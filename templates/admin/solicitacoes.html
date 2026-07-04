@@ -5,7 +5,7 @@
 <div class="lista-agenda agenda-compacta">
 {% for s in itens %}
   {% set item_nome = s.produto.nome if s.produto else "A definir" %}
-  <a class="linha-agenda" href="/painel/solicitacao/{{ s.id }}">
+  <a class="linha-agenda {{ classe_alerta_contrato(s.status) }}" href="/painel/solicitacao/{{ s.id }}">
     <div class="data-agenda">{{ s.data_evento.strftime('%d/%m') }}</div>
     <div class="info-agenda">
       <b>{{ s.hora_inicio.strftime('%H:%M') }} · {{ s.cliente.nome }}</b>

@@ -261,7 +261,7 @@
     <a class="botao largura-total" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
   {% endif %}
 
-  {% if contrato_pendente %}
+  {% if tem_itens and not contrato_aceito %}
     <button class="secundario largura-total" type="button" onclick="toggleBloco('aceiteManual')">Aceite manual</button>
   {% endif %}
 
@@ -269,6 +269,10 @@
     <label>Motivo do aceite manual</label>
     <textarea name="observacao_aceite" required placeholder="Ex.: cliente confirmou pelo WhatsApp."></textarea>
     <button class="largura-total">Confirmar aceite manual</button>
+  </form>
+
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/excluir" class="form-excluir-contrato" onsubmit="return confirm('Deseja excluir este contrato/reserva? Isso apaga reserva, itens, pagamentos não conciliados e agenda. Se houver pagamento conciliado, o sistema não vai excluir.')">
+    <button class="botao-perigo largura-total" type="submit">Excluir contrato</button>
   </form>
 </section>
 
@@ -307,6 +311,15 @@ function toggleBloco(id){
 function moedaParaNumero(valor){
   return parseFloat(String(valor || '0').replace(/\./g,'').replace(',','.')) || 0;
 }
+document.addEventListener('submit', function(ev){
+  const form = ev.target;
+  const btn = form.querySelector('button[type="submit"], button:not([type])');
+  if(btn && !form.dataset.enviando){
+    form.dataset.enviando = '1';
+    setTimeout(() => { btn.disabled = true; btn.classList.add('botao-enviando'); }, 20);
+  }
+});
+
 function validarPagamentoReserva(form){
   const campo = form.querySelector('[name="valor_pago"]');
   const valor = moedaParaNumero(campo.value);

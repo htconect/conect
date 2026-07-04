@@ -41,7 +41,7 @@
 <h2 class="titulo-secao">Últimas reservas</h2>
 <div class="lista-mobile">
 {% for i in solicitacoes %}
-  <a class="card-lista" href="/painel/solicitacao/{{ i.id }}">
+  <a class="card-lista {{ classe_alerta_contrato(i.status) }}" href="/painel/solicitacao/{{ i.id }}">
     <div>
       <b>{{ i.cliente.nome }}</b>
       <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>

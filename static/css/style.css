@@ -907,3 +907,17 @@ body{overflow-x:hidden}
   background: #dc2626;
   color: #fff;
 }
+
+/* Alertas visuais de contrato nas listas */
+.card-lista.card-rascunho,
+.linha-agenda.card-rascunho{
+  background:#fee2e2 !important;
+  border-color:#fca5a5 !important;
+}
+.card-lista.card-nao-aceito,
+.linha-agenda.card-nao-aceito{
+  background:#fef3c7 !important;
+  border-color:#fbbf24 !important;
+}
+.form-excluir-contrato{margin-top:12px;}
+.botao-enviando{opacity:.65;cursor:wait;}

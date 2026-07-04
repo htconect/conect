@@ -21,7 +21,7 @@
 
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 
-<form id="formContratoNovo" method="post" action="{% if modo_edicao %}/painel/solicitacao/{{ item.id }}/editar-completo{% else %}/painel/contrato-novo{% endif %}" class="box">
+<form id="formContratoNovo" method="post" action="{% if modo_edicao %}/painel/solicitacao/{{ item.id }}/editar-completo{% else %}/painel/contrato-novo{% endif %}" class="box" onsubmit="return bloquearEnvioContratoNovo(this)">
   <h2>Cliente</h2>
   <label>Nome do cliente</label>
   <input name="nome" value="{{ form.nome or '' }}" required>
@@ -105,6 +105,18 @@
   <label>Observações</label>
   <textarea name="observacoes">{{ form.observacoes or '' }}</textarea>
 
-  <button>{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
+  <button id="btnContratoNovo">{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
 </form>
+<script>
+function bloquearEnvioContratoNovo(form){
+  if(form.dataset.enviando === '1') return false;
+  form.dataset.enviando = '1';
+  const btn = document.getElementById('btnContratoNovo');
+  if(btn){
+    btn.disabled = true;
+    btn.textContent = 'Salvando...';
+  }
+  return true;
+}
+</script>
 {% endblock %}

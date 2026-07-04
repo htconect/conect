@@ -121,6 +121,20 @@ def sincronizar_pagamentos_solicitacoes(db: Session, solicitacoes):
         db.commit()
     return alterou
 
+
+def existe_pagamento_conciliado(item: Solicitacao) -> bool:
+    return any(getattr(p, "conciliado_em", None) for p in (getattr(item, "pagamentos", None) or []))
+
+
+def classe_alerta_contrato(status: str) -> str:
+    if status in {"pre_reserva"}:
+        return "card-rascunho"
+    if status in {"aguardando_aceite", "contrato_enviado"}:
+        return "card-nao-aceito"
+    return ""
+
+templates.env.globals["classe_alerta_contrato"] = classe_alerta_contrato
+
 def validar_total_pagamentos(item: Solicitacao, total_pago: float):
     if item.valor and total_pago > float(item.valor or 0) + 0.009:
         raise HTTPException(400, "A soma dos pagamentos não pode ser maior que o total do contrato.")
@@ -433,7 +447,16 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
 def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
     """Mensagem enviada ao cliente com formatação preservada para WhatsApp."""
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    link_contrato = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
     link_clausulas = _link_absoluto(request, "contrato_cliente_clausulas", slug=empresa.slug, solicitacao_id=item.id)
+
+    if item.status not in {"aguardando_aceite", "contrato_enviado", "aceito", "aguardando_pagamento", "reserva_confirmada"}:
+        return "\n".join([
+            f"*{empresa.nome or 'Karaokê RJ'}*",
+            "",
+            "Olá! Segue o link da sua reserva/contrato para conferência:",
+            link_contrato,
+        ]).strip()
 
     total = float(item.valor or 0)
     pago = float(item.valor_pago or 0)
@@ -1840,6 +1863,41 @@ async def preparar_contrato(
 
 
 
+@app.post("/painel/solicitacao/{solicitacao_id}/excluir")
+def excluir_solicitacao_completa(
+    solicitacao_id: int,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada)
+):
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if existe_pagamento_conciliado(item):
+        raise HTTPException(400, "Não é possível excluir: existe pagamento conciliado no financeiro.")
+
+    cliente = item.cliente
+    pagamento_ids = [p.id for p in (item.pagamentos or [])]
+    if pagamento_ids:
+        db.query(LancamentoBanco).filter(
+            LancamentoBanco.empresa_id == empresa.id,
+            LancamentoBanco.pagamento_id.in_(pagamento_ids)
+        ).update({LancamentoBanco.pagamento_id: None}, synchronize_session=False)
+        db.query(LancamentoManualFinanceiro).filter(
+            LancamentoManualFinanceiro.empresa_id == empresa.id,
+            LancamentoManualFinanceiro.pagamento_id.in_(pagamento_ids)
+        ).update({LancamentoManualFinanceiro.pagamento_id: None}, synchronize_session=False)
+
+    db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
+    db.delete(item)
+    db.flush()
+
+    if cliente and db.query(Solicitacao).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).count() == 0:
+        db.delete(cliente)
+
+    db.commit()
+    return RedirectResponse("/painel", status_code=303)
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/aceite-manual")
 def aceite_manual_solicitacao(
     request: Request,
@@ -1957,6 +2015,28 @@ def contrato_novo_salvar(
     if cnpj_limpo and not cnpj_valido(cnpj_limpo):
         return render_erro("CNPJ inválido.")
 
+    data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    duplicado_q = db.query(Solicitacao).join(Cliente, Solicitacao.cliente_id == Cliente.id).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.data_evento == data_evento_obj,
+        ~Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
+    )
+    condicoes = []
+    if telefone_limpo:
+        condicoes.append(Cliente.telefone == telefone_limpo)
+        condicoes.append(Cliente.identificador == telefone_limpo)
+    if cpf_limpo:
+        condicoes.append(Cliente.cpf == cpf_limpo)
+        condicoes.append(Cliente.identificador == cpf_limpo)
+    if cnpj_limpo:
+        condicoes.append(Cliente.cnpj == cnpj_limpo)
+        condicoes.append(Cliente.identificador == cnpj_limpo)
+    from sqlalchemy import or_
+    if condicoes:
+        duplicado = duplicado_q.filter(or_(*condicoes)).first()
+        if duplicado:
+            return render_erro(f"Já existe uma reserva/contrato para este telefone/CPF/CNPJ nesta data: #{duplicado.id} - {duplicado.cliente.nome}.")
+
     cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=identificador).first()
     if not cliente:
         cliente = Cliente(empresa_id=empresa.id, identificador=identificador)
@@ -1993,7 +2073,7 @@ def contrato_novo_salvar(
         cliente_id=cliente.id,
         produto_id=produto.id if produto else None,
         contrato_id=int(contrato_id) if contrato_id else None,
-        data_evento=datetime.strptime(data_evento, "%Y-%m-%d").date(),
+        data_evento=data_evento_obj,
         hora_inicio=inicio_obj,
         hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
         bairro=bairro.strip(),
