@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<h1>Itens de locação</h1>
+<p class="texto-discreto">Item de locação é o equipamento ou serviço contratado no aluguel. O contrato será escolhido dentro da reserva.</p>
+
+<div class="box">
+<form method="post">
+  {% if produto %}
+  <input type="hidden" name="produto_id" value="{{ produto.id }}">
+  {% endif %}
+  <label>Nome</label><input name="nome" value="{{ produto.nome if produto else '' }}" required>
+  <label>Descrição / itens inclusos</label><textarea name="descricao">{{ produto.descricao if produto else '' }}</textarea>
+  <div class="linha">
+    <div>
+      <label>Quantidade disponível</label>
+      <input name="quantidade_disponivel" type="number" min="1" value="{{ produto.quantidade_disponivel if produto else 1 }}">
+    </div>
+    <div>
+      <label>Duração padrão</label>
+      <select name="duracao_minutos">
+        {% set duracao = produto.duracao_minutos if produto else 240 %}
+        <option value="60" {% if duracao == 60 %}selected{% endif %}>1 hora</option>
+        <option value="120" {% if duracao == 120 %}selected{% endif %}>2 horas</option>
+        <option value="180" {% if duracao == 180 %}selected{% endif %}>3 horas</option>
+        <option value="240" {% if duracao == 240 %}selected{% endif %}>4 horas</option>
+        <option value="300" {% if duracao == 300 %}selected{% endif %}>5 horas</option>
+        <option value="360" {% if duracao == 360 %}selected{% endif %}>6 horas</option>
+        <option value="480" {% if duracao == 480 %}selected{% endif %}>8 horas</option>
+      </select>
+    </div>
+  </div>
+  <div class="linha">
+    <div>
+      <label>Prazo padrão para retirada</label>
+      {% set prazo = produto.prazo_retirada_dias if produto else 1 %}
+      <select name="prazo_retirada_dias">
+        <option value="0" {% if prazo == 0 %}selected{% endif %}>Mesmo dia</option>
+        <option value="1" {% if prazo == 1 %}selected{% endif %}>1 dia</option>
+        <option value="2" {% if prazo == 2 %}selected{% endif %}>2 dias</option>
+        <option value="3" {% if prazo == 3 %}selected{% endif %}>3 dias</option>
+      </select>
+    </div>
+    <div>
+      <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
+    </div>
+  </div>
+  <button>{% if produto %}Atualizar{% else %}Salvar{% endif %}</button>
+</form>
+</div>
+
+<div class="grid">
+{% for p in produtos %}
+<div class="card">
+  <h3>{{ p.nome }}</h3>
+  <p>{{ p.descricao }}</p>
+  <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
+  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p>
+  <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
+</div>
+{% endfor %}
+</div>
+{% endblock %}

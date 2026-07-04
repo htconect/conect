@@ -1,0 +1,27 @@
+.venv/
+venv/
+.env
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Banco local - nunca enviar para o Git
+organiza.db
+*.db
+*.db-wal
+*.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+.idea/
+.vscode/
+
+*.zip
+*_backup*
+_backup_original/
+
+*.log
+Thumbs.db

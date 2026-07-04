@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="hero-admin">
+  <div>
+    <p class="mini">Administrador geral</p>
+    <h1>Empresas</h1>
+    <p>Você cria e edita apenas as empresas. Cada empresa acessa seus próprios clientes, contratos, produtos e agenda.</p>
+  </div>
+  <div class="acoes">
+    <a class="botao" href="/admin/sair">Sair</a>
+  </div>
+</div>
+
+<div class="box">
+  <h2>{% if empresa %}Editar empresa{% else %}Nova empresa{% endif %}</h2>
+  <form method="post" enctype="multipart/form-data" action="{% if empresa %}/admin/empresa/{{ empresa.id }}{% else %}/admin/empresas{% endif %}">
+    <label>Nome da empresa</label>
+    <input name="nome" value="{{ empresa.nome if empresa else '' }}" placeholder="Karaoke RJ" required>
+
+    <label>Slug do link público</label>
+    <input name="slug" value="{{ empresa.slug if empresa else '' }}" placeholder="karaokerj" required>
+
+    <label>Buscar cliente por</label>
+    <select name="identificador_principal">
+      <option value="telefone" {% if empresa and empresa.identificador_principal == 'telefone' %}selected{% endif %}>Telefone</option>
+      <option value="cpf" {% if empresa and empresa.identificador_principal == 'cpf' %}selected{% endif %}>CPF</option>
+      <option value="cnpj" {% if empresa and empresa.identificador_principal == 'cnpj' %}selected{% endif %}>CNPJ</option>
+    </select>
+
+    <label>Usuário da empresa</label>
+    <input name="usuario_admin" value="{{ empresa.usuario_admin if empresa else '' }}" required>
+
+    <label>Senha da empresa</label>
+    <input name="senha_admin" value="{{ empresa.senha_admin if empresa else '' }}" required>
+    <label>PIX copia e cola</label>
+    <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea>
+
+    <div class="linha">
+      <div>
+        <label>Suporte início</label>
+        <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '' }}">
+      </div>
+      <div>
+        <label>Suporte fim</label>
+        <input name="suporte_fim" type="time" step="1800" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '' }}">
+      </div>
+    </div>
+
+    <label class="check"><input type="checkbox" name="mostrar_suporte_contrato" value="1" {% if empresa and empresa.mostrar_suporte_contrato %}checked{% endif %}> Mostrar horário de suporte no contrato</label>
+
+    <h2>Logo da empresa</h2>
+    {% if empresa and (empresa.logo_url or empresa.logo_idb_url) %}
+      <div class="logo-preview">
+        <img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="Logo atual">
+        <small>Logo atual</small>
+      </div>
+    {% endif %}
+
+    <label>Enviar logo do PC ou celular</label>
+    <input name="logo_arquivo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml">
+    <p class="texto-discreto">Essa é a opção recomendada. A logo será salva no sistema e aparecerá nas telas públicas e no painel.</p>
+
+    <details class="box-mini">
+      <summary>Usar link da logo em vez de arquivo</summary>
+      <label>URL direta da imagem</label>
+      <input name="logo_url" value="{{ empresa.logo_url if empresa and empresa.logo_url and empresa.logo_url.startswith('http') else '' }}" placeholder="https://.../logo.png">
+      <label>Link alternativo IDB.co / imagem hospedada</label>
+      <input name="logo_idb_url" value="{{ empresa.logo_idb_url if empresa else '' }}" placeholder="Cole o link direto da imagem">
+    </details>
+
+    <label>Tema padrão</label>
+    <select name="tema">
+      <option value="azul" {% if empresa and empresa.tema == 'azul' %}selected{% endif %}>Azul</option>
+      <option value="escuro" {% if empresa and empresa.tema == 'escuro' %}selected{% endif %}>Escuro</option>
+      <option value="claro" {% if empresa and empresa.tema == 'claro' %}selected{% endif %}>Claro</option>
+    </select>
+
+    {% if empresa %}
+    <label class="check"><input type="checkbox" name="ativa" value="1" {% if empresa.ativa %}checked{% endif %}> Empresa ativa</label>
+    {% endif %}
+
+    <button>{% if empresa %}Salvar empresa{% else %}Criar empresa{% endif %}</button>
+  </form>
+</div>
+
+
+{% if empresa %}
+<div class="box">
+  <h2>Usuários da empresa</h2>
+  <p class="texto-discreto">Somente o administrador geral cria ou remove usuários. O login principal da empresa continua funcionando.</p>
+
+  <form method="post" action="/admin/empresa/{{ empresa.id }}/usuarios">
+    <div class="linha">
+      <div>
+        <label>Nome</label>
+        <input name="nome" placeholder="Luiz" required>
+      </div>
+      <div>
+        <label>Usuário</label>
+        <input name="usuario" placeholder="luiz" required>
+      </div>
+    </div>
+    <label>Senha</label>
+    <input name="senha" required>
+    <label class="check"><input type="checkbox" name="ativo" value="1" checked> Usuário ativo</label>
+    <label class="check"><input type="checkbox" name="visualiza_financeiro" value="1" checked> Visualiza financeiro</label>
+    <button>Criar usuário</button>
+  </form>
+
+  <div class="lista-mobile">
+  {% for u in usuarios_empresa or [] %}
+    <div class="card-lista">
+      <div>
+        <b>{{ u.nome }}</b>
+        <small>{{ u.usuario }} · {{ "Ativo" if u.ativo else "Inativo" }} · Financeiro: {{ "Sim" if u.visualiza_financeiro else "Não" }}</small>
+      </div>
+      <a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
+    </div>
+  {% else %}
+    <p class="texto-discreto">Nenhum usuário extra criado.</p>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<h2>Empresas cadastradas</h2>
+<div class="grid">
+{% for e in empresas %}
+  <div class="card">
+    <h3>{{ e.nome }}</h3>
+    <p><b>Usuário:</b> {{ e.usuario_admin or '-' }}</p>
+    <p><b>Link público:</b> <a href="/e/{{ e.slug }}">/e/{{ e.slug }}</a></p>
+    <p><b>Status:</b> {{ "Ativa" if e.ativa else "Inativa" }}</p>
+    <a href="/admin/empresa/{{ e.id }}">Editar</a>
+  </div>
+{% endfor %}
+</div>
+{% endblock %}

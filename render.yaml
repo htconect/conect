@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: humiat-conect
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CONECT_ADMIN_NOME
+        value: Admin
+      - key: CONECT_ADMIN_SENHA
+        value: humiat123

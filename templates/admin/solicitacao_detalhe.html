@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block conteudo %}
+{% set total = item.valor or 0 %}
+{% set pago = item.valor_pago or 0 %}
+{% set falta_real = total - pago %}
+{% set falta = falta_real if falta_real > 0 else 0 %}
+{% set excedente = (pago - total) if total and pago > total else 0 %}
+{% set tel = item.cliente.telefone or item.cliente.identificador %}
+{% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
+{% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=item.id) %}
+{% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=item.id) %}
+{% set link_contrato_whatsapp = request.url_for('compartilhar_contrato_whatsapp', solicitacao_id=item.id) %}
+{% set tem_itens = item.itens and item.itens|length > 0 %}
+{% set contrato_aceito = status_reserva_confirmada(item.status) %}
+{% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
+{% set em_rascunho = not contrato_pendente and not contrato_aceito %}
+
+<section class="reserva-mobile-topo">
+  <a class="voltar" href="/painel/reservas">← Minhas reservas</a>
+
+  <div class="reserva-titulo-card">
+    <p class="mini">Reserva #{{ item.id }}</p>
+    <h1>{{ item.cliente.nome or "Cliente sem nome" }}</h1>
+    <p>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else "-" }} · {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else "-" }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
+    <p>{{ item.local or item.cliente.endereco or "-" }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}</p>
+    <p>{{ item.bairro or item.cliente.bairro or "-" }}</p>
+    {% if item.acesso_local %}<p>Acesso: {{ item.acesso_local }}</p>{% endif %}
+    <p>{{ item.cliente.telefone or item.cliente.identificador or "-" }}</p>
+    <a class="botao-cliente-card" href="/painel/solicitacao/{{ item.id }}/cliente">Editar cliente</a>
+  </div>
+
+  <div class="status-grid-mobile">
+    <div class="status-pill {% if tem_itens %}ok{% else %}pendente{% endif %}">
+      <small>Itens</small><b>{% if tem_itens %}{{ item.itens|length }}{% else %}Pendente{% endif %}</b>
+    </div>
+    <div class="status-pill {% if contrato_aceito %}ok{% elif contrato_pendente %}alerta{% else %}pendente{% endif %}">
+      <small>Contrato</small><b>{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Enviado{% else %}Rascunho{% endif %}</b>
+    </div>
+    <div class="status-pill {% if pago > 0 %}ok{% else %}neutro{% endif %}">
+      <small>Pagamento</small><b>{% if pago > 0 %}R$ {{ pago|moeda_br }}{% else %}Opcional{% endif %}</b>
+    </div>
+  </div>
+</section>
+
+{% if not tem_itens %}
+<section class="proxima-acao">
+  <small>Próxima ação</small>
+  <b>Adicionar equipamento</b>
+  <button class="botao largura-total" type="button" onclick="toggleBloco('formEquipamentos')">+ Adicionar equipamento</button>
+</section>
+{% elif em_rascunho %}
+<section class="proxima-acao">
+  <small>Próxima ação</small>
+  <b>Salvar e enviar para o cliente</b>
+  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">Compartilhar WhatsApp</a>
+</section>
+{% elif contrato_pendente %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Aguardando aceite do cliente</b>
+  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">Compartilhar WhatsApp</a>
+</section>
+{% else %}
+<section class="proxima-acao ok-acao">
+  <small>Status</small>
+  <b>Contrato aceito</b>
+  <button class="botao largura-total" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
+</section>
+{% endif %}
+
+
+<section class="card-reserva">
+  <div class="card-reserva-head">
+    <h2>Dados da reserva</h2>
+    <a class="link-botao" href="/painel/solicitacao/{{ item.id }}/editar-completo">Editar</a>
+  </div>
+
+  <div class="dados-reserva-lista">
+    <p><small>Data e horário</small><b>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }} · {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</b></p>
+    <p><small>Local</small><b>{{ item.local_nome or item.local or item.cliente.endereco or '-' }}</b></p>
+    <p><small>Endereço do evento</small><b>{{ item.local or item.cliente.endereco or '-' }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}{% if item.bairro or item.cliente.bairro %} · {{ item.bairro or item.cliente.bairro }}{% endif %}</b></p>
+    {% if item.acesso_local %}<p><small>Acesso ao local</small><b>{{ item.acesso_local }}</b></p>{% endif %}
+    {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
+      <p><small>Responsável no local</small><b>{{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</b></p>
+    {% endif %}
+    {% if item.observacoes %}<p><small>Observações</small><b>{{ item.observacoes }}</b></p>{% endif %}
+  </div>
+</section>
+
+<section class="card-reserva">
+  <div class="card-reserva-head">
+    <h2>Situação na agenda</h2>
+    {% if item.status == "aguardando_nova_data" %}
+      <span class="status alerta">Em crédito</span>
+    {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
+      <span class="status pendente">Cancelado</span>
+    {% else %}
+      <span class="status ok">Ativo</span>
+    {% endif %}
+  </div>
+
+  <p class="texto-discreto">
+    Use estes botões para definir se a reserva continua na agenda/operação ou se deve sair da operação mantendo o controle no financeiro.
+  </p>
+
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/status" class="grid-acoes-mobile">
+    {% if item.status == "aguardando_nova_data" %}
+      <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>
+      <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
+    {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
+      <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>
+      <button type="submit" name="status" value="aguardando_nova_data" class="secundario">Crédito</button>
+    {% else %}
+      <button type="submit" name="status" value="aguardando_nova_data" class="secundario">Crédito</button>
+      <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
+    {% endif %}
+  </form>
+</section>
+
+
+<section class="card-reserva">
+  <div class="card-reserva-head">
+    <h2>Equipamentos</h2>
+    <button class="link-botao" type="button" onclick="toggleBloco('formEquipamentos')">{% if tem_itens %}Editar{% else %}Adicionar{% endif %}</button>
+  </div>
+
+  {% if item.itens %}
+    {% for it in item.itens %}
+      <div class="linha-item-mobile">
+        <div>
+          <b>{{ it.quantidade }}x {{ it.nome }}</b>
+          <small>R$ {{ it.valor_unitario|moeda_br }} un.</small>
+        </div>
+        <strong>R$ {{ it.valor_total|moeda_br }}</strong>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="texto-discreto">Nenhum equipamento adicionado.</p>
+  {% endif %}
+
+  <form id="formEquipamentos" method="post" action="/painel/solicitacao/{{ item.id }}/preparar" class="form-mobile-simples bloco-oculto">
+    <input type="hidden" name="data_evento" value="{{ item.data_evento.isoformat() if item.data_evento else '' }}">
+    <input type="hidden" name="hora_inicio" value="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}">
+    <input type="hidden" name="hora_fim" value="{{ item.hora_fim.strftime('%H:%M') if item.hora_fim else '' }}">
+    <input type="hidden" name="bairro" value="{{ item.bairro or item.cliente.bairro or '' }}">
+    <input type="hidden" name="local" value="{{ item.local or item.cliente.endereco or '' }}">
+    <input type="hidden" name="acesso_local" value="{{ item.acesso_local or '' }}">
+
+    <label>Modelo de contrato</label>
+    <select name="contrato_id" required>
+      <option value="">Selecione</option>
+      {% for c in contratos %}
+        <option value="{{ c.id }}" {% if item.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+      {% endfor %}
+    </select>
+
+    <div id="itensReserva">
+      {% set linhas = item.itens if item.itens else [None] %}
+      {% for linha in linhas %}
+      <div class="item-reserva item-reserva-mobile">
+        <div class="item-reserva-topo">
+          <b>Item</b>
+          <button type="button" class="remover-item-texto" onclick="removerItem(this)">Remover</button>
+        </div>
+        <label>Equipamento/serviço</label>
+        <select name="produto_id">
+          <option value="">Selecione</option>
+          {% for p in produtos %}
+            <option value="{{ p.id }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
+          {% endfor %}
+        </select>
+        <div class="linha">
+          <div><label>Qtd.</label><input name="quantidade" type="number" min="1" value="{{ linha.quantidade if linha else 1 }}"></div>
+          <div><label>Unitário</label><input name="valor_unitario" inputmode="decimal" value="{{ (linha.valor_unitario|moeda_br) if linha else '0,00' }}"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <button type="button" class="secundario largura-total" onclick="adicionarItem()">+ Adicionar outro item</button>
+
+    <label>Observações do contrato</label>
+    <textarea name="observacoes" placeholder="Opcional">{{ item.observacoes or '' }}</textarea>
+    <input type="hidden" name="valor" value="{{ item.valor|moeda_br }}">
+    <input type="hidden" name="sinal" value="{{ item.sinal|moeda_br }}">
+
+    <button name="acao" value="salvar" class="largura-total">Salvar equipamentos</button>
+  </form>
+</section>
+
+<section class="card-reserva" id="pagamento">
+  <div class="card-reserva-head">
+    <h2>Pagamento</h2>
+    <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar</button>
+  </div>
+
+  <div class="resumo-financeiro-mobile">
+    <div><small>Total</small><b>R$ {{ total|moeda_br }}</b></div>
+    <div><small>Pago</small><b>R$ {{ pago|moeda_br }}</b></div>
+    <div><small>Falta</small><b>R$ {{ falta|moeda_br }}</b></div>
+  </div>
+  {% if excedente > 0 %}
+    <p class="alerta-texto">Atenção: há R$ {{ excedente|moeda_br }} recebido acima do total. Corrija pelo financeiro.</p>
+  {% endif %}
+
+  <form id="formPagamento" method="post" action="/painel/solicitacao/{{ item.id }}/pagamento" class="form-mobile-simples bloco-oculto" onsubmit="return validarPagamentoReserva(this)">
+    <label>Valor recebido</label>
+    <input name="valor_pago" value="{{ falta|moeda_br }}" required inputmode="decimal" data-max="{{ '%.2f'|format(falta) }}" {% if falta <= 0 %}disabled{% endif %}>
+    <label>Forma</label>
+    <select name="forma_pagamento" {% if falta <= 0 %}disabled{% endif %}>
+      <option value="pix">PIX</option>
+      <option value="dinheiro">Dinheiro</option>
+      <option value="cartao">Cartão</option>
+    </select>
+    <details class="accordion interno">
+      <summary>Detalhes opcionais</summary>
+      <label>Data do pagamento</label><input type="date" name="data_pagamento">
+      <label>Comprovante no nome do cliente?</label>
+      <select name="comprovante_no_nome_cliente" onchange="document.getElementById('nomeComprovante').style.display = this.value === 'nao' ? 'block' : 'none'">
+        <option value="sim">Sim</option>
+        <option value="nao">Não</option>
+      </select>
+      <div id="nomeComprovante" style="display:none">
+        <label>Em nome de quem?</label>
+        <input name="nome_comprovante">
+      </div>
+      <label>Observação</label>
+      <input name="observacoes_pagamento" placeholder="Ex.: dinheiro entregue ao Júnior">
+    </details>
+    <button class="largura-total" {% if falta <= 0 %}disabled{% endif %}>Registrar pagamento</button>
+  </form>
+
+  {% if item.pagamentos %}
+  <div class="pagamentos-lista">
+    {% for p in item.pagamentos %}
+    <div class="linha-item-mobile">
+      <div>
+        <b>R$ {{ p.valor|moeda_br }} · {{ p.forma_pagamento }}</b>
+        <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · {{ "Conciliado" if p.conciliado_em else "Pendente" }}</small>
+      </div>
+      {% if not p.conciliado_em %}
+      <form method="post" action="/painel/solicitacao/{{ item.id }}/pagamento/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este pagamento?')">
+        <button class="remover-item-texto" type="submit">Excluir</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card-reserva">
+  <div class="card-reserva-head">
+    <h2>Contrato</h2>
+    <span class="status">{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Aguardando aceite{% else %}Rascunho{% endif %}</span>
+  </div>
+
+  {% if tem_itens %}
+    <a class="botao largura-total" href="{{ link_contrato_visual }}" target="_blank">Ver contrato</a>
+    <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}" target="_blank">Compartilhar WhatsApp</a>
+    <a class="botao largura-total" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
+  {% endif %}
+
+  {% if contrato_pendente %}
+    <button class="secundario largura-total" type="button" onclick="toggleBloco('aceiteManual')">Aceite manual</button>
+  {% endif %}
+
+  <form id="aceiteManual" method="post" action="/painel/solicitacao/{{ item.id }}/aceite-manual" class="bloco-oculto form-mobile-simples">
+    <label>Motivo do aceite manual</label>
+    <textarea name="observacao_aceite" required placeholder="Ex.: cliente confirmou pelo WhatsApp."></textarea>
+    <button class="largura-total">Confirmar aceite manual</button>
+  </form>
+</section>
+
+<details class="accordion">
+  <summary>Histórico operacional</summary>
+  <div class="linha-historico"><div><b>Reserva criada</b><small>{{ item.criado_em|datahora_local if item.criado_em else '-' }}</small></div></div>
+  {% for p in item.pagamentos %}
+    <div class="linha-historico"><div><b>Pagamento informado</b><small>{{ p.usuario_registro or 'Usuário' }} · R$ {{ p.valor|moeda_br }} · {{ p.forma_pagamento }}</small></div></div>
+  {% endfor %}
+  {% if item.aprovado_em %}<div class="linha-historico"><div><b>Contrato aceito</b><small>{{ item.aprovado_em|datahora_local }}</small></div></div>{% endif %}
+</details>
+
+<script>
+function adicionarItem(){
+  const container = document.getElementById('itensReserva');
+  const base = container.querySelector('.item-reserva');
+  if(!base) return;
+  const clone = base.cloneNode(true);
+  clone.querySelectorAll('select,input').forEach(campo => {
+    if(campo.tagName === 'SELECT') campo.selectedIndex = 0;
+    if(campo.name === 'quantidade') campo.value = 1;
+    if(campo.name === 'valor_unitario') campo.value = '0,00';
+  });
+  container.appendChild(clone);
+}
+function removerItem(botao){
+  const linha = botao.closest('.item-reserva');
+  if(linha) linha.remove();
+}
+function toggleBloco(id){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.classList.toggle('bloco-oculto');
+  if(!el.classList.contains('bloco-oculto')) el.scrollIntoView({behavior:'smooth', block:'start'});
+}
+function moedaParaNumero(valor){
+  return parseFloat(String(valor || '0').replace(/\./g,'').replace(',','.')) || 0;
+}
+function validarPagamentoReserva(form){
+  const campo = form.querySelector('[name="valor_pago"]');
+  const valor = moedaParaNumero(campo.value);
+  const maximo = parseFloat(campo.dataset.max || '0');
+  if(valor <= 0){
+    alert('Informe um valor maior que zero.');
+    return false;
+  }
+  if(maximo > 0 && valor > maximo){
+    alert('O pagamento não pode ser maior que o saldo do contrato.');
+    campo.value = maximo.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    return false;
+  }
+  return true;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block conteudo %}
+{% set contrato_pronto = contrato and itens_reserva and itens_reserva|length > 0 %}
+
+<h1>{% if status_reserva_confirmada(item.status) %}Reserva confirmada{% else %}Pré-contrato para conferência{% endif %} - {{ empresa.nome }}</h1>
+
+{% if not contrato_pronto and not status_reserva_confirmada(item.status) and item.status != "cancelado_cliente" %}
+<div class="box aviso">
+  <b>Status: contrato em preparação.</b>
+  <p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p>
+</div>
+{% endif %}
+
+<div class="contrato-visual">
+  <div class="card">
+    <h2>Resumo do evento</h2>
+    <p><b>Data do evento:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
+    <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
+    <p><b>Valor total:</b> R$ {{ item.valor|moeda_br }}</p>
+    <p><b>Valor recebido:</b> R$ {{ item.valor_pago|moeda_br }}</p>
+    <p><b>Sinal previsto:</b> R$ {{ item.sinal|moeda_br }}</p>
+    <p><b>Falta:</b> R$ {{ (((item.valor or 0) - (item.valor_pago or 0)) if ((item.valor or 0) - (item.valor_pago or 0)) > 0 else 0)|moeda_br }}</p>
+  </div>
+
+  <div class="card">
+    <h2>Cliente</h2>
+    <p><b>Nome:</b> {{ item.cliente.nome or '-' }}</p>
+    <p><b>Telefone:</b> {{ item.cliente.telefone or item.cliente.identificador or '-' }}</p>
+    <p><b>CPF:</b> {{ item.cliente.cpf or '-' }}</p>
+    <p><b>CNPJ:</b> {{ item.cliente.cnpj or '-' }}</p>
+    <p><b>Email:</b> {{ item.cliente.email or '-' }}</p>
+    <p><b>Nascimento:</b> {{ item.cliente.data_nascimento.strftime('%d/%m/%Y') if item.cliente.data_nascimento else '-' }}</p>
+  </div>
+
+  <div class="card">
+    <h2>Endereço do cliente</h2>
+    <p><b>Endereço:</b> {{ item.cliente.endereco or '-' }}</p>
+    <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
+    <p><b>Complemento:</b> {{ item.cliente.complemento or '-' }}</p>
+    <p><b>Bairro:</b> {{ item.cliente.bairro or '-' }}</p>
+    <p><b>Cidade/UF:</b> {{ item.cliente.cidade or '-' }}{% if item.cliente.estado %} - {{ item.cliente.estado }}{% endif %}</p>
+    <p><b>CEP:</b> {{ item.cliente.cep or '-' }}</p>
+    <p><b>Observações do cliente:</b> {{ item.cliente.observacoes or '-' }}</p>
+  </div>
+
+  <div class="card">
+    <h2>Local do evento</h2>
+    <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
+    <p><b>Endereço/referência:</b> {{ item.local or item.cliente.endereco or '-' }}</p>
+    <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
+    <p><b>Bairro:</b> {{ item.bairro or item.cliente.bairro or '-' }}</p>
+    <p><b>Acesso:</b> {{ item.acesso_local or '-' }}</p>
+    <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}</p>
+    <p><b>Telefone responsável:</b> {{ item.local_responsavel_telefone or '-' }}</p>
+    <p><b>Observações da reserva:</b> {{ item.observacoes or '-' }}</p>
+  </div>
+</div>
+
+<div class="box">
+  <h2>Produtos e serviços</h2>
+  {% if itens_reserva %}
+    <table>
+      <thead><tr><th>Item</th><th>Qtd.</th><th>Unitário</th><th>Total</th></tr></thead>
+      <tbody>
+      {% for it in itens_reserva %}
+        <tr>
+          <td>{{ it.nome }}<br><span class="texto-discreto">{{ it.descricao or "" }}</span></td>
+          <td>{{ it.quantidade }}</td>
+          <td>R$ {{ it.valor_unitario|moeda_br }}</td>
+          <td>R$ {{ it.valor_total|moeda_br }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p><b>Itens ainda não informados.</b></p>
+    <p class="texto-discreto">Este contrato ainda está em preparação pela empresa.</p>
+  {% endif %}
+</div>
+
+{% if empresa.mostrar_suporte_contrato and (empresa.suporte_inicio or empresa.suporte_fim) %}
+<div class="box">
+  <h2>Suporte</h2>
+  <p>Atendimento de suporte: {{ empresa.suporte_inicio or '--:--' }} às {{ empresa.suporte_fim or '--:--' }}.</p>
+</div>
+{% endif %}
+
+<div class="box contrato">
+  <h2>{{ contrato.nome if contrato else "Cláusulas" }}</h2>
+  {% if contrato and contrato.descricao %}
+    <p><b>Descrição:</b> {{ contrato.descricao }}</p>
+  {% endif %}
+  <pre>{{ contrato.clausulas if contrato else "Contrato ainda não configurado." }}</pre>
+</div>
+
+<div class="box">
+  <h2>Linha do tempo</h2>
+  <div class="timeline">
+    <div><b>Preparado em:</b> {{ item.criado_em|datahora_local }}</div>
+    <div><b>Aprovado em:</b> {{ (item.aprovado_em or item.aceite_em)|datahora_local if (item.aprovado_em or item.aceite_em) and status_reserva_confirmada(item.status) else '-' }}</div>
+    <div><b>Cancelado em:</b> {{ item.cancelado_em|datahora_local }}</div>
+    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif status_reserva_confirmada(item.status) %}Reserva{% else %}Aguardando aceite{% endif %}</div>
+  </div>
+</div>
+
+<div class="box">
+  {% if status_reserva_confirmada(item.status) %}
+    <p><b>Contrato aceito.</b> A partir deste ponto ele passa a ser tratado como reserva.</p>
+    <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar esta reserva?');">
+      <button class="perigo" type="submit">Cancelar</button>
+    </form>
+  {% elif item.status == "cancelado_cliente" %}
+    <p><b>Contrato cancelado.</b></p>
+  {% else %}
+    {% if contrato_pronto %}
+      <div class="acoes-contrato-publico">
+        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}">
+          <label class="check"><input type="checkbox" name="aceite" value="sim" required> Li, conferi os dados e aceito o contrato.</label>
+          <button>Aceitar</button>
+        </form>
+        <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar este contrato?');">
+          <button class="perigo" type="submit">Cancelar</button>
+        </form>
+      </div>
+    {% else %}
+      <p><b>Contrato em preparação.</b></p>
+      <p class="texto-discreto">O aceite ficará disponível depois que a empresa incluir os itens e configurar as cláusulas.</p>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

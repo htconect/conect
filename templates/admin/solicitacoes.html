@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<h1>Contratos e reservas</h1>
+<div class="lista-agenda agenda-compacta">
+{% for s in itens %}
+  {% set item_nome = s.produto.nome if s.produto else "A definir" %}
+  <a class="linha-agenda" href="/painel/solicitacao/{{ s.id }}">
+    <div class="data-agenda">{{ s.data_evento.strftime('%d/%m') }}</div>
+    <div class="info-agenda">
+      <b>{{ s.hora_inicio.strftime('%H:%M') }} · {{ s.cliente.nome }}</b>
+      <small>{{ item_nome }} · {{ s.bairro or '-' }}</small>
+    </div>
+    <span class="seta-card">›</span>
+  </a>
+{% else %}
+  <div class="box"><p>Nenhum contrato ou reserva encontrado.</p></div>
+{% endfor %}
+</div>
+{% endblock %}

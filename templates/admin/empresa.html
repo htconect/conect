@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<h1>Empresa</h1>
+<div class="box">
+<form method="post">
+  <label>Nome</label><input name="nome" value="{{ empresa.nome }}" required>
+  <label>Slug do link público</label><input name="slug" value="{{ empresa.slug }}" required>
+  <label>Buscar cliente por</label>
+  <select name="identificador_principal">
+    <option value="telefone" {% if empresa.identificador_principal == 'telefone' %}selected{% endif %}>Telefone</option>
+    <option value="cpf" {% if empresa.identificador_principal == 'cpf' %}selected{% endif %}>CPF</option>
+    <option value="cnpj" {% if empresa.identificador_principal == 'cnpj' %}selected{% endif %}>CNPJ</option>
+  </select>
+  <label>Usuário do painel</label><input name="usuario_admin" value="{{ empresa.usuario_admin or '' }}" required>
+  <label>Senha do painel</label><input name="senha_admin" value="{{ empresa.senha_admin or '' }}" required>
+  <button>Salvar empresa</button>
+</form>
+</div>
+{% endblock %}

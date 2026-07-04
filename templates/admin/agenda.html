@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel">← Início</a>
+  <h1>Agenda ({{ total_itens or itens|length }})</h1>
+</section>
+
+<form method="get" class="filtro-periodo">
+  <label>
+    <span>Início</span>
+    <input type="date" name="data_inicial" value="{{ data_inicial }}" onchange="this.form.submit()">
+  </label>
+  <label>
+    <span>Fim</span>
+    <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
+  </label>
+
+  <div class="filtros-status-agenda">
+    <label class="check">
+      <input type="checkbox" name="ativos" value="1" {% if filtro_ativos %}checked{% endif %} onchange="this.form.submit()">
+      Ativos
+    </label>
+    <label class="check">
+      <input type="checkbox" name="credito" value="1" {% if filtro_credito %}checked{% endif %} onchange="this.form.submit()">
+      Em crédito
+    </label>
+    <label class="check">
+      <input type="checkbox" name="cancelados" value="1" {% if filtro_cancelados %}checked{% endif %} onchange="this.form.submit()">
+      Cancelados
+    </label>
+  </div>
+</form>
+
+<div class="lista-agenda agenda-compacta">
+{% for s in itens %}
+  {% set data_curta = s.data_evento.strftime('%d/%m') if s.data_evento else '-' %}
+  {% set hora_base = s.hora_inicio.strftime('%H:%M') if s.hora_inicio else '-' %}
+  {% set item_nome = s.produto.nome if s.produto else "A definir" %}
+  {% set eh_credito = s.status == "aguardando_nova_data" %}
+  {% set eh_cancelado = s.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
+  <a class="linha-agenda {% if eh_credito %}agenda-credito{% elif eh_cancelado %}agenda-cancelado{% endif %}" href="/painel/solicitacao/{{ s.id }}">
+    <div class="data-agenda">{{ data_curta }}</div>
+    <div class="info-agenda">
+      <b>{{ hora_base }} · {{ s.cliente.nome }}</b>
+      <small>{{ item_nome }} · {{ s.bairro or s.cliente.bairro or '-' }}</small>
+      {% if eh_credito %}
+        <small class="financeiro-mini">Situação: Em crédito</small>
+      {% elif eh_cancelado %}
+        <small class="financeiro-mini">Situação: Cancelado</small>
+      {% endif %}
+      <small class="financeiro-mini">Valor R$ {{ s.valor|moeda_br }} · Pago R$ {{ s.valor_pago|moeda_br }} · Falta R$ {{ ((s.valor or 0) - (s.valor_pago or 0))|moeda_br }}</small>
+    </div>
+    <span class="seta-card">›</span>
+  </a>
+{% else %}
+  <div class="box"><p>Nenhuma locação no período.</p></div>
+{% endfor %}
+</div>
+{% endblock %}

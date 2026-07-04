@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<h1>Configurações</h1>
+<div class="box">
+  <form method="post" enctype="multipart/form-data">
+    <label>PIX copia e cola</label>
+    <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola or '' }}</textarea>
+
+    <div class="linha">
+      <div>
+        <label>Suporte início</label>
+        <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio or '' }}">
+      </div>
+      <div>
+        <label>Suporte fim</label>
+        <input name="suporte_fim" type="time" step="1800" value="{{ empresa.suporte_fim or '' }}">
+      </div>
+    </div>
+
+    <label class="check"><input type="checkbox" name="mostrar_suporte_contrato" value="1" {% if empresa.mostrar_suporte_contrato %}checked{% endif %}> Mostrar horário de suporte no contrato</label>
+
+    <h2>Logo da empresa</h2>
+    {% if empresa.logo_url or empresa.logo_idb_url %}
+      <div class="logo-preview">
+        <img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="Logo atual">
+        <small>Logo atual</small>
+      </div>
+    {% endif %}
+
+    <label>Enviar logo do PC ou celular</label>
+    <input name="logo_arquivo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml">
+    <p class="texto-discreto">Recomendado. O sistema salva a imagem e aplica em todas as telas.</p>
+
+    <details class="box-mini">
+      <summary>Usar link da logo em vez de arquivo</summary>
+      <label>URL direta da imagem</label>
+      <input name="logo_url" value="{{ empresa.logo_url if empresa.logo_url and empresa.logo_url.startswith('http') else '' }}" placeholder="https://.../logo.png">
+      <label>Link alternativo IDB.co / imagem hospedada</label>
+      <input name="logo_idb_url" value="{{ empresa.logo_idb_url or '' }}" placeholder="Cole o link direto da imagem, não o link da página">
+    </details>
+
+    <label>Tema padrão</label>
+    <select name="tema">
+      <option value="azul" {% if empresa.tema == 'azul' %}selected{% endif %}>Azul</option>
+      <option value="escuro" {% if empresa.tema == 'escuro' %}selected{% endif %}>Escuro</option>
+      <option value="claro" {% if empresa.tema == 'claro' %}selected{% endif %}>Claro</option>
+    </select>
+
+
+
+    <h2>Mensagens automáticas</h2>
+    <p class="texto-discreto">Já vem tudo pronto. A empresa só edita se quiser. Variáveis disponíveis: {{ '{{link}}' }}, {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{valor_sinal}}' }}, {{ '{{pix}}' }}, {{ '{{link_localizacao}}' }}.</p>
+
+    <label>Mensagem da reserva</label>
+    <textarea name="mensagem_reserva">{{ empresa.mensagem_reserva or mensagens_padrao.reserva }}</textarea>
+
+    <label>Mensagem do aceite</label>
+    <textarea name="mensagem_aceite">{{ empresa.mensagem_aceite or mensagens_padrao.aceite }}</textarea>
+
+    <label>Mensagem de pagamento do sinal</label>
+    <textarea name="mensagem_pagamento">{{ empresa.mensagem_pagamento or mensagens_padrao.pagamento }}</textarea>
+
+    <label>Mensagem de reserva confirmada</label>
+    <textarea name="mensagem_confirmacao">{{ empresa.mensagem_confirmacao or mensagens_padrao.confirmacao }}</textarea>
+
+    <label>Mensagem: estamos nos preparando</label>
+    <textarea name="mensagem_preparacao">{{ empresa.mensagem_preparacao or mensagens_padrao.preparacao }}</textarea>
+
+    <label>Mensagem: equipe a caminho</label>
+    <textarea name="mensagem_a_caminho">{{ empresa.mensagem_a_caminho or mensagens_padrao.a_caminho }}</textarea>
+
+    <label>Mensagem: localização</label>
+    <textarea name="mensagem_localizacao">{{ empresa.mensagem_localizacao or mensagens_padrao.localizacao }}</textarea>
+
+    <h2>Campos do cadastro público</h2>
+    <p class="texto-discreto">Configure uma vez. A reserva só mostra e exige o que estiver marcado aqui.</p>
+    <table>
+      <thead><tr><th>Campo</th><th>Mostrar</th><th>Obrigatório</th></tr></thead>
+      <tbody>
+      {% for ce in campos %}
+        <tr>
+          <td>{{ ce.campo.rotulo }}</td>
+          <td><input type="checkbox" name="campo_visivel_{{ ce.id }}" {% if ce.visivel %}checked{% endif %}></td>
+          <td><input type="checkbox" name="campo_obrigatorio_{{ ce.id }}" {% if ce.obrigatorio %}checked{% endif %}></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button>Salvar configurações</button>
+  </form>
+</div>
+{% endblock %}

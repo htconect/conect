@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel">← Início</a>
+  <h1>Buscar cliente</h1>
+  <p class="texto-discreto">Digite CPF ou telefone para ver as reservas e reenviar contrato.</p>
+</section>
+
+<form method="get" class="box busca-cliente">
+  <input name="busca" value="{{ busca or '' }}" placeholder="CPF ou telefone" inputmode="numeric" autofocus>
+  <button>Pesquisar</button>
+</form>
+
+<div class="lista-mobile">
+{% for c in itens %}
+  <a class="card-lista" href="/painel/cliente/{{ c.id }}">
+    <div>
+      <b>{{ c.nome or 'Cliente sem nome' }}</b>
+      <small>{{ c.telefone or c.identificador }} · {{ c.solicitacoes|length }} reserva(s)</small>
+    </div>
+    <span class="seta-card">›</span>
+  </a>
+{% else %}
+  {% if busca %}
+  <div class="box">
+    <p>Nenhum cliente encontrado.</p>
+    <a class="botao largura-total" href="/painel/contrato-novo?busca={{ busca|urlencode }}">Criar contrato novo com este CPF/telefone</a>
+  </div>
+  {% endif %}
+{% endfor %}
+</div>
+{% endblock %}

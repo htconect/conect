@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box pequeno">
+  <h1>{{ titulo_login or "Entrar no Conect" }}</h1>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  <form method="post" action="{{ action_login or '/admin/login' }}">
+    <label>Usuário</label>
+    <input name="usuario" required autocapitalize="none" autocomplete="username" spellcheck="false">
+    <label>Senha</label>
+    <input name="senha" type="password" required autocomplete="current-password">
+    <button>Entrar</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+<table>
+  <thead><tr><th>Cliente</th><th>Item principal</th><th>Data</th><th>Bairro</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {% for s in solicitacoes or itens %}
+  <tr>
+    <td>{{ s.cliente.nome }}</td>
+    <td>{{ s.produto.nome if s.produto else "A definir" }}</td>
+    <td>{{ s.data_evento.strftime('%d/%m/%Y') }}</td>
+    <td>{{ s.bairro or "-" }}</td>
+    <td><span class="status">{% if status_reserva_confirmada(s.status) %}Reserva{% elif s.status == "cancelado_cliente" %}Cancelado{% else %}Contrato{% endif %}</span></td>
+    <td><a href="/painel/solicitacao/{{ s.id }}">Abrir</a></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Nenhum contrato ou reserva encontrado.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>

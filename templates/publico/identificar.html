@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box pequeno tema-{{ empresa.tema or 'azul' }}">
+  {% if empresa.logo_url %}
+  <img class="logo-publica" src="{{ empresa.logo_url }}" alt="{{ empresa.nome }}">
+  {% endif %}
+  <h1>{{ empresa.nome }}</h1>
+  <p>Informe celular ou CPF apenas quando o cliente já existe na base.</p>
+  <form method="post" action="/e/{{ empresa.slug }}/buscar">
+    <label>Celular ou CPF</label>
+    <input name="identificador" inputmode="numeric" required autofocus>
+    <button>Continuar</button>
+  </form>
+  <p class="texto-discreto">Use este link apenas quando o cliente já existir. Para cliente novo, use o link de pré-contrato em branco.</p>
+</div>
+{% endblock %}

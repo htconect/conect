@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel/clientes">← Buscar cliente</a>
+  <h1>{{ cliente.nome }}</h1>
+  <p class="texto-discreto">{{ cliente.telefone }} · {{ cliente.cpf or cliente.cnpj or cliente.identificador }}</p>
+</section>
+
+<h2 class="titulo-secao">Reservas do cliente</h2>
+<div class="lista-mobile">
+{% for i in solicitacoes %}
+  {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=i.id) %}
+  <article class="card reserva-cliente">
+    <a class="card-link-limpo" href="/painel/solicitacao/{{ i.id }}">
+      <div class="agenda-topo">
+        <div>
+          <b>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.hora_inicio.strftime('%H:%M') }}</b>
+          <small>{{ i.bairro or cliente.bairro or '-' }} · R$ {{ i.valor|moeda_br }}</small>
+        </div>
+        <span class="seta-card">›</span>
+      </div>
+    </a>
+    <div class="acoes linha-acoes">
+      <a class="botao secundario" href="{{ link_contrato_visual }}" target="_blank">Contrato</a>
+      <a class="botao-whats" target="_blank" href="https://wa.me/55{{ (cliente.telefone or cliente.identificador)|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}?text={{ ('Olá! Segue o contrato da sua reserva: ' ~ link_contrato_visual)|urlencode }}">WhatsApp</a>
+    </div>
+  </article>
+{% else %}
+  <div class="box"><p>Nenhuma reserva encontrada para este cliente.</p></div>
+{% endfor %}
+</div>
+
+<details class="accordion">
+  <summary>Dados do cliente / editar cadastro</summary>
+
+  <form method="post" action="/painel/cliente/{{ cliente.id }}/dados" class="form-grid">
+    <label>Nome
+      <input name="nome" value="{{ cliente.nome or '' }}">
+    </label>
+
+    <label>Telefone
+      <input name="telefone" inputmode="numeric" value="{{ cliente.telefone or '' }}">
+    </label>
+
+    <label>CPF
+      <input name="cpf" inputmode="numeric" value="{{ cliente.cpf or '' }}">
+    </label>
+
+    <label>CNPJ
+      <input name="cnpj" inputmode="numeric" value="{{ cliente.cnpj or '' }}">
+    </label>
+
+    <label>E-mail
+      <input name="email" type="email" value="{{ cliente.email or '' }}">
+    </label>
+
+    <label>CEP
+      <input name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
+    </label>
+
+    <label>Endereço
+      <input name="endereco" value="{{ cliente.endereco or '' }}">
+    </label>
+
+    <label>Número
+      <input name="numero" value="{{ cliente.numero or '' }}">
+    </label>
+
+    <label>Complemento
+      <input name="complemento" value="{{ cliente.complemento or '' }}">
+    </label>
+
+    <label>Bairro
+      <input name="bairro" value="{{ cliente.bairro or '' }}">
+    </label>
+
+    <label>Cidade
+      <input name="cidade" value="{{ cliente.cidade or '' }}">
+    </label>
+
+    <label>Estado
+      <input name="estado" value="{{ cliente.estado or '' }}">
+    </label>
+
+    <label class="campo-cheio">Observações
+      <textarea name="observacoes" rows="3">{{ cliente.observacoes or '' }}</textarea>
+    </label>
+
+    <button class="botao" type="submit">Salvar cadastro</button>
+  </form>
+</details>
+{% endblock %}

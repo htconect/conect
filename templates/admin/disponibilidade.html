@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel">← Início</a>
+  <p class="mini">Locação</p>
+  <h1>Disponibilidade</h1>
+  <p class="texto-discreto">Escolha a data e veja rapidamente o que pode ser alugado.</p>
+</section>
+
+<form method="get" class="box consulta-data">
+  <label>Data da locação</label>
+  <input type="date" name="data" value="{{ data_consulta.isoformat() }}" onchange="this.form.submit()">
+</form>
+
+{% if produto_selecionado %}
+<section class="card detalhe-disponibilidade">
+  <a class="voltar" href="/painel/disponibilidade?data={{ data_consulta.isoformat() }}">← Todos os itens</a>
+  <h2>{{ produto_selecionado.produto.nome }}</h2>
+  <div class="resumo-disponibilidade">
+    <div><small>Total</small><b>{{ produto_selecionado.total }}</b></div>
+    <div><small>Alugados</small><b>{{ produto_selecionado.alugados }}</b></div>
+    <div><small>Disponíveis</small><b>{{ produto_selecionado.disponiveis }}</b></div>
+  </div>
+
+  <details class="accordion interno" open>
+    <summary>Onde está nessa data</summary>
+    {% if produto_selecionado.locais %}
+      {% for loc in produto_selecionado.locais %}
+        <a class="linha-local" href="/painel/solicitacao/{{ loc.reserva_id }}">
+          <div>
+            <b>{{ loc.hora }} · {{ loc.bairro }}</b>
+            <small>{{ loc.quantidade }}x alugado · {{ loc.cliente }}</small>
+          </div>
+          <span>›</span>
+        </a>
+      {% endfor %}
+    {% else %}
+      <p class="texto-discreto">Nenhuma locação deste item nesta data.</p>
+    {% endif %}
+  </details>
+
+  <details class="accordion interno">
+    <summary>Análise rápida de rota</summary>
+    <p class="texto-discreto">Use os bairros acima para decidir se a locação é viável. A previsão automática de rota fica para a próxima etapa.</p>
+  </details>
+
+  {% if produto_selecionado.disponiveis > 0 %}
+    <a class="botao largura-total" href="/painel/clientes">Iniciar contrato rápido</a>
+  {% endif %}
+</section>
+{% else %}
+<div class="lista-mobile disponibilidade-lista">
+{% for item in itens %}
+  <a class="card-lista disponibilidade-card {{ item.status }}" href="/painel/disponibilidade?data={{ data_consulta.isoformat() }}&produto_id={{ item.produto.id }}">
+    <div>
+      <b>{{ item.produto.nome }}</b>
+      <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
+    </div>
+    <strong>{% if item.status == 'disponivel' %}🟢{% elif item.status == 'atencao' %}🟡{% else %}🔴{% endif %}</strong>
+  </a>
+{% else %}
+  <div class="box"><p>Nenhum item cadastrado.</p></div>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

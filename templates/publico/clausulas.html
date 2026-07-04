@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="contrato-publico">
+  <h1>{{ empresa.nome }}</h1>
+  <h2>Cláusulas da reserva #{{ item.id }}</h2>
+  <p><b>Cliente:</b> {{ item.cliente.nome or '-' }}</p>
+  <p><b>Data:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }} às {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}</p>
+
+  {% if contratos_clausulas %}
+    {% for contrato in contratos_clausulas %}
+      <section class="box">
+        <h3>{{ contrato.nome }}</h3>
+        {% if contrato.descricao %}<p>{{ contrato.descricao }}</p>{% endif %}
+        <div style="white-space: pre-wrap; line-height: 1.5;">{{ contrato.clausulas }}</div>
+      </section>
+    {% endfor %}
+  {% else %}
+    <section class="box">
+      <h3>Condições da locação</h3>
+      <p>Nenhuma cláusula específica foi vinculada aos itens desta reserva.</p>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<script>document.body.classList.add("tela-financeiro-desktop");</script>
+<section class="financeiro-novo">
+  <div class="financeiro-topline"><a href="/painel" class="btn-voltar">← Painel</a><strong>Financeiro</strong></div>
+  <form method="get" class="financeiro-filtros compact-card">
+    <select name="conta_id" onchange="this.form.submit()">
+      {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+    </select>
+    <input type="date" name="data_inicial" value="{{ data_inicial }}">
+    <input type="date" name="data_final" value="{{ data_final }}">
+    <select name="categoria"><option value="">Todas categorias</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
+    <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
+    <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
+    <button>Filtrar</button>
+  </form>
+
+  {% if request.query_params.get('importados') is not none %}
+  <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
+  {% endif %}
+
+  {% if conta %}
+  <div class="financeiro-acoes compact-grid">
+    <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="inline-form compact-card preserve-scroll">
+      <input type="hidden" name="conta_id" value="{{ conta.id }}">
+      <span>Extrato</span><input type="file" name="arquivo" accept=".csv,.xlsx,.xls" required><button>Importar</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="financeiro-resumo">
+    <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
+    <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
+    <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
+    <div><small>A receber</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+    <div><small>Previsto</small><b>R$ {{ saldo_previsto|moeda_br }}</b></div>
+    <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+  </div>
+
+  <details class="financeiro-add compact-card">
+    <summary>+ Lançamentos manuais</summary>
+    <div class="forms-add">
+      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="real">
+        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="Descrição" required><input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required>
+        <select name="categoria">{% for valor, rotulo in categorias %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select><button>Salvar lançamento</button>
+      </form>
+      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="receber">
+        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="A receber" required><input name="valor" data-mascara="moeda" placeholder="Valor" required>
+        <select name="categoria"><option value="aluguel">Aluguel</option><option value="empresa">Empresa</option><option value="casa">Casa</option><option value="manutencao">Manutenção</option></select><button>Salvar a receber</button>
+      </form>
+    </div>
+  </details>
+
+  <div class="financeiro-duas-colunas">
+    <section class="box tabela-financeiro banco-box">
+      <div class="titulo-tabela"><h2>Banco</h2><span>{{ banco|length }} lançamentos</span></div>
+      <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
+      <table>
+        <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ação</th></tr></thead>
+        <tbody>
+        {% for l in banco %}
+          <tr class="{{ 'linha-vinculada' if l.pagamento else '' }}">
+            <td>{{ l.data.strftime('%d/%m') }}</td>
+            <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
+            <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
+            <td>
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll">
+                <select name="categoria">
+                  {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+                </select>
+                <input type="hidden" name="confirmado" value="1">
+                <button class="btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Confirmar tipo">{{ '✓' if l.categoria_confirmada else 'OK' }}</button>
+              </form>
+            </td>
+            <td>
+              {% if l.pagamento %}
+                <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
+              {% elif l.categoria != 'aluguel' %}
+                <span class="texto-discreto">—</span>
+              {% elif candidatos_vinculo.get(l.id) %}
+                <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular" class="vinculo-form preserve-scroll">
+                  <select name="pagamento_id">
+                    {% for c in candidatos_vinculo.get(l.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
+                  </select><button>✓</button>
+                </form>
+              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
+            </td>
+            <td class="acoes-linha">
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
+              {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario">Desv.</button></form>{% endif %}
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo">Excluir</button></form>
+            </td>
+          </tr>
+        {% else %}<tr><td colspan="6">Nenhum extrato importado neste filtro.</td></tr>{% endfor %}
+        {% for m in manuais_reais %}
+          <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento else '' }}">
+            <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
+            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
+            <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
+            <td>
+              <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
+                {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if m.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+              </select>
+            </td>
+            <td>
+              {% if m.pagamento %}
+                <div class="vinculo-atual"><b>Vinculado</b> · {{ m.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ m.pagamento.solicitacao_id }}">{{ m.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ m.pagamento.valor|moeda_br }}</div>
+              {% elif m.categoria != 'aluguel' or m.valor <= 0 %}
+                <span class="texto-discreto">—</span>
+              {% elif candidatos_manual.get(m.id) %}
+                <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="vinculo-form preserve-scroll">
+                  <select name="pagamento_id">
+                    {% for c in candidatos_manual.get(m.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
+                  </select><button title="Vincular">✓</button>
+                </form>
+              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
+            </td>
+            <td class="acoes-linha">
+              <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
+              <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">OK</button>
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
+              {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario">Desv.</button></form>{% endif %}
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="btn-perigo">Excluir</button></form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="box tabela-financeiro sistema-box">
+      <div class="titulo-tabela"><h2>Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
+      <div class="filtro-direito">
+        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente">Pendentes</a>
+        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado">Vinculados</a>
+        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos">Todos</a>
+      </div>
+      <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
+      <table>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for p in pagamentos_sistema %}
+          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.solicitacao.cliente.nome }}</a></td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="4">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      <details class="receber-mini">
+        <summary>A receber manual</summary>
+        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-receber-scroll">
+        <table><thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead><tbody>
+        {% for r in receber %}<tr><td>{{ r.data.strftime('%d/%m') }}</td><td>{{ r.descricao }}</td><td class="positivo">R$ {{ r.valor|moeda_br }}</td><td><form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll"><button>OK</button></form></td></tr>{% else %}<tr><td colspan="4">Nenhum valor a receber.</td></tr>{% endfor %}
+        </tbody></table>
+        </div>
+      </details>
+    </section>
+  </div>
+</section>
+
+<script>
+(function(){
+  function salvarScrolls(){
+    document.querySelectorAll('[data-scroll-key]').forEach(function(el){ sessionStorage.setItem(el.dataset.scrollKey, el.scrollTop); });
+  }
+  document.querySelectorAll('[data-scroll-key]').forEach(function(el){
+    var key = el.dataset.scrollKey;
+    var saved = sessionStorage.getItem(key);
+    if(saved !== null){ el.scrollTop = parseInt(saved,10) || 0; }
+    el.addEventListener('scroll', function(){ sessionStorage.setItem(key, el.scrollTop); });
+  });
+  document.querySelectorAll('form.preserve-scroll').forEach(function(form){ form.addEventListener('submit', salvarScrolls); });
+  window.addEventListener('beforeunload', salvarScrolls);
+
+  document.querySelectorAll('input[data-allow-negative="1"][data-mascara="moeda"]').forEach(function(input){
+    input.addEventListener('input', function(){
+      var negativo = /^\s*-/.test(this.value) || this.value.indexOf('-') >= 0;
+      var digitos = this.value.replace(/\D/g, '');
+      if(!digitos){ this.value = negativo ? '-' : ''; return; }
+      var numero = (parseInt(digitos,10) / 100).toFixed(2);
+      var valor = numero.replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      this.value = negativo ? '-' + valor : valor;
+    });
+  });
+})();
+</script>
+
+<style>
+.financeiro-topline{height:24px;display:flex;align-items:center;gap:8px;margin-bottom:4px}.btn-voltar{background:#0f172a;color:#fff;text-decoration:none;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:900}.financeiro-novo{max-width:none;width:100%;padding:6px 9px 9px;box-sizing:border-box}.financeiro-alerta{background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:4px 8px;margin:4px 0;font-size:11px}.compact-card{background:#fff;border:1px solid #dbe2ea;border-radius:10px;padding:5px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.financeiro-filtros{display:grid;grid-template-columns:165px 125px 125px 140px 145px minmax(220px,1fr) 76px;gap:6px;margin-bottom:5px}.financeiro-acoes{display:grid;grid-template-columns:minmax(380px,1fr);gap:6px;margin-bottom:5px}.inline-form{display:grid;grid-template-columns:48px 1fr 78px;align-items:center;gap:6px}.inline-form span{font-weight:800;font-size:11px}.financeiro-resumo{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:5px}.financeiro-resumo>div{background:#fff;border:1px solid #dbe2ea;border-radius:10px;padding:5px 8px}.financeiro-resumo small{display:block;color:#475569;font-size:10px}.financeiro-resumo b{font-size:14px}.financeiro-add{margin-bottom:6px}.financeiro-add summary{font-size:12px;font-weight:900;cursor:pointer}.forms-add{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.grid-form{display:grid;grid-template-columns:115px 1fr 115px 130px 118px;gap:5px}.financeiro-duas-colunas{display:grid;grid-template-columns:minmax(900px,1.65fr) minmax(430px,.7fr);gap:8px;height:calc(100vh - 178px);min-height:500px}.box{background:#fff;border:1px solid #dbe2ea;border-radius:12px;overflow:hidden}.titulo-tabela{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #e5e7eb}.titulo-tabela h2{font-size:17px;margin:0}.titulo-tabela span{font-size:11px;color:#64748b}.tabela-scroll{overflow:auto;height:calc(100% - 35px)}.sistema-scroll{height:calc(100% - 94px)}.receber-scroll{max-height:105px}.tabela-financeiro table{width:100%;border-collapse:collapse;font-size:11px}.tabela-financeiro th,.tabela-financeiro td{border-bottom:1px solid #e5e7eb;padding:4px 6px;text-align:left;vertical-align:middle;white-space:nowrap}.tabela-financeiro th{background:#f8fafc;position:sticky;top:0;z-index:2}.hist-cell{white-space:normal!important;min-width:260px}.hist-cell small{display:block;color:#64748b;font-size:9px}.cliente-cell{white-space:normal!important}.positivo{color:#059669}.negativo{color:#dc2626}.linha-vinculada{background:#f0fdf4}.tipo-form,.vinculo-form,.acoes-linha{display:flex;align-items:center;gap:4px}.tipo-form select{width:100px}.vinculo-form select{width:230px}.vinculo-atual{font-size:10.5px;color:#166534;white-space:normal}.texto-discreto{color:#64748b;font-size:11px}.filtro-direito{display:flex;gap:5px;padding:5px 8px;border-bottom:1px solid #e5e7eb}.filtro-direito a{font-size:11px;text-decoration:none;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:4px 8px;font-weight:800}.filtro-direito a.ativo{background:#2563eb;color:#fff}.badge-ok,.badge-pendente{border-radius:999px;padding:2px 6px;font-size:10px;font-weight:800}.badge-ok{background:#dcfce7;color:#166534}.badge-pendente{background:#fef3c7;color:#92400e}.receber-mini{border-top:1px solid #e5e7eb}.receber-mini summary{padding:5px 8px;font-weight:900;cursor:pointer;font-size:12px}input,select,button{height:28px;border:1px solid #cbd5e1;border-radius:7px;padding:0 7px;font-size:11px;box-sizing:border-box}button{border:0;background:#2563eb;color:#fff;font-weight:900;cursor:pointer}.btn-ok{background:#e2e8f0!important;color:#0f172a!important;min-width:32px}.btn-ok.confirmado{background:#22c55e!important;color:#fff!important}.btn-mover{background:#94a3b8!important;min-width:26px;padding:0 5px!important}.btn-secundario{background:#64748b!important}.btn-perigo{background:#dc2626!important}.input-data-mini{width:104px}.input-desc-mini{width:100%;min-width:170px}.input-valor-mini{width:100px}.input-tipo-mini{width:100px}body.tela-financeiro-desktop{background:#f6f7fb;overflow:hidden}body.tela-financeiro-desktop .topo-app,body.tela-financeiro-desktop .nav-inferior{display:none!important}body.tela-financeiro-desktop .container-app{max-width:none;width:100vw;height:100vh;margin:0;padding:0;overflow:hidden}@media(max-width:900px){body.tela-financeiro-desktop{overflow:auto}.financeiro-filtros,.financeiro-acoes,.financeiro-resumo,.forms-add,.financeiro-duas-colunas,.grid-form{display:block;height:auto}.financeiro-duas-colunas{height:auto}.tabela-scroll,.sistema-scroll{height:auto;max-height:60vh}.compact-card,.box,.financeiro-resumo>div{margin-bottom:8px}}
+</style>
+{% endblock %}

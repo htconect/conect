@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<h1>Pré-contrato - {{ empresa.nome }}</h1>
+<p class="texto-discreto">Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.</p>
+
+{% if erro %}
+<div class="box aviso">
+  {% if erro == 'cpf_cnpj' %}Informe CPF ou CNPJ, nunca os dois.{% endif %}
+  {% if erro == 'cpf_invalido' %}CPF inválido. Confira os números informados.{% endif %}
+  {% if erro == 'cnpj_invalido' %}CNPJ inválido. Confira os números informados.{% endif %}
+  {% if erro == 'hora_invalida' %}Horário inválido. Use horários de 30 em 30 minutos, como 14:00 ou 14:30.{% endif %}
+</div>
+{% endif %}
+
+{% if cliente_encontrado and not cliente %}
+<div class="box aviso">
+  <b>Encontramos um cadastro com esse telefone.</b>
+  <p>Para proteger seus dados, confirme o CPF para carregar as informações já cadastradas.</p>
+  <form method="get" action="/e/{{ empresa.slug }}/cadastro">
+    <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
+    <label>CPF para confirmação</label>
+    <input name="cpf_confirmacao" inputmode="numeric" required>
+    <button>Carregar meus dados</button>
+  </form>
+</div>
+{% endif %}
+
+<form method="post" action="/e/{{ empresa.slug }}/reserva" class="box tema-{{ empresa.tema or 'azul' }}">
+  <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
+
+  <section class="secao-form">
+    <h2>1. Quem está reservando?</h2>
+    <p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
+    <div class="linha">
+      <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" checked onchange="alternarPessoa()"> Pessoa física</label>
+      <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" onchange="alternarPessoa()"> Pessoa jurídica</label>
+    </div>
+
+    <div id="area-fisica">
+      <label>Nome completo{% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %} *{% endif %}</label><input name="nome" value="{{ cliente.nome if cliente else '' }}" {% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %}required{% endif %}>
+      {% if not campos_cfg.get('cpf') or campos_cfg.get('cpf').visivel %}<label>CPF{% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %} *{% endif %}</label><input name="cpf" inputmode="numeric" value="{{ form.cpf if form is defined else cliente.cpf if cliente else '' }}" {% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="cpf" value="">{% endif %}
+      {% if not campos_cfg.get('data_nascimento') or campos_cfg.get('data_nascimento').visivel %}<label>Data de nascimento{% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %} *{% endif %}</label><input name="data_nascimento" type="date" value="{{ cliente.data_nascimento if cliente and cliente.data_nascimento else '' }}" {% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="data_nascimento" value="">{% endif %}
+    </div>
+
+    <div id="area-juridica" style="display:none">
+      <label>Razão social / nome da empresa *</label><input name="nome_empresa" oninput="document.querySelector('input[name=nome]').value=this.value">
+      <label>CNPJ *</label><input name="cnpj" inputmode="numeric" value="{{ form.cnpj if form is defined else cliente.cnpj if cliente else '' }}">
+    </div>
+
+    <label>Telefone / WhatsApp{% if campos_cfg.get('telefone') and campos_cfg.get('telefone').obrigatorio %} *{% endif %}</label><input name="telefone" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" {% if campos_cfg.get('telefone') and campos_cfg.get('telefone').obrigatorio %}required{% endif %}>
+    {% if not campos_cfg.get('email') or campos_cfg.get('email').visivel %}<label>E-mail{% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %} *{% endif %}</label><input name="email" type="email" value="{{ cliente.email if cliente else '' }}" {% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %}required{% endif %}>{% endif %}
+  </section>
+
+  <section class="secao-form">
+    <h2>2. Endereço do evento</h2>
+    <div class="linha">
+      <div>
+        <label>CEP</label><input id="cep" name="cep" value="{{ cliente.cep if cliente else '' }}">
+      </div>
+      <button type="button" onclick="buscarCEP()">Buscar CEP</button>
+    </div>
+    <label>Rua / endereço{% if campos_cfg.get('endereco') and campos_cfg.get('endereco').obrigatorio %} *{% endif %}</label><input id="endereco" name="endereco" value="{{ cliente.endereco if cliente else '' }}" {% if campos_cfg.get('endereco') and campos_cfg.get('endereco').obrigatorio %}required{% endif %}>
+    <div class="grid duas">
+      <div><label>Número{% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %} *{% endif %}</label><input name="numero" value="{{ cliente.numero if cliente else '' }}" {% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %}required{% endif %}></div>
+      <div><label>Complemento</label><input name="complemento" value="{{ cliente.complemento if cliente else '' }}"></div>
+    </div>
+    <div class="grid duas">
+      <div><label>Bairro{% if campos_cfg.get('bairro') and campos_cfg.get('bairro').obrigatorio %} *{% endif %}</label><input id="bairro" name="bairro" value="{{ cliente.bairro if cliente else '' }}" {% if campos_cfg.get('bairro') and campos_cfg.get('bairro').obrigatorio %}required{% endif %}></div>
+      <div><label>Cidade{% if campos_cfg.get('cidade') and campos_cfg.get('cidade').obrigatorio %} *{% endif %}</label><input id="cidade" name="cidade" value="{{ cliente.cidade if cliente else '' }}" {% if campos_cfg.get('cidade') and campos_cfg.get('cidade').obrigatorio %}required{% endif %}></div>
+    </div>
+    <label>Estado</label><input id="estado" name="estado" value="{{ cliente.estado if cliente else '' }}">
+  </section>
+
+  <section class="secao-form">
+    <h2>3. Evento</h2>
+    <div class="grid duas">
+      <div><label>Data do evento *</label><input name="data_evento" type="date" required></div>
+      <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" required></div>
+    </div>
+    <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
+    <label>Nome do local</label><input name="local_nome" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
+    <label>Referência do local</label><input name="local" placeholder="Ex.: Portaria 2, salão térreo, entrada pela rua lateral">
+    <label>Acesso ao local</label>
+    <select name="acesso_local">
+      <option value="">Selecione</option>
+      <option>Térreo</option>
+      <option>Elevador</option>
+      <option>Escada</option>
+      <option>Elevador + escada</option>
+    </select>
+  </section>
+
+  <section class="secao-form">
+    <h2>4. Responsável no local</h2>
+    <p class="texto-discreto">Opcional, mas muito importante quando outra pessoa recebe a equipe.</p>
+    <div class="grid duas">
+      <div><label>Nome do responsável</label><input name="local_responsavel_nome" placeholder="Quem estará no local?"></div>
+      <div><label>Telefone do responsável</label><input name="local_responsavel_telefone" placeholder="WhatsApp ou telefone"></div>
+    </div>
+    <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
+  </section>
+
+  <button>Enviar reserva</button>
+</form>
+
+<script>
+function alternarPessoa(){
+  const tipo = document.querySelector('input[name=tipo_pessoa]:checked').value;
+  const fisica = document.getElementById('area-fisica');
+  const juridica = document.getElementById('area-juridica');
+  fisica.style.display = tipo === 'fisica' ? 'block' : 'none';
+  juridica.style.display = tipo === 'juridica' ? 'block' : 'none';
+  document.querySelector('input[name=cpf]').disabled = tipo !== 'fisica';
+  document.querySelector('input[name=cnpj]').disabled = tipo !== 'juridica';
+}
+async function buscarCEP(){
+  const campo = document.getElementById('cep');
+  const cep = (campo.value || '').replace(/\D/g, '');
+  if (cep.length !== 8) { alert('Informe um CEP válido com 8 números.'); return; }
+  try {
+    const resposta = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    const dados = await resposta.json();
+    if (dados.erro) { alert('CEP não encontrado.'); return; }
+    document.getElementById('endereco').value = dados.logradouro || '';
+    document.getElementById('bairro').value = dados.bairro || '';
+    document.getElementById('cidade').value = dados.localidade || '';
+    document.getElementById('estado').value = dados.uf || '';
+  } catch (e) { alert('Não foi possível buscar o CEP agora.'); }
+}
+
+{% if form %}
+const formAnterior = {{ form|tojson }};
+for (const [nome, valor] of Object.entries(formAnterior)) {
+  const campos = document.querySelectorAll(`[name="${nome}"]`);
+  campos.forEach(campo => {
+    if (campo.type === 'radio') {
+      campo.checked = campo.value === valor;
+    } else if (campo.type !== 'hidden' || valor) {
+      campo.value = valor || '';
+    }
+  });
+}
+{% endif %}
+
+alternarPessoa();
+</script>
+{% endblock %}

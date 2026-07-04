@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ titulo or "HUMIAT Conect" }}</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %}">
+<header class="topo-app">
+  <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
+    {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
+    <span>{{ empresa.nome if empresa is defined and empresa else "Conect" }}</span>
+  </a>
+  {% if request.session.get('empresa_id') %}
+    <div class="usuario-topo">
+      <span>{{ request.session.get('usuario_nome') or request.session.get('usuario') or 'Usuário' }}</span>
+      <a class="sair-app" href="/empresa/sair">Sair</a>
+    </div>
+  {% elif request.session.get('admin_geral') %}
+    <a class="sair-app" href="/admin/sair">Sair</a>
+  {% else %}
+    <a class="sair-app" href="/empresa/login">Entrar</a>
+  {% endif %}
+</header>
+
+<main class="container-app">
+  {% block conteudo %}{% endblock %}
+</main>
+
+{% if request.session.get('empresa_id') %}
+<nav class="nav-inferior">
+  <a href="/painel">🏠<span>Início</span></a>
+  <a href="/painel/agenda">📅<span>Agenda</span></a>
+  <a href="/painel/disponibilidade">📦<span>Disponível</span></a>
+  <a href="/painel/financeiro">💰<span>Financeiro</span></a>
+  <a class="nav-principal" href="/painel/contrato-novo">＋<span>Manual</span></a>
+</nav>
+{% endif %}
+
+<script>
+(function () {
+  function aplicarMascaraMoeda(input) {
+    input.addEventListener("input", function () {
+      const permiteNegativo = this.dataset.allowNegative === "1";
+      const negativo = permiteNegativo && (/^\s*-/.test(this.value) || this.value.indexOf("-") >= 0);
+      let digitos = this.value.replace(/\D/g, "");
+      if (!digitos) {
+        this.value = negativo ? "-" : "";
+        return;
+      }
+      let numero = (parseInt(digitos, 10) / 100).toFixed(2);
+      let valor = numero.replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      this.value = negativo ? "-" + valor : valor;
+    });
+  }
+
+  document.querySelectorAll('input[name="valor"], input[name="sinal"], input[name="valor_unitario"], input[name="valor_pago"], input[data-mascara="moeda"]').forEach(aplicarMascaraMoeda);
+})();
+</script>
+</body>
+</html>

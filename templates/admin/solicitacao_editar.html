@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile reserva-cabecalho">
+  <a class="voltar" href="/painel/solicitacao/{{ item.id }}">← Voltar</a>
+  <p class="mini">Controle operacional</p>
+  <h1>Status da reserva</h1>
+  <p class="texto-discreto">{{ item.cliente.nome }}</p>
+</section>
+
+<form method="post" class="card" action="/painel/solicitacao/{{ item.id }}/editar">
+  <input type="hidden" name="data_evento" value="{{ item.data_evento.isoformat() if item.data_evento else '' }}">
+  <input type="hidden" name="hora_inicio" value="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}">
+  <input type="hidden" name="hora_fim" value="{{ item.hora_fim.strftime('%H:%M') if item.hora_fim else '' }}">
+  <input type="hidden" name="bairro" value="{{ item.bairro or '' }}">
+  <input type="hidden" name="acesso_local" value="{{ item.acesso_local or '' }}">
+  <input type="hidden" name="local" value="{{ item.local or '' }}">
+  <input type="hidden" name="valor" value="{{ item.valor|moeda_br }}">
+  <input type="hidden" name="sinal" value="{{ item.sinal|moeda_br }}">
+
+  <label>Status da reserva</label>
+  <select name="status">
+    {% set atual = item.status %}
+    <option value="{{ atual }}" selected>Manter atual: {{ atual|replace('_',' ') }}</option>
+    <option value="reserva_confirmada">Reserva confirmada</option>
+    <option value="aguardando_pagamento">Aguardando pagamento</option>
+    <option value="aguardando_nova_data">Aguardando nova data</option>
+    <option value="cancelada">Cancelada</option>
+  </select>
+
+  <p class="texto-discreto">
+    Use esta tela apenas para mudar o status operacional. Para alterar cliente, endereço, data, valores ou itens, volte e use <b>Editar contrato</b>.
+  </p>
+
+  {% if item.itens %}
+  <label class="check">
+    <input type="checkbox" name="aprovacao_manual" value="1">
+    Aprovação manual pelo usuário do sistema
+  </label>
+  <small class="texto-discreto">Use quando o cliente autorizou por telefone ou WhatsApp.</small>
+  {% else %}
+  <div class="aviso">
+    Para aprovar manualmente, primeiro adicione pelo menos um item ao contrato.
+  </div>
+  {% endif %}
+
+  <label>Observações internas</label>
+  <textarea name="observacoes">{{ item.observacoes or '' }}</textarea>
+
+  <button type="submit">Salvar status</button>
+</form>
+{% endblock %}

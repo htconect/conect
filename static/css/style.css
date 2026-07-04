@@ -1,0 +1,909 @@
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;color:#18202f}.topo{height:64px;background:#111827;color:white;display:flex;align-items:center;justify-content:space-between;padding:0 28px}.marca{font-weight:800;color:white;text-decoration:none;font-size:20px}.marca span{color:#38bdf8}.topo nav a{color:white;text-decoration:none;margin-left:18px}.container{max-width:1100px;margin:0 auto;padding:32px 20px}.hero{background:linear-gradient(135deg,#111827,#1f6feb);color:white;padding:42px;border-radius:24px;margin-bottom:24px}.hero h1{font-size:42px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px}.grid.duas{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}.card,.box{background:white;border-radius:18px;padding:22px;box-shadow:0 8px 24px rgba(15,23,42,.08);margin-bottom:18px}.pequeno{max-width:480px;margin:30px auto}a{color:#1f6feb}.botao,button{background:#1f6feb;color:white;border:0;border-radius:12px;padding:12px 18px;text-decoration:none;font-weight:700;cursor:pointer;display:inline-block}.botao.secundario{background:#475569}.acoes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}label{display:block;font-weight:700;margin:14px 0 6px}input,select,textarea{width:100%;padding:12px;border:1px solid #d6dae3;border-radius:10px;font-size:16px}textarea{min-height:100px}.linha{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end}table{width:100%;border-collapse:collapse;background:white;border-radius:16px;overflow:hidden;box-shadow:0 8px 24px rgba(15,23,42,.08)}th,td{text-align:left;padding:14px;border-bottom:1px solid #eef2f7}th{background:#f1f5f9}.status{background:#e0f2fe;color:#075985;border-radius:999px;padding:5px 10px;font-size:13px}pre{white-space:pre-wrap;font-family:inherit;line-height:1.5}.erro{background:#fee2e2;color:#991b1b;padding:12px;border-radius:10px;margin-bottom:12px}.sucesso{border:2px solid #bbf7d0}.check{display:flex;gap:10px;align-items:center}.check input{width:auto}@media(max-width:600px){.topo{padding:0 16px}.hero h1{font-size:32px}.container{padding:20px 12px}}
+
+
+.hero-admin{
+  display:flex;
+  justify-content:space-between;
+  gap:20px;
+  align-items:center;
+  background:linear-gradient(135deg,#ffffff,#eef4ff);
+  border:1px solid #dbe5f4;
+  border-radius:22px;
+  padding:24px;
+  margin-bottom:18px;
+}
+.mini{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#6b7280;margin:0}
+.metricas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}
+.metrica{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:18px}
+.metrica strong{display:block;font-size:34px;line-height:1}
+.metrica span{color:#6b7280}
+.card-link{text-decoration:none;color:inherit;transition:.15s ease}
+.card-link:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(15,23,42,.10)}
+@media(max-width:800px){
+  .hero-admin{display:block}
+  .metricas{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+
+.voltar {
+  display: inline-block;
+  margin-bottom: 16px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.slug-destaque {
+  margin: 6px 0 4px;
+  font-weight: 700;
+}
+.texto-discreto {
+  margin-top: 18px;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.perigo{background:#dc2626}
+.aviso{border:1px solid #f59e0b;background:#fffbeb}
+.logo-publica{max-width:180px;max-height:90px;object-fit:contain;display:block;margin:0 auto 18px}
+.tema-azul{border-top:5px solid #1f6feb}
+.tema-escuro{border-top:5px solid #111827}
+.tema-claro{border-top:5px solid #94a3b8}
+
+.marca{display:flex;align-items:center;gap:10px}
+.marca img{width:38px;height:38px;border-radius:10px;object-fit:contain;background:white;padding:3px}
+.tema-global-azul{--cor-principal:#1f6feb;--cor-fundo:#f6f7fb}
+.tema-global-escuro{--cor-principal:#111827;--cor-fundo:#eef2f7}
+.tema-global-claro{--cor-principal:#64748b;--cor-fundo:#ffffff}
+body[class*="tema-global"]{background:var(--cor-fundo)}
+body[class*="tema-global"] .botao,
+body[class*="tema-global"] button{background:var(--cor-principal)}
+body[class*="tema-global"] .marca span{color:#fff}
+.metrica.alerta{border-color:#f59e0b;background:#fffbeb}
+.card h3{margin-top:0}
+
+
+.secao-form {
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 18px;
+  background: rgba(255,255,255,.72);
+}
+
+.secao-form h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.painel-limpo {
+  align-items: center;
+}
+
+.botao-grande {
+  font-size: 18px;
+  padding: 16px 22px;
+}
+
+.atalhos-discretos {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+  opacity: .8;
+}
+
+.destaque-suave {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.logo-preview{display:flex;align-items:center;gap:12px;margin:10px 0 16px}
+.logo-preview img{max-width:120px;max-height:80px;border-radius:12px;background:#fff;border:1px solid #d7deea;padding:8px;object-fit:contain}
+
+.links-operacao{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.linha-link{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.timeline{display:grid;gap:8px}
+
+
+/* Operação pensada para celular e WhatsApp */
+.agenda-card h2{margin:8px 0 0}
+.agenda-topo{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.agenda-acoes .botao{flex:1;text-align:center}
+.agenda-localizacao{margin-top:12px}
+.filtro-mobile .grid{gap:10px}
+
+@media(max-width:720px){
+  .topo{height:auto;min-height:64px;display:block;padding:14px 16px}
+  .topo nav{display:flex;gap:8px;overflow:auto;margin-top:12px}
+  .topo nav a{margin-left:0;white-space:nowrap;background:rgba(255,255,255,.12);padding:8px 10px;border-radius:10px}
+  .container{padding:16px 10px}
+  .card,.box{border-radius:16px;padding:16px;margin-bottom:14px}
+  .hero-admin{padding:16px}
+  .hero-admin .acoes{display:grid;grid-template-columns:1fr 1fr}
+  .botao,button{width:auto;text-align:center}
+  .links-operacao .linha-link{display:grid;grid-template-columns:1fr auto;width:100%}
+  .links-operacao .linha-link .botao{width:100%}
+  table{display:block;overflow-x:auto}
+  .agenda-topo{display:block}
+  .agenda-topo .botao{margin-top:10px;width:100%}
+  .agenda-acoes{display:grid;grid-template-columns:1fr;gap:8px}
+  .agenda-acoes .botao{width:100%}
+  .linha{grid-template-columns:1fr}
+}
+
+
+/* ORION mobile-first 7.0 */
+:root{--azul:#1f6feb;--escuro:#0f172a;--muted:#64748b;--borda:#e5e7eb;--card:#fff;--fundo:#f6f7fb}
+body{background:var(--fundo);font-size:16px;padding-bottom:86px;color:#172033}
+.topo-app{position:sticky;top:0;z-index:20;height:58px;background:#0f172a;color:white;display:flex;align-items:center;justify-content:space-between;padding:0 14px;box-shadow:0 4px 18px rgba(15,23,42,.14)}
+.marca-app{display:flex;align-items:center;gap:10px;color:white;text-decoration:none;font-weight:800;font-size:17px;min-width:0}
+.marca-app img{width:34px;height:34px;border-radius:10px;background:#fff;object-fit:contain;padding:3px}.marca-app span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sair-app{color:white;text-decoration:none;font-size:14px;background:rgba(255,255,255,.12);padding:8px 10px;border-radius:999px}
+.container-app{max-width:720px;margin:0 auto;padding:16px 12px 24px}.cabecalho-mobile{margin:2px 0 14px}.cabecalho-mobile h1{font-size:25px;line-height:1.15;margin:4px 0 6px}.mini{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:0}.titulo-secao{font-size:18px;margin:20px 0 10px}
+.card,.box,.accordion{background:#fff;border:1px solid var(--borda);border-radius:18px;box-shadow:0 8px 22px rgba(15,23,42,.06);padding:16px;margin-bottom:12px}
+.atalhos-home{display:grid;gap:12px}.cartao-acao,.card-lista{display:flex;align-items:center;gap:14px;justify-content:space-between;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--borda);border-radius:18px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.06)}.cartao-acao span:first-child{font-size:26px}.cartao-acao div,.card-lista div{display:flex;flex-direction:column;gap:4px;min-width:0}.cartao-acao b,.card-lista b{font-size:16px}.cartao-acao small,.card-lista small{color:var(--muted);font-size:13px}.card-lista strong{font-size:15px;color:#0f172a;white-space:nowrap}
+.accordion{padding:0;overflow:hidden}.accordion summary{list-style:none;cursor:pointer;font-weight:800;padding:16px;display:flex;align-items:center;justify-content:space-between}.accordion summary::-webkit-details-marker{display:none}.accordion summary:after{content:'›';font-size:26px;transform:rotate(90deg);transition:.15s;color:#64748b}.accordion[open] summary:after{transform:rotate(-90deg)}.accordion>*:not(summary){margin:0 16px 14px}.accordion.interno{box-shadow:none;border-radius:14px;background:#f8fafc;margin-top:10px}.accordion.interno summary{padding:12px 14px}
+.nav-inferior{position:fixed;left:0;right:0;bottom:0;z-index:30;background:white;border-top:1px solid #e5e7eb;display:grid;grid-template-columns:repeat(5,1fr);height:70px;padding-bottom:env(safe-area-inset-bottom);box-shadow:0 -8px 24px rgba(15,23,42,.08)}.nav-inferior a{display:flex;flex-direction:column;align-items:center;justify-content:center;text-decoration:none;color:#334155;font-size:20px;gap:3px}.nav-inferior span{font-size:11px}.nav-inferior .nav-principal{width:48px;height:48px;margin:auto;border-radius:16px;background:var(--azul);color:#fff;font-size:32px;line-height:1;box-shadow:0 8px 20px rgba(31,111,235,.28)}
+.botao,button,.botao-whats{width:auto;min-height:46px;border-radius:14px;font-size:15px;text-align:center;display:inline-flex;align-items:center;justify-content:center}.botao-whats{background:#16a34a;color:#fff;text-decoration:none;font-weight:800;padding:12px 18px}.acoes.empilhadas{display:grid;gap:10px}.acoes.empilhadas .botao,.acoes.empilhadas .botao-whats,.acoes.empilhadas button{width:100%}
+input,select,textarea{font-size:16px;border-radius:14px;padding:13px;border:1px solid #d8dee8}label{font-size:13px;margin:12px 0 5px;color:#334155}.linha{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.agenda-card h2{font-size:23px;margin:6px 0}.agenda-topo{display:flex;justify-content:space-between;gap:10px;align-items:center}.card-link-limpo{text-decoration:none;color:inherit}.seta-card{font-size:30px;color:#94a3b8}.status{font-size:12px;text-transform:capitalize}.status.grande{display:inline-flex;margin-top:8px;font-size:13px}
+.resumo-valores{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}.resumo-valores small{display:block;color:#64748b;font-size:12px}.resumo-valores b{font-size:16px}.linha-historico{border-top:1px solid #eef2f7;padding:12px 0}.linha-historico:first-child{border-top:0}.linha-historico b{display:block}.linha-historico small{display:block;color:#64748b;margin-top:3px}.pagamentos-lista{margin-top:12px}.linha-acoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 0}
+.filtros-rapidos{display:flex;gap:8px;margin-bottom:12px}.filtros-rapidos button,.filtros-rapidos .botao{flex:1}.busca-cliente{display:grid;gap:10px}
+table{display:block;overflow-x:auto;border-radius:16px}.topo,.container{display:none!important}
+@media(min-width:760px){.container-app{padding:24px 18px}.nav-inferior{left:50%;transform:translateX(-50%);max-width:720px;border-radius:22px 22px 0 0}.atalhos-home{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.grid,.grid.duas{display:block}.card,.box{padding:15px}.cabecalho-mobile h1{font-size:23px}}
+
+
+/* ORION ajuste operacional: menos campos, mais toque para detalhe */
+.nav-inferior .nav-principal{font-size:28px;gap:0}
+.nav-inferior .nav-principal span{color:#fff;font-size:10px;margin-top:-2px}
+.consulta-data{padding:12px 14px}
+.consulta-data label{margin-top:0}
+.consulta-data input{height:44px}
+.agenda-compacta{display:grid;gap:8px}
+.linha-agenda{display:grid;grid-template-columns:54px 1fr 18px;align-items:center;gap:10px;text-decoration:none;color:inherit;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:12px 14px;box-shadow:0 6px 18px rgba(15,23,42,.05)}
+.hora-agenda{font-size:17px;font-weight:900;color:#0f172a}
+.info-agenda{min-width:0}
+.info-agenda b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.info-agenda small{display:block;color:#64748b;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.disponibilidade-lista{display:grid;gap:8px}
+.disponibilidade-card{padding:13px 14px}
+.disponibilidade-card.indisponivel{opacity:.7}
+.disponibilidade-card.atencao{border-color:#f59e0b;background:#fffbeb}
+.resumo-disponibilidade{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;text-align:center}
+.resumo-disponibilidade div{background:#f8fafc;border:1px solid #eef2f7;border-radius:14px;padding:10px}
+.resumo-disponibilidade small{display:block;color:#64748b;font-size:12px}
+.resumo-disponibilidade b{font-size:20px}
+.linha-local{display:flex;justify-content:space-between;gap:8px;align-items:center;text-decoration:none;color:inherit;border-top:1px solid #eef2f7;padding:12px 0}
+.linha-local:first-of-type{border-top:0}
+.linha-local small{display:block;color:#64748b;font-size:13px;margin-top:3px}
+.largura-total{width:100%;margin-top:10px}
+@media(max-width:520px){
+  .cartao-acao{padding:13px 14px}
+  .cartao-acao span:first-child{font-size:22px}
+  .linha-agenda{grid-template-columns:50px 1fr 16px;padding:11px 12px}
+}
+
+
+/* ORION mobile refinamento: listas curtas e operação em campo */
+.filtro-periodo{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin:8px 0 14px;
+}
+.filtro-periodo label{
+  background:white;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  padding:9px 10px;
+  margin:0;
+}
+.filtro-periodo label span{
+  display:block;
+  font-size:11px;
+  color:#64748b;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  margin-bottom:4px;
+}
+.filtro-periodo input{
+  border:0;
+  padding:0;
+  border-radius:0;
+  font-size:14px;
+  background:transparent;
+}
+.linha-agenda,
+.linha-preparo{
+  background:#fff;
+  border:1px solid #e2e8f0;
+  border-radius:14px;
+  margin-bottom:8px;
+  box-shadow:0 6px 18px rgba(15,23,42,.05);
+}
+.linha-agenda{
+  display:grid;
+  grid-template-columns:54px 1fr 18px;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  color:inherit;
+  text-decoration:none;
+}
+.data-agenda{
+  font-size:18px;
+  font-weight:900;
+  color:#0f172a;
+  line-height:1;
+}
+.info-agenda b{
+  display:block;
+  font-size:14px;
+  line-height:1.2;
+}
+.info-agenda small{
+  display:block;
+  font-size:12px;
+  color:#334155;
+  margin-top:3px;
+  line-height:1.25;
+}
+.seta-card{
+  color:#64748b;
+  font-size:22px;
+  justify-self:end;
+}
+.linha-preparo{
+  overflow:hidden;
+}
+.linha-preparo summary{
+  list-style:none;
+  display:grid;
+  grid-template-columns:54px 1fr 18px;
+  align-items:center;
+  gap:8px;
+  padding:10px 12px;
+  cursor:pointer;
+}
+.linha-preparo summary::-webkit-details-marker{display:none}
+.preparo-acoes{
+  border-top:1px solid #e2e8f0;
+  padding:10px 12px 12px;
+}
+.preparo-acoes label{
+  margin:0 0 5px;
+  font-size:12px;
+}
+.preparo-acoes input{
+  height:38px;
+  padding:8px 10px;
+}
+.acoes-rota{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+  margin-top:8px;
+}
+.botao-mini{
+  padding:9px 8px;
+  border-radius:10px;
+  font-size:13px;
+}
+.botao-mini.principal{
+  background:#1f6feb;
+}
+.link-detalhe{
+  display:block;
+  margin-top:10px;
+  font-weight:800;
+  text-decoration:none;
+}
+@media(max-width:600px){
+  .cabecalho-mobile h1{font-size:24px;margin:8px 0 10px}
+  .container{padding-bottom:88px}
+  .linha-agenda,.linha-preparo summary{grid-template-columns:50px 1fr 16px}
+}
+
+
+/* Operação: entrega e retirada em uma fila cronológica */
+.filtros-operacao{grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
+.filtros-operacao label{display:flex;align-items:center;gap:6px;margin:0;background:#fff;border:1px solid #dbe3ef;border-radius:999px;padding:9px 12px;font-size:13px}
+.filtros-operacao input{width:auto}
+.linha-operacao summary{grid-template-columns:16px 54px 1fr 16px;align-items:center}
+.bolinha-operacao{width:12px;height:12px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.12)}
+.linha-operacao.retirada .bolinha-operacao{background:#dc2626;box-shadow:0 0 0 4px rgba(220,38,38,.12)}
+.linha-operacao.concluido .bolinha-operacao{background:#16a34a;box-shadow:0 0 0 4px rgba(22,163,74,.12)}
+.linha-operacao.concluido{opacity:.72}
+.info-agenda em{display:block;margin-top:2px;font-style:normal;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
+
+
+.filtros-operacao-compactos{
+  display:flex;
+  flex-wrap:nowrap;
+  gap:8px;
+  overflow-x:auto;
+  padding-bottom:4px;
+}
+.filtros-operacao-compactos label{
+  white-space:nowrap;
+  flex:0 0 auto;
+  font-size:13px;
+  padding:8px 10px;
+}
+.acoes-operacao-lista{
+  display:flex;
+  gap:8px;
+  margin:8px 0 12px;
+}
+.obs-status{
+  display:block;
+  color:#64748b;
+  font-weight:400;
+  font-size:12px;
+  margin-top:3px;
+}
+@media(max-width:600px){
+  .cabecalho-mobile h1{margin-top:4px}
+  .atalhos-home{margin-top:8px}
+}
+
+
+/* ORION revisão visual: ícones compactos e cards sem sobreposição */
+.atalhos-home{
+  gap:14px;
+}
+.cartao-acao,
+.card-lista{
+  min-height:auto;
+  height:auto;
+  align-items:center;
+  overflow:visible;
+}
+.cartao-acao > div,
+.card-lista > div{
+  flex:1 1 auto;
+}
+.cartao-acao span:first-child{
+  width:34px;
+  min-width:34px;
+  height:34px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.cartao-acao b,
+.card-lista b{
+  line-height:1.2;
+}
+.cartao-acao small,
+.card-lista small{
+  line-height:1.25;
+}
+.barra-icones-operacao{
+  display:flex;
+  justify-content:flex-end;
+  margin:-4px 0 8px;
+}
+.botao-icone{
+  width:42px;
+  min-width:42px;
+  height:42px;
+  min-height:42px;
+  padding:0;
+  border-radius:14px;
+  font-size:24px;
+  line-height:1;
+  box-shadow:0 6px 16px rgba(31,111,235,.18);
+}
+.linha-operacao .seta-expandir{
+  transition:.15s ease;
+}
+.linha-operacao[open] .seta-expandir{
+  transform:rotate(180deg);
+}
+.acoes-operacao-lista{
+  display:none!important;
+}
+@media(max-width:520px){
+  .cartao-acao{
+    padding:14px 14px;
+    margin-bottom:0;
+  }
+  .atalhos-home{
+    gap:12px;
+  }
+}
+
+
+/* Ajustes ORION: cards sem sobreposição e ações compactas */
+.cartao-acao,.card-lista{
+  min-height:auto!important;
+  height:auto!important;
+  align-items:center;
+}
+.cartao-acao div,.card-lista div{
+  overflow:hidden;
+}
+.cartao-acao b,.card-lista b,
+.cartao-acao small,.card-lista small{
+  overflow-wrap:anywhere;
+}
+.cabecalho-com-acao .titulo-com-icone,
+.titulo-com-icone{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+.titulo-com-icone h1{
+  margin-bottom:0;
+}
+.icone-cabecalho,
+.acao-icone{
+  border:0;
+  background:transparent;
+  color:#334155;
+  min-width:34px;
+  width:34px;
+  height:34px;
+  min-height:34px;
+  padding:0;
+  border-radius:12px;
+  font-size:24px;
+  box-shadow:none;
+  text-decoration:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+.icone-cabecalho:active,
+.acao-icone:active{
+  background:#e2e8f0;
+}
+.barra-icones-operacao{
+  display:none!important;
+}
+.destaque-local{
+  border-color:#bfdbfe;
+  box-shadow:0 8px 22px rgba(37,99,235,.08);
+}
+.destaque-local p{
+  margin:8px 16px;
+}
+.filtros-operacao-compactos{
+  display:flex;
+  flex-wrap:nowrap;
+  gap:8px;
+  width:100%;
+}
+.filtros-operacao-compactos label{
+  flex:1;
+  white-space:nowrap;
+  padding:10px 8px;
+  font-size:13px;
+}
+@media(max-width:430px){
+  .filtros-operacao-compactos label{font-size:12px;padding:9px 6px}
+  .cartao-acao{padding:13px 14px}
+}
+
+
+/* ORION ajuste contrato: busca sem cliente, aceite e botões mobile */
+.acoes-contrato-publico{
+  display:grid;
+  gap:12px;
+}
+.acoes-contrato-publico form{
+  margin:0;
+}
+.acoes-contrato-publico button{
+  width:100%;
+}
+.largura-total{
+  width:100%;
+}
+@media(max-width:520px){
+  .acoes,
+  .linha-acoes{
+    grid-template-columns:1fr!important;
+  }
+  .acoes .botao,
+  .acoes .botao-whats,
+  .linha-acoes .botao,
+  .linha-acoes .botao-whats,
+  .acoes button{
+    width:100%;
+  }
+  .check{
+    align-items:flex-start;
+    line-height:1.35;
+  }
+}
+
+
+/* ORION fluxo simples: WhatsApp x Manual */
+.fluxo-contrato{
+  background:#f8fafc;
+}
+.opcao-fluxo{
+  display:flex;
+  gap:12px;
+  align-items:flex-start;
+  border:1px solid #dbe3ef;
+  border-radius:16px;
+  padding:14px;
+  margin:10px 0;
+  background:#fff;
+}
+.opcao-fluxo input{
+  width:auto;
+  margin-top:4px;
+}
+.opcao-fluxo span{
+  display:grid;
+  gap:4px;
+}
+.opcao-fluxo small{
+  color:#64748b;
+  line-height:1.35;
+}
+.processo-simples{
+  border-color:#bfdbfe;
+  background:#eff6ff;
+}
+.nav-inferior .nav-principal span{
+  font-size:11px;
+}
+
+.acao-card{font-size:12px;font-weight:800;color:#2563eb;background:#eff6ff;border:1px solid #bfdbfe;border-radius:999px;padding:4px 8px;margin-left:auto}
+.form-compacto{margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb}
+.form-compacto button{margin-top:8px}
+.edicao-card{border-top:1px solid #e5e7eb;padding-top:12px}
+.acoes-finais{position:sticky;bottom:78px;z-index:5;background:rgba(248,250,252,.92);backdrop-filter:blur(8px);padding:10px;border-radius:18px;border:1px solid #e5e7eb}
+
+
+
+/* Reserva mobile simplificada */
+.reserva-mobile-topo{margin-bottom:14px}
+.reserva-titulo-card{background:#111827;color:white;border-radius:22px;padding:18px;margin:10px 0}
+.reserva-titulo-card h1{margin:4px 0;font-size:26px}
+.reserva-titulo-card p{margin:4px 0;color:#d1d5db}
+.status-grid-mobile{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.status-pill{background:white;border:1px solid #e5e7eb;border-radius:16px;padding:12px;box-shadow:0 4px 14px rgba(15,23,42,.06)}
+.status-pill small{display:block;color:#64748b;font-size:12px}
+.status-pill b{display:block;margin-top:3px;font-size:14px}
+.status-pill.ok{border-color:#bbf7d0;background:#f0fdf4}
+.status-pill.alerta{border-color:#fde68a;background:#fffbeb}
+.status-pill.pendente{border-color:#bae6fd;background:#f0f9ff}
+.status-pill.neutro{background:#fff}
+.proxima-acao{background:white;border:2px solid #1f6feb;border-radius:20px;padding:16px;margin:14px 0;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+.proxima-acao small{display:block;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-size:12px}
+.proxima-acao b{display:block;font-size:20px;margin:4px 0 12px}
+.proxima-acao .botao,.proxima-acao .botao-whats{width:100%;text-align:center}
+.aviso-acao{border-color:#f59e0b}.ok-acao{border-color:#16a34a}
+.cards-reserva-mobile{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card-reserva{background:white;border-radius:20px;padding:18px;margin-bottom:14px;box-shadow:0 8px 24px rgba(15,23,42,.08)}
+.card-reserva h2{font-size:18px;margin:0 0 10px}
+.card-reserva p{margin:6px 0;color:#334155}
+.card-reserva-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
+.card-reserva-head a,.link-botao{font-size:14px;background:transparent;color:#1f6feb;padding:0;border:0;text-decoration:none;font-weight:700}
+.bloco-oculto{display:none}
+.linha-item-mobile{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:1px solid #eef2f7;padding:12px 0}
+.linha-item-mobile small{display:block;color:#64748b;margin-top:3px}
+.form-mobile-simples{margin-top:14px;border-top:1px solid #eef2f7;padding-top:14px}
+.item-reserva-mobile{position:relative;background:#f8fafc;border:1px solid #e5e7eb;border-radius:16px;padding:12px;margin-bottom:10px}
+.remover-item{position:absolute;right:8px;top:8px;width:30px;height:30px;padding:0;border-radius:999px;background:#fee2e2;color:#991b1b}
+.largura-total{width:100%;text-align:center;margin-top:10px}
+.acoes-mobile-fixas{display:grid;grid-template-columns:1fr;gap:8px;margin-top:12px}
+.botao-whats,.botao-whats-btn{background:#16a34a;color:white;border:0;border-radius:12px;padding:12px 18px;text-decoration:none;font-weight:700;cursor:pointer;display:inline-block}
+.resumo-financeiro-mobile{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.resumo-financeiro-mobile div{background:#f8fafc;border:1px solid #e5e7eb;border-radius:14px;padding:10px}
+.resumo-financeiro-mobile small{display:block;color:#64748b;font-size:12px}
+.status-linha{border-radius:14px;padding:12px;font-weight:700}
+.status-linha.ok{background:#f0fdf4;color:#166534}
+.status-linha.alerta{background:#fffbeb;color:#92400e}
+.status-linha.pendente{background:#f0f9ff;color:#075985}
+@media(max-width:600px){
+  .status-grid-mobile{grid-template-columns:1fr 1fr 1fr}
+  .status-pill{padding:10px 8px}
+  .status-pill b{font-size:13px}
+  .card-reserva{padding:16px;border-radius:18px}
+  .resumo-financeiro-mobile{grid-template-columns:1fr 1fr 1fr}
+}
+
+
+/* ORION ajuste reserva mobile - fluxo simples */
+.reserva-titulo-card{margin-bottom:10px}
+.reserva-titulo-card h1{font-size:24px;line-height:1.1}
+.reserva-titulo-card p{font-size:15px}
+.proxima-acao{padding:14px}
+.card-reserva{padding:16px;margin-bottom:12px}
+.card-reserva-head .link-botao{
+  min-width:auto;width:auto;height:auto;border-radius:999px;
+  background:#eff6ff;color:#1f6feb;padding:7px 11px;
+  font-size:13px;line-height:1;border:1px solid #bfdbfe;
+}
+.item-reserva-topo{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.remover-item,.remover-item-texto{
+  position:static;width:auto;height:auto;border:0;background:#fee2e2;
+  color:#b91c1c;border-radius:999px;padding:8px 11px;
+  font-size:13px;font-weight:800;line-height:1;
+}
+.item-reserva-mobile{padding:12px}
+.item-reserva-mobile select{padding-right:34px}
+.resumo-financeiro-mobile{margin-bottom:10px}
+.alerta-texto{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:12px;padding:10px;font-size:13px}
+button:disabled,input:disabled,select:disabled{opacity:.55;cursor:not-allowed}
+.pagamentos-lista .linha-item-mobile{align-items:center}
+.pagamentos-lista form{margin:0}
+.botao.largura-total,.botao-whats.largura-total,button.largura-total{display:block;width:100%;text-align:center}
+@media (max-width: 520px){
+  .container-app{padding:12px 10px 24px}
+  .status-grid-mobile{gap:7px}
+  .status-pill{padding:10px 8px}
+  .status-pill b{font-size:13px}
+  .card-reserva h2{font-size:18px}
+}
+
+
+/* ORION correção mobile: operação e contrato visual */
+body{overflow-x:hidden}
+.container{max-width:430px}
+.card-reserva,.reserva-titulo-card,.proxima-acao,.linha-preparo,.linha-agenda,.box,.card{max-width:100%;overflow:hidden}
+.card-reserva p,.reserva-titulo-card p,.linha-item-mobile,.info-agenda small,.info-agenda b{overflow-wrap:anywhere}
+.reserva-titulo-card h1{font-size:22px;line-height:1.12}
+.status-grid-mobile{grid-template-columns:repeat(3,minmax(0,1fr))}
+.status-pill{padding:10px 8px}
+.status-pill b{font-size:13px;overflow-wrap:anywhere}
+.form-operacao .linha{grid-template-columns:1fr 1fr}
+.form-operacao input,.form-operacao select{min-width:0}
+.operacao-ajuda{font-size:12px;line-height:1.35;margin:8px 0 10px}
+.operacao-acoes-novas{grid-template-columns:1fr 1fr 1fr}
+.operacao-acoes-novas .botao-mini{display:flex;align-items:center;justify-content:center;text-align:center;text-decoration:none;min-height:40px}
+.historico-operacao{margin-top:10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:10px}
+.historico-operacao summary{display:block;padding:0;cursor:pointer;font-weight:800;font-size:13px}
+.historico-operacao pre{font-size:12px;white-space:pre-wrap;margin:8px 0 0;color:#475569}
+.lista-simples{margin:8px 0 0;padding-left:18px;color:#475569}
+.lista-simples li{margin:4px 0}
+@media(max-width:430px){
+  .container{padding-left:10px;padding-right:10px}
+  .card-reserva{padding:14px}
+  .reserva-titulo-card{padding:16px;border-radius:18px}
+  .filtros-operacao-compactos{gap:6px}
+  .filtros-operacao-compactos label{font-size:11px;padding:8px 6px}
+  .linha-operacao summary{grid-template-columns:14px 46px minmax(0,1fr) 14px;padding:9px 10px}
+  .data-agenda{font-size:17px}
+  .info-agenda b{font-size:13px}
+  .info-agenda small{font-size:11px}
+  .preparo-acoes{padding:10px}
+  .operacao-acoes-novas{grid-template-columns:1fr;gap:8px}
+}
+
+.contrato-visual{display:grid;grid-template-columns:1fr;gap:12px;margin-bottom:14px}
+.contrato-visual .card p{font-size:14px;line-height:1.35;overflow-wrap:anywhere}
+@media(max-width:520px){
+  table, thead, tbody, tr, th, td{max-width:100%}
+  .box table{display:block;overflow-x:auto;box-shadow:none;border-radius:0}
+  .contrato h2{font-size:18px}
+}
+
+.usuario-topo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.usuario-topo span {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  opacity: .9;
+}
+
+.usuario-online-card {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 16px;
+  padding: 12px 16px;
+  margin: 0 0 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usuario-online-card small {
+  display: block;
+  color: #48607a;
+  font-size: 12px;
+}
+
+.usuario-online-card b {
+  font-size: 16px;
+}
+
+.usuario-online-card span {
+  color: #16a34a;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #24405f;
+}
+
+.form-grid input,
+.form-grid textarea {
+  width: 100%;
+  border: 1px solid #cfd9e6;
+  border-radius: 14px;
+  padding: 11px 12px;
+  font-size: 15px;
+  background: #fff;
+}
+
+.form-grid .campo-cheio,
+.form-grid button {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .usuario-topo span {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.botao-cliente-card{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-top:12px;
+  padding:10px 14px;
+  border-radius:14px;
+  background:#ffffff;
+  color:#0f172a;
+  font-weight:800;
+  text-decoration:none;
+}
+.grid-dois{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+@media (max-width: 640px){
+  .grid-dois{grid-template-columns:1fr;}
+}
+
+.resumo-financeiro{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:8px;
+  margin:10px 0;
+}
+.resumo-financeiro div{
+  background:#fff;
+  border:1px solid #dbe3ef;
+  border-radius:14px;
+  padding:10px;
+  box-shadow:0 6px 18px rgba(15,23,42,.05);
+}
+.resumo-financeiro small{
+  display:block;
+  color:#64748b;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  margin-bottom:4px;
+}
+.resumo-financeiro b{font-size:14px;white-space:nowrap}
+.resumo-mes div{background:#f8fafc}
+@media(max-width:700px){.resumo-financeiro{grid-template-columns:repeat(2,1fr)}}
+
+/* Financeiro: card abre os lançamentos para conciliação */
+.financeiro-detalhe{display:block;padding:0;overflow:hidden}
+.financeiro-detalhe summary{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px;cursor:pointer;list-style:none}
+.financeiro-detalhe summary::-webkit-details-marker{display:none}
+.financeiro-detalhe summary > div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.financeiro-lancamentos{border-top:1px solid var(--borda);padding:10px 14px 14px;display:flex;flex-direction:column;gap:10px;background:#f8fafc}
+.financeiro-lancamento{background:#fff;border:1px solid var(--borda);border-radius:14px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.botao-pequeno{border:0;border-radius:12px;background:#2563eb;color:#fff;font-weight:800;padding:9px 12px;cursor:pointer}
+.botao-secundario{display:flex;align-items:center;justify-content:center;text-decoration:none;border:1px solid var(--borda);border-radius:14px;padding:11px 12px;background:#fff;color:#0f172a;font-weight:800}
+.status.ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}
+
+/* Financeiro: edição e conciliação de lançamentos */
+.editar-pagamento{width:100%;margin-top:8px}
+.editar-pagamento>summary{list-style:none;cursor:pointer;text-align:center}
+.editar-pagamento>summary::-webkit-details-marker{display:none}
+.form-pagamento-inline{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.form-pagamento-inline label{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:800;color:#16345f;text-transform:uppercase}
+.form-pagamento-inline input,.form-pagamento-inline select{width:100%;border:1px solid var(--borda);border-radius:10px;padding:9px;background:#fff;font-weight:700}
+.form-pagamento-inline button{grid-column:1/-1}
+.acoes-lancamento{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:8px}
+.botao-perigo{border:0;border-radius:10px;padding:10px 14px;background:#ef4444;color:#fff;font-weight:900;cursor:pointer}
+.botao-secundario.pequeno{display:block;padding:9px 12px;border-radius:10px;font-size:13px}
+@media (max-width:640px){
+  .financeiro-lancamento{align-items:stretch;flex-direction:column}
+  .form-pagamento-inline{grid-template-columns:1fr}
+}
+
+.acoes-card-inline{display:flex;align-items:center;gap:12px;}
+
+.dados-reserva-lista{display:grid;gap:8px}
+.dados-reserva-lista p{background:#f8fafc;border:1px solid #eef2f7;border-radius:14px;padding:10px;margin:0}
+.dados-reserva-lista small{display:block;color:#64748b;text-transform:uppercase;letter-spacing:.06em;font-size:11px;margin-bottom:3px}
+.dados-reserva-lista b{display:block;color:#0f172a;font-size:14px;line-height:1.35}
+
+
+/* ORION: filtros simples da agenda */
+.filtros-status-agenda{
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
+.filtro-periodo .filtros-status-agenda label.check{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:10px;
+  font-size:13px;
+  font-weight:800;
+}
+.filtros-status-agenda input{
+  width:auto;
+}
+.agenda-credito{
+  border-color:#f59e0b;
+}
+.agenda-cancelado{
+  opacity:.75;
+}
+.grid-acoes-mobile{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
+@media(max-width:520px){
+  .filtros-status-agenda,
+  .grid-acoes-mobile{
+    grid-template-columns:1fr;
+  }
+}
+
+
+/* Padronização dos botões pequenos em equipamentos e pagamentos */
+.link-botao,
+.remover-item-texto,
+.botao-perigo {
+  min-height: 38px;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+.remover-item-texto,
+.botao-perigo {
+  background: #dc2626;
+  color: #fff;
+}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box pequeno sucesso">
+  {% if status_reserva_confirmada(solicitacao.status) %}
+    <h1>Contrato aceito</h1>
+    {% if solicitacao.sinal and solicitacao.sinal > 0 %}
+      <p>Agora envie o sinal de R$ {{ solicitacao.sinal|moeda_br }} para confirmar a reserva.</p>
+      {% if empresa.pix_copia_cola %}
+      <textarea readonly onclick="this.select()">{{ empresa.pix_copia_cola }}</textarea>
+      {% endif %}
+    {% else %}
+      <p>Sua reserva foi registrada.</p>
+    {% endif %}
+  {% else %}
+    <h1>Contrato enviado</h1>
+    <p>Recebemos suas informações. A empresa vai validar o combinado e preparar o contrato para aceite.</p>
+  {% endif %}
+  <a class="botao" href="/e/{{ empresa.slug }}">Voltar</a>
+</div>
+{% endblock %}

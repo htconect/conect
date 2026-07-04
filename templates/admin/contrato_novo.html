@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel">← Início</a>
+  <h1>{% if modo_edicao %}Editar contrato{% else %}Novo contrato{% endif %}</h1>
+  <p class="texto-discreto">{% if modo_edicao %}Altere qualquer dado do cliente, endereço, reserva ou contrato em uma única tela.{% else %}Escolha o processo e preencha tudo em uma única tela.{% endif %}</p>
+  {% if not modo_edicao %}
+  <div class="box fluxo-contrato">
+    <h2>Processo</h2>
+    <label class="opcao-fluxo">
+      <input type="radio" name="modo_criacao" value="whatsapp" form="formContratoNovo" checked>
+      <span><b>Cliente pelo WhatsApp</b><small>Você envia o link, o cliente preenche, você inclui itens e manda para aprovação. Pagamento só depois do aceite.</small></span>
+    </label>
+    <label class="opcao-fluxo">
+      <input type="radio" name="modo_criacao" value="manual" form="formContratoNovo">
+      <span><b>Contrato manual</b><small>Você preenche cliente, itens e sinal agora. A reserva já fica aprovada.</small></span>
+    </label>
+  </div>
+  {% endif %}
+</section>
+
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+
+<form id="formContratoNovo" method="post" action="{% if modo_edicao %}/painel/solicitacao/{{ item.id }}/editar-completo{% else %}/painel/contrato-novo{% endif %}" class="box">
+  <h2>Cliente</h2>
+  <label>Nome do cliente</label>
+  <input name="nome" value="{{ form.nome or '' }}" required>
+
+  <div class="linha">
+    <div>
+      <label>Telefone</label>
+      <input name="telefone" value="{{ form.telefone or '' }}" inputmode="tel" placeholder="DDD + número">
+    </div>
+    <div>
+      <label>CPF</label>
+      <input name="cpf" value="{{ form.cpf or '' }}" inputmode="numeric">
+    </div>
+  </div>
+
+  <label>CNPJ</label>
+  <input name="cnpj" value="{{ form.cnpj or '' }}" inputmode="numeric">
+
+  <label>E-mail</label>
+  <input name="email" value="{{ form.email or '' }}" type="email">
+
+  <h2>Endereço</h2>
+  <label>Endereço / referência</label>
+  <input name="endereco" value="{{ form.endereco or '' }}">
+  <div class="linha">
+    <div><label>Número</label><input name="numero" value="{{ form.numero or '' }}"></div>
+    <div><label>Bairro</label><input name="bairro" value="{{ form.bairro or '' }}"></div>
+  </div>
+  <label>Complemento</label>
+  <input name="complemento" value="{{ form.complemento or '' }}">
+  <div class="linha">
+    <div><label>Cidade</label><input name="cidade" value="{{ form.cidade or '' }}"></div>
+    <div><label>Estado</label><input name="estado" value="{{ form.estado or '' }}"></div>
+  </div>
+  <label>CEP</label>
+  <input name="cep" value="{{ form.cep or '' }}" inputmode="numeric">
+
+  <h2>Dados da reserva</h2>
+  <label>Data do evento</label>
+  <input name="data_evento" type="date" value="{{ form.data_evento or '' }}" required>
+
+  <label>Hora de início</label>
+  <input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio or '' }}" required>
+
+  <label>Item principal</label>
+  <select name="produto_id">
+    <option value="">Selecionar depois</option>
+    {% for p in produtos %}
+      <option value="{{ p.id }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>
+    {% endfor %}
+  </select>
+
+  <label>Modelo de contrato</label>
+  <select name="contrato_id">
+    <option value="">Selecionar depois</option>
+    {% for c in contratos %}
+      <option value="{{ c.id }}" {% if form.contrato_id == c.id|string %}selected{% endif %}>{{ c.nome }}</option>
+    {% endfor %}
+  </select>
+
+  <div class="linha">
+    <div><label>Valor total</label><input name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal"></div>
+    <div><label>Sinal</label><input name="sinal" value="{{ form.sinal or '0,00' }}" inputmode="decimal"></div>
+  </div>
+
+  <label>Nome do local</label>
+  <input name="local_nome" value="{{ form.local_nome or '' }}" placeholder="Ex.: Casa, salão, sítio">
+
+  <label>Endereço do evento</label>
+  <input name="local" value="{{ form.local or '' }}" placeholder="Use somente se for diferente do endereço do cliente">
+
+  <label>Acesso ao local</label>
+  <input name="acesso_local" value="{{ form.acesso_local or '' }}" placeholder="Ex.: escada, elevador, térreo">
+
+  <label>Responsável no local</label>
+  <input name="local_responsavel_nome" value="{{ form.local_responsavel_nome or '' }}">
+
+  <label>Telefone do responsável</label>
+  <input name="local_responsavel_telefone" value="{{ form.local_responsavel_telefone or '' }}" inputmode="tel">
+
+  <label>Observações</label>
+  <textarea name="observacoes">{{ form.observacoes or '' }}</textarea>
+
+  <button>{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
+</form>
+{% endblock %}

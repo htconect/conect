@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<h1>Contratos</h1>
+<div class="box">
+<form method="post" action="/painel/contratos">
+  {% if contrato %}
+  <input type="hidden" name="contrato_id" value="{{ contrato.id }}">
+  {% endif %}
+  <label>Nome</label><input name="nome" value="{{ contrato.nome if contrato else '' }}" required>
+  <label>Descrição interna</label><textarea name="descricao">{{ contrato.descricao if contrato else '' }}</textarea>
+  <label>Cláusulas</label>
+  <textarea id="clausulas" name="clausulas" rows="10" required>{{ contrato.clausulas if contrato else '' }}</textarea>
+  <details class="box-mini">
+    <summary>Adicionar campo nas observações</summary>
+    <p class="texto-discreto">Use apenas quando quiser puxar algum dado do banco para facilitar a edição.</p>
+    <select id="campoBanco">
+      <option value="Cliente: ">Cliente</option>
+      <option value="Telefone: ">Telefone</option>
+      <option value="CPF/CNPJ: ">CPF/CNPJ</option>
+      <option value="Data do evento: ">Data do evento</option>
+      <option value="Endereço: ">Endereço</option>
+      <option value="Produto: ">Produto</option>
+      <option value="Valor total: ">Valor total</option>
+      <option value="Sinal: ">Sinal</option>
+      <option value="Acesso ao local: ">Acesso ao local</option>
+    </select>
+    <button type="button" onclick="addCampoContrato()">Adicionar no texto</button>
+  </details>
+  <script>
+    function addCampoContrato(){
+      const area = document.getElementById('clausulas');
+      area.value += "\n" + document.getElementById('campoBanco').value;
+      area.focus();
+    }
+  </script>
+  <button>{% if contrato %}Atualizar contrato{% else %}Salvar contrato{% endif %}</button>
+</form>
+</div>
+{% for c in contratos %}
+<div class="card">
+  <h3>{{ c.nome }}</h3>
+  <p>{{ c.descricao }}</p>
+  <a href="/painel/contrato/{{ c.id }}">Editar</a> · <a href="/painel/contrato/{{ c.id }}/copiar">Duplicar</a>
+</div>
+{% endfor %}
+{% endblock %}

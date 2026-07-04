@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel/solicitacao/{{ item.id }}">← Voltar para reserva</a>
+  <h1>Editar cliente</h1>
+  <p class="texto-discreto">Reserva #{{ item.id }} · {{ cliente.nome or "Cliente sem nome" }}</p>
+</section>
+
+<section class="card-reserva">
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/cliente" class="form-mobile-simples">
+    <label>Nome
+      <input name="nome" value="{{ cliente.nome or '' }}" autocomplete="name">
+    </label>
+
+    <label>Telefone
+      <input name="telefone" inputmode="numeric" value="{{ cliente.telefone or cliente.identificador or '' }}" autocomplete="tel">
+    </label>
+
+    <div class="grid-dois">
+      <label>CPF
+        <input name="cpf" inputmode="numeric" value="{{ cliente.cpf or '' }}">
+      </label>
+
+      <label>CNPJ
+        <input name="cnpj" inputmode="numeric" value="{{ cliente.cnpj or '' }}">
+      </label>
+    </div>
+
+    <label>Data de nascimento
+      <input name="data_nascimento" type="date" value="{{ cliente.data_nascimento.isoformat() if cliente.data_nascimento else '' }}">
+    </label>
+
+    <label>E-mail
+      <input name="email" type="email" value="{{ cliente.email or '' }}" autocomplete="email">
+    </label>
+
+    <div class="grid-dois">
+      <label>CEP
+        <input name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
+      </label>
+
+      <label>Número
+        <input name="numero" value="{{ cliente.numero or '' }}">
+      </label>
+    </div>
+
+    <label>Endereço
+      <input name="endereco" value="{{ cliente.endereco or '' }}" autocomplete="street-address">
+    </label>
+
+    <label>Complemento
+      <input name="complemento" value="{{ cliente.complemento or '' }}">
+    </label>
+
+    <div class="grid-dois">
+      <label>Bairro
+        <input name="bairro" value="{{ cliente.bairro or '' }}">
+      </label>
+
+      <label>Cidade
+        <input name="cidade" value="{{ cliente.cidade or '' }}">
+      </label>
+    </div>
+
+    <label>Estado
+      <input name="estado" maxlength="2" value="{{ cliente.estado or '' }}">
+    </label>
+
+    <label>Observações
+      <textarea name="observacoes" rows="4">{{ cliente.observacoes or '' }}</textarea>
+    </label>
+
+    <button class="botao largura-total" type="submit">Salvar cadastro</button>
+  </form>
+</section>
+{% endblock %}

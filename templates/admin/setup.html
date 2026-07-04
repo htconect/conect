@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<h1>Primeira configuração</h1>
+<div class="box">
+  <p>Cadastre a empresa principal para começar o Conect.</p>
+  <form method="post">
+    <label>Nome da empresa</label><input name="nome" placeholder="Karaoke RJ" required>
+    <label>Slug do link público</label><input name="slug" placeholder="karaokerj" required>
+    <label>Usuário de acesso</label><input name="usuario" required>
+    <label>Senha</label><input name="senha" type="password" required>
+    <button>Criar empresa</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="atalhos-home">
+  <a class="cartao-acao" href="/painel/agenda">
+    <span>📅</span>
+    <div><b>Agenda de hoje</b><small>{{ agenda_hoje }} evento(s)</small></div>
+  </a>
+  <a class="cartao-acao" href="/painel/reservas">
+    <span>📦</span>
+    <div><b>Operação</b><small>{{ pendentes }} pendente(s)</small></div>
+  </a>
+  <a class="cartao-acao" href="/painel/disponibilidade">
+    <span>📦</span>
+    <div><b>Disponibilidade</b><small>Consultar por data</small></div>
+  </a>
+  <a class="cartao-acao" href="/painel/clientes">
+    <span>👤</span>
+    <div><b>Buscar cliente</b><small>CPF ou telefone</small></div>
+  </a>
+</div>
+
+<details class="accordion">
+  <summary>Compartilhar pré-contrato</summary>
+  {% set link_pre_contrato = request.base_url|string ~ 'e/' ~ empresa.slug ~ '/pre-contrato' %}
+  {% set link_contrato = request.base_url|string ~ 'e/' ~ empresa.slug %}
+  <div class="acoes empilhadas">
+    <a class="botao-whats" target="_blank" href="https://wa.me/?text={{ ('Olá! Preencha seu pré-contrato por este link: ' ~ link_pre_contrato)|urlencode }}">Compartilhar pré-contrato</a>
+    <a class="botao secundario" href="{{ link_pre_contrato }}" target="_blank">Abrir pré-contrato</a>
+  </div>
+</details>
+
+<details class="accordion">
+  <summary>Configurações</summary>
+  <div class="acoes empilhadas">
+    <a class="botao secundario" href="/painel/contratos">Política / modelos</a>
+    <a class="botao secundario" href="/painel/produtos">Itens de locação</a>
+    <a class="botao secundario" href="/painel/configuracoes">Empresa e campos</a>
+  </div>
+</details>
+
+<h2 class="titulo-secao">Últimas reservas</h2>
+<div class="lista-mobile">
+{% for i in solicitacoes %}
+  <a class="card-lista" href="/painel/solicitacao/{{ i.id }}">
+    <div>
+      <b>{{ i.cliente.nome }}</b>
+      <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
+    </div>
+    <strong>R$ {{ i.valor|moeda_br }}</strong>
+  </a>
+{% else %}
+  <div class="box"><p>Nenhuma reserva ainda.</p></div>
+{% endfor %}
+</div>
+{% endblock %}
