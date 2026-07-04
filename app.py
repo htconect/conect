@@ -19,9 +19,12 @@ from sqlalchemy import func, text, inspect
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, Contrato, Empresa, EquipamentoCliente, Pagamento, ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, LancamentoManualFinanceiro
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, Contrato, Empresa, EquipamentoCliente, Pagamento, \
+    ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
+    LancamentoManualFinanceiro
 from seed import inicializar_dados
-from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
+from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
+    cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
 
 from fastapi.templating import Jinja2Templates
 
@@ -31,15 +34,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 
-
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
+
 
 def agora_utc() -> datetime:
     """Salva horários em UTC para não depender do fuso do servidor."""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def redirect_preservando_filtros(request: Request, fallback: str = "/painel/financeiro", extras: dict | None = None) -> RedirectResponse:
+def redirect_preservando_filtros(request: Request, fallback: str = "/painel/financeiro",
+                                 extras: dict | None = None) -> RedirectResponse:
     url = request.headers.get("referer") or fallback
     if extras:
         partes = urlparse(url)
@@ -47,6 +51,7 @@ def redirect_preservando_filtros(request: Request, fallback: str = "/painel/fina
         qs.update({k: str(v) for k, v in extras.items()})
         url = urlunparse((partes.scheme, partes.netloc, partes.path, partes.params, urlencode(qs), partes.fragment))
     return RedirectResponse(url, status_code=303)
+
 
 def datahora_local(valor):
     """Mostra horários no fuso do Brasil/RJ."""
@@ -57,7 +62,9 @@ def datahora_local(valor):
     except Exception:
         return "-"
 
+
 templates.env.filters["datahora_local"] = datahora_local
+
 
 def valor_falta(item) -> float:
     return max(float(getattr(item, "valor", 0) or 0) - float(getattr(item, "valor_pago", 0) or 0), 0)
@@ -90,7 +97,8 @@ def recalcular_pagamento_solicitacao(db: Session, item: Solicitacao):
     # Antes havia casos em que o card mostrava falta receber mesmo com todos
     # os pagamentos lançados/conciliados, porque esse resumo ficou desatualizado.
     db.flush()
-    total_pago = sum((p.valor or 0) for p in db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
+    total_pago = sum(
+        (p.valor or 0) for p in db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
     item.valor_pago = total_pago
     item.sinal_recebido = total_pago > 0
     if total_pago <= 0:
@@ -108,7 +116,8 @@ def sincronizar_pagamentos_solicitacoes(db: Session, solicitacoes):
         if not item or item.id in vistos:
             continue
         vistos.add(item.id)
-        total_pago = sum((p.valor or 0) for p in db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
+        total_pago = sum((p.valor or 0) for p in
+                         db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
         if round(float(item.valor_pago or 0), 2) != round(float(total_pago or 0), 2):
             item.valor_pago = total_pago
             item.sinal_recebido = total_pago > 0
@@ -133,7 +142,9 @@ def classe_alerta_contrato(status: str) -> str:
         return "card-nao-aceito"
     return ""
 
+
 templates.env.globals["classe_alerta_contrato"] = classe_alerta_contrato
+
 
 def validar_total_pagamentos(item: Solicitacao, total_pago: float):
     if item.valor and total_pago > float(item.valor or 0) + 0.009:
@@ -143,6 +154,7 @@ def validar_total_pagamentos(item: Solicitacao, total_pago: float):
 def status_reserva_confirmada(status: str) -> bool:
     return status in {"aceito", "aguardando_pagamento", "reserva_confirmada"}
 
+
 def status_em_contrato(status: str) -> bool:
     return status in {"pre_reserva", "aguardando_aceite", "contrato_enviado"}
 
@@ -150,9 +162,11 @@ def status_em_contrato(status: str) -> bool:
 def reserva_tem_itens(item) -> bool:
     return bool(getattr(item, "itens", None))
 
+
 def reserva_pode_aprovar(item) -> bool:
     """Contrato só pode ser aprovado quando já existe pelo menos um item."""
     return reserva_tem_itens(item)
+
 
 def corrigir_reservas_aprovadas_sem_itens(db: Session):
     """
@@ -160,7 +174,8 @@ def corrigir_reservas_aprovadas_sem_itens(db: Session):
     Esse estado não é permitido: a próxima ação correta é adicionar itens.
     """
     alterou = False
-    reservas = db.query(Solicitacao).filter(Solicitacao.status.in_(["reserva_confirmada", "aguardando_pagamento"])).all()
+    reservas = db.query(Solicitacao).filter(
+        Solicitacao.status.in_(["reserva_confirmada", "aguardando_pagamento"])).all()
     for item in reservas:
         qtd_itens = db.query(ReservaItem).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).count()
         if qtd_itens == 0:
@@ -175,7 +190,6 @@ def corrigir_reservas_aprovadas_sem_itens(db: Session):
         db.commit()
 
 
-
 def corrigir_valores_teste(db: Session):
     """
     Corrige valores inflados em bases de teste geradas por máscara monetária antiga.
@@ -183,6 +197,7 @@ def corrigir_valores_teste(db: Session):
     Regra conservadora para este projeto: valores operacionais acima de 50 mil,
     quando múltiplos de 1000, são reduzidos em 1000.
     """
+
     def ajustar(valor):
         try:
             numero = float(valor or 0)
@@ -222,8 +237,6 @@ def corrigir_valores_teste(db: Session):
 
     if alterou:
         db.commit()
-
-
 
 
 def recalcular_valores_reservas(db: Session):
@@ -291,8 +304,6 @@ def limpar_agenda_operacional(db: Session):
         db.commit()
 
 
-
-
 def janela_uma_hora(hora) -> str:
     if not hora:
         return "-"
@@ -300,6 +311,7 @@ def janela_uma_hora(hora) -> str:
     if not fim:
         return hora.strftime("%H:%M")
     return f"{hora.strftime('%H:%M')} às {fim.strftime('%H:%M')}"
+
 
 def ajustar_hora_texto(hora_texto, horas: int) -> str:
     """Recebe HH:MM e devolve HH:MM somando/subtraindo horas."""
@@ -311,11 +323,13 @@ def ajustar_hora_texto(hora_texto, horas: int) -> str:
     except Exception:
         return "-"
 
+
 def periodo_semana_atual():
     hoje = date.today()
     inicio = hoje - timedelta(days=hoje.weekday())
     fim = inicio + timedelta(days=6)
     return inicio, fim
+
 
 def moeda_br(valor) -> str:
     try:
@@ -324,6 +338,7 @@ def moeda_br(valor) -> str:
         numero = 0.0
     texto = f"{numero:,.2f}"
     return texto.replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 templates.env.filters["moeda_br"] = moeda_br
 templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
@@ -391,8 +406,6 @@ def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     return linhas
 
 
-
-
 def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "texto") -> list[str]:
     """Lista todas as informações preenchidas do contrato/reserva para PDF e WhatsApp.
     formato='whatsapp' usa negrito com *campo*.
@@ -454,14 +467,14 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     return linhas
 
 
-
 def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
     """Mensagem enviada ao cliente com formatação preservada para WhatsApp."""
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
     link_contrato = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
     link_clausulas = _link_absoluto(request, "contrato_cliente_clausulas", slug=empresa.slug, solicitacao_id=item.id)
 
-    if item.status not in {"aguardando_aceite", "contrato_enviado", "aceito", "aguardando_pagamento", "reserva_confirmada"}:
+    if item.status not in {"aguardando_aceite", "contrato_enviado", "aceito", "aguardando_pagamento",
+                           "reserva_confirmada"}:
         return "\n".join([
             f"*{empresa.nome or 'Karaokê RJ'}*",
             "",
@@ -486,7 +499,9 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
         equipamentos.append("• Itens da reserva")
 
     endereco_linhas = linhas_endereco_reserva(item)
-    endereco_texto = "\n".join(l.replace("*Endereço:* ", "").replace("*Local:* ", "").replace("*Bairro:* ", "Bairro: ") for l in endereco_linhas)
+    endereco_texto = "\n".join(
+        l.replace("*Endereço:* ", "").replace("*Local:* ", "").replace("*Bairro:* ", "Bairro: ") for l in
+        endereco_linhas)
 
     linhas = [
         f"*{empresa.nome or 'Karaokê RJ'}*",
@@ -521,7 +536,6 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     return "\n".join(linhas).strip()
 
 
-
 def garantir_colunas_novas():
     """Migração simples para bases locais/teste já existentes."""
     insp = inspect(engine)
@@ -536,7 +550,6 @@ def garantir_colunas_novas():
         return {c["name"] for c in insp.get_columns(tabela)}
 
     comandos = []
-
 
     if "usuarios_empresa" not in tabelas:
         comandos.append("""
@@ -616,8 +629,6 @@ def garantir_colunas_novas():
         if "acesso_local" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN acesso_local VARCHAR(40)")
 
-
-
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
         if "usuario_registro" not in cols_pag:
@@ -669,7 +680,6 @@ def garantir_colunas_novas():
             FOREIGN KEY(pagamento_id) REFERENCES pagamentos (id)
         )
         """)
-
 
     if "lancamentos_banco" in tabelas:
         cols_lb = colunas("lancamentos_banco")
@@ -751,11 +761,13 @@ def atualizar_mensagem_previsao_padrao():
     try:
         with engine.begin() as conn:
             conn.execute(
-                text("UPDATE empresas SET mensagem_preparacao = :nova WHERE mensagem_preparacao IS NULL OR mensagem_preparacao = :antiga"),
+                text(
+                    "UPDATE empresas SET mensagem_preparacao = :nova WHERE mensagem_preparacao IS NULL OR mensagem_preparacao = :antiga"),
                 {"nova": nova_preparacao, "antiga": antiga_preparacao},
             )
             conn.execute(
-                text("UPDATE empresas SET mensagem_a_caminho = :nova WHERE mensagem_a_caminho IS NULL OR mensagem_a_caminho = :antiga"),
+                text(
+                    "UPDATE empresas SET mensagem_a_caminho = :nova WHERE mensagem_a_caminho IS NULL OR mensagem_a_caminho = :antiga"),
                 {"nova": nova_caminho, "antiga": antiga_caminho},
             )
     except Exception:
@@ -780,8 +792,6 @@ def startup():
             garantir_agenda_reservas(db, emp.id)
     finally:
         db.close()
-
-
 
 
 def nome_item_reserva(item: Solicitacao) -> str:
@@ -935,6 +945,7 @@ def url_publica(request: Request, caminho: str) -> str:
     base = str(request.base_url).rstrip("/")
     return f"{base}{caminho}"
 
+
 def empresa_logada(request: Request, db: Session = Depends(get_db)) -> Empresa:
     empresa_id = request.session.get("empresa_id")
     if not empresa_id:
@@ -944,7 +955,6 @@ def empresa_logada(request: Request, db: Session = Depends(get_db)) -> Empresa:
         request.session.clear()
         raise HTTPException(status_code=303, headers={"Location": "/empresa/login"})
     return empresa
-
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -990,33 +1000,34 @@ def admin_sair(request: Request):
 @app.get("/admin", response_class=HTMLResponse)
 def admin_geral(request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
-    return templates.TemplateResponse("admin/empresas.html", {"request": request, "empresas": empresas, "empresa": None})
+    return templates.TemplateResponse("admin/empresas.html",
+                                      {"request": request, "empresas": empresas, "empresa": None})
 
 
 @app.post("/admin/empresas")
 def admin_criar_empresa(
-    nome: str = Form(...),
-    slug: str = Form(...),
-    usuario_admin: str = Form(...),
-    senha_admin: str = Form(...),
-    identificador_principal: str = Form("telefone"),
-    pix_copia_cola: str = Form(""),
-    suporte_inicio: str = Form(""),
-    suporte_fim: str = Form(""),
-    mostrar_suporte_contrato: Optional[str] = Form(None),
-    logo_url: str = Form(""),
-    logo_idb_url: str = Form(""),
-    logo_arquivo: UploadFile | None = File(None),
-    tema: str = Form("azul"),
-    mensagem_reserva: str = Form(""),
-    mensagem_aceite: str = Form(""),
-    mensagem_pagamento: str = Form(""),
-    mensagem_confirmacao: str = Form(""),
-    mensagem_preparacao: str = Form(""),
-    mensagem_a_caminho: str = Form(""),
-    mensagem_localizacao: str = Form(""),
-    db: Session = Depends(get_db),
-    ok: bool = Depends(admin_geral_logado)
+        nome: str = Form(...),
+        slug: str = Form(...),
+        usuario_admin: str = Form(...),
+        senha_admin: str = Form(...),
+        identificador_principal: str = Form("telefone"),
+        pix_copia_cola: str = Form(""),
+        suporte_inicio: str = Form(""),
+        suporte_fim: str = Form(""),
+        mostrar_suporte_contrato: Optional[str] = Form(None),
+        logo_url: str = Form(""),
+        logo_idb_url: str = Form(""),
+        logo_arquivo: UploadFile | None = File(None),
+        tema: str = Form("azul"),
+        mensagem_reserva: str = Form(""),
+        mensagem_aceite: str = Form(""),
+        mensagem_pagamento: str = Form(""),
+        mensagem_confirmacao: str = Form(""),
+        mensagem_preparacao: str = Form(""),
+        mensagem_a_caminho: str = Form(""),
+        mensagem_localizacao: str = Form(""),
+        db: Session = Depends(get_db),
+        ok: bool = Depends(admin_geral_logado)
 ):
     empresa = Empresa(
         nome=nome.strip(),
@@ -1069,34 +1080,37 @@ def admin_criar_empresa(
 
 
 @app.get("/admin/empresa/{empresa_id}", response_class=HTMLResponse)
-def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depends(get_db),
+                         ok: bool = Depends(admin_geral_logado)):
     empresa = db.get(Empresa, empresa_id)
     if not empresa:
         raise HTTPException(404)
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
     usuarios_empresa = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id).order_by(UsuarioEmpresa.nome).all()
-    return templates.TemplateResponse("admin/empresas.html", {"request": request, "empresas": empresas, "empresa": empresa, "usuarios_empresa": usuarios_empresa})
+    return templates.TemplateResponse("admin/empresas.html",
+                                      {"request": request, "empresas": empresas, "empresa": empresa,
+                                       "usuarios_empresa": usuarios_empresa})
 
 
 @app.post("/admin/empresa/{empresa_id}")
 def admin_salvar_empresa(
-    empresa_id: int,
-    nome: str = Form(...),
-    slug: str = Form(...),
-    usuario_admin: str = Form(...),
-    senha_admin: str = Form(...),
-    identificador_principal: str = Form("telefone"),
-    pix_copia_cola: str = Form(""),
-    suporte_inicio: str = Form(""),
-    suporte_fim: str = Form(""),
-    mostrar_suporte_contrato: Optional[str] = Form(None),
-    logo_url: str = Form(""),
-    logo_idb_url: str = Form(""),
-    logo_arquivo: UploadFile | None = File(None),
-    tema: str = Form("azul"),
-    ativa: Optional[str] = Form(None),
-    db: Session = Depends(get_db),
-    ok: bool = Depends(admin_geral_logado)
+        empresa_id: int,
+        nome: str = Form(...),
+        slug: str = Form(...),
+        usuario_admin: str = Form(...),
+        senha_admin: str = Form(...),
+        identificador_principal: str = Form("telefone"),
+        pix_copia_cola: str = Form(""),
+        suporte_inicio: str = Form(""),
+        suporte_fim: str = Form(""),
+        mostrar_suporte_contrato: Optional[str] = Form(None),
+        logo_url: str = Form(""),
+        logo_idb_url: str = Form(""),
+        logo_arquivo: UploadFile | None = File(None),
+        tema: str = Form("azul"),
+        ativa: Optional[str] = Form(None),
+        db: Session = Depends(get_db),
+        ok: bool = Depends(admin_geral_logado)
 ):
     empresa = db.get(Empresa, empresa_id)
     if not empresa:
@@ -1134,18 +1148,16 @@ def admin_salvar_empresa(
     return RedirectResponse("/admin", status_code=303)
 
 
-
-
 @app.post("/admin/empresa/{empresa_id}/usuarios")
 def admin_criar_usuario_empresa(
-    empresa_id: int,
-    nome: str = Form(...),
-    usuario: str = Form(...),
-    senha: str = Form(...),
-    ativo: Optional[str] = Form("1"),
-    visualiza_financeiro: Optional[str] = Form("1"),
-    db: Session = Depends(get_db),
-    ok: bool = Depends(admin_geral_logado)
+        empresa_id: int,
+        nome: str = Form(...),
+        usuario: str = Form(...),
+        senha: str = Form(...),
+        ativo: Optional[str] = Form("1"),
+        visualiza_financeiro: Optional[str] = Form("1"),
+        db: Session = Depends(get_db),
+        ok: bool = Depends(admin_geral_logado)
 ):
     empresa = db.get(Empresa, empresa_id)
     if not empresa:
@@ -1172,16 +1184,17 @@ def admin_criar_usuario_empresa(
 
 @app.get("/admin/empresa/{empresa_id}/usuario/{usuario_id}/excluir")
 def admin_excluir_usuario_empresa(
-    empresa_id: int,
-    usuario_id: int,
-    db: Session = Depends(get_db),
-    ok: bool = Depends(admin_geral_logado)
+        empresa_id: int,
+        usuario_id: int,
+        db: Session = Depends(get_db),
+        ok: bool = Depends(admin_geral_logado)
 ):
     usuario = db.get(UsuarioEmpresa, usuario_id)
     if usuario and usuario.empresa_id == empresa_id:
         db.delete(usuario)
         db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
+
 
 @app.get("/empresa/login", response_class=HTMLResponse)
 def empresa_login_form(request: Request, db: Session = Depends(get_db)):
@@ -1218,7 +1231,8 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
     usuario_empresa = (
         db.query(UsuarioEmpresa)
         .join(Empresa, Empresa.id == UsuarioEmpresa.empresa_id)
-        .filter(func.lower(UsuarioEmpresa.usuario) == usuario_busca, UsuarioEmpresa.senha == senha_limpa, UsuarioEmpresa.ativo == True, Empresa.ativa == True)
+        .filter(func.lower(UsuarioEmpresa.usuario) == usuario_busca, UsuarioEmpresa.senha == senha_limpa,
+                UsuarioEmpresa.ativo == True, Empresa.ativa == True)
         .first()
     )
     if usuario_empresa:
@@ -1228,7 +1242,9 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
         request.session["usuario_nome"] = usuario_empresa.nome
         return RedirectResponse("/painel", status_code=303)
 
-    return RedirectResponse("/empresa/login?erro=Usuário ou senha não encontrado. Confira o usuário, a senha e se o celular está acessando o endereço correto da rede local.", status_code=303)
+    return RedirectResponse(
+        "/empresa/login?erro=Usuário ou senha não encontrado. Confira o usuário, a senha e se o celular está acessando o endereço correto da rede local.",
+        status_code=303)
 
 
 @app.get("/empresa/sair")
@@ -1249,7 +1265,8 @@ def configurar_campos_empresa(db: Session, empresa_id: int):
         existe = db.query(CampoEmpresa).filter_by(empresa_id=empresa_id, campo_id=campo.id).first()
         if not existe:
             visivel = campo.chave not in ["hora_fim"]
-            db.add(CampoEmpresa(empresa_id=empresa_id, campo_id=campo.id, ordem=ordem, visivel=visivel, obrigatorio=campo.chave in obrigatorios))
+            db.add(CampoEmpresa(empresa_id=empresa_id, campo_id=campo.id, ordem=ordem, visivel=visivel,
+                                obrigatorio=campo.chave in obrigatorios))
     db.commit()
 
 
@@ -1304,20 +1321,43 @@ Este é um contrato fictício inicial. Edite este texto conforme a política da 
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     garantir_agenda_reservas(db, empresa.id)
-    solicitacoes = db.query(Solicitacao).filter_by(empresa_id=empresa.id).order_by(Solicitacao.criado_em.desc()).limit(8).all()
+
+    solicitacoes = (
+        db.query(Solicitacao)
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.status.in_(["pre_reserva", "contrato_enviado", "aguardando_aceite"])
+        )
+        .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+        .limit(8)
+        .all()
+    )
+
     total_clientes = db.query(Cliente).filter_by(empresa_id=empresa.id).count()
     total_produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).count()
-    pendentes = db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id, Solicitacao.status.in_(["pre_reserva", "contrato_enviado", "aguardando_aceite"])).count()
+
+    pendentes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.status.in_(["pre_reserva", "contrato_enviado", "aguardando_aceite"])
+    ).count()
+
     agenda_hoje = db.query(Agenda).filter_by(empresa_id=empresa.id, data=datetime.today().date()).count()
+
     pendencias_financeiras = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
         Solicitacao.valor > Solicitacao.valor_pago
     ).count()
+
     return templates.TemplateResponse("admin/painel.html", {
-        "request": request, "empresa": empresa, "solicitacoes": solicitacoes,
-        "total_clientes": total_clientes, "total_produtos": total_produtos,
-        "pendentes": pendentes, "agenda_hoje": agenda_hoje, "pendencias_financeiras": pendencias_financeiras,
+        "request": request,
+        "empresa": empresa,
+        "solicitacoes": solicitacoes,
+        "total_clientes": total_clientes,
+        "total_produtos": total_produtos,
+        "pendentes": pendentes,
+        "agenda_hoje": agenda_hoje,
+        "pendencias_financeiras": pendencias_financeiras,
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
     })
 
@@ -1325,30 +1365,33 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
 @app.get("/painel/configuracoes", response_class=HTMLResponse)
 def configuracoes_empresa(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     mensagens_padrao = mensagens_empresa(empresa)
-    campos = db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).order_by(CampoEmpresa.ordem).all()
-    return templates.TemplateResponse("admin/configuracoes.html", {"request": request, "empresa": empresa, "mensagens_padrao": mensagens_padrao, "campos": campos})
+    campos = db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).order_by(
+        CampoEmpresa.ordem).all()
+    return templates.TemplateResponse("admin/configuracoes.html",
+                                      {"request": request, "empresa": empresa, "mensagens_padrao": mensagens_padrao,
+                                       "campos": campos})
 
 
 @app.post("/painel/configuracoes")
 async def salvar_configuracoes_empresa(
-    request: Request,
-    pix_copia_cola: str = Form(""),
-    suporte_inicio: str = Form(""),
-    suporte_fim: str = Form(""),
-    mostrar_suporte_contrato: Optional[str] = Form(None),
-    logo_url: str = Form(""),
-    logo_idb_url: str = Form(""),
-    logo_arquivo: UploadFile | None = File(None),
-    tema: str = Form("azul"),
-    mensagem_reserva: str = Form(""),
-    mensagem_aceite: str = Form(""),
-    mensagem_pagamento: str = Form(""),
-    mensagem_confirmacao: str = Form(""),
-    mensagem_preparacao: str = Form(""),
-    mensagem_a_caminho: str = Form(""),
-    mensagem_localizacao: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        pix_copia_cola: str = Form(""),
+        suporte_inicio: str = Form(""),
+        suporte_fim: str = Form(""),
+        mostrar_suporte_contrato: Optional[str] = Form(None),
+        logo_url: str = Form(""),
+        logo_idb_url: str = Form(""),
+        logo_arquivo: UploadFile | None = File(None),
+        tema: str = Form("azul"),
+        mensagem_reserva: str = Form(""),
+        mensagem_aceite: str = Form(""),
+        mensagem_pagamento: str = Form(""),
+        mensagem_confirmacao: str = Form(""),
+        mensagem_preparacao: str = Form(""),
+        mensagem_a_caminho: str = Form(""),
+        mensagem_localizacao: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     empresa.pix_copia_cola = pix_copia_cola.strip()
     empresa.suporte_inicio = suporte_inicio.strip()
@@ -1392,28 +1435,38 @@ async def salvar_configuracoes_empresa(
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
-    return templates.TemplateResponse("admin/produtos.html", {"request": request, "empresa": empresa, "produtos": produtos, "produto": None})
+    return templates.TemplateResponse("admin/produtos.html",
+                                      {"request": request, "empresa": empresa, "produtos": produtos, "produto": None})
 
 
 @app.get("/painel/produto/{produto_id}", response_class=HTMLResponse)
-def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_db),
+                   empresa: Empresa = Depends(empresa_logada)):
     produto = db.get(ProdutoServico, produto_id)
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
-    return templates.TemplateResponse("admin/produtos.html", {"request": request, "empresa": empresa, "produtos": produtos, "produto": produto})
+    return templates.TemplateResponse("admin/produtos.html",
+                                      {"request": request, "empresa": empresa, "produtos": produtos,
+                                       "produto": produto})
 
 
 @app.post("/painel/produto/{produto_id_url}")
-def salvar_produto_url(produto_id_url: int, nome: str = Form(...), descricao: str = Form(""), quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    return salvar_produto(str(produto_id_url), nome, descricao, quantidade_disponivel, valor_base, duracao_minutos, prazo_retirada_dias, db, empresa)
+def salvar_produto_url(produto_id_url: int, nome: str = Form(...), descricao: str = Form(""),
+                       quantidade_disponivel: int = Form(1), valor_base: str = Form("0"),
+                       duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
+                       db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return salvar_produto(str(produto_id_url), nome, descricao, quantidade_disponivel, valor_base, duracao_minutos,
+                          prazo_retirada_dias, db, empresa)
+
 
 @app.post("/painel/produtos")
 def salvar_produto(
-    produto_id: str = Form(""),
-    nome: str = Form(...), descricao: str = Form(""),
-    quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
-    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+        produto_id: str = Form(""),
+        nome: str = Form(...), descricao: str = Form(""),
+        quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240),
+        prazo_retirada_dias: int = Form(1),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
@@ -1437,7 +1490,10 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
     origem = db.get(ProdutoServico, produto_id)
     if not origem or origem.empresa_id != empresa.id:
         raise HTTPException(404)
-    novo = ProdutoServico(empresa_id=empresa.id, contrato_id=None, nome=f"{origem.nome} - cópia", descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel, valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos, prazo_retirada_dias=origem.prazo_retirada_dias, ativo=True)
+    novo = ProdutoServico(empresa_id=empresa.id, contrato_id=None, nome=f"{origem.nome} - cópia",
+                          descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
+                          valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
+                          prazo_retirada_dias=origem.prazo_retirada_dias, ativo=True)
     db.add(novo)
     db.commit()
     db.refresh(novo)
@@ -1447,25 +1503,30 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
 @app.get("/painel/contratos", response_class=HTMLResponse)
 def contratos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/contratos.html", {"request": request, "empresa": empresa, "contratos": contratos, "contrato": None})
+    return templates.TemplateResponse("admin/contratos.html",
+                                      {"request": request, "empresa": empresa, "contratos": contratos,
+                                       "contrato": None})
 
 
 @app.get("/painel/contrato/{contrato_id}", response_class=HTMLResponse)
-def contrato_editar(contrato_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def contrato_editar(contrato_id: int, request: Request, db: Session = Depends(get_db),
+                    empresa: Empresa = Depends(empresa_logada)):
     contrato = db.get(Contrato, contrato_id)
     if not contrato or contrato.empresa_id != empresa.id:
         raise HTTPException(404)
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/contratos.html", {"request": request, "empresa": empresa, "contratos": contratos, "contrato": contrato})
+    return templates.TemplateResponse("admin/contratos.html",
+                                      {"request": request, "empresa": empresa, "contratos": contratos,
+                                       "contrato": contrato})
 
 
 @app.post("/painel/contrato/{contrato_id}")
 @app.post("/painel/contratos")
 def salvar_contrato(
-    contrato_id: int | None = None,
-    contrato_id_form: str = Form("", alias="contrato_id"),
-    nome: str = Form(...), descricao: str = Form(""), clausulas: str = Form(...),
-    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+        contrato_id: int | None = None,
+        contrato_id_form: str = Form("", alias="contrato_id"),
+        nome: str = Form(...), descricao: str = Form(""), clausulas: str = Form(...),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     contrato_id_final = contrato_id or (int(contrato_id_form) if contrato_id_form else None)
     contrato = db.get(Contrato, contrato_id_final) if contrato_id_final else None
@@ -1501,14 +1562,14 @@ def copiar_contrato(contrato_id: int, db: Session = Depends(get_db), empresa: Em
 
 @app.get("/painel/reservas", response_class=HTMLResponse)
 def preparar_reservas(
-    request: Request,
-    data_inicial: str = "",
-    data_final: str = "",
-    mostrar_entregas: str = "",
-    mostrar_retiradas: str = "",
-    mostrar_concluidas: str = "",
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        data_inicial: str = "",
+        data_final: str = "",
+        mostrar_entregas: str = "",
+        mostrar_retiradas: str = "",
+        mostrar_concluidas: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     inicio, fim = periodo_semana_atual()
     data_inicial = data_inicial or inicio.isoformat()
@@ -1546,7 +1607,8 @@ def preparar_reservas(
     if not mostrar_concluidas:
         q = q.filter(Agenda.status_operacional != "concluido")
 
-    itens = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).join(Cliente, Solicitacao.cliente_id == Cliente.id).all()
+    itens = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).join(Cliente,
+                                                                              Solicitacao.cliente_id == Cliente.id).all()
     sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
 
     def chave_operacao(a: Agenda):
@@ -1554,7 +1616,8 @@ def preparar_reservas(
         # 1) se já foi roteirizado, usa data/hora de entrega ou busca;
         # 2) dentro do mesmo horário, respeita a ordem manual do arrastar;
         # 3) se ainda não foi roteirizado, usa data/hora do contrato.
-        roteirizado = bool((a.previsao_entrega or "").strip() or (a.ordem_rota or 0) or (a.observacoes_operacionais and "Roteirização salva" in a.observacoes_operacionais))
+        roteirizado = bool((a.previsao_entrega or "").strip() or (a.ordem_rota or 0) or (
+                a.observacoes_operacionais and "Roteirização salva" in a.observacoes_operacionais))
         sol = a.solicitacao
         data_base = (a.data if roteirizado and a.data else (sol.data_evento if sol else a.data))
         hora_base = (a.hora_inicio if roteirizado and a.hora_inicio else (sol.hora_inicio if sol else a.hora_inicio))
@@ -1578,17 +1641,23 @@ def preparar_reservas(
 
 
 @app.get("/painel/solicitacoes", response_class=HTMLResponse)
-def solicitacoes(request: Request, busca: str = "", db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def solicitacoes(request: Request, busca: str = "", db: Session = Depends(get_db),
+                 empresa: Empresa = Depends(empresa_logada)):
     q = db.query(Solicitacao).filter_by(empresa_id=empresa.id)
     termo = limpar_identificador(busca)
     if termo:
-        q = q.join(Cliente).filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (Cliente.identificador.contains(termo)))
-    itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).order_by(Solicitacao.data_evento, Cliente.nome, Solicitacao.hora_inicio, Solicitacao.id).all()
-    return templates.TemplateResponse("admin/solicitacoes.html", {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
+        q = q.join(Cliente).filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (
+            Cliente.identificador.contains(termo)))
+    itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).order_by(Solicitacao.data_evento, Cliente.nome,
+                                                                           Solicitacao.hora_inicio,
+                                                                           Solicitacao.id).all()
+    return templates.TemplateResponse("admin/solicitacoes.html",
+                                      {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}", response_class=HTMLResponse)
-def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+                        empresa: Empresa = Depends(empresa_logada)):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
@@ -1596,11 +1665,14 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     mensagens = mensagens_empresa(empresa)
-    return templates.TemplateResponse("admin/solicitacao_detalhe.html", {"request": request, "item": item, "empresa": empresa, "produtos": produtos, "contratos": contratos, "mensagens": mensagens})
+    return templates.TemplateResponse("admin/solicitacao_detalhe.html",
+                                      {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
+                                       "contratos": contratos, "mensagens": mensagens})
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/whatsapp")
-def compartilhar_contrato_whatsapp(solicitacao_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def compartilhar_contrato_whatsapp(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+                                   empresa: Empresa = Depends(empresa_logada)):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
@@ -1612,7 +1684,8 @@ def compartilhar_contrato_whatsapp(solicitacao_id: int, request: Request, db: Se
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/cliente", response_class=HTMLResponse)
-def editar_cliente_da_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def editar_cliente_da_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+                                  empresa: Empresa = Depends(empresa_logada)):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
@@ -1624,23 +1697,23 @@ def editar_cliente_da_solicitacao(solicitacao_id: int, request: Request, db: Ses
 
 @app.post("/painel/solicitacao/{solicitacao_id}/cliente")
 def salvar_cliente_da_solicitacao(
-    solicitacao_id: int,
-    nome: str = Form(""),
-    telefone: str = Form(""),
-    cpf: str = Form(""),
-    cnpj: str = Form(""),
-    data_nascimento: str = Form(""),
-    email: str = Form(""),
-    endereco: str = Form(""),
-    numero: str = Form(""),
-    complemento: str = Form(""),
-    bairro: str = Form(""),
-    cidade: str = Form(""),
-    estado: str = Form(""),
-    cep: str = Form(""),
-    observacoes: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        nome: str = Form(""),
+        telefone: str = Form(""),
+        cpf: str = Form(""),
+        cnpj: str = Form(""),
+        data_nascimento: str = Form(""),
+        email: str = Form(""),
+        endereco: str = Form(""),
+        numero: str = Form(""),
+        complemento: str = Form(""),
+        bairro: str = Form(""),
+        cidade: str = Form(""),
+        estado: str = Form(""),
+        cep: str = Form(""),
+        observacoes: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id or not item.cliente:
@@ -1679,31 +1752,34 @@ def salvar_cliente_da_solicitacao(
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/editar", response_class=HTMLResponse)
-def editar_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def editar_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+                       empresa: Empresa = Depends(empresa_logada)):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/solicitacao_editar.html", {"request": request, "item": item, "empresa": empresa, "produtos": produtos, "contratos": contratos})
+    return templates.TemplateResponse("admin/solicitacao_editar.html",
+                                      {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
+                                       "contratos": contratos})
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/editar")
 def salvar_edicao_solicitacao(
-    solicitacao_id: int,
-    data_evento: str = Form(""),
-    hora_inicio: str = Form(""),
-    hora_fim: str = Form(""),
-    bairro: str = Form(""),
-    local: str = Form(""),
-    acesso_local: str = Form(""),
-    valor: str = Form("0"),
-    sinal: str = Form("0"),
-    status: str = Form(""),
-    observacoes: str = Form(""),
-    aprovacao_manual: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
+        hora_fim: str = Form(""),
+        bairro: str = Form(""),
+        local: str = Form(""),
+        acesso_local: str = Form(""),
+        valor: str = Form("0"),
+        sinal: str = Form("0"),
+        status: str = Form(""),
+        observacoes: str = Form(""),
+        aprovacao_manual: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -1749,13 +1825,12 @@ def salvar_edicao_solicitacao(
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
-
 @app.post("/painel/solicitacao/{solicitacao_id}/status")
 def atualizar_status_solicitacao(
-    solicitacao_id: int,
-    status: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        status: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -1785,23 +1860,23 @@ def atualizar_status_solicitacao(
 
 @app.post("/painel/solicitacao/{solicitacao_id}/cliente-local")
 def salvar_cliente_local_solicitacao(
-    solicitacao_id: int,
-    nome: str = Form(""),
-    telefone: str = Form(""),
-    cpf: str = Form(""),
-    email: str = Form(""),
-    data_evento: str = Form(""),
-    hora_inicio: str = Form(""),
-    hora_fim: str = Form(""),
-    local: str = Form(""),
-    numero: str = Form(""),
-    bairro: str = Form(""),
-    acesso_local: str = Form(""),
-    local_nome: str = Form(""),
-    local_responsavel_nome: str = Form(""),
-    local_responsavel_telefone: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        nome: str = Form(""),
+        telefone: str = Form(""),
+        cpf: str = Form(""),
+        email: str = Form(""),
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
+        hora_fim: str = Form(""),
+        local: str = Form(""),
+        numero: str = Form(""),
+        bairro: str = Form(""),
+        acesso_local: str = Form(""),
+        local_nome: str = Form(""),
+        local_responsavel_nome: str = Form(""),
+        local_responsavel_telefone: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -1826,7 +1901,8 @@ def salvar_cliente_local_solicitacao(
     item.acesso_local = acesso_local.strip()
     item.local_nome = local_nome.strip()
     item.local_responsavel_nome = local_responsavel_nome.strip()
-    item.local_responsavel_telefone = limpar_identificador(local_responsavel_telefone) or local_responsavel_telefone.strip()
+    item.local_responsavel_telefone = limpar_identificador(
+        local_responsavel_telefone) or local_responsavel_telefone.strip()
 
     if item.status not in ["cancelada", "cancelado_cliente", "aguardando_nova_data"]:
         criar_eventos_operacionais(db, item)
@@ -1837,27 +1913,27 @@ def salvar_cliente_local_solicitacao(
 
 @app.post("/painel/solicitacao/{solicitacao_id}/preparar")
 async def preparar_contrato(
-    solicitacao_id: int,
-    request: Request,
-    contrato_id: str = Form(""),
-    data_evento: str = Form(""),
-    hora_inicio: str = Form(""),
-    hora_fim: str = Form(""),
-    bairro: str = Form(""),
-    local: str = Form(""),
-    acesso_local: str = Form(""),
-    valor: str = Form("0"),
-    sinal: str = Form("0"),
-    observacoes: str = Form(""),
-    acao: str = Form("salvar"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        request: Request,
+        contrato_id: str = Form(""),
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
+        hora_fim: str = Form(""),
+        bairro: str = Form(""),
+        local: str = Form(""),
+        acesso_local: str = Form(""),
+        valor: str = Form("0"),
+        sinal: str = Form("0"),
+        observacoes: str = Form(""),
+        acao: str = Form("salvar"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if item.status in ["cancelada", "cancelado_cliente"]:
-        return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
     if data_evento:
         item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -1883,7 +1959,8 @@ async def preparar_contrato(
         if not produto or produto.empresa_id != empresa.id:
             continue
         quantidade = int(quantidades[idx]) if idx < len(quantidades) and str(quantidades[idx]).isdigit() else 1
-        valor_unitario = texto_para_float(valores_unitarios[idx]) if idx < len(valores_unitarios) else (produto.valor_base or 0)
+        valor_unitario = texto_para_float(valores_unitarios[idx]) if idx < len(valores_unitarios) else (
+                produto.valor_base or 0)
         total_item = quantidade * valor_unitario
         db.add(ReservaItem(
             empresa_id=empresa.id,
@@ -1924,16 +2001,11 @@ async def preparar_contrato(
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
-
-
-
-
-
 @app.post("/painel/solicitacao/{solicitacao_id}/excluir")
 def excluir_solicitacao_completa(
-    solicitacao_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -1966,11 +2038,11 @@ def excluir_solicitacao_completa(
 
 @app.post("/painel/solicitacao/{solicitacao_id}/aceite-manual")
 def aceite_manual_solicitacao(
-    request: Request,
-    solicitacao_id: int,
-    observacao_aceite: str = Form(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        solicitacao_id: int,
+        observacao_aceite: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -1997,8 +2069,10 @@ def aceite_manual_solicitacao(
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
+
 @app.get("/painel/contrato-novo", response_class=HTMLResponse)
-def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(get_db),
+                       empresa: Empresa = Depends(empresa_logada)):
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     busca_limpa = limpar_identificador(busca)
@@ -2022,34 +2096,34 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
 
 @app.post("/painel/contrato-novo")
 def contrato_novo_salvar(
-    request: Request,
-    nome: str = Form(""),
-    telefone: str = Form(""),
-    cpf: str = Form(""),
-    cnpj: str = Form(""),
-    email: str = Form(""),
-    endereco: str = Form(""),
-    numero: str = Form(""),
-    complemento: str = Form(""),
-    bairro: str = Form(""),
-    cidade: str = Form(""),
-    estado: str = Form(""),
-    cep: str = Form(""),
-    produto_id: str = Form(""),
-    contrato_id: str = Form(""),
-    data_evento: str = Form(...),
-    hora_inicio: str = Form(...),
-    valor: str = Form("0"),
-    sinal: str = Form("0"),
-    local_nome: str = Form(""),
-    local: str = Form(""),
-    acesso_local: str = Form(""),
-    local_responsavel_nome: str = Form(""),
-    local_responsavel_telefone: str = Form(""),
-    observacoes: str = Form(""),
-    modo_criacao: str = Form("whatsapp"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        nome: str = Form(""),
+        telefone: str = Form(""),
+        cpf: str = Form(""),
+        cnpj: str = Form(""),
+        email: str = Form(""),
+        endereco: str = Form(""),
+        numero: str = Form(""),
+        complemento: str = Form(""),
+        bairro: str = Form(""),
+        cidade: str = Form(""),
+        estado: str = Form(""),
+        cep: str = Form(""),
+        produto_id: str = Form(""),
+        contrato_id: str = Form(""),
+        data_evento: str = Form(...),
+        hora_inicio: str = Form(...),
+        valor: str = Form("0"),
+        sinal: str = Form("0"),
+        local_nome: str = Form(""),
+        local: str = Form(""),
+        acesso_local: str = Form(""),
+        local_responsavel_nome: str = Form(""),
+        local_responsavel_telefone: str = Form(""),
+        observacoes: str = Form(""),
+        modo_criacao: str = Form("whatsapp"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     telefone_limpo = limpar_identificador(telefone)
     cpf_limpo = limpar_identificador(cpf)
@@ -2101,7 +2175,8 @@ def contrato_novo_salvar(
     if condicoes:
         duplicado = duplicado_q.filter(or_(*condicoes)).first()
         if duplicado:
-            return render_erro(f"Já existe uma reserva/contrato para este telefone/CPF/CNPJ nesta data: #{duplicado.id} - {duplicado.cliente.nome}.")
+            return render_erro(
+                f"Já existe uma reserva/contrato para este telefone/CPF/CNPJ nesta data: #{duplicado.id} - {duplicado.cliente.nome}.")
 
     cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=identificador).first()
     if not cliente:
@@ -2146,7 +2221,8 @@ def contrato_novo_salvar(
         local=local.strip() or endereco.strip(),
         local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome.strip(),
-        local_responsavel_telefone=limpar_identificador(local_responsavel_telefone) or local_responsavel_telefone.strip(),
+        local_responsavel_telefone=limpar_identificador(
+            local_responsavel_telefone) or local_responsavel_telefone.strip(),
         acesso_local=acesso_local.strip(),
         valor=valor_float,
         sinal=sinal_float,
@@ -2196,7 +2272,6 @@ def awaitable_form_fallback(request: Request) -> dict:
     return {}
 
 
-
 def form_solicitacao_completo(item: Solicitacao) -> dict:
     """Monta o formulário único com todos os dados já preenchidos para edição completa."""
     cliente = item.cliente
@@ -2231,10 +2306,10 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
 
 @app.get("/painel/solicitacao/{solicitacao_id}/editar-completo", response_class=HTMLResponse)
 def editar_solicitacao_completa(
-    solicitacao_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -2256,34 +2331,34 @@ def editar_solicitacao_completa(
 
 @app.post("/painel/solicitacao/{solicitacao_id}/editar-completo")
 def salvar_solicitacao_completa(
-    solicitacao_id: int,
-    request: Request,
-    nome: str = Form(""),
-    telefone: str = Form(""),
-    cpf: str = Form(""),
-    cnpj: str = Form(""),
-    email: str = Form(""),
-    endereco: str = Form(""),
-    numero: str = Form(""),
-    complemento: str = Form(""),
-    bairro: str = Form(""),
-    cidade: str = Form(""),
-    estado: str = Form(""),
-    cep: str = Form(""),
-    produto_id: str = Form(""),
-    contrato_id: str = Form(""),
-    data_evento: str = Form(...),
-    hora_inicio: str = Form(...),
-    valor: str = Form("0"),
-    sinal: str = Form("0"),
-    local_nome: str = Form(""),
-    local: str = Form(""),
-    acesso_local: str = Form(""),
-    local_responsavel_nome: str = Form(""),
-    local_responsavel_telefone: str = Form(""),
-    observacoes: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        request: Request,
+        nome: str = Form(""),
+        telefone: str = Form(""),
+        cpf: str = Form(""),
+        cnpj: str = Form(""),
+        email: str = Form(""),
+        endereco: str = Form(""),
+        numero: str = Form(""),
+        complemento: str = Form(""),
+        bairro: str = Form(""),
+        cidade: str = Form(""),
+        estado: str = Form(""),
+        cep: str = Form(""),
+        produto_id: str = Form(""),
+        contrato_id: str = Form(""),
+        data_evento: str = Form(...),
+        hora_inicio: str = Form(...),
+        valor: str = Form("0"),
+        sinal: str = Form("0"),
+        local_nome: str = Form(""),
+        local: str = Form(""),
+        acesso_local: str = Form(""),
+        local_responsavel_nome: str = Form(""),
+        local_responsavel_telefone: str = Form(""),
+        observacoes: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id or not item.cliente:
@@ -2353,7 +2428,8 @@ def salvar_solicitacao_completa(
     item.local = local.strip() or endereco.strip()
     item.local_nome = local_nome.strip()
     item.local_responsavel_nome = local_responsavel_nome.strip()
-    item.local_responsavel_telefone = limpar_identificador(local_responsavel_telefone) or local_responsavel_telefone.strip()
+    item.local_responsavel_telefone = limpar_identificador(
+        local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.acesso_local = acesso_local.strip()
     item.valor = valor_float
     item.sinal = sinal_float
@@ -2376,46 +2452,55 @@ def salvar_solicitacao_completa(
 
 
 @app.get("/painel/clientes", response_class=HTMLResponse)
-def clientes(request: Request, busca: str = "", db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def clientes(request: Request, busca: str = "", db: Session = Depends(get_db),
+             empresa: Empresa = Depends(empresa_logada)):
     termo = limpar_identificador(busca)
     itens = []
     if termo:
         q = db.query(Cliente).filter_by(empresa_id=empresa.id)
-        q = q.filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (Cliente.identificador.contains(termo)))
+        q = q.filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (
+            Cliente.identificador.contains(termo)))
         itens = q.order_by(Cliente.nome).all()
-    return templates.TemplateResponse("admin/clientes.html", {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
+    return templates.TemplateResponse("admin/clientes.html",
+                                      {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
 
 
 @app.get("/painel/cliente/{cliente_id}", response_class=HTMLResponse)
-def cliente_detalhe(cliente_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def cliente_detalhe(cliente_id: int, request: Request, db: Session = Depends(get_db),
+                    empresa: Empresa = Depends(empresa_logada)):
     cliente = db.get(Cliente, cliente_id)
     if not cliente or cliente.empresa_id != empresa.id:
         raise HTTPException(404)
-    equipamentos = db.query(EquipamentoCliente).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).order_by(EquipamentoCliente.nome).all()
-    solicitacoes = db.query(Solicitacao).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).order_by(Solicitacao.criado_em.desc()).all()
+    equipamentos = db.query(EquipamentoCliente).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).order_by(
+        EquipamentoCliente.nome).all()
+    solicitacoes = db.query(Solicitacao).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).order_by(
+        Solicitacao.criado_em.desc()).all()
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/cliente_detalhe.html", {"request": request, "empresa": empresa, "cliente": cliente, "equipamentos": equipamentos, "solicitacoes": solicitacoes, "produtos": produtos, "contratos": contratos})
+    return templates.TemplateResponse("admin/cliente_detalhe.html",
+                                      {"request": request, "empresa": empresa, "cliente": cliente,
+                                       "equipamentos": equipamentos, "solicitacoes": solicitacoes, "produtos": produtos,
+                                       "contratos": contratos})
 
 
 @app.post("/painel/cliente/{cliente_id}/dados")
 def atualizar_cliente_dados(
-    cliente_id: int,
-    nome: str = Form(""),
-    telefone: str = Form(""),
-    cpf: str = Form(""),
-    cnpj: str = Form(""),
-    email: str = Form(""),
-    endereco: str = Form(""),
-    numero: str = Form(""),
-    complemento: str = Form(""),
-    bairro: str = Form(""),
-    cidade: str = Form(""),
-    estado: str = Form(""),
-    cep: str = Form(""),
-    observacoes: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        cliente_id: int,
+        nome: str = Form(""),
+        telefone: str = Form(""),
+        cpf: str = Form(""),
+        cnpj: str = Form(""),
+        email: str = Form(""),
+        endereco: str = Form(""),
+        numero: str = Form(""),
+        complemento: str = Form(""),
+        bairro: str = Form(""),
+        cidade: str = Form(""),
+        estado: str = Form(""),
+        cep: str = Form(""),
+        observacoes: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     cliente = db.get(Cliente, cliente_id)
     if not cliente or cliente.empresa_id != empresa.id:
@@ -2448,21 +2533,21 @@ def atualizar_cliente_dados(
 
 @app.post("/painel/cliente/{cliente_id}/pre-reserva-rapida")
 def criar_pre_reserva_rapida(
-    cliente_id: int,
-    produto_id: str = Form(""),
-    contrato_id: str = Form(""),
-    data_evento: str = Form(...),
-    hora_inicio: str = Form(...),
-    valor: str = Form("0"),
-    sinal: str = Form("0"),
-    local_nome: str = Form(""),
-    local: str = Form(""),
-    local_responsavel_nome: str = Form(""),
-    local_responsavel_telefone: str = Form(""),
-    observacoes: str = Form(""),
-    acao: str = Form("salvar"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        cliente_id: int,
+        produto_id: str = Form(""),
+        contrato_id: str = Form(""),
+        data_evento: str = Form(...),
+        hora_inicio: str = Form(...),
+        valor: str = Form("0"),
+        sinal: str = Form("0"),
+        local_nome: str = Form(""),
+        local: str = Form(""),
+        local_responsavel_nome: str = Form(""),
+        local_responsavel_telefone: str = Form(""),
+        observacoes: str = Form(""),
+        acao: str = Form("salvar"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     cliente = db.get(Cliente, cliente_id)
     if not cliente or cliente.empresa_id != empresa.id:
@@ -2509,10 +2594,11 @@ def criar_pre_reserva_rapida(
 
 @app.post("/painel/cliente/{cliente_id}/equipamentos")
 def salvar_equipamento_cliente(
-    cliente_id: int,
-    nome: str = Form(...), marca: str = Form(""), modelo: str = Form(""), numero_serie: str = Form(""), observacoes: str = Form(""),
-    acao: str = Form("salvar"),
-    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+        cliente_id: int,
+        nome: str = Form(...), marca: str = Form(""), modelo: str = Form(""), numero_serie: str = Form(""),
+        observacoes: str = Form(""),
+        acao: str = Form("salvar"),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     cliente = db.get(Cliente, cliente_id)
     if not cliente or cliente.empresa_id != empresa.id:
@@ -2525,12 +2611,12 @@ def salvar_equipamento_cliente(
     return RedirectResponse(f"/painel/cliente/{cliente_id}", status_code=303)
 
 
-
 def usuario_pode_financeiro(request: Request, empresa: Empresa, db: Session) -> bool:
     usuario_sistema = request.session.get("usuario_sistema")
     if usuario_sistema and empresa.usuario_admin and usuario_sistema.lower() == empresa.usuario_admin.lower():
         return True
-    usuario = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id, usuario=usuario_sistema).first() if usuario_sistema else None
+    usuario = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id,
+                                                 usuario=usuario_sistema).first() if usuario_sistema else None
     return True if not usuario else bool(getattr(usuario, "visualiza_financeiro", True))
 
 
@@ -2581,9 +2667,14 @@ def texto_normalizado_financeiro(valor: str) -> str:
 
 def categoria_sugerida(historico: str, valor: float) -> str:
     h = texto_normalizado_financeiro(historico)
-    if any(p in h for p in ["uber", "tim", "claro", "vivo", "light", "enel", "internet", "telefone", "google", "meta", "facebook", "conta azul", "mei", "simples", "taxa", "tarifa", "maquininha", "stone", "mercado pago", "nic br", "hospedagem", "dominio"]):
+    if any(p in h for p in
+           ["uber", "tim", "claro", "vivo", "light", "enel", "internet", "telefone", "google", "meta", "facebook",
+            "conta azul", "mei", "simples", "taxa", "tarifa", "maquininha", "stone", "mercado pago", "nic br",
+            "hospedagem", "dominio"]):
         return "empresa"
-    if any(p in h for p in ["mercado", "farmacia", "padaria", "ifood", "restaurante", "posto", "combustivel", "condominio", "aluguel casa"]):
+    if any(p in h for p in
+           ["mercado", "farmacia", "padaria", "ifood", "restaurante", "posto", "combustivel", "condominio",
+            "aluguel casa"]):
         return "casa"
     if any(p in h for p in ["agua", "aguas", "manut", "reparo", "peca", "assistencia"]):
         return "manutencao"
@@ -2592,7 +2683,8 @@ def categoria_sugerida(historico: str, valor: float) -> str:
     return "empresa"
 
 
-def hash_lancamento_banco(empresa_id: int, conta_id: int, data_lanc, historico: str, documento: str, valor: float, saldo: float) -> str:
+def hash_lancamento_banco(empresa_id: int, conta_id: int, data_lanc, historico: str, documento: str, valor: float,
+                          saldo: float) -> str:
     base = "|".join([
         str(empresa_id), str(conta_id), str(data_lanc),
         texto_normalizado_financeiro(historico), texto_normalizado_financeiro(documento),
@@ -2627,7 +2719,8 @@ def melhores_vinculos_financeiros(data_lanc, texto_lanc, valor_lanc, pagamentos,
     hist = texto_normalizado_financeiro(texto_lanc)
     candidatos = []
     for p in pagamentos:
-        nome = texto_normalizado_financeiro(getattr(p.solicitacao.cliente, "nome", "")) if p.solicitacao and p.solicitacao.cliente else ""
+        nome = texto_normalizado_financeiro(
+            getattr(p.solicitacao.cliente, "nome", "")) if p.solicitacao and p.solicitacao.cliente else ""
         diff_valor = abs(float(valor_lanc or 0) - float(p.valor or 0))
         diff_dias = abs((data_lanc - p.data_pagamento).days) if data_lanc and p.data_pagamento else 99
         nome_score = SequenceMatcher(None, hist, nome).ratio() if nome else 0
@@ -2643,6 +2736,7 @@ def melhores_vinculos_financeiros(data_lanc, texto_lanc, valor_lanc, pagamentos,
         if diff_valor <= 10 or diff_dias <= 3 or nome_score >= .55:
             candidatos.append({"pagamento": p, "score": score, "diff_valor": diff_valor, "diff_dias": diff_dias})
     return sorted(candidatos, key=lambda x: (-x["score"], x["diff_valor"], x["diff_dias"]))[:limite]
+
 
 def ler_extrato_upload(upload: UploadFile):
     nome = upload.filename or "extrato"
@@ -2673,6 +2767,7 @@ def ler_extrato_upload(upload: UploadFile):
         raise HTTPException(400, "Não encontrei as colunas Data, Histórico, Valor e Saldo no extrato.")
 
     cab = [str(c or "").strip().lower() for c in linhas[cabecalho_idx]]
+
     def achar(nome):
         for i, c in enumerate(cab):
             if nome in c:
@@ -2695,16 +2790,21 @@ def ler_extrato_upload(upload: UploadFile):
             continue
         saldo = parse_valor_banco(linha[i_saldo]) if i_saldo >= 0 and len(linha) > i_saldo else 0
         documento = str(linha[i_doc] or "").strip() if i_doc >= 0 and len(linha) > i_doc else ""
-        registros.append({"data": data_lanc, "historico": historico, "documento": documento, "valor": valor, "saldo": saldo})
+        registros.append(
+            {"data": data_lanc, "historico": historico, "documento": documento, "valor": valor, "saldo": saldo})
     return registros
+
 
 def garantir_ordem_financeira(db: Session, empresa_id: int):
     # Preenche a ordem dos registros antigos. A ordem fica editável depois pelos botões ↑/↓.
     alterou = False
-    for obj in db.query(LancamentoBanco).filter(LancamentoBanco.empresa_id == empresa_id, (LancamentoBanco.ordem == None) | (LancamentoBanco.ordem == 0)).all():
+    for obj in db.query(LancamentoBanco).filter(LancamentoBanco.empresa_id == empresa_id,
+                                                (LancamentoBanco.ordem == None) | (LancamentoBanco.ordem == 0)).all():
         obj.ordem = obj.id or 0
         alterou = True
-    for obj in db.query(LancamentoManualFinanceiro).filter(LancamentoManualFinanceiro.empresa_id == empresa_id, (LancamentoManualFinanceiro.ordem == None) | (LancamentoManualFinanceiro.ordem == 0)).all():
+    for obj in db.query(LancamentoManualFinanceiro).filter(LancamentoManualFinanceiro.empresa_id == empresa_id,
+                                                           (LancamentoManualFinanceiro.ordem == None) | (
+                                                                   LancamentoManualFinanceiro.ordem == 0)).all():
         obj.ordem = obj.id or 0
         alterou = True
     if alterou:
@@ -2735,19 +2835,17 @@ def mover_lancamento_na_lista(db: Session, modelo, lanc, direcao: str):
     db.commit()
 
 
-
-
 @app.get("/painel/financeiro", response_class=HTMLResponse)
 def financeiro(
-    request: Request,
-    conta_id: int = 0,
-    data_inicial: str = "",
-    data_final: str = "",
-    categoria: str = "",
-    busca: str = "",
-    status_sistema: str = "pendente",
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        conta_id: int = 0,
+        data_inicial: str = "",
+        data_final: str = "",
+        categoria: str = "",
+        busca: str = "",
+        status_sistema: str = "pendente",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     if not usuario_pode_financeiro(request, empresa, db):
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
@@ -2796,7 +2894,9 @@ def financeiro(
         q_receber = q_receber.filter(LancamentoManualFinanceiro.descricao.ilike(like))
 
     banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.ordem.asc(), LancamentoBanco.id.asc()).all()
-    manuais_reais = q_manual_real.order_by(LancamentoManualFinanceiro.data.desc(), LancamentoManualFinanceiro.ordem.asc(), LancamentoManualFinanceiro.id.asc()).all()
+    manuais_reais = q_manual_real.order_by(LancamentoManualFinanceiro.data.desc(),
+                                           LancamentoManualFinanceiro.ordem.asc(),
+                                           LancamentoManualFinanceiro.id.asc()).all()
     receber = q_receber.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
 
     q_pagamentos_sistema = db.query(Pagamento).join(Solicitacao).join(Cliente).filter(
@@ -2822,17 +2922,22 @@ def financeiro(
         Pagamento.conciliado_em == None
     ).all()
 
-    entradas = sum(l.valor for l in banco if (l.valor or 0) > 0) + sum(l.valor for l in manuais_reais if (l.valor or 0) > 0)
-    saidas = sum(abs(l.valor or 0) for l in banco if (l.valor or 0) < 0) + sum(abs(l.valor or 0) for l in manuais_reais if (l.valor or 0) < 0)
+    entradas = sum(l.valor for l in banco if (l.valor or 0) > 0) + sum(
+        l.valor for l in manuais_reais if (l.valor or 0) > 0)
+    saidas = sum(abs(l.valor or 0) for l in banco if (l.valor or 0) < 0) + sum(
+        abs(l.valor or 0) for l in manuais_reais if (l.valor or 0) < 0)
     saldo_real = entradas - saidas
     total_receber = sum(max(l.valor or 0, 0) for l in receber)
     saldo_previsto = saldo_real + total_receber
 
     saldo_todos = 0
     for c in contas:
-        banco_c = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter_by(empresa_id=empresa.id, conta_id=c.id).scalar() or 0
-        manual_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(empresa_id=empresa.id, conta_id=c.id, tipo="real").scalar() or 0
-        receber_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(empresa_id=empresa.id, conta_id=c.id, tipo="receber", recebido=False).scalar() or 0
+        banco_c = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter_by(empresa_id=empresa.id,
+                                                                                        conta_id=c.id).scalar() or 0
+        manual_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(
+            empresa_id=empresa.id, conta_id=c.id, tipo="real").scalar() or 0
+        receber_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(
+            empresa_id=empresa.id, conta_id=c.id, tipo="receber", recebido=False).scalar() or 0
         saldo_todos += float(banco_c or 0) + float(manual_c or 0) + float(receber_c or 0)
 
     candidatos_vinculo = {
@@ -2861,11 +2966,11 @@ def financeiro(
 
 @app.post("/painel/financeiro/conta")
 def financeiro_salvar_conta(
-    request: Request,
-    conta_id: int = Form(0),
-    saldo_inicial: str = Form("0"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        conta_id: int = Form(0),
+        saldo_inicial: str = Form("0"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
@@ -2877,11 +2982,11 @@ def financeiro_salvar_conta(
 
 @app.post("/painel/financeiro/importar")
 def financeiro_importar_extrato(
-    request: Request,
-    conta_id: int = Form(...),
-    arquivo: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        conta_id: int = Form(...),
+        arquivo: UploadFile = File(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
@@ -2891,9 +2996,11 @@ def financeiro_importar_extrato(
     duplicados = 0
     conciliados = 0
     hashes_do_arquivo = set()
-    proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoBanco.ordem), 0)).filter_by(empresa_id=empresa.id, conta_id=conta.id).scalar() or 0) + 1
+    proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoBanco.ordem), 0)).filter_by(empresa_id=empresa.id,
+                                                                                              conta_id=conta.id).scalar() or 0) + 1
     for idx_registro, r in enumerate(registros):
-        h = hash_lancamento_banco(empresa.id, conta.id, r["data"], r["historico"], r["documento"], r["valor"], r["saldo"])
+        h = hash_lancamento_banco(empresa.id, conta.id, r["data"], r["historico"], r["documento"], r["valor"],
+                                  r["saldo"])
         if h in hashes_do_arquivo:
             duplicados += 1
             continue
@@ -2902,11 +3009,11 @@ def financeiro_importar_extrato(
             LancamentoBanco.empresa_id == empresa.id,
             LancamentoBanco.conta_id == conta.id,
             (LancamentoBanco.hash_importacao == h) | (
-                (LancamentoBanco.data == r["data"]) &
-                (LancamentoBanco.historico == r["historico"]) &
-                (LancamentoBanco.documento == r["documento"]) &
-                (LancamentoBanco.valor == r["valor"]) &
-                (LancamentoBanco.saldo == r["saldo"])
+                    (LancamentoBanco.data == r["data"]) &
+                    (LancamentoBanco.historico == r["historico"]) &
+                    (LancamentoBanco.documento == r["documento"]) &
+                    (LancamentoBanco.valor == r["valor"]) &
+                    (LancamentoBanco.saldo == r["saldo"])
             )
         ).first()
         if existe:
@@ -2933,17 +3040,19 @@ def financeiro_importar_extrato(
         ))
         importados += 1
     db.commit()
-    return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={conta.id}", {"importados": importados, "duplicados": duplicados, "conciliados": conciliados})
+    return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={conta.id}",
+                                        {"importados": importados, "duplicados": duplicados,
+                                         "conciliados": conciliados})
 
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/categoria")
 def financeiro_categoria_banco(
-    request: Request,
-    lancamento_id: int,
-    categoria: str = Form(...),
-    confirmado: str = Form("0"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        categoria: str = Form(...),
+        confirmado: str = Form("0"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
@@ -2958,11 +3067,11 @@ def financeiro_categoria_banco(
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/vincular")
 def financeiro_vincular_banco(
-    request: Request,
-    lancamento_id: int,
-    pagamento_id: int = Form(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        pagamento_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     pagamento = db.get(Pagamento, pagamento_id)
@@ -2978,10 +3087,10 @@ def financeiro_vincular_banco(
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/desvincular")
 def financeiro_desvincular_banco(
-    request: Request,
-    lancamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
@@ -2996,10 +3105,10 @@ def financeiro_desvincular_banco(
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/excluir")
 def financeiro_excluir_banco(
-    request: Request,
-    lancamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
@@ -3014,11 +3123,11 @@ def financeiro_excluir_banco(
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/mover")
 def financeiro_mover_banco(
-    request: Request,
-    lancamento_id: int,
-    direcao: str = Form(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        direcao: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
@@ -3029,15 +3138,15 @@ def financeiro_mover_banco(
 
 @app.post("/painel/financeiro/manual")
 def financeiro_lancamento_manual(
-    request: Request,
-    conta_id: int = Form(...),
-    data: str = Form(...),
-    descricao: str = Form(...),
-    valor: str = Form("0"),
-    categoria: str = Form("empresa"),
-    tipo: str = Form("real"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        conta_id: int = Form(...),
+        data: str = Form(...),
+        descricao: str = Form(...),
+        valor: str = Form("0"),
+        categoria: str = Form("empresa"),
+        tipo: str = Form("real"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
@@ -3047,7 +3156,9 @@ def financeiro_lancamento_manual(
     if tipo not in ["real", "receber"]:
         raise HTTPException(400, "Tipo inválido.")
     valor_float = texto_para_float(valor)
-    proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(empresa_id=empresa.id, conta_id=conta.id).scalar() or 0) + 1
+    proxima_ordem = int(
+        db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(empresa_id=empresa.id,
+                                                                                         conta_id=conta.id).scalar() or 0) + 1
     if tipo == "receber" and valor_float < 0:
         valor_float = abs(valor_float)
     db.add(LancamentoManualFinanceiro(
@@ -3067,29 +3178,30 @@ def financeiro_lancamento_manual(
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/mover")
 def financeiro_mover_manual(
-    request: Request,
-    lancamento_id: int,
-    direcao: str = Form(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        direcao: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
         raise HTTPException(404)
     mover_lancamento_na_lista(db, LancamentoManualFinanceiro, lanc, direcao)
-    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}", status_code=303)
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
+                            status_code=303)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/editar")
 def financeiro_editar_manual(
-    request: Request,
-    lancamento_id: int,
-    data: str = Form(...),
-    descricao: str = Form(...),
-    valor: str = Form("0"),
-    categoria: str = Form("empresa"),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        data: str = Form(...),
+        descricao: str = Form(...),
+        valor: str = Form("0"),
+        categoria: str = Form("empresa"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
@@ -3111,11 +3223,11 @@ def financeiro_editar_manual(
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/vincular")
 def financeiro_vincular_manual(
-    request: Request,
-    lancamento_id: int,
-    pagamento_id: int = Form(...),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        pagamento_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     pagamento = db.get(Pagamento, pagamento_id)
@@ -3126,15 +3238,16 @@ def financeiro_vincular_manual(
     pagamento.conciliado_em = agora_utc()
     pagamento.conciliado_por = request.session.get("usuario_nome") or "Financeiro"
     db.commit()
-    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}", status_code=303)
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
+                            status_code=303)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/desvincular")
 def financeiro_desvincular_manual(
-    request: Request,
-    lancamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
@@ -3144,15 +3257,16 @@ def financeiro_desvincular_manual(
         lanc.pagamento.conciliado_por = None
     lanc.pagamento_id = None
     db.commit()
-    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}", status_code=303)
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
+                            status_code=303)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/excluir")
 def financeiro_excluir_manual(
-    request: Request,
-    lancamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
@@ -3163,15 +3277,16 @@ def financeiro_excluir_manual(
         lanc.pagamento.conciliado_por = None
     db.delete(lanc)
     db.commit()
-    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta_id}", status_code=303)
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta_id}",
+                            status_code=303)
 
 
 @app.post("/painel/financeiro/receber/{lancamento_id}/receber")
 def financeiro_marcar_recebido(
-    request: Request,
-    lancamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "receber":
@@ -3191,21 +3306,19 @@ def financeiro_marcar_recebido(
     return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={lanc.conta_id}")
 
 
-
-
 @app.post("/painel/solicitacao/{solicitacao_id}/pagamento")
 def confirmar_pagamento(
-    request: Request,
-    solicitacao_id: int,
-    data_pagamento: str = Form(""),
-    valor_pago: str = Form("0"),
-    forma_pagamento: str = Form("pix"),
-    comprovante_no_nome_cliente: str = Form("sim"),
-    nome_comprovante: str = Form(""),
-    observacoes_pagamento: str = Form(""),
-    retorno: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        solicitacao_id: int,
+        data_pagamento: str = Form(""),
+        valor_pago: str = Form("0"),
+        forma_pagamento: str = Form("pix"),
+        comprovante_no_nome_cliente: str = Form("sim"),
+        nome_comprovante: str = Form(""),
+        observacoes_pagamento: str = Form(""),
+        retorno: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -3240,10 +3353,10 @@ def confirmar_pagamento(
 
 @app.post("/painel/solicitacao/{solicitacao_id}/pagamento/{pagamento_id}/excluir")
 def excluir_pagamento_solicitacao(
-    solicitacao_id: int,
-    pagamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        solicitacao_id: int,
+        pagamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
@@ -3264,15 +3377,15 @@ def excluir_pagamento_solicitacao(
 
 @app.post("/painel/pagamento/{pagamento_id}/editar")
 def editar_pagamento_financeiro(
-    request: Request,
-    pagamento_id: int,
-    data_pagamento: str = Form(""),
-    valor_pago: str = Form("0"),
-    forma_pagamento: str = Form("pix"),
-    nome_comprovante: str = Form(""),
-    observacoes_pagamento: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        pagamento_id: int,
+        data_pagamento: str = Form(""),
+        valor_pago: str = Form("0"),
+        forma_pagamento: str = Form("pix"),
+        nome_comprovante: str = Form(""),
+        observacoes_pagamento: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     pagamento = db.get(Pagamento, pagamento_id)
     if not pagamento or pagamento.empresa_id != empresa.id:
@@ -3305,10 +3418,10 @@ def editar_pagamento_financeiro(
 
 @app.post("/painel/pagamento/{pagamento_id}/excluir")
 def excluir_pagamento_financeiro(
-    request: Request,
-    pagamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        pagamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     pagamento = db.get(Pagamento, pagamento_id)
     if not pagamento or pagamento.empresa_id != empresa.id:
@@ -3326,25 +3439,26 @@ def excluir_pagamento_financeiro(
 
 @app.post("/painel/pagamento/{pagamento_id}/conciliar")
 def conciliar_pagamento_financeiro(
-    request: Request,
-    pagamento_id: int,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        pagamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     pagamento = db.get(Pagamento, pagamento_id)
     if not pagamento or pagamento.empresa_id != empresa.id:
         raise HTTPException(404)
     if not pagamento.conciliado_em:
         pagamento.conciliado_em = agora_utc()
-        pagamento.conciliado_por = request.session.get("usuario_sistema") or request.session.get("usuario_nome") or "Usuário"
+        pagamento.conciliado_por = request.session.get("usuario_sistema") or request.session.get(
+            "usuario_nome") or "Usuário"
         db.commit()
     voltar = request.headers.get("referer") or "/painel/financeiro"
     return RedirectResponse(voltar, status_code=303)
 
 
-
 @app.get("/painel/disponibilidade", response_class=HTMLResponse)
-def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: Session = Depends(get_db),
+                    empresa: Empresa = Depends(empresa_logada)):
     data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
 
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
@@ -3408,14 +3522,14 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
 
 @app.get("/painel/agenda", response_class=HTMLResponse)
 def agenda(
-    request: Request,
-    data_inicial: str = "",
-    data_final: str = "",
-    ativos: str = "1",
-    credito: str = "",
-    cancelados: str = "",
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        data_inicial: str = "",
+        data_final: str = "",
+        ativos: str = "1",
+        credito: str = "",
+        cancelados: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     garantir_agenda_reservas(db, empresa.id)
     inicio, fim = periodo_semana_atual()
@@ -3441,8 +3555,20 @@ def agenda(
         q = q.filter(Solicitacao.data_evento <= datetime.strptime(data_final, "%Y-%m-%d").date())
 
     solicitacoes = (
-        q.join(Cliente, Solicitacao.cliente_id == Cliente.id)
-        .order_by(Solicitacao.data_evento, Cliente.nome, Solicitacao.hora_inicio, Solicitacao.id)
+        db.query(Solicitacao)
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.status.in_([
+                "pre_reserva",
+                "contrato_enviado",
+                "aguardando_aceite",
+            ])
+        )
+        .order_by(
+            Solicitacao.data_evento.asc(),
+            Solicitacao.hora_inicio.asc()
+        )
+        .limit(8)
         .all()
     )
 
@@ -3453,7 +3579,8 @@ def agenda(
         eh_cancelado = status_atual in status_cancelados
         eh_ativo = status_atual not in status_inativos
 
-        if (eh_ativo and "ativos" in filtros_status) or (eh_credito and "credito" in filtros_status) or (eh_cancelado and "cancelados" in filtros_status):
+        if (eh_ativo and "ativos" in filtros_status) or (eh_credito and "credito" in filtros_status) or (
+                eh_cancelado and "cancelados" in filtros_status):
             itens.append(s)
 
     mensagens = mensagens_empresa(empresa)
@@ -3473,16 +3600,16 @@ def agenda(
 
 @app.post("/painel/agenda/{agenda_id}/roteiro")
 def atualizar_roteiro(
-    request: Request,
-    agenda_id: int,
-    direcao: str = Form(""),
-    previsao_entrega: str = Form(""),
-    data_evento: str = Form(""),
-    data_operacao: str = Form(""),
-    status_operacional: str = Form("pendente"),
-    link_localizacao: str = Form(""),
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        agenda_id: int,
+        direcao: str = Form(""),
+        previsao_entrega: str = Form(""),
+        data_evento: str = Form(""),
+        data_operacao: str = Form(""),
+        status_operacional: str = Form("pendente"),
+        link_localizacao: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     item = db.get(Agenda, agenda_id)
     if not item or item.empresa_id != empresa.id:
@@ -3543,9 +3670,9 @@ def atualizar_roteiro(
 
 @app.post("/painel/reservas/roteirizacao")
 async def salvar_roteirizacao_geral(
-    request: Request,
-    db: Session = Depends(get_db),
-    empresa: Empresa = Depends(empresa_logada)
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
 ):
     dados = await request.json()
     ids = dados.get("ordem", [])
@@ -3595,12 +3722,14 @@ def pre_contrato_cliente(slug: str, request: Request, erro: str = "", db: Sessio
     return templates.TemplateResponse("publico/cadastro.html", {
         "request": request, "empresa": empresa, "cliente": None, "identificador": "",
         "cliente_encontrado": False, "cpf_confirmacao": "", "erro": erro,
-        "campos_cfg": {ce.campo.chave: ce for ce in db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+        "campos_cfg": {ce.campo.chave: ce for ce in
+                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     })
 
 
 @app.get("/e/{slug}/cadastro", response_class=HTMLResponse)
-def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_confirmacao: str = "", erro: str = "", db: Session = Depends(get_db)):
+def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_confirmacao: str = "", erro: str = "",
+                     db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     ident = limpar_identificador(identificador)
     cliente_encontrado = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=ident).first()
@@ -3610,20 +3739,26 @@ def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_c
         cliente = cliente_encontrado
     return templates.TemplateResponse("publico/cadastro.html", {
         "request": request, "empresa": empresa, "cliente": cliente, "identificador": ident,
-        "cliente_encontrado": bool(cliente_encontrado), "cpf_confirmacao": cpf_confirmacao, "erro": erro, "campos_cfg": {ce.campo.chave: ce for ce in db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+        "cliente_encontrado": bool(cliente_encontrado), "cpf_confirmacao": cpf_confirmacao, "erro": erro,
+        "campos_cfg": {ce.campo.chave: ce for ce in
+                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     })
 
 
 @app.post("/e/{slug}/reserva")
 @app.post("/e/{slug}/pre-cadastro")
 def salvar_pre_cadastro(
-    request: Request, slug: str, identificador: str = Form(...), tipo_pessoa: str = Form("fisica"), nome: str = Form(""), data_nascimento: str = Form(""), telefone: str = Form(""), cpf: str = Form(""),
-    cnpj: str = Form(""), email: str = Form(""), endereco: str = Form(""), numero: str = Form(""), complemento: str = Form(""),
-    bairro: str = Form(""), cidade: str = Form(""), estado: str = Form(""), cep: str = Form(""), local: str = Form(""),
-    local_nome: str = Form(""), acesso_local: str = Form(""), local_responsavel_nome: str = Form(""), local_responsavel_telefone: str = Form(""),
-    data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
-    acao: str = Form("salvar"),
-    db: Session = Depends(get_db)
+        request: Request, slug: str, identificador: str = Form(...), tipo_pessoa: str = Form("fisica"),
+        nome: str = Form(""), data_nascimento: str = Form(""), telefone: str = Form(""), cpf: str = Form(""),
+        cnpj: str = Form(""), email: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
+        complemento: str = Form(""),
+        bairro: str = Form(""), cidade: str = Form(""), estado: str = Form(""), cep: str = Form(""),
+        local: str = Form(""),
+        local_nome: str = Form(""), acesso_local: str = Form(""), local_responsavel_nome: str = Form(""),
+        local_responsavel_telefone: str = Form(""),
+        data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
+        acao: str = Form("salvar"),
+        db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     cpf_limpo = limpar_identificador(cpf)
@@ -3635,11 +3770,14 @@ def salvar_pre_cadastro(
         # Prioridade: CPF/CNPJ quando existir; senão celular; senão código temporário.
         ident = cpf_limpo or cnpj_limpo or telefone_limpo or uuid.uuid4().hex[:12]
     campos_empresa = {
-        ce.campo.chave: ce for ce in db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()
+        ce.campo.chave: ce for ce in
+        db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()
     }
+
     def campo_obrigatorio(chave: str) -> bool:
         ce = campos_empresa.get(chave)
         return bool(ce and ce.visivel and ce.obrigatorio)
+
     form_data = {
         "tipo_pessoa": tipo_pessoa, "nome": nome, "data_nascimento": data_nascimento, "telefone": telefone,
         "cpf": cpf, "cnpj": cnpj, "email": email, "endereco": endereco, "numero": numero, "complemento": complemento,
@@ -3705,7 +3843,6 @@ def salvar_pre_cadastro(
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao.id}", status_code=303)
 
 
-
 def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", tamanho=10):
     c.setFont(fonte, tamanho)
     for paragrafo in (texto or "").splitlines():
@@ -3723,11 +3860,14 @@ def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", taman
                 y -= leading
                 linha = palavra
                 if y < 50:
-                    c.showPage(); y = 800; c.setFont(fonte, tamanho)
+                    c.showPage();
+                    y = 800;
+                    c.setFont(fonte, tamanho)
         if linha:
             c.drawString(x, y, linha)
             y -= leading
     return y
+
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}.pdf")
 def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
@@ -3756,36 +3896,46 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
         logo_path = Path(logo.lstrip("/"))
         if logo_path.exists():
             try:
-                c.drawImage(ImageReader(str(logo_path)), 40, y-42, width=70, height=42, preserveAspectRatio=True, mask='auto')
+                c.drawImage(ImageReader(str(logo_path)), 40, y - 42, width=70, height=42, preserveAspectRatio=True,
+                            mask='auto')
             except Exception:
                 pass
     c.setFont("Helvetica-Bold", 16)
     c.drawString(120, y, empresa.nome or "Contrato")
     c.setFont("Helvetica-Bold", 13)
-    c.drawString(40, y-62, f"Contrato / Reserva #{item.id}")
+    c.drawString(40, y - 62, f"Contrato / Reserva #{item.id}")
     y -= 88
 
-    c.setFont("Helvetica-Bold", 11); c.drawString(40, y, "Dados preenchidos"); y -= 16
+    c.setFont("Helvetica-Bold", 11);
+    c.drawString(40, y, "Dados preenchidos");
+    y -= 16
     for linha in linhas_informacoes_preenchidas_contrato(item, formato="texto"):
         if y < 70:
-            c.showPage(); y = h - 60
-        y = _wrap_pdf_text(c, linha, 40, y, w-80, leading=13, tamanho=9)
+            c.showPage();
+            y = h - 60
+        y = _wrap_pdf_text(c, linha, 40, y, w - 80, leading=13, tamanho=9)
     y -= 8
 
-    c.setFont("Helvetica-Bold", 11); c.drawString(40, y, "Itens"); y -= 16
+    c.setFont("Helvetica-Bold", 11);
+    c.drawString(40, y, "Itens");
+    y -= 16
     if itens_reserva:
         for ri in itens_reserva:
             c.drawString(50, y, f"{ri.quantidade or 1}x {ri.nome} - R$ {moeda_br(ri.valor_total or 0)}")
             y -= 14
     elif produto:
-        c.drawString(50, y, produto.nome); y -= 14
+        c.drawString(50, y, produto.nome);
+        y -= 14
     y -= 10
 
-    c.setFont("Helvetica-Bold", 11); c.drawString(40, y, contrato.nome if contrato else "Contrato"); y -= 16
-    y = _wrap_pdf_text(c, contrato.clausulas if contrato else (item.observacoes or ""), 40, y, w-80)
+    c.setFont("Helvetica-Bold", 11);
+    c.drawString(40, y, contrato.nome if contrato else "Contrato");
+    y -= 16
+    y = _wrap_pdf_text(c, contrato.clausulas if contrato else (item.observacoes or ""), 40, y, w - 80)
     y -= 24
     if y < 120:
-        c.showPage(); y = h - 60
+        c.showPage();
+        y = h - 60
     c.setFont("Helvetica", 10)
     c.drawString(40, y, "Declaro estar ciente e de acordo com as condições desta locação.")
     y -= 42
@@ -3800,7 +3950,8 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     c.save()
     buffer.seek(0)
     nome_pdf = f"contrato_{empresa.slug}_{item.id}.pdf"
-    return Response(buffer.read(), media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{nome_pdf}"'})
+    return Response(buffer.read(), media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{nome_pdf}"'})
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}/clausulas", response_class=HTMLResponse)
@@ -3832,17 +3983,24 @@ def contrato_cliente_clausulas(slug: str, solicitacao_id: int, request: Request,
         "contratos_clausulas": contratos_clausulas,
     })
 
+
 @app.get("/e/{slug}/contrato/{solicitacao_id}", response_class=HTMLResponse)
 def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = db.get(Solicitacao, solicitacao_id)
-    if not empresa or not item or item.empresa_id != empresa.id or item.status not in ["pre_reserva", "reserva", "aguardando_aceite", "contrato_enviado", "aceito", "aguardando_pagamento", "reserva_confirmada", "cancelado_cliente"]:
+    if not empresa or not item or item.empresa_id != empresa.id or item.status not in ["pre_reserva", "reserva",
+                                                                                       "aguardando_aceite",
+                                                                                       "contrato_enviado", "aceito",
+                                                                                       "aguardando_pagamento",
+                                                                                       "reserva_confirmada",
+                                                                                       "cancelado_cliente"]:
         raise HTTPException(404)
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
     produto = db.get(ProdutoServico, item.produto_id) if item.produto_id else None
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    return templates.TemplateResponse("publico/contrato.html", {"request": request, "empresa": empresa, "item": item, "contrato": contrato, "produto": produto, "itens_reserva": itens_reserva})
-
+    return templates.TemplateResponse("publico/contrato.html",
+                                      {"request": request, "empresa": empresa, "item": item, "contrato": contrato,
+                                       "produto": produto, "itens_reserva": itens_reserva})
 
 
 @app.post("/e/{slug}/cancelar/{solicitacao_id}")
@@ -3869,7 +4027,8 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
         item.aceite_em = agora_utc()
         item.aprovado_em = item.aceite_em
-        fim_obj = item.hora_fim or (somar_minutos(item.hora_inicio, item.produto.duracao_minutos) if item.produto and item.produto.duracao_minutos else None)
+        fim_obj = item.hora_fim or (somar_minutos(item.hora_inicio,
+                                                  item.produto.duracao_minutos) if item.produto and item.produto.duracao_minutos else None)
         item.hora_fim = fim_obj
         criar_eventos_operacionais(db, item)
         db.commit()
@@ -3880,4 +4039,5 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
 def obrigado(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug).first()
     solicitacao = db.get(Solicitacao, solicitacao_id)
-    return templates.TemplateResponse("publico/obrigado.html", {"request": request, "empresa": empresa, "solicitacao": solicitacao})
+    return templates.TemplateResponse("publico/obrigado.html",
+                                      {"request": request, "empresa": empresa, "solicitacao": solicitacao})

@@ -2,548 +2,604 @@
 {% block conteudo %}
 {% set mensagens = mensagens|default({}) %}
 <section class="cabecalho-mobile cabecalho-com-acao">
-  <a class="voltar" href="/painel">← Início</a>
-  <div class="titulo-com-icone">
-    <h1>Operação ({{ total_itens or itens|length }})</h1>
-  </div>
+    <a class="voltar" href="/painel">← Início</a>
+    <div class="titulo-com-icone">
+        <h1>Operação ({{ total_itens or itens|length }})</h1>
+    </div>
 </section>
 
 <form method="get" class="filtro-periodo" id="filtroOperacao">
-  <label>
-    <span>Início</span>
-    <input type="date" name="data_inicial" value="{{ data_inicial }}" onchange="this.form.submit()">
-  </label>
-  <label>
-    <span>Fim</span>
-    <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
-  </label>
+    <label>
+        <span>Início</span>
+        <input type="date" name="data_inicial" value="{{ data_inicial }}" onchange="this.form.submit()">
+    </label>
+    <label>
+        <span>Fim</span>
+        <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
+    </label>
 
-  <div class="filtros-operacao filtros-operacao-compactos">
-    <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %} onchange="this.form.submit()"> 🔵 Entregar</label>
-    <label><input type="checkbox" name="mostrar_retiradas" value="1" {% if mostrar_retiradas %}checked{% endif %} onchange="this.form.submit()"> 🔴 Retirar</label>
-    <label><input type="checkbox" name="mostrar_concluidas" value="1" {% if mostrar_concluidas %}checked{% endif %} onchange="this.form.submit()"> 🟢 Encerrado</label>
-  </div>
+    <div class="filtros-operacao filtros-operacao-compactos">
+        <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %}
+                      onchange="this.form.submit()"> 🔵 Entregar</label>
+        <label><input type="checkbox" name="mostrar_retiradas" value="1" {% if mostrar_retiradas %}checked{% endif %}
+                      onchange="this.form.submit()"> 🔴 Retirar</label>
+        <label><input type="checkbox" name="mostrar_concluidas" value="1" {% if mostrar_concluidas %}checked{% endif %}
+                      onchange="this.form.submit()"> 🟢 Encerrado</label>
+    </div>
 </form>
 
 <div class="lista-agenda agenda-compacta lista-roteirizacao" id="listaRoteirizacao">
-{% for a in itens %}
-  {% set data_agenda = a.data.strftime('%d/%m') if a.data else (a.solicitacao.data_evento.strftime('%d/%m') if a.solicitacao and a.solicitacao.data_evento else '-') %}
-  {% set data_entrega = a.data.strftime('%Y-%m-%d') if a.data else '' %}
-  {% set data_entrega_texto = a.data.strftime('%d/%m/%Y') if a.data else '-' %}
-  {% set hora_entrega = a.previsao_entrega if a.previsao_entrega else (a.hora_inicio.strftime('%H:%M') if a.hora_inicio else '--') %}
-  {% set item_nome = a.solicitacao.produto.nome if a.solicitacao.produto else a.titulo %}
-  {% set tipo = a.tipo_evento or 'entrega' %}
-  {% set falta_receber = (a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0) %}
-  {% set concluido = a.status_operacional == 'concluido' %}
-  {% set roteirizado = (a.previsao_entrega or (a.observacoes_operacionais and 'Roteirização salva' in a.observacoes_operacionais) or a.ordem_rota or (a.solicitacao and a.solicitacao.data_evento and a.data and a.data != a.solicitacao.data_evento)) %}
-  {% set data_contrato_iso = a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else '' %}
-  {% set data_contrato_texto = a.solicitacao.data_evento.strftime('%d/%m/%Y') if a.solicitacao and a.solicitacao.data_evento else '-' %}
-  {% set hora_contrato_texto = a.solicitacao.hora_inicio.strftime('%H:%M') if a.solicitacao and a.solicitacao.hora_inicio else '-' %}
-  {% set hora_card_operacao = hora_entrega|replace(':00','H') if hora_entrega != '--' else '--' %}
-  {% set hora_card_contrato = hora_contrato_texto|replace(':00','H') if hora_contrato_texto != '-' else '-' %}
-  {% set entrega_fora_data = tipo == 'entrega' and a.solicitacao and a.solicitacao.data_evento and a.data and a.data != a.solicitacao.data_evento %}
-  {% set tel = a.solicitacao.cliente.telefone or a.solicitacao.cliente.identificador %}
-  {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
-  {% set hora_previsao_inicio = ajustar_hora_texto(hora_entrega, -1) %}
-  {% set hora_previsao_fim = ajustar_hora_texto(hora_entrega, 1) %}
-  {% set msg_preparacao = (mensagens.preparacao|default('Olá, {{cliente}}.\n\nEstamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\nNossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\nCaso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\nSe houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\nEquipe {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim) %}
-  {% set msg_caminho = (mensagens.a_caminho|default('Olá, {{cliente}}.\n\nNossa equipe já está a caminho.\n\nEm breve estaremos no local informado.\n\nCaso precise falar conosco, basta responder esta mensagem.\n\nEquipe {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim) %}
-  {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=a.solicitacao_id) %}
-  {% set endereco_rota = (a.solicitacao.local or '') ~ (', ' ~ a.bairro if a.bairro else '') ~ (', ' ~ (a.solicitacao.bairro or '') if a.solicitacao and a.solicitacao.bairro and not a.bairro else '') %}
-  {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
-  {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
-  <details class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}" draggable="true" data-agenda-id="{{ a.id }}">
-    <summary>
-      <div class="alca-arrastar" title="Arrastar para reordenar">⋮⋮</div>
-      <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
-      <div class="data-agenda">{{ data_agenda }}</div>
-      <div class="info-agenda">
-        <b>{{ hora_card_operacao }} / {{ hora_card_contrato }} · {{ a.solicitacao.cliente.nome }}</b>
-        <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
-        <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0))|moeda_br }}</small>
-        <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}{% if concluido %} encerrado{% endif %}</em>
-      </div>
-      <span class="seta-card seta-expandir">⌄</span>
-    </summary>
+    {% for a in itens %}
+    {% set data_agenda = a.data.strftime('%d/%m') if a.data else (a.solicitacao.data_evento.strftime('%d/%m') if
+    a.solicitacao and a.solicitacao.data_evento else '-') %}
+    {% set data_entrega = a.data.strftime('%Y-%m-%d') if a.data else '' %}
+    {% set data_entrega_texto = a.data.strftime('%d/%m/%Y') if a.data else '-' %}
+    {% set hora_entrega = a.previsao_entrega if a.previsao_entrega else (a.hora_inicio.strftime('%H:%M') if
+    a.hora_inicio else '--') %}
+    {% set item_nome = a.solicitacao.produto.nome if a.solicitacao.produto else a.titulo %}
+    {% set tipo = a.tipo_evento or 'entrega' %}
+    {% set falta_receber = (a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0) %}
+    {% set concluido = a.status_operacional == 'concluido' %}
+    {% set roteirizado = (a.previsao_entrega or (a.observacoes_operacionais and 'Roteirização salva' in
+    a.observacoes_operacionais) or a.ordem_rota or (a.solicitacao and a.solicitacao.data_evento and a.data and a.data !=
+    a.solicitacao.data_evento)) %}
+    {% set data_contrato_iso = a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else
+    '' %}
+    {% set data_contrato_texto = a.solicitacao.data_evento.strftime('%d/%m/%Y') if a.solicitacao and
+    a.solicitacao.data_evento else '-' %}
+    {% set hora_contrato_texto = a.solicitacao.hora_inicio.strftime('%H:%M') if a.solicitacao and
+    a.solicitacao.hora_inicio else '-' %}
+    {% set hora_card_operacao = hora_entrega|replace(':00','H') if hora_entrega != '--' else '--' %}
+    {% set hora_card_contrato = hora_contrato_texto|replace(':00','H') if hora_contrato_texto != '-' else '-' %}
+    {% set entrega_fora_data = tipo == 'entrega' and a.solicitacao and a.solicitacao.data_evento and a.data and a.data
+    != a.solicitacao.data_evento %}
+    {% set tel = a.solicitacao.cliente.telefone or a.solicitacao.cliente.identificador %}
+    {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
+    {% set hora_previsao_inicio = ajustar_hora_texto(hora_entrega, -1) %}
+    {% set hora_previsao_fim = ajustar_hora_texto(hora_entrega, 1) %}
+    {% set msg_preparacao = (mensagens.preparacao|default('Olá, {{cliente}}.\n\nEstamos nos preparando para sair e, em
+    breve, iniciaremos o deslocamento até você.\n\nNossa previsão de chegada é entre {{hora_previsao_inicio}} e
+    {{hora_previsao_fim}}.\n\nCaso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos
+    avise.\n\nSe houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\nEquipe
+    {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
+    or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else
+    '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim)
+    %}
+    {% set msg_caminho = (mensagens.a_caminho|default('Olá, {{cliente}}.\n\nNossa equipe já está a caminho.\n\nEm breve
+    estaremos no local informado.\n\nCaso precise falar conosco, basta responder esta mensagem.\n\nEquipe
+    {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
+    or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else
+    '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim)
+    %}
+    {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug,
+    solicitacao_id=a.solicitacao_id) %}
+    {% set c = a.solicitacao.cliente %}
+    {% set endereco_rota =
+    (c.endereco or a.solicitacao.local or '') ~
+    (', ' ~ c.numero if c.numero else '') ~
+    (', ' ~ c.complemento if c.complemento else '') ~
+    (', ' ~ (a.bairro or a.solicitacao.bairro or c.bairro) if (a.bairro or a.solicitacao.bairro or c.bairro) else '') ~
+    (', ' ~ c.cidade if c.cidade else '') ~
+    (', ' ~ c.estado if c.estado else '') ~
+    (', CEP ' ~ c.cep if c.cep else '')
+    %}
+    {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) %}
+    {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
+    <details
+            class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
+            draggable="true" data-agenda-id="{{ a.id }}">
+        <summary>
+            <div class="alca-arrastar" title="Arrastar para reordenar">⋮⋮</div>
+            <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
+            <div class="data-agenda">{{ data_agenda }}</div>
+            <div class="info-agenda">
+                <b>{{ hora_card_operacao }} / {{ hora_card_contrato }} · {{ a.solicitacao.cliente.nome }}</b>
+                <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
+                <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or
+                    0))|moeda_br }}</small>
+                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}{% if concluido %} encerrado{% endif %}</em>
+            </div>
+            <span class="seta-card seta-expandir">⌄</span>
+        </summary>
 
-    <form id="roteiro-{{ a.id }}" method="post" action="/painel/agenda/{{ a.id }}/roteiro" class="preparo-acoes form-operacao" data-data-evento="{{ a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else '' }}" data-tipo="{{ tipo }}" onsubmit="return validarDataOperacao(this)">
-      <a class="link-detalhe link-contrato-operacao" href="{{ link_contrato_visual }}" target="_blank">Ver contrato</a>
+        <form id="roteiro-{{ a.id }}" method="post" action="/painel/agenda/{{ a.id }}/roteiro"
+              class="preparo-acoes form-operacao"
+              data-data-evento="{{ a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else '' }}"
+              data-tipo="{{ tipo }}" onsubmit="return validarDataOperacao(this)">
+            <a class="link-detalhe link-contrato-operacao" href="{{ link_contrato_visual }}" target="_blank">Ver
+                contrato</a>
 
-      <div class="linha">
-        <div>
-          <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
-          <input type="date" name="data_operacao" value="{{ data_entrega }}">
+            <div class="linha">
+                <div>
+                    <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
+                    <input type="date" name="data_operacao" value="{{ data_entrega }}">
+                </div>
+                <div>
+                    <label>{{ 'Hora da busca' if tipo == 'retirada' else 'Hora da entrega' }}</label>
+                    <input type="time" name="previsao_entrega"
+                           value="{{ hora_entrega if hora_entrega != '--' else '' }}">
+                </div>
+            </div>
+
+            <div class="descricao-roteiro">
+                <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
+                <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
+            </div>
+            <p class="texto-discreto operacao-ajuda">Data do contrato: <b>{{ data_contrato_texto }}</b>. {% if tipo ==
+                'retirada' %}A busca pode ser depois, mas nunca antes do contrato.{% else %}A entrega pode ser antes,
+                mas nunca depois do contrato.{% endif %}</p>
+
+            <div class="acoes-rota operacao-acoes-novas">
+                <a class="botao-mini botao-whats-btn" target="_blank"
+                   href="https://wa.me/55{{ tel_limpo }}?text={{ msg_preparacao|urlencode }}">Previsão</a>
+                {% if data_entrega and hora_entrega != '--' %}
+                <a class="botao-mini botao-whats-btn botao-a-caminho" target="_blank"
+                   href="https://wa.me/55{{ tel_limpo }}?text={{ msg_caminho|urlencode }}" data-agenda-id="{{ a.id }}">A
+                    caminho</a>
+                {% else %}
+                <span class="botao-mini botao-whats-btn desabilitado"
+                      title="Salve a data e a hora para liberar o aviso ao cliente.">A caminho</span>
+                {% endif %}
+
+                {% if endereco_rota|trim %}
+                <a class="botao-mini botao-rota desabilitado" href="#" data-waze="{{ url_waze }}"
+                   data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}"
+                   title="Clique em A caminho para liberar a navegação.">Iniciar rota</a>
+                {% else %}
+                <span class="botao-mini botao-rota desabilitado"
+                      title="Cadastre o endereço/local da reserva para iniciar rota.">Iniciar rota</span>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="falta-receber-operacao">
+            <span>Falta receber</span>
+            <b>R$ {{ falta_receber|moeda_br }}</b>
         </div>
-        <div>
-          <label>{{ 'Hora da busca' if tipo == 'retirada' else 'Hora da entrega' }}</label>
-          <input type="time" name="previsao_entrega" value="{{ hora_entrega if hora_entrega != '--' else '' }}">
-        </div>
-      </div>
 
-      <div class="descricao-roteiro">
-        <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
-        <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
-      </div>
-      <p class="texto-discreto operacao-ajuda">Data do contrato: <b>{{ data_contrato_texto }}</b>. {% if tipo == 'retirada' %}A busca pode ser depois, mas nunca antes do contrato.{% else %}A entrega pode ser antes, mas nunca depois do contrato.{% endif %}</p>
+        <details class="registrar-pagamento-operacao">
+            <summary>Registrar pagamento</summary>
+            <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/pagamento"
+                  class="form-pagamento-operacao">
+                <input type="hidden" name="retorno" value="{{ request.url }}">
+                <div class="linha">
+                    <div>
+                        <label>Valor recebido</label>
+                        <input type="text" name="valor_pago" inputmode="decimal" placeholder="Ex.: 100,00">
+                    </div>
+                    <div>
+                        <label>Forma</label>
+                        <select name="forma_pagamento">
+                            <option value="pix">PIX</option>
+                            <option value="dinheiro">Dinheiro</option>
+                            <option value="cartao">Cartão</option>
+                            <option value="transferencia">Transferência</option>
+                            <option value="outro">Outro</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="linha">
+                    <div>
+                        <label>Data do pagamento</label>
+                        <input type="date" name="data_pagamento">
+                    </div>
+                    <div>
+                        <label>Comprovante no nome do cliente?</label>
+                        <select name="comprovante_no_nome_cliente">
+                            <option value="sim">Sim</option>
+                            <option value="nao">Não</option>
+                        </select>
+                    </div>
+                </div>
+                <label>Observação</label>
+                <input type="text" name="observacoes_pagamento" placeholder="Ex.: dinheiro entregue ao Júnior">
+                <button class="botao-mini principal botao-registrar-pagamento" type="submit">Registrar pagamento
+                </button>
+            </form>
+        </details>
 
-      <div class="acoes-rota operacao-acoes-novas">
-        <a class="botao-mini botao-whats-btn" target="_blank" href="https://wa.me/55{{ tel_limpo }}?text={{ msg_preparacao|urlencode }}">Previsão</a>
-        {% if data_entrega and hora_entrega != '--' %}
-          <a class="botao-mini botao-whats-btn botao-a-caminho" target="_blank" href="https://wa.me/55{{ tel_limpo }}?text={{ msg_caminho|urlencode }}" data-agenda-id="{{ a.id }}">A caminho</a>
-        {% else %}
-          <span class="botao-mini botao-whats-btn desabilitado" title="Salve a data e a hora para liberar o aviso ao cliente.">A caminho</span>
-        {% endif %}
-
-        {% if endereco_rota|trim %}
-          <a class="botao-mini botao-rota desabilitado" href="#" data-waze="{{ url_waze }}" data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}" title="Clique em A caminho para liberar a navegação.">Iniciar rota</a>
-        {% else %}
-          <span class="botao-mini botao-rota desabilitado" title="Cadastre o endereço/local da reserva para iniciar rota.">Iniciar rota</span>
-        {% endif %}
-      </div>
-    </form>
-
-    <div class="falta-receber-operacao">
-      <span>Falta receber</span>
-      <b>R$ {{ falta_receber|moeda_br }}</b>
-    </div>
-
-    <details class="registrar-pagamento-operacao">
-      <summary>Registrar pagamento</summary>
-      <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/pagamento" class="form-pagamento-operacao">
-        <input type="hidden" name="retorno" value="{{ request.url }}">
-        <div class="linha">
-          <div>
-            <label>Valor recebido</label>
-            <input type="text" name="valor_pago" inputmode="decimal" placeholder="Ex.: 100,00">
-          </div>
-          <div>
-            <label>Forma</label>
-            <select name="forma_pagamento">
-              <option value="pix">PIX</option>
-              <option value="dinheiro">Dinheiro</option>
-              <option value="cartao">Cartão</option>
-              <option value="transferencia">Transferência</option>
-              <option value="outro">Outro</option>
+        <div class="status-operacao-final">
+            <label>Status</label>
+            <select name="status_operacional" form="roteiro-{{ a.id }}">
+                <option value="pendente" {% if not concluido %}selected{% endif %}>{{ 'Falta buscar' if tipo ==
+                    'retirada' else 'Falta entregar' }}
+                </option>
+                <option value="concluido" {% if concluido %}selected{% endif %}>Encerrado</option>
             </select>
-          </div>
         </div>
-        <div class="linha">
-          <div>
-            <label>Data do pagamento</label>
-            <input type="date" name="data_pagamento">
-          </div>
-          <div>
-            <label>Comprovante no nome do cliente?</label>
-            <select name="comprovante_no_nome_cliente">
-              <option value="sim">Sim</option>
-              <option value="nao">Não</option>
-            </select>
-          </div>
-        </div>
-        <label>Observação</label>
-        <input type="text" name="observacoes_pagamento" placeholder="Ex.: dinheiro entregue ao Júnior">
-        <button class="botao-mini principal botao-registrar-pagamento" type="submit">Registrar pagamento</button>
-      </form>
+
+
+        <button form="roteiro-{{ a.id }}" name="direcao" value="" class="botao-mini principal botao-salvar-operacao"
+                type="submit">Salvar
+        </button>
     </details>
-
-    <div class="status-operacao-final">
-      <label>Status</label>
-      <select name="status_operacional" form="roteiro-{{ a.id }}">
-        <option value="pendente" {% if not concluido %}selected{% endif %}>{{ 'Falta buscar' if tipo == 'retirada' else 'Falta entregar' }}</option>
-        <option value="concluido" {% if concluido %}selected{% endif %}>Encerrado</option>
-      </select>
-    </div>
-
-
-    <button form="roteiro-{{ a.id }}" name="direcao" value="" class="botao-mini principal botao-salvar-operacao" type="submit">Salvar</button>
-  </details>
-{% else %}
-  <div class="box"><p>Nenhum evento operacional no período.</p></div>
-{% endfor %}
+    {% else %}
+    <div class="box"><p>Nenhum evento operacional no período.</p></div>
+    {% endfor %}
 </div>
 
 <details class="accordion">
-  <summary>Mensagens WhatsApp não usadas nesta tela</summary>
-  <p class="texto-discreto">Nesta operação usamos apenas <b>Previsão</b> e <b>A caminho</b>.</p>
-  <ul class="lista-simples">
-    <li>Pré-reserva / link do cliente</li>
-    <li>Aceite do contrato</li>
-    <li>Pagamento</li>
-    <li>Confirmação de pagamento</li>
-    <li>Localização</li>
-  </ul>
+    <summary>Mensagens WhatsApp não usadas nesta tela</summary>
+    <p class="texto-discreto">Nesta operação usamos apenas <b>Previsão</b> e <b>A caminho</b>.</p>
+    <ul class="lista-simples">
+        <li>Pré-reserva / link do cliente</li>
+        <li>Aceite do contrato</li>
+        <li>Pagamento</li>
+        <li>Confirmação de pagamento</li>
+        <li>Localização</li>
+    </ul>
 </details>
 
 
 <style>
-.lista-roteirizacao .linha-operacao{
-  background:#fff !important;
-  transition: background .2s ease, border-color .2s ease, transform .15s ease;
-}
-.lista-roteirizacao .linha-operacao.roteiro-salvo{
-  background:#F2F4F7 !important;
-  border-color:#d9e0ea;
-}
-.lista-roteirizacao .linha-operacao.roteiro-outra-data{
-  background:#FFF8DB !important;
-  border-color:#F3D675;
-}
-.lista-roteirizacao .linha-operacao.roteiro-retirada{
-  background:#FFECEC !important;
-  border-color:#F6B8B8;
-}
-.lista-roteirizacao .linha-operacao.concluido{
-  background:#ECFDF3 !important;
-  border-color:#ABEFC6;
-  opacity:1;
-}
-.lista-roteirizacao .linha-operacao.arrastando{
-  opacity:.65;
-  transform:scale(.99);
-}
-.lista-roteirizacao .linha-operacao summary{
-  grid-template-columns:22px 16px 64px minmax(0,1fr) 18px;
-  gap:8px;
-}
-.lista-roteirizacao .info-agenda{
-  min-width:0;
-  overflow:hidden;
-}
-.lista-roteirizacao .info-agenda b,
-.lista-roteirizacao .info-agenda small,
-.lista-roteirizacao .info-agenda em{
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
-}
-.alca-arrastar{
-  color:#7a8797;
-  font-weight:900;
-  letter-spacing:-2px;
-  padding:8px 2px;
-  cursor:grab;
-  user-select:none;
-  touch-action:none;
-}
-.descricao-roteiro{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-  margin:10px 0;
-  font-size:13px;
-}
-.descricao-roteiro span{
-  background:rgba(255,255,255,.62);
-  border:1px solid #d8e1ef;
-  border-radius:12px;
-  padding:8px 10px;
-}
+    .lista-roteirizacao .linha-operacao{
+      background:#fff !important;
+      transition: background .2s ease, border-color .2s ease, transform .15s ease;
+    }
+    .lista-roteirizacao .linha-operacao.roteiro-salvo{
+      background:#F2F4F7 !important;
+      border-color:#d9e0ea;
+    }
+    .lista-roteirizacao .linha-operacao.roteiro-outra-data{
+      background:#FFF8DB !important;
+      border-color:#F3D675;
+    }
+    .lista-roteirizacao .linha-operacao.roteiro-retirada{
+      background:#FFECEC !important;
+      border-color:#F6B8B8;
+    }
+    .lista-roteirizacao .linha-operacao.concluido{
+      background:#ECFDF3 !important;
+      border-color:#ABEFC6;
+      opacity:1;
+    }
+    .lista-roteirizacao .linha-operacao.arrastando{
+      opacity:.65;
+      transform:scale(.99);
+    }
+    .lista-roteirizacao .linha-operacao summary{
+      grid-template-columns:22px 16px 64px minmax(0,1fr) 18px;
+      gap:8px;
+    }
+    .lista-roteirizacao .info-agenda{
+      min-width:0;
+      overflow:hidden;
+    }
+    .lista-roteirizacao .info-agenda b,
+    .lista-roteirizacao .info-agenda small,
+    .lista-roteirizacao .info-agenda em{
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .alca-arrastar{
+      color:#7a8797;
+      font-weight:900;
+      letter-spacing:-2px;
+      padding:8px 2px;
+      cursor:grab;
+      user-select:none;
+      touch-action:none;
+    }
+    .descricao-roteiro{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px;
+      margin:10px 0;
+      font-size:13px;
+    }
+    .descricao-roteiro span{
+      background:rgba(255,255,255,.62);
+      border:1px solid #d8e1ef;
+      border-radius:12px;
+      padding:8px 10px;
+    }
 
 
-.link-contrato-operacao{
-  display:inline-block;
-  font-size:12px;
-  margin:0 0 8px;
-}
+    .link-contrato-operacao{
+      display:inline-block;
+      font-size:12px;
+      margin:0 0 8px;
+    }
 
-.falta-receber-operacao{
-  margin:0 12px 10px;
-  border:1px solid #d8e1ef;
-  background:#fff;
-  border-radius:12px;
-  padding:9px 12px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  font-size:13px;
-}
-.falta-receber-operacao span{
-  color:#475467;
-  font-weight:700;
-}
-.falta-receber-operacao b{
-  color:#101828;
-  font-size:15px;
-}
-.operacao-acoes-novas .botao-mini{
-  width:100%;
-  min-height:38px;
-  height:38px;
-  padding:8px 12px;
-  font-size:14px;
-  font-weight:700;
-  border-radius:11px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  text-decoration:none;
-  box-sizing:border-box;
-}
-.operacao-acoes-novas{
-  display:grid;
-  gap:8px;
-}
+    .falta-receber-operacao{
+      margin:0 12px 10px;
+      border:1px solid #d8e1ef;
+      background:#fff;
+      border-radius:12px;
+      padding:9px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font-size:13px;
+    }
+    .falta-receber-operacao span{
+      color:#475467;
+      font-weight:700;
+    }
+    .falta-receber-operacao b{
+      color:#101828;
+      font-size:15px;
+    }
+    .operacao-acoes-novas .botao-mini{
+      width:100%;
+      min-height:38px;
+      height:38px;
+      padding:8px 12px;
+      font-size:14px;
+      font-weight:700;
+      border-radius:11px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-decoration:none;
+      box-sizing:border-box;
+    }
+    .operacao-acoes-novas{
+      display:grid;
+      gap:8px;
+    }
 
-.botao-whats-btn.desabilitado,
-.botao-rota.desabilitado{
-  opacity:.45;
-  pointer-events:none;
-  filter:grayscale(1);
-  cursor:not-allowed;
-  background:#e5e7eb !important;
-  color:#6b7280 !important;
-  border-color:#d1d5db !important;
-}
-.status-operacao-final{
-  margin:0 12px 10px;
-}
-.botao-salvar-operacao{
-  width:calc(100% - 24px);
-  margin:0 12px 14px;
-  justify-content:center;
-  padding:12px;
-}
+    .botao-whats-btn.desabilitado,
+    .botao-rota.desabilitado{
+      opacity:.45;
+      pointer-events:none;
+      filter:grayscale(1);
+      cursor:not-allowed;
+      background:#e5e7eb !important;
+      color:#6b7280 !important;
+      border-color:#d1d5db !important;
+    }
+    .status-operacao-final{
+      margin:0 12px 10px;
+    }
+    .botao-salvar-operacao{
+      width:calc(100% - 24px);
+      margin:0 12px 14px;
+      justify-content:center;
+      padding:12px;
+    }
 
-.registrar-pagamento-operacao{
-  margin:0 12px 14px;
-  border:1px solid #d8e1ef;
-  border-radius:14px;
-  background:#f8fafc;
-  overflow:hidden;
-}
-.registrar-pagamento-operacao > summary{
-  list-style:none;
-  cursor:pointer;
-  background:#1f6feb;
-  color:#fff;
-  text-align:center;
-  font-weight:700;
-  font-size:14px;
-  padding:8px 12px;
-  min-height:38px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  border-radius:12px;
-  box-sizing:border-box;
-}
-.registrar-pagamento-operacao > summary::-webkit-details-marker{display:none;}
+    .registrar-pagamento-operacao{
+      margin:0 12px 14px;
+      border:1px solid #d8e1ef;
+      border-radius:14px;
+      background:#f8fafc;
+      overflow:hidden;
+    }
+    .registrar-pagamento-operacao > summary{
+      list-style:none;
+      cursor:pointer;
+      background:#1f6feb;
+      color:#fff;
+      text-align:center;
+      font-weight:700;
+      font-size:14px;
+      padding:8px 12px;
+      min-height:38px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:12px;
+      box-sizing:border-box;
+    }
+    .registrar-pagamento-operacao > summary::-webkit-details-marker{display:none;}
 
-.lista-roteirizacao .linha-operacao .registrar-pagamento-operacao > summary{
-  display:flex !important;
-  grid-template-columns:initial !important;
-  width:100%;
-  min-height:38px;
-  height:38px;
-  white-space:nowrap;
-  line-height:1;
-}
-.lista-roteirizacao .linha-operacao .botao-rota{
-  justify-content:center;
-}
-.form-pagamento-operacao{
-  padding:12px;
-  display:grid;
-  gap:10px;
-}
-.botao-registrar-pagamento{
-  width:100%;
-  justify-content:center;
-  padding:12px;
-}
+    .lista-roteirizacao .linha-operacao .registrar-pagamento-operacao > summary{
+      display:flex !important;
+      grid-template-columns:initial !important;
+      width:100%;
+      min-height:38px;
+      height:38px;
+      white-space:nowrap;
+      line-height:1;
+    }
+    .lista-roteirizacao .linha-operacao .botao-rota{
+      justify-content:center;
+    }
+    .form-pagamento-operacao{
+      padding:12px;
+      display:grid;
+      gap:10px;
+    }
+    .botao-registrar-pagamento{
+      width:100%;
+      justify-content:center;
+      padding:12px;
+    }
 
-@media (max-width:700px){
-  .lista-roteirizacao .linha-operacao summary{
-    grid-template-columns:18px 14px 58px minmax(0,1fr) 16px;
-    gap:6px;
-    padding:10px 8px;
-  }
-  .lista-roteirizacao .data-agenda{
-    font-size:18px;
-  }
-  .lista-roteirizacao .info-agenda b{
-    font-size:13px;
-  }
-  .lista-roteirizacao .info-agenda small{
-    font-size:11px;
-  }
-  .descricao-roteiro{
-    grid-template-columns:1fr;
-  }
-}
+    @media (max-width:700px){
+      .lista-roteirizacao .linha-operacao summary{
+        grid-template-columns:18px 14px 58px minmax(0,1fr) 16px;
+        gap:6px;
+        padding:10px 8px;
+      }
+      .lista-roteirizacao .data-agenda{
+        font-size:18px;
+      }
+      .lista-roteirizacao .info-agenda b{
+        font-size:13px;
+      }
+      .lista-roteirizacao .info-agenda small{
+        font-size:11px;
+      }
+      .descricao-roteiro{
+        grid-template-columns:1fr;
+      }
+    }
 </style>
 
 <script>
-(function(){
-  const formFiltro = document.getElementById('filtroOperacao');
-  const storageKey = 'conect_operacao_filtros';
+    (function(){
+      const formFiltro = document.getElementById('filtroOperacao');
+      const storageKey = 'conect_operacao_filtros';
 
-  function salvarFiltros(){
-    if(!formFiltro) return;
-    const dados = {
-      data_inicial: formFiltro.querySelector('[name="data_inicial"]')?.value || '',
-      data_final: formFiltro.querySelector('[name="data_final"]')?.value || '',
-      mostrar_entregas: formFiltro.querySelector('[name="mostrar_entregas"]')?.checked ? '1' : '',
-      mostrar_retiradas: formFiltro.querySelector('[name="mostrar_retiradas"]')?.checked ? '1' : '',
-      mostrar_concluidas: formFiltro.querySelector('[name="mostrar_concluidas"]')?.checked ? '1' : ''
-    };
-    localStorage.setItem(storageKey, JSON.stringify(dados));
-  }
-
-  if(formFiltro){
-    const salvo = localStorage.getItem(storageKey);
-    if(!window.location.search && salvo){
-      try{
-        const dados = JSON.parse(salvo);
-        const params = new URLSearchParams();
-        if(dados.data_inicial) params.set('data_inicial', dados.data_inicial);
-        if(dados.data_final) params.set('data_final', dados.data_final);
-        if(dados.mostrar_entregas) params.set('mostrar_entregas', '1');
-        if(dados.mostrar_retiradas) params.set('mostrar_retiradas', '1');
-        if(dados.mostrar_concluidas) params.set('mostrar_concluidas', '1');
-        if(params.toString()) window.location.replace(window.location.pathname + '?' + params.toString());
-      }catch(e){}
-    }
-    formFiltro.addEventListener('submit', salvarFiltros);
-    formFiltro.querySelectorAll('input').forEach(campo => campo.addEventListener('change', salvarFiltros));
-  }
-})();
-
-(function(){
-  const lista = document.getElementById('listaRoteirizacao');
-  if(!lista) return;
-
-  let arrastado = null;
-
-  function cards(){
-    return Array.from(lista.querySelectorAll('.linha-operacao[data-agenda-id]'));
-  }
-
-  async function salvarOrdem(){
-    const ordem = cards().map(card => card.dataset.agendaId);
-    if(!ordem.length) return;
-
-    const resposta = await fetch('/painel/reservas/roteirizacao', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ordem})
-    });
-
-    if(!resposta.ok){
-      alert('Não foi possível salvar a roteirização.');
-      return;
-    }
-
-    cards().forEach(card => {
-      if(!card.classList.contains('roteiro-outra-data') && !card.classList.contains('roteiro-retirada')){
-        card.classList.add('roteiro-salvo');
+      function salvarFiltros(){
+        if(!formFiltro) return;
+        const dados = {
+          data_inicial: formFiltro.querySelector('[name="data_inicial"]')?.value || '',
+          data_final: formFiltro.querySelector('[name="data_final"]')?.value || '',
+          mostrar_entregas: formFiltro.querySelector('[name="mostrar_entregas"]')?.checked ? '1' : '',
+          mostrar_retiradas: formFiltro.querySelector('[name="mostrar_retiradas"]')?.checked ? '1' : '',
+          mostrar_concluidas: formFiltro.querySelector('[name="mostrar_concluidas"]')?.checked ? '1' : ''
+        };
+        localStorage.setItem(storageKey, JSON.stringify(dados));
       }
-    });
-  }
 
-  document.querySelectorAll('.botao-a-caminho[data-agenda-id]').forEach(botao => {
-    botao.addEventListener('click', () => {
-      const rota = document.querySelector(`[data-rota-agenda-id="${botao.dataset.agendaId}"]`);
-      if(rota){
-        rota.classList.remove('desabilitado');
-        rota.removeAttribute('title');
-      }
-    });
-  });
-
-  document.querySelectorAll('.botao-rota[data-waze][data-maps]').forEach(botao => {
-    botao.addEventListener('click', event => {
-      event.preventDefault();
-      if(botao.classList.contains('desabilitado')) return;
-
-      const waze = botao.dataset.waze;
-      const maps = botao.dataset.maps;
-      let saiuDoApp = false;
-
-      const marcarSaida = () => { saiuDoApp = true; };
-      document.addEventListener('visibilitychange', () => {
-        if(document.hidden) marcarSaida();
-      }, {once:true});
-
-      window.location.href = waze;
-
-      setTimeout(() => {
-        if(!saiuDoApp){
-          window.location.href = maps;
+      if(formFiltro){
+        const salvo = localStorage.getItem(storageKey);
+        if(!window.location.search && salvo){
+          try{
+            const dados = JSON.parse(salvo);
+            const params = new URLSearchParams();
+            if(dados.data_inicial) params.set('data_inicial', dados.data_inicial);
+            if(dados.data_final) params.set('data_final', dados.data_final);
+            if(dados.mostrar_entregas) params.set('mostrar_entregas', '1');
+            if(dados.mostrar_retiradas) params.set('mostrar_retiradas', '1');
+            if(dados.mostrar_concluidas) params.set('mostrar_concluidas', '1');
+            if(params.toString()) window.location.replace(window.location.pathname + '?' + params.toString());
+          }catch(e){}
         }
-      }, 1400);
-    });
-  });
+        formFiltro.addEventListener('submit', salvarFiltros);
+        formFiltro.querySelectorAll('input').forEach(campo => campo.addEventListener('change', salvarFiltros));
+      }
+    })();
 
-  cards().forEach(card => {
-    card.addEventListener('dragstart', () => {
-      arrastado = card;
-      card.classList.add('arrastando');
-    });
+    (function(){
+      const lista = document.getElementById('listaRoteirizacao');
+      if(!lista) return;
 
-    card.addEventListener('dragend', async () => {
-      card.classList.remove('arrastando');
-      arrastado = null;
-      await salvarOrdem();
-    });
+      let arrastado = null;
 
-    card.addEventListener('dragover', event => {
-      event.preventDefault();
-      const alvo = event.currentTarget;
-      if(!arrastado || alvo === arrastado) return;
-      const caixa = alvo.getBoundingClientRect();
-      const depois = event.clientY > caixa.top + caixa.height / 2;
-      lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
-    });
+      function cards(){
+        return Array.from(lista.querySelectorAll('.linha-operacao[data-agenda-id]'));
+      }
 
-    // Celular: permite segurar e arrastar com o dedo.
-    card.addEventListener('touchmove', event => {
-      if(!arrastado) return;
-      const toque = event.touches[0];
-      const alvo = document.elementFromPoint(toque.clientX, toque.clientY)?.closest('.linha-operacao[data-agenda-id]');
-      if(!alvo || alvo === arrastado || alvo.parentElement !== lista) return;
-      const caixa = alvo.getBoundingClientRect();
-      const depois = toque.clientY > caixa.top + caixa.height / 2;
-      lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
-    }, {passive:true});
+      async function salvarOrdem(){
+        const ordem = cards().map(card => card.dataset.agendaId);
+        if(!ordem.length) return;
 
-    card.addEventListener('touchstart', () => {
-      arrastado = card;
-      card.classList.add('arrastando');
-    }, {passive:true});
+        const resposta = await fetch('/painel/reservas/roteirizacao', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({ordem})
+        });
 
-    card.addEventListener('touchend', async () => {
-      if(!arrastado) return;
-      card.classList.remove('arrastando');
-      arrastado = null;
-      await salvarOrdem();
-    });
-  });
+        if(!resposta.ok){
+          alert('Não foi possível salvar a roteirização.');
+          return;
+        }
 
-})();
+        cards().forEach(card => {
+          if(!card.classList.contains('roteiro-outra-data') && !card.classList.contains('roteiro-retirada')){
+            card.classList.add('roteiro-salvo');
+          }
+        });
+      }
 
-function validarDataOperacao(form){
-  const dataContrato = form.dataset.dataEvento;
-  const tipo = form.dataset.tipo || 'entrega';
-  const campo = form.querySelector('[name="data_operacao"]') || form.querySelector('[name="data_evento"]');
-  if(!dataContrato || !campo || !campo.value) return true;
+      document.querySelectorAll('.botao-a-caminho[data-agenda-id]').forEach(botao => {
+        botao.addEventListener('click', () => {
+          const rota = document.querySelector(`[data-rota-agenda-id="${botao.dataset.agendaId}"]`);
+          if(rota){
+            rota.classList.remove('desabilitado');
+            rota.removeAttribute('title');
+          }
+        });
+      });
 
-  if(tipo === 'retirada'){
-    if(campo.value < dataContrato){
-      alert('A data da busca não pode ser anterior à data do contrato.');
-      return false;
+      document.querySelectorAll('.botao-rota[data-waze][data-maps]').forEach(botao => {
+        botao.addEventListener('click', event => {
+          event.preventDefault();
+          if(botao.classList.contains('desabilitado')) return;
+
+          const waze = botao.dataset.waze;
+          const maps = botao.dataset.maps;
+          let saiuDoApp = false;
+
+          const marcarSaida = () => { saiuDoApp = true; };
+          document.addEventListener('visibilitychange', () => {
+            if(document.hidden) marcarSaida();
+          }, {once:true});
+
+    window.open(waze, "_blank");
+
+    setTimeout(() => {
+        if (!saiuDoApp) {
+            window.open(maps, "_blank");
+        }
+    }, 1400);
+        });
+      });
+
+      cards().forEach(card => {
+        card.addEventListener('dragstart', () => {
+          arrastado = card;
+          card.classList.add('arrastando');
+        });
+
+        card.addEventListener('dragend', async () => {
+          card.classList.remove('arrastando');
+          arrastado = null;
+          await salvarOrdem();
+        });
+
+        card.addEventListener('dragover', event => {
+          event.preventDefault();
+          const alvo = event.currentTarget;
+          if(!arrastado || alvo === arrastado) return;
+          const caixa = alvo.getBoundingClientRect();
+          const depois = event.clientY > caixa.top + caixa.height / 2;
+          lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
+        });
+
+        // Celular: permite segurar e arrastar com o dedo.
+        card.addEventListener('touchmove', event => {
+          if(!arrastado) return;
+          const toque = event.touches[0];
+          const alvo = document.elementFromPoint(toque.clientX, toque.clientY)?.closest('.linha-operacao[data-agenda-id]');
+          if(!alvo || alvo === arrastado || alvo.parentElement !== lista) return;
+          const caixa = alvo.getBoundingClientRect();
+          const depois = toque.clientY > caixa.top + caixa.height / 2;
+          lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
+        }, {passive:true});
+
+        card.addEventListener('touchstart', () => {
+          arrastado = card;
+          card.classList.add('arrastando');
+        }, {passive:true});
+
+        card.addEventListener('touchend', async () => {
+          if(!arrastado) return;
+          card.classList.remove('arrastando');
+          arrastado = null;
+          await salvarOrdem();
+        });
+      });
+
+    })();
+
+    function validarDataOperacao(form){
+      const dataContrato = form.dataset.dataEvento;
+      const tipo = form.dataset.tipo || 'entrega';
+      const campo = form.querySelector('[name="data_operacao"]') || form.querySelector('[name="data_evento"]');
+      if(!dataContrato || !campo || !campo.value) return true;
+
+      if(tipo === 'retirada'){
+        if(campo.value < dataContrato){
+          alert('A data da busca não pode ser anterior à data do contrato.');
+          return false;
+        }
+        return true;
+      }
+
+      if(campo.value > dataContrato){
+        alert('A data da entrega não pode ser posterior à data do contrato.');
+        return false;
+      }
+      if(campo.value < dataContrato){
+        return confirm('A entrega está marcada para um dia anterior ao contrato. Deseja fazer isso mesmo?');
+      }
+      return true;
     }
-    return true;
-  }
-
-  if(campo.value > dataContrato){
-    alert('A data da entrega não pode ser posterior à data do contrato.');
-    return false;
-  }
-  if(campo.value < dataContrato){
-    return confirm('A entrega está marcada para um dia anterior ao contrato. Deseja fazer isso mesmo?');
-  }
-  return true;
-}
 </script>
 {% endblock %}
