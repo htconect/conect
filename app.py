@@ -301,6 +301,16 @@ def janela_uma_hora(hora) -> str:
         return hora.strftime("%H:%M")
     return f"{hora.strftime('%H:%M')} às {fim.strftime('%H:%M')}"
 
+def ajustar_hora_texto(hora_texto, horas: int) -> str:
+    """Recebe HH:MM e devolve HH:MM somando/subtraindo horas."""
+    try:
+        if not hora_texto or hora_texto == "--":
+            return "-"
+        base = datetime.strptime(str(hora_texto), "%H:%M")
+        return (base + timedelta(hours=int(horas))).strftime("%H:%M")
+    except Exception:
+        return "-"
+
 def periodo_semana_atual():
     hoje = date.today()
     inicio = hoje - timedelta(days=hoje.weekday())
@@ -319,6 +329,7 @@ templates.env.filters["moeda_br"] = moeda_br
 templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
 templates.env.globals["status_em_contrato"] = status_em_contrato
 templates.env.globals["janela_uma_hora"] = janela_uma_hora
+templates.env.globals["ajustar_hora_texto"] = ajustar_hora_texto
 
 
 def _limpar_tel_whatsapp(valor: str) -> str:
@@ -718,11 +729,44 @@ def garantir_colunas_novas():
                 conn.execute(text(comando))
 
 
+def atualizar_mensagem_previsao_padrao():
+    """Atualiza empresas que ainda usam mensagens antigas da operação."""
+    antiga_preparacao = "Olá, {{cliente}}! Estamos nos preparando para sua entrega. Em breve nossa equipe seguirá para o local combinado."
+    nova_preparacao = (
+        "Olá, {{cliente}}.\n\n"
+        "Estamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\n"
+        "Nossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\n"
+        "Caso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\n"
+        "Se houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\n"
+        "Equipe {{empresa}}"
+    )
+    antiga_caminho = "🚚 Sua entrega está a caminho.\n\nSua previsão de entrega é às {{hora_entrega}}.\n\nCaso haja alguma alteração, avisaremos."
+    nova_caminho = (
+        "Olá, {{cliente}}.\n\n"
+        "Nossa equipe já está a caminho.\n\n"
+        "Em breve estaremos no local informado.\n\n"
+        "Caso precise falar conosco, basta responder esta mensagem.\n\n"
+        "Equipe {{empresa}}"
+    )
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE empresas SET mensagem_preparacao = :nova WHERE mensagem_preparacao IS NULL OR mensagem_preparacao = :antiga"),
+                {"nova": nova_preparacao, "antiga": antiga_preparacao},
+            )
+            conn.execute(
+                text("UPDATE empresas SET mensagem_a_caminho = :nova WHERE mensagem_a_caminho IS NULL OR mensagem_a_caminho = :antiga"),
+                {"nova": nova_caminho, "antiga": antiga_caminho},
+            )
+    except Exception:
+        pass
+
 
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
+    atualizar_mensagem_previsao_padrao()
     db = SessionLocal()
     try:
         inicializar_dados(db)
@@ -867,10 +911,19 @@ def mensagens_empresa(empresa: Empresa) -> dict:
             "Pagamento confirmado.\nSua reserva foi efetuada com sucesso.\nObrigado pela confiança!"
         ),
         "preparacao": empresa.mensagem_preparacao or (
-            "Olá, {{cliente}}! Estamos nos preparando para sua entrega. Em breve nossa equipe seguirá para o local combinado."
+            "Olá, {{cliente}}.\n\n"
+            "Estamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\n"
+            "Nossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\n"
+            "Caso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\n"
+            "Se houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\n"
+            "Equipe {{empresa}}"
         ),
         "a_caminho": empresa.mensagem_a_caminho or (
-            "🚚 Sua entrega está a caminho.\n\nSua previsão de entrega é às {{hora_entrega}}.\n\nCaso haja alguma alteração, avisaremos."
+            "Olá, {{cliente}}.\n\n"
+            "Nossa equipe já está a caminho.\n\n"
+            "Em breve estaremos no local informado.\n\n"
+            "Caso precise falar conosco, basta responder esta mensagem.\n\n"
+            "Equipe {{empresa}}"
         ),
         "localizacao": empresa.mensagem_localizacao or (
             "Olá, {{cliente}}! Segue a localização da equipe/rota: {{link_localizacao}}"
@@ -1451,8 +1504,8 @@ def preparar_reservas(
     request: Request,
     data_inicial: str = "",
     data_final: str = "",
-    mostrar_entregas: str = "1",
-    mostrar_retiradas: str = "1",
+    mostrar_entregas: str = "",
+    mostrar_retiradas: str = "",
     mostrar_concluidas: str = "",
     db: Session = Depends(get_db),
     empresa: Empresa = Depends(empresa_logada)
@@ -1460,6 +1513,19 @@ def preparar_reservas(
     inicio, fim = periodo_semana_atual()
     data_inicial = data_inicial or inicio.isoformat()
     data_final = data_final or fim.isoformat()
+
+    # Checkbox desmarcado não vem no GET. Se for o primeiro acesso da tela,
+    # começa com Entregar e Retirar ligados. Depois disso, respeita exatamente
+    # o que o usuário marcou/desmarcou.
+    query = request.query_params
+    if not query:
+        mostrar_entregas = "1"
+        mostrar_retiradas = "1"
+        mostrar_concluidas = ""
+    else:
+        mostrar_entregas = "1" if "mostrar_entregas" in query else ""
+        mostrar_retiradas = "1" if "mostrar_retiradas" in query else ""
+        mostrar_concluidas = "1" if "mostrar_concluidas" in query else ""
 
     q = db.query(Agenda).filter_by(empresa_id=empresa.id)
     if data_inicial:

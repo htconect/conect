@@ -8,7 +8,7 @@
   </div>
 </section>
 
-<form method="get" class="filtro-periodo">
+<form method="get" class="filtro-periodo" id="filtroOperacao">
   <label>
     <span>Início</span>
     <input type="date" name="data_inicial" value="{{ data_inicial }}" onchange="this.form.submit()">
@@ -19,9 +19,9 @@
   </label>
 
   <div class="filtros-operacao filtros-operacao-compactos">
-    <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %} onchange="this.form.submit()"> 🔵 Entrega</label>
-    <label><input type="checkbox" name="mostrar_retiradas" value="1" {% if mostrar_retiradas %}checked{% endif %} onchange="this.form.submit()"> 🔴 Retirada</label>
-    <label><input type="checkbox" name="mostrar_concluidas" value="1" {% if mostrar_concluidas %}checked{% endif %} onchange="this.form.submit()"> 🟢 Finalizados</label>
+    <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %} onchange="this.form.submit()"> 🔵 Entregar</label>
+    <label><input type="checkbox" name="mostrar_retiradas" value="1" {% if mostrar_retiradas %}checked{% endif %} onchange="this.form.submit()"> 🔴 Retirar</label>
+    <label><input type="checkbox" name="mostrar_concluidas" value="1" {% if mostrar_concluidas %}checked{% endif %} onchange="this.form.submit()"> 🟢 Encerrado</label>
   </div>
 </form>
 
@@ -44,8 +44,10 @@
   {% set entrega_fora_data = tipo == 'entrega' and a.solicitacao and a.solicitacao.data_evento and a.data and a.data != a.solicitacao.data_evento %}
   {% set tel = a.solicitacao.cliente.telefone or a.solicitacao.cliente.identificador %}
   {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
-  {% set msg_preparacao = (mensagens.preparacao|default('Olá, {{cliente}}! Estamos nos preparando para sua entrega. Em breve nossa equipe seguirá para o local combinado.'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente') %}
-  {% set msg_caminho = (mensagens.a_caminho|default('🚚 Sua entrega está a caminho.\n\nSua previsão de entrega é às {{hora_entrega}}.\n\nCaso haja alguma alteração, avisaremos.'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else '-') %}
+  {% set hora_previsao_inicio = ajustar_hora_texto(hora_entrega, -1) %}
+  {% set hora_previsao_fim = ajustar_hora_texto(hora_entrega, 1) %}
+  {% set msg_preparacao = (mensagens.preparacao|default('Olá, {{cliente}}.\n\nEstamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\nNossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\nCaso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\nSe houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\nEquipe {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim) %}
+  {% set msg_caminho = (mensagens.a_caminho|default('Olá, {{cliente}}.\n\nNossa equipe já está a caminho.\n\nEm breve estaremos no local informado.\n\nCaso precise falar conosco, basta responder esta mensagem.\n\nEquipe {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim) %}
   {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=a.solicitacao_id) %}
   {% set endereco_rota = (a.solicitacao.local or '') ~ (', ' ~ a.bairro if a.bairro else '') ~ (', ' ~ (a.solicitacao.bairro or '') if a.solicitacao and a.solicitacao.bairro and not a.bairro else '') %}
   {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
@@ -59,7 +61,7 @@
         <b>{{ hora_card_operacao }} / {{ hora_card_contrato }} · {{ a.solicitacao.cliente.nome }}</b>
         <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
         <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0))|moeda_br }}</small>
-        <em>{{ 'Busca' if tipo == 'retirada' else 'Entrega' }}{% if concluido %} {{ 'finalizada' if tipo == 'retirada' else 'entregue' }}{% endif %}</em>
+        <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}{% if concluido %} encerrado{% endif %}</em>
       </div>
       <span class="seta-card seta-expandir">⌄</span>
     </summary>
@@ -80,12 +82,12 @@
 
       <div class="descricao-roteiro">
         <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
-        <span><b>{{ 'Busca' if tipo == 'retirada' else 'Entrega' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
+        <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
       </div>
       <p class="texto-discreto operacao-ajuda">Data do contrato: <b>{{ data_contrato_texto }}</b>. {% if tipo == 'retirada' %}A busca pode ser depois, mas nunca antes do contrato.{% else %}A entrega pode ser antes, mas nunca depois do contrato.{% endif %}</p>
 
       <div class="acoes-rota operacao-acoes-novas">
-        <a class="botao-mini botao-whats-btn" target="_blank" href="https://wa.me/55{{ tel_limpo }}?text={{ msg_preparacao|urlencode }}">Preparando</a>
+        <a class="botao-mini botao-whats-btn" target="_blank" href="https://wa.me/55{{ tel_limpo }}?text={{ msg_preparacao|urlencode }}">Previsão</a>
         {% if data_entrega and hora_entrega != '--' %}
           <a class="botao-mini botao-whats-btn botao-a-caminho" target="_blank" href="https://wa.me/55{{ tel_limpo }}?text={{ msg_caminho|urlencode }}" data-agenda-id="{{ a.id }}">A caminho</a>
         {% else %}
@@ -108,7 +110,7 @@
     <details class="registrar-pagamento-operacao">
       <summary>Registrar pagamento</summary>
       <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/pagamento" class="form-pagamento-operacao">
-        <input type="hidden" name="retorno" value="{{ request.url.path }}?data_inicial={{ data_inicial }}&data_final={{ data_final }}&mostrar_entregas={{ mostrar_entregas }}&mostrar_retiradas={{ mostrar_retiradas }}&mostrar_concluidas={{ mostrar_concluidas }}">
+        <input type="hidden" name="retorno" value="{{ request.url }}">
         <div class="linha">
           <div>
             <label>Valor recebido</label>
@@ -148,7 +150,7 @@
       <label>Status</label>
       <select name="status_operacional" form="roteiro-{{ a.id }}">
         <option value="pendente" {% if not concluido %}selected{% endif %}>{{ 'Falta buscar' if tipo == 'retirada' else 'Falta entregar' }}</option>
-        <option value="concluido" {% if concluido %}selected{% endif %}>{{ 'Finalizado' if tipo == 'retirada' else 'Entregue' }}</option>
+        <option value="concluido" {% if concluido %}selected{% endif %}>Encerrado</option>
       </select>
     </div>
 
@@ -162,7 +164,7 @@
 
 <details class="accordion">
   <summary>Mensagens WhatsApp não usadas nesta tela</summary>
-  <p class="texto-discreto">Nesta operação usamos apenas <b>Preparando</b> e <b>A caminho</b>.</p>
+  <p class="texto-discreto">Nesta operação usamos apenas <b>Previsão</b> e <b>A caminho</b>.</p>
   <ul class="lista-simples">
     <li>Pré-reserva / link do cliente</li>
     <li>Aceite do contrato</li>
@@ -372,6 +374,41 @@
 </style>
 
 <script>
+(function(){
+  const formFiltro = document.getElementById('filtroOperacao');
+  const storageKey = 'conect_operacao_filtros';
+
+  function salvarFiltros(){
+    if(!formFiltro) return;
+    const dados = {
+      data_inicial: formFiltro.querySelector('[name="data_inicial"]')?.value || '',
+      data_final: formFiltro.querySelector('[name="data_final"]')?.value || '',
+      mostrar_entregas: formFiltro.querySelector('[name="mostrar_entregas"]')?.checked ? '1' : '',
+      mostrar_retiradas: formFiltro.querySelector('[name="mostrar_retiradas"]')?.checked ? '1' : '',
+      mostrar_concluidas: formFiltro.querySelector('[name="mostrar_concluidas"]')?.checked ? '1' : ''
+    };
+    localStorage.setItem(storageKey, JSON.stringify(dados));
+  }
+
+  if(formFiltro){
+    const salvo = localStorage.getItem(storageKey);
+    if(!window.location.search && salvo){
+      try{
+        const dados = JSON.parse(salvo);
+        const params = new URLSearchParams();
+        if(dados.data_inicial) params.set('data_inicial', dados.data_inicial);
+        if(dados.data_final) params.set('data_final', dados.data_final);
+        if(dados.mostrar_entregas) params.set('mostrar_entregas', '1');
+        if(dados.mostrar_retiradas) params.set('mostrar_retiradas', '1');
+        if(dados.mostrar_concluidas) params.set('mostrar_concluidas', '1');
+        if(params.toString()) window.location.replace(window.location.pathname + '?' + params.toString());
+      }catch(e){}
+    }
+    formFiltro.addEventListener('submit', salvarFiltros);
+    formFiltro.querySelectorAll('input').forEach(campo => campo.addEventListener('change', salvarFiltros));
+  }
+})();
+
 (function(){
   const lista = document.getElementById('listaRoteirizacao');
   if(!lista) return;
