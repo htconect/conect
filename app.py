@@ -3554,21 +3554,14 @@ def agenda(
     if data_final:
         q = q.filter(Solicitacao.data_evento <= datetime.strptime(data_final, "%Y-%m-%d").date())
 
+    # Agenda deve mostrar todas as locações do período.
+    # O filtro de rascunho/contrato sem aceite fica somente na tela inicial (/painel).
     solicitacoes = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_([
-                "pre_reserva",
-                "contrato_enviado",
-                "aguardando_aceite",
-            ])
-        )
-        .order_by(
+        q.order_by(
             Solicitacao.data_evento.asc(),
-            Solicitacao.hora_inicio.asc()
+            Solicitacao.hora_inicio.asc(),
+            Solicitacao.id.asc(),
         )
-        .limit(8)
         .all()
     )
 
