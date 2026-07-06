@@ -536,6 +536,24 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     return "\n".join(linhas).strip()
 
 
+
+MENSAGEM_OPERACAO_PREPARACAO_APROVADA = (
+    "Olá, {{cliente}}.\n\n"
+    "Estamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\n"
+    "Nossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\n"
+    "Caso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\n"
+    "Se houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\n"
+    "Equipe {{empresa}}"
+)
+
+MENSAGEM_OPERACAO_A_CAMINHO_APROVADA = (
+    "Olá, {{cliente}}.\n\n"
+    "Nossa equipe já está a caminho.\n\n"
+    "Em breve estaremos no local informado.\n\n"
+    "Caso precise falar conosco, basta responder esta mensagem.\n\n"
+    "Equipe {{empresa}}"
+)
+
 def garantir_colunas_novas():
     """Migração simples para bases locais/teste já existentes."""
     insp = inspect(engine)
@@ -718,6 +736,14 @@ def garantir_colunas_novas():
         if "ordem" not in cols_lmf:
             comandos.append("ALTER TABLE lancamentos_manuais_financeiros ADD COLUMN ordem INTEGER DEFAULT 0")
 
+    if "app_migrations" not in tabelas:
+        comandos.append("""
+        CREATE TABLE app_migrations (
+            chave VARCHAR(120) PRIMARY KEY,
+            executado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
     if "agenda" in tabelas:
         cols_ag = colunas("agenda")
         if "ordem_rota" not in cols_ag:
@@ -740,39 +766,44 @@ def garantir_colunas_novas():
 
 
 def atualizar_mensagem_previsao_padrao():
-    """Atualiza empresas que ainda usam mensagens antigas da operação."""
-    antiga_preparacao = "Olá, {{cliente}}! Estamos nos preparando para sua entrega. Em breve nossa equipe seguirá para o local combinado."
-    nova_preparacao = (
-        "Olá, {{cliente}}.\n\n"
-        "Estamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\n"
-        "Nossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\n"
-        "Caso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\n"
-        "Se houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\n"
-        "Equipe {{empresa}}"
-    )
-    antiga_caminho = "🚚 Sua entrega está a caminho.\n\nSua previsão de entrega é às {{hora_entrega}}.\n\nCaso haja alguma alteração, avisaremos."
-    nova_caminho = (
-        "Olá, {{cliente}}.\n\n"
-        "Nossa equipe já está a caminho.\n\n"
-        "Em breve estaremos no local informado.\n\n"
-        "Caso precise falar conosco, basta responder esta mensagem.\n\n"
-        "Equipe {{empresa}}"
-    )
+    """Copia uma única vez para o cadastro as mensagens aprovadas que estavam fixas nos botões da operação.
+
+    Depois dessa migração, os botões Previsão e A caminho passam a usar o texto cadastrado
+    na empresa. O controle por chave evita sobrescrever edições futuras feitas em Configurações.
+    """
+    chave_migracao = "20260706_mensagens_operacao_aprovadas"
     try:
         with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    chave VARCHAR(120) PRIMARY KEY,
+                    executado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            ja_executou = conn.execute(
+                text("SELECT chave FROM app_migrations WHERE chave = :chave"),
+                {"chave": chave_migracao},
+            ).first()
+            if ja_executou:
+                return
+
             conn.execute(
-                text(
-                    "UPDATE empresas SET mensagem_preparacao = :nova WHERE mensagem_preparacao IS NULL OR mensagem_preparacao = :antiga"),
-                {"nova": nova_preparacao, "antiga": antiga_preparacao},
+                text("""
+                    UPDATE empresas
+                       SET mensagem_preparacao = :preparacao,
+                           mensagem_a_caminho = :a_caminho
+                """),
+                {
+                    "preparacao": MENSAGEM_OPERACAO_PREPARACAO_APROVADA,
+                    "a_caminho": MENSAGEM_OPERACAO_A_CAMINHO_APROVADA,
+                },
             )
             conn.execute(
-                text(
-                    "UPDATE empresas SET mensagem_a_caminho = :nova WHERE mensagem_a_caminho IS NULL OR mensagem_a_caminho = :antiga"),
-                {"nova": nova_caminho, "antiga": antiga_caminho},
+                text("INSERT INTO app_migrations (chave) VALUES (:chave)"),
+                {"chave": chave_migracao},
             )
     except Exception:
         pass
-
 
 @app.on_event("startup")
 def startup():
@@ -920,24 +951,8 @@ def mensagens_empresa(empresa: Empresa) -> dict:
         "confirmacao": empresa.mensagem_confirmacao or (
             "Pagamento confirmado.\nSua reserva foi efetuada com sucesso.\nObrigado pela confiança!"
         ),
-        "preparacao": empresa.mensagem_preparacao or (
-            "Olá, {{cliente}}.\n\n"
-            "Estamos nos preparando para sair e, em breve, iniciaremos o deslocamento até você.\n\n"
-            "Nossa previsão de chegada é entre {{hora_previsao_inicio}} e {{hora_previsao_fim}}.\n\n"
-            "Caso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos avise.\n\n"
-            "Se houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\n"
-            "Equipe {{empresa}}"
-        ),
-        "a_caminho": empresa.mensagem_a_caminho or (
-            "Olá, {{cliente}}.\n\n"
-            "Nossa equipe já está a caminho.\n\n"
-            "Em breve estaremos no local informado.\n\n"
-            "Caso precise falar conosco, basta responder esta mensagem.\n\n"
-            "Equipe {{empresa}}"
-        ),
-        "localizacao": empresa.mensagem_localizacao or (
-            "Olá, {{cliente}}! Segue a localização da equipe/rota: {{link_localizacao}}"
-        ),
+        "preparacao": empresa.mensagem_preparacao or MENSAGEM_OPERACAO_PREPARACAO_APROVADA,
+        "a_caminho": empresa.mensagem_a_caminho or MENSAGEM_OPERACAO_A_CAMINHO_APROVADA,
     }
 
 
@@ -1389,7 +1404,6 @@ async def salvar_configuracoes_empresa(
         mensagem_confirmacao: str = Form(""),
         mensagem_preparacao: str = Form(""),
         mensagem_a_caminho: str = Form(""),
-        mensagem_localizacao: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -1422,7 +1436,6 @@ async def salvar_configuracoes_empresa(
     empresa.mensagem_confirmacao = mensagem_confirmacao.strip()
     empresa.mensagem_preparacao = mensagem_preparacao.strip()
     empresa.mensagem_a_caminho = mensagem_a_caminho.strip()
-    empresa.mensagem_localizacao = mensagem_localizacao.strip()
     form = await request.form()
     campos = db.query(CampoEmpresa).filter_by(empresa_id=empresa.id).all()
     for ce in campos:

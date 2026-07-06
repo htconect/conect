@@ -57,17 +57,11 @@
     {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
     {% set hora_previsao_inicio = ajustar_hora_texto(hora_entrega, -1) %}
     {% set hora_previsao_fim = ajustar_hora_texto(hora_entrega, 1) %}
-    {% set msg_preparacao = (mensagens.preparacao|default('Olá, {{cliente}}.\n\nEstamos nos preparando para sair e, em
-    breve, iniciaremos o deslocamento até você.\n\nNossa previsão de chegada é entre {{hora_previsao_inicio}} e
-    {{hora_previsao_fim}}.\n\nCaso esse horário não seja adequado ou aconteça algum imprevisto, por favor nos
-    avise.\n\nSe houver qualquer alteração em nossa programação, entraremos em contato imediatamente.\n\nEquipe
-    {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
+    {% set msg_preparacao = (mensagens.preparacao)|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
     or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else
     '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim)
     %}
-    {% set msg_caminho = (mensagens.a_caminho|default('Olá, {{cliente}}.\n\nNossa equipe já está a caminho.\n\nEm breve
-    estaremos no local informado.\n\nCaso precise falar conosco, basta responder esta mensagem.\n\nEquipe
-    {{empresa}}'))|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
+    {% set msg_caminho = (mensagens.a_caminho)|replace('{{cliente}}', a.solicitacao.cliente.nome or 'cliente')|replace('{{empresa}}', empresa.nome
     or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else
     '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim)
     %}

@@ -50,7 +50,10 @@
 
 
     <h2>Mensagens automáticas</h2>
-    <p class="texto-discreto">Já vem tudo pronto. A empresa só edita se quiser. Variáveis disponíveis: {{ '{{link}}' }}, {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{valor_sinal}}' }}, {{ '{{pix}}' }}, {{ '{{link_localizacao}}' }}, {{ '{{hora_entrega}}' }}, {{ '{{hora_previsao_inicio}}' }}, {{ '{{hora_previsao_fim}}' }}.</p>
+    <p class="texto-discreto">Já vem tudo pronto. A empresa só edita se quiser.</p>
+
+    <h3>Módulo contrato / reserva</h3>
+    <p class="texto-discreto">Variáveis disponíveis: {{ '{{link}}' }}, {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{valor_sinal}}' }}, {{ '{{pix}}' }}.</p>
 
     <label>Mensagem da reserva</label>
     <textarea name="mensagem_reserva">{{ empresa.mensagem_reserva or mensagens_padrao.reserva }}</textarea>
@@ -64,14 +67,15 @@
     <label>Mensagem de reserva confirmada</label>
     <textarea name="mensagem_confirmacao">{{ empresa.mensagem_confirmacao or mensagens_padrao.confirmacao }}</textarea>
 
+    <h3>Módulo operação / logística</h3>
+    <p class="texto-discreto">Estas mensagens são usadas nos botões da tela de Operação. Variáveis disponíveis: {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{hora_entrega}}' }}, {{ '{{hora_previsao_inicio}}' }}, {{ '{{hora_previsao_fim}}' }}.</p>
+
     <label>Mensagem: estamos nos preparando</label>
     <textarea name="mensagem_preparacao">{{ empresa.mensagem_preparacao or mensagens_padrao.preparacao }}</textarea>
 
     <label>Mensagem: equipe a caminho</label>
     <textarea name="mensagem_a_caminho">{{ empresa.mensagem_a_caminho or mensagens_padrao.a_caminho }}</textarea>
 
-    <label>Mensagem: localização</label>
-    <textarea name="mensagem_localizacao">{{ empresa.mensagem_localizacao or mensagens_padrao.localizacao }}</textarea>
 
     <h2>Campos do cadastro público</h2>
     <p class="texto-discreto">Configure uma vez. A reserva só mostra e exige o que estiver marcado aqui.</p>
