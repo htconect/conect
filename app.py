@@ -578,7 +578,7 @@ def garantir_colunas_novas():
             usuario VARCHAR(80) NOT NULL,
             senha VARCHAR(120) NOT NULL,
             ativo BOOLEAN DEFAULT true,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id)
         )
         """)
@@ -670,7 +670,7 @@ def garantir_colunas_novas():
             tipo VARCHAR(20) DEFAULT 'banco',
             saldo_inicial FLOAT DEFAULT 0,
             ativa BOOLEAN DEFAULT true,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id)
         )
         """)
@@ -692,7 +692,7 @@ def garantir_colunas_novas():
             hash_importacao VARCHAR(64),
             origem_importacao VARCHAR(120),
             ordem INTEGER DEFAULT 0,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id),
             FOREIGN KEY(conta_id) REFERENCES contas_financeiras (id),
             FOREIGN KEY(pagamento_id) REFERENCES pagamentos (id)
@@ -722,7 +722,7 @@ def garantir_colunas_novas():
             recebido BOOLEAN DEFAULT false,
             pagamento_id INTEGER,
             ordem INTEGER DEFAULT 0,
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id),
             FOREIGN KEY(conta_id) REFERENCES contas_financeiras (id),
             FOREIGN KEY(pagamento_id) REFERENCES pagamentos (id)
@@ -740,7 +740,7 @@ def garantir_colunas_novas():
         comandos.append("""
         CREATE TABLE app_migrations (
             chave VARCHAR(120) PRIMARY KEY,
-            executado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+            executado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
 
@@ -777,7 +777,7 @@ def atualizar_mensagem_previsao_padrao():
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS app_migrations (
                     chave VARCHAR(120) PRIMARY KEY,
-                    executado_em DATETIME DEFAULT CURRENT_TIMESTAMP
+                    executado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """))
             ja_executou = conn.execute(
