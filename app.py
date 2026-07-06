@@ -1729,17 +1729,37 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/whatsapp")
-def compartilhar_contrato_whatsapp(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
-                                   empresa: Empresa = Depends(empresa_logada)):
+def compartilhar_contrato_whatsapp(
+    solicitacao_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
-    telefone = _limpar_tel_whatsapp(item.cliente.telefone or item.cliente.identificador)
+
+    telefone = _limpar_tel_whatsapp(
+        item.cliente.telefone or item.cliente.identificador
+    )
     if not telefone:
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
-    texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
-    return RedirectResponse(f"https://wa.me/{telefone}?text={quote(texto)}", status_code=303)
 
+    # Marca como enviado somente na primeira vez.
+    if (
+        item.status == "pre_reserva"
+        and item.contrato_id
+        and len(item.itens) > 0
+    ):
+        item.status = "contrato_enviado"
+        db.commit()
+
+    texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
+
+    return RedirectResponse(
+        f"https://wa.me/{telefone}?text={quote(texto)}",
+        status_code=303,
+    )
 
 @app.get("/painel/solicitacao/{solicitacao_id}/cliente", response_class=HTMLResponse)
 def editar_cliente_da_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
