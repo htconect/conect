@@ -3,11 +3,17 @@
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
         <span>📅</span>
-        <div><b>Agenda de hoje</b><small>{{ agenda_hoje }} evento(s)</small></div>
+        <div>
+            <b>Agenda</b>
+            <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ agenda_periodo_qtd }} evento(s)</small>
+        </div>
     </a>
     <a class="cartao-acao" href="/painel/reservas">
         <span>📦</span>
-        <div><b>Operação</b><small>{{ pendentes }} pendente(s)</small></div>
+        <div>
+            <b>Operação</b>
+            <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ operacao_entregar_qtd }} entregar · {{ operacao_buscar_qtd }} buscar</small>
+        </div>
     </a>
     <a class="cartao-acao" href="/painel/disponibilidade">
         <span>📦</span>

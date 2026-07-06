@@ -1368,7 +1368,25 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
     ).count()
 
-    agenda_hoje = db.query(Agenda).filter_by(empresa_id=empresa.id, data=datetime.today().date()).count()
+    inicio_semana, fim_semana = periodo_semana_atual()
+    status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
+
+    agenda_periodo_qtd = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.data_evento >= inicio_semana,
+        Solicitacao.data_evento <= fim_semana,
+        ~Solicitacao.status.in_(status_agenda_inativos)
+    ).count()
+
+    operacao_base = db.query(Agenda).filter(
+        Agenda.empresa_id == empresa.id,
+        Agenda.data >= inicio_semana,
+        Agenda.data <= fim_semana,
+        Agenda.status_operacional != "concluido"
+    )
+    operacao_entregar_qtd = operacao_base.filter(Agenda.tipo_evento == "entrega").count()
+    operacao_buscar_qtd = operacao_base.filter(Agenda.tipo_evento == "retirada").count()
+    operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
 
     pendencias_financeiras = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -1383,7 +1401,12 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "total_clientes": total_clientes,
         "total_produtos": total_produtos,
         "pendentes": pendentes,
-        "agenda_hoje": agenda_hoje,
+        "agenda_periodo_qtd": agenda_periodo_qtd,
+        "operacao_periodo_qtd": operacao_periodo_qtd,
+        "operacao_entregar_qtd": operacao_entregar_qtd,
+        "operacao_buscar_qtd": operacao_buscar_qtd,
+        "inicio_semana": inicio_semana,
+        "fim_semana": fim_semana,
         "pendencias_financeiras": pendencias_financeiras,
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
     })
@@ -3570,8 +3593,23 @@ def agenda(
 ):
     garantir_agenda_reservas(db, empresa.id)
     inicio, fim = periodo_semana_atual()
-    data_inicial = data_inicial or inicio.isoformat()
-    data_final = data_final or fim.isoformat()
+
+    # Mantém o último filtro usado na agenda para a equipe não precisar refazer a busca.
+    filtro_salvo = request.session.get("agenda_filtro", {}) if not request.query_params else {}
+    data_inicial = data_inicial or filtro_salvo.get("data_inicial") or inicio.isoformat()
+    data_final = data_final or filtro_salvo.get("data_final") or fim.isoformat()
+    if not request.query_params and filtro_salvo:
+        ativos = filtro_salvo.get("ativos", "1")
+        credito = filtro_salvo.get("credito", "")
+        cancelados = filtro_salvo.get("cancelados", "")
+
+    request.session["agenda_filtro"] = {
+        "data_inicial": data_inicial,
+        "data_final": data_final,
+        "ativos": "1" if ativos else "",
+        "credito": "1" if credito else "",
+        "cancelados": "1" if cancelados else "",
+    }
 
     status_credito = {"aguardando_nova_data"}
     status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada"}
