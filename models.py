@@ -30,6 +30,8 @@ class Empresa(Base):
     mensagem_preparacao = Column(Text, nullable=True)
     mensagem_a_caminho = Column(Text, nullable=True)
     mensagem_localizacao = Column(Text, nullable=True)
+    mensagem_hora_fim = Column(Text, nullable=True)
+    mostrar_mensagem_hora_fim = Column(Boolean, default=True)
     logo_idb_url = Column(String(300), nullable=True)
 
     clientes = relationship("Cliente", back_populates="empresa")

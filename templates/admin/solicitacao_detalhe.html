@@ -14,6 +14,9 @@
 {% set contrato_aceito = status_reserva_confirmada(item.status) %}
 {% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
 {% set em_rascunho = not contrato_pendente and not contrato_aceito %}
+{% set erro = request.query_params.get("erro") %}
+
+{% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
 
 <section class="reserva-mobile-topo">
   <a class="voltar" href="/painel/reservas">← Minhas reservas</a>
@@ -77,6 +80,9 @@
 
   <div class="dados-reserva-lista">
     <p><small>Data e horário</small><b>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }} · {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</b></p>
+    {% if empresa.mostrar_mensagem_hora_fim and (empresa.mensagem_hora_fim or mensagens.hora_fim) %}
+      <p class="box aviso">{{ empresa.mensagem_hora_fim or mensagens.hora_fim }}</p>
+    {% endif %}
     <p><small>Local</small><b>{{ item.local_nome or item.local or item.cliente.endereco or '-' }}</b></p>
     <p><small>Endereço do evento</small><b>{{ item.local or item.cliente.endereco or '-' }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}{% if item.bairro or item.cliente.bairro %} · {{ item.bairro or item.cliente.bairro }}{% endif %}</b></p>
     {% if item.acesso_local %}<p><small>Acesso ao local</small><b>{{ item.acesso_local }}</b></p>{% endif %}
@@ -166,7 +172,7 @@
         <select name="produto_id">
           <option value="">Selecione</option>
           {% for p in produtos %}
-            <option value="{{ p.id }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
+            <option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
           {% endfor %}
         </select>
         <div class="linha">
@@ -286,6 +292,22 @@
 </details>
 
 <script>
+function aplicarContratoPadrao(select){
+  const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
+  const contrato = document.querySelector('select[name="contrato_id"]');
+  if(contratoId && contrato){
+    contrato.value = contratoId;
+  }
+}
+document.addEventListener('change', function(ev){
+  if(ev.target && ev.target.name === 'produto_id'){
+    aplicarContratoPadrao(ev.target);
+  }
+});
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('select[name="produto_id"]').forEach(aplicarContratoPadrao);
+});
+
 function adicionarItem(){
   const container = document.getElementById('itensReserva');
   const base = container.querySelector('.item-reserva');

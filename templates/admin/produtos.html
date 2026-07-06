@@ -2,7 +2,7 @@
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Itens de locação</h1>
-<p class="texto-discreto">Item de locação é o equipamento ou serviço contratado no aluguel. O contrato será escolhido dentro da reserva.</p>
+<p class="texto-discreto">Item de locação é o equipamento ou serviço contratado no aluguel. O contrato padrão marcado aqui será trazido automaticamente ao adicionar o item na reserva.</p>
 
 <div class="box">
 <form method="post">
@@ -11,6 +11,13 @@
   {% endif %}
   <label>Nome</label><input name="nome" value="{{ produto.nome if produto else '' }}" required>
   <label>Descrição / itens inclusos</label><textarea name="descricao">{{ produto.descricao if produto else '' }}</textarea>
+  <label>Contrato padrão deste item</label>
+  <select name="contrato_id">
+    <option value="">Sem contrato padrão</option>
+    {% for c in contratos %}
+      <option value="{{ c.id }}" {% if produto and produto.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+    {% endfor %}
+  </select>
   <div class="linha">
     <div>
       <label>Quantidade disponível</label>
@@ -55,7 +62,7 @@
   <h3>{{ p.nome }}</h3>
   <p>{{ p.descricao }}</p>
   <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
-  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p>
+  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
   <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
 </div>
 {% endfor %}

@@ -606,6 +606,10 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_localizacao TEXT")
     if "logo_idb_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN logo_idb_url VARCHAR(300)")
+    if "mensagem_hora_fim" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_hora_fim TEXT")
+    if "mostrar_mensagem_hora_fim" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN mostrar_mensagem_hora_fim BOOLEAN DEFAULT true")
     if "mensagem_aceite" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_aceite TEXT")
     if "mensagem_pagamento" not in cols_emp:
@@ -951,6 +955,9 @@ def mensagens_empresa(empresa: Empresa) -> dict:
         "confirmacao": empresa.mensagem_confirmacao or (
             "Pagamento confirmado.\nSua reserva foi efetuada com sucesso.\nObrigado pela confiança!"
         ),
+        "hora_fim": empresa.mensagem_hora_fim or (
+            "Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber."
+        ),
         "preparacao": empresa.mensagem_preparacao or MENSAGEM_OPERACAO_PREPARACAO_APROVADA,
         "a_caminho": empresa.mensagem_a_caminho or MENSAGEM_OPERACAO_A_CAMINHO_APROVADA,
     }
@@ -1038,6 +1045,8 @@ def admin_criar_empresa(
         mensagem_aceite: str = Form(""),
         mensagem_pagamento: str = Form(""),
         mensagem_confirmacao: str = Form(""),
+        mensagem_hora_fim: str = Form(""),
+        mostrar_mensagem_hora_fim: Optional[str] = Form(None),
         mensagem_preparacao: str = Form(""),
         mensagem_a_caminho: str = Form(""),
         mensagem_localizacao: str = Form(""),
@@ -1330,6 +1339,9 @@ Este é um contrato fictício inicial. Edite este texto conforme a política da 
     empresa.mensagem_aceite = empresa.mensagem_aceite or mensagens["aceite"]
     empresa.mensagem_pagamento = empresa.mensagem_pagamento or mensagens["pagamento"]
     empresa.mensagem_confirmacao = empresa.mensagem_confirmacao or mensagens["confirmacao"]
+    empresa.mensagem_hora_fim = empresa.mensagem_hora_fim or mensagens["hora_fim"]
+    if empresa.mostrar_mensagem_hora_fim is None:
+        empresa.mostrar_mensagem_hora_fim = True
     db.commit()
 
 
@@ -1341,7 +1353,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         db.query(Solicitacao)
         .filter(
             Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_(["pre_reserva", "contrato_enviado", "aguardando_aceite"])
+            Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
         )
         .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
         .limit(8)
@@ -1353,7 +1365,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
 
     pendentes = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
-        Solicitacao.status.in_(["pre_reserva", "contrato_enviado", "aguardando_aceite"])
+        Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
     ).count()
 
     agenda_hoje = db.query(Agenda).filter_by(empresa_id=empresa.id, data=datetime.today().date()).count()
@@ -1402,6 +1414,8 @@ async def salvar_configuracoes_empresa(
         mensagem_aceite: str = Form(""),
         mensagem_pagamento: str = Form(""),
         mensagem_confirmacao: str = Form(""),
+        mensagem_hora_fim: str = Form(""),
+        mostrar_mensagem_hora_fim: Optional[str] = Form(None),
         mensagem_preparacao: str = Form(""),
         mensagem_a_caminho: str = Form(""),
         db: Session = Depends(get_db),
@@ -1434,6 +1448,8 @@ async def salvar_configuracoes_empresa(
     empresa.mensagem_aceite = mensagem_aceite.strip()
     empresa.mensagem_pagamento = mensagem_pagamento.strip()
     empresa.mensagem_confirmacao = mensagem_confirmacao.strip()
+    empresa.mensagem_hora_fim = mensagem_hora_fim.strip()
+    empresa.mostrar_mensagem_hora_fim = bool(mostrar_mensagem_hora_fim)
     empresa.mensagem_preparacao = mensagem_preparacao.strip()
     empresa.mensagem_a_caminho = mensagem_a_caminho.strip()
     form = await request.form()
@@ -1448,8 +1464,10 @@ async def salvar_configuracoes_empresa(
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
+    contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     return templates.TemplateResponse("admin/produtos.html",
-                                      {"request": request, "empresa": empresa, "produtos": produtos, "produto": None})
+                                      {"request": request, "empresa": empresa, "produtos": produtos, "produto": None,
+                                       "contratos": contratos})
 
 
 @app.get("/painel/produto/{produto_id}", response_class=HTMLResponse)
@@ -1459,18 +1477,20 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
+    contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     return templates.TemplateResponse("admin/produtos.html",
                                       {"request": request, "empresa": empresa, "produtos": produtos,
-                                       "produto": produto})
+                                       "produto": produto, "contratos": contratos})
 
 
 @app.post("/painel/produto/{produto_id_url}")
 def salvar_produto_url(produto_id_url: int, nome: str = Form(...), descricao: str = Form(""),
                        quantidade_disponivel: int = Form(1), valor_base: str = Form("0"),
                        duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
+                       contrato_id: str = Form(""),
                        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     return salvar_produto(str(produto_id_url), nome, descricao, quantidade_disponivel, valor_base, duracao_minutos,
-                          prazo_retirada_dias, db, empresa)
+                          prazo_retirada_dias, contrato_id, db, empresa)
 
 
 @app.post("/painel/produtos")
@@ -1478,7 +1498,7 @@ def salvar_produto(
         produto_id: str = Form(""),
         nome: str = Form(...), descricao: str = Form(""),
         quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240),
-        prazo_retirada_dias: int = Form(1),
+        prazo_retirada_dias: int = Form(1), contrato_id: str = Form(""),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     produto_id_int = int(produto_id) if produto_id else None
@@ -1488,7 +1508,9 @@ def salvar_produto(
         db.add(produto)
     produto.nome = nome.strip()
     produto.descricao = descricao
-    produto.contrato_id = None
+    contrato_id_int = int(contrato_id) if contrato_id and str(contrato_id).isdigit() else None
+    contrato = db.get(Contrato, contrato_id_int) if contrato_id_int else None
+    produto.contrato_id = contrato.id if contrato and contrato.empresa_id == empresa.id else None
     produto.quantidade_disponivel = quantidade_disponivel
     produto.valor_base = texto_para_float(valor_base)
     produto.duracao_minutos = duracao_minutos
@@ -1503,7 +1525,7 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
     origem = db.get(ProdutoServico, produto_id)
     if not origem or origem.empresa_id != empresa.id:
         raise HTTPException(404)
-    novo = ProdutoServico(empresa_id=empresa.id, contrato_id=None, nome=f"{origem.nome} - cópia",
+    novo = ProdutoServico(empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
                           descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
                           valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
                           prazo_retirada_dias=origem.prazo_retirada_dias, ativo=True)
@@ -1989,7 +2011,8 @@ async def preparar_contrato(
             primeiro_produto = produto
 
     item.produto_id = primeiro_produto.id if primeiro_produto else None
-    item.contrato_id = int(contrato_id) if contrato_id else None
+    contrato_padrao_id = primeiro_produto.contrato_id if primeiro_produto and primeiro_produto.contrato_id else None
+    item.contrato_id = int(contrato_id) if contrato_id else contrato_padrao_id
     db.flush()
     total_itens = sum((linha.valor_total or 0) for linha in item.itens)
     valor_manual = texto_para_float(valor)
@@ -2024,7 +2047,8 @@ def excluir_solicitacao_completa(
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if existe_pagamento_conciliado(item):
-        raise HTTPException(400, "Não é possível excluir: existe pagamento conciliado no financeiro.")
+        msg = quote("Pagamento conciliado. Chame o financeiro antes de excluir este contrato.")
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={msg}", status_code=303)
 
     cliente = item.cliente
     pagamento_ids = [p.id for p in (item.pagamentos or [])]
@@ -2226,7 +2250,7 @@ def contrato_novo_salvar(
         empresa_id=empresa.id,
         cliente_id=cliente.id,
         produto_id=produto.id if produto else None,
-        contrato_id=int(contrato_id) if contrato_id else None,
+        contrato_id=int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None),
         data_evento=data_evento_obj,
         hora_inicio=inicio_obj,
         hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
@@ -2240,7 +2264,7 @@ def contrato_novo_salvar(
         valor=valor_float,
         sinal=sinal_float,
         observacoes=observacoes.strip(),
-        status="reserva_confirmada" if manual else ("aguardando_aceite" if contrato_id and produto else "pre_reserva"),
+        status="reserva_confirmada" if manual else ("aguardando_aceite" if (contrato_id or (produto and produto.contrato_id)) and produto else "pre_reserva"),
         aprovado_em=agora_utc() if manual else None,
         aceite_em=agora_utc() if manual else None,
         sinal_recebido=True if manual and sinal_float > 0 else False,
@@ -2433,7 +2457,7 @@ def salvar_solicitacao_completa(
     sinal_float = texto_para_float(sinal)
 
     item.produto_id = produto.id if produto else None
-    item.contrato_id = int(contrato_id) if contrato_id else None
+    item.contrato_id = int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None)
     item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
     item.hora_inicio = inicio_obj
     item.hora_fim = somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else item.hora_fim
@@ -2573,7 +2597,7 @@ def criar_pre_reserva_rapida(
         empresa_id=empresa.id,
         cliente_id=cliente.id,
         produto_id=produto.id if produto else None,
-        contrato_id=int(contrato_id) if contrato_id else None,
+        contrato_id=int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None),
         data_evento=datetime.strptime(data_evento, "%Y-%m-%d").date(),
         hora_inicio=inicio_obj,
         hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
@@ -3835,13 +3859,26 @@ def salvar_pre_cadastro(
     if not hora_meia_em_meia_valida(hora_inicio):
         return render_erro("hora_invalida")
     data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    rascunho_existente = (
+        db.query(Solicitacao)
+        .join(Cliente, Solicitacao.cliente_id == Cliente.id)
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.data_evento == data_obj,
+            Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"]),
+            Cliente.telefone == (telefone_limpo or telefone)
+        )
+        .first()
+    )
+    if rascunho_existente:
+        return render_erro("rascunho_duplicado")
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
     fim_obj = None
     solicitacao = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=data_obj, hora_inicio=inicio_obj,
         hora_fim=fim_obj, bairro=bairro, local=local, local_nome=local_nome,
         local_responsavel_nome=local_responsavel_nome, local_responsavel_telefone=local_responsavel_telefone,
-        acesso_local=acesso_local, observacoes=observacoes, status="reserva"
+        acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva"
     )
     db.add(solicitacao)
     db.commit()

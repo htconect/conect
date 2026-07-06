@@ -67,6 +67,10 @@
     <label>Mensagem de reserva confirmada</label>
     <textarea name="mensagem_confirmacao">{{ empresa.mensagem_confirmacao or mensagens_padrao.confirmacao }}</textarea>
 
+    <label>Mensagem abaixo do horário de fim</label>
+    <textarea name="mensagem_hora_fim">{{ empresa.mensagem_hora_fim or mensagens_padrao.hora_fim }}</textarea>
+    <label class="check"><input type="checkbox" name="mostrar_mensagem_hora_fim" value="1" {% if empresa.mostrar_mensagem_hora_fim %}checked{% endif %}> Mostrar esta mensagem no rascunho/cadastro</label>
+
     <h3>Módulo operação / logística</h3>
     <p class="texto-discreto">Estas mensagens são usadas nos botões da tela de Operação. Variáveis disponíveis: {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{hora_entrega}}' }}, {{ '{{hora_previsao_inicio}}' }}, {{ '{{hora_previsao_fim}}' }}.</p>
 

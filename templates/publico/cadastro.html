@@ -9,6 +9,7 @@
   {% if erro == 'cpf_invalido' %}CPF inválido. Confira os números informados.{% endif %}
   {% if erro == 'cnpj_invalido' %}CNPJ inválido. Confira os números informados.{% endif %}
   {% if erro == 'hora_invalida' %}Horário inválido. Use horários de 30 em 30 minutos, como 14:00 ou 14:30.{% endif %}
+  {% if erro == 'rascunho_duplicado' %}Seu contrato já foi informado para este telefone nesta data. Leia o contrato quando receber. Caso precise alterar alguma informação, chame a empresa pelo WhatsApp.{% endif %}
 </div>
 {% endif %}
 
@@ -78,6 +79,9 @@
       <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" required></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
+    {% if empresa.mostrar_mensagem_hora_fim %}
+      <p class="box aviso">{{ empresa.mensagem_hora_fim or 'Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber.' }}</p>
+    {% endif %}
     <label>Nome do local</label><input name="local_nome" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
     <label>Referência do local</label><input name="local" placeholder="Ex.: Portaria 2, salão térreo, entrada pela rua lateral">
     <label>Acesso ao local</label>
