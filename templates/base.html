@@ -31,6 +31,16 @@
   {% block conteudo %}{% endblock %}
 </main>
 
+<div id="app-loading" class="app-loading" aria-live="polite" aria-hidden="true">
+  <div class="app-loading-card">
+    <div class="app-loading-spinner"></div>
+    <strong id="app-loading-title">Carregando informações</strong>
+    <span id="app-loading-text">Consultando o banco de dados. Isso pode levar alguns segundos.</span>
+    <div class="app-loading-bar"><i></i></div>
+  </div>
+</div>
+
+
 {% if request.session.get('empresa_id') %}
 <nav class="nav-inferior">
   <a href="/painel">🏠<span>Início</span></a>
@@ -61,5 +71,76 @@
   document.querySelectorAll('input[name="valor"], input[name="sinal"], input[name="valor_unitario"], input[name="valor_pago"], input[data-mascara="moeda"]').forEach(aplicarMascaraMoeda);
 })();
 </script>
+
+<script>
+(function () {
+  const overlay = document.getElementById("app-loading");
+  const titulo = document.getElementById("app-loading-title");
+  const texto = document.getElementById("app-loading-text");
+  let timer = null;
+
+  function mostrarCarregando(tituloMsg, textoMsg) {
+    if (!overlay) return;
+    if (titulo && tituloMsg) titulo.textContent = tituloMsg;
+    if (texto && textoMsg) texto.textContent = textoMsg;
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      overlay.classList.add("ativo");
+      overlay.setAttribute("aria-hidden", "false");
+    }, 120);
+  }
+
+  function linkInternoValido(link) {
+    if (!link || link.target === "_blank" || link.hasAttribute("download")) return false;
+    if (link.dataset.noLoading === "1") return false;
+    const href = link.getAttribute("href") || "";
+    if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) return false;
+    try {
+      const url = new URL(href, window.location.href);
+      return url.origin === window.location.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  document.addEventListener("submit", function (e) {
+    const form = e.target;
+    if (!form || form.dataset.noLoading === "1") return;
+    const msg = form.dataset.loadingText || "Salvando e atualizando os dados no Neon.";
+    mostrarCarregando(form.dataset.loadingTitle || "Processando solicitação", msg);
+    const botao = form.querySelector('button[type="submit"], button:not([type])');
+    if (botao) {
+      botao.dataset.textoOriginal = botao.textContent;
+      botao.textContent = "Aguarde...";
+      botao.disabled = true;
+    }
+  }, true);
+
+  document.addEventListener("click", function (e) {
+    const link = e.target.closest("a");
+    if (!linkInternoValido(link)) return;
+    mostrarCarregando(link.dataset.loadingTitle || "Abrindo tela", link.dataset.loadingText || "Carregando informações atualizadas.");
+  }, true);
+
+  document.querySelectorAll("select[onchange*='submit']").forEach(function (select) {
+    select.addEventListener("change", function () {
+      mostrarCarregando("Atualizando filtros", "Buscando informações atualizadas no financeiro.");
+    });
+  });
+
+  window.addEventListener("pageshow", function () {
+    if (!overlay) return;
+    clearTimeout(timer);
+    overlay.classList.remove("ativo");
+    overlay.setAttribute("aria-hidden", "true");
+    document.querySelectorAll("button[disabled][data-texto-original]").forEach(function (botao) {
+      botao.disabled = false;
+      botao.textContent = botao.dataset.textoOriginal;
+      delete botao.dataset.textoOriginal;
+    });
+  });
+})();
+</script>
+
 </body>
 </html>

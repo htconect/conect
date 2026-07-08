@@ -926,3 +926,65 @@ body{overflow-x:hidden}
 .pagamento-detalhes-consulta{margin-top:8px;display:grid;gap:3px;font-size:12px;color:#475569;line-height:1.35}
 .pagamento-detalhes-consulta span{display:block}
 .pagamento-detalhes-consulta strong{color:#0f172a}
+
+
+/* Camada global de carregamento: reduz a sensação de travamento em consultas lentas no Neon/Render */
+.app-loading{
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:rgba(248,250,252,.78);
+  backdrop-filter:blur(8px);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .18s ease;
+}
+.app-loading.ativo{opacity:1;pointer-events:all}
+.app-loading-card{
+  width:min(360px,100%);
+  background:#fff;
+  border:1px solid #dbe5f4;
+  border-radius:22px;
+  box-shadow:0 24px 70px rgba(15,23,42,.16);
+  padding:24px;
+  text-align:center;
+}
+.app-loading-spinner{
+  width:44px;
+  height:44px;
+  margin:0 auto 14px;
+  border-radius:999px;
+  border:4px solid #dbeafe;
+  border-top-color:#2563eb;
+  animation:appSpin .8s linear infinite;
+}
+.app-loading-card strong{display:block;font-size:18px;color:#0f172a;margin-bottom:6px}
+.app-loading-card span{display:block;font-size:14px;line-height:1.4;color:#64748b}
+.app-loading-bar{
+  height:8px;
+  overflow:hidden;
+  background:#eaf1ff;
+  border-radius:999px;
+  margin-top:18px;
+}
+.app-loading-bar i{
+  display:block;
+  width:42%;
+  height:100%;
+  border-radius:999px;
+  background:#2563eb;
+  animation:appLoadingBar 1.15s ease-in-out infinite;
+}
+@keyframes appSpin{to{transform:rotate(360deg)}}
+@keyframes appLoadingBar{
+  0%{transform:translateX(-110%)}
+  100%{transform:translateX(250%)}
+}
+@media(max-width:700px){
+  .app-loading{align-items:flex-end}
+  .app-loading-card{border-radius:22px 22px 0 0;margin-bottom:0}
+}
