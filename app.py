@@ -467,21 +467,8 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     return linhas
 
 
-def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem enviada ao cliente com formatação preservada para WhatsApp."""
-    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    link_contrato = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
-    link_clausulas = _link_absoluto(request, "contrato_cliente_clausulas", slug=empresa.slug, solicitacao_id=item.id)
-
-    if item.status not in {"aguardando_aceite", "contrato_enviado", "aceito", "aguardando_pagamento",
-                           "reserva_confirmada"}:
-        return "\n".join([
-            f"*{empresa.nome or 'Karaokê RJ'}*",
-            "",
-            "Olá! Segue o link da sua reserva/contrato para conferência:",
-            link_contrato,
-        ]).strip()
-
+def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva) -> list[str]:
+    """Monta o resumo principal da reserva para mensagens de WhatsApp."""
     total = float(item.valor or 0)
     pago = float(item.valor_pago or 0)
     falta = max(total - pago, 0)
@@ -500,13 +487,12 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
 
     endereco_linhas = linhas_endereco_reserva(item)
     endereco_texto = "\n".join(
-        l.replace("*Endereço:* ", "").replace("*Local:* ", "").replace("*Bairro:* ", "Bairro: ") for l in
-        endereco_linhas)
+        l.replace("*Endereço:* ", "").replace("*Local:* ", "").replace("*Bairro:* ", "Bairro: ")
+        for l in endereco_linhas
+    )
 
-    linhas = [
+    return [
         f"*{empresa.nome or 'Karaokê RJ'}*",
-        "",
-        "Sua reserva foi confirmada.",
         "",
         f"Cliente: {item.cliente.nome if item.cliente else '-'}",
         "",
@@ -523,11 +509,41 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
         f"Total: R$ {moeda_br(total)}",
         f"Pago: R$ {moeda_br(pago)}",
         f"Saldo: R$ {moeda_br(falta)}",
+    ]
+
+
+def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
+    """Mensagem para o cliente aceitar a reserva. Usa o link da tela de aceite."""
+    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+
+    linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
+    linhas.extend([
         "",
-        "📄 Leia as cláusulas do contrato:",
+        "Para confirmar sua reserva, confira os dados e aceite pelo link abaixo:",
+        link_aceite,
+    ])
+    return "\n".join(linhas).strip()
+
+
+def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
+    """Mensagem enviada somente depois do aceite, com o link do contrato final."""
+    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    link_contrato = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
+    link_clausulas = _link_absoluto(request, "contrato_cliente_clausulas", slug=empresa.slug, solicitacao_id=item.id)
+
+    linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
+    linhas.extend([
+        "",
+        "Sua reserva foi confirmada.",
+        "",
+        "📄 Contrato final:",
+        link_contrato,
+        "",
+        "📄 Cláusulas do contrato:",
         link_clausulas,
         "",
-    ]
+    ])
 
     mensagem_final = mensagens_empresa(empresa).get("confirmacao", "").strip()
     if mensagem_final:
@@ -1729,30 +1745,54 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/whatsapp")
+def compartilhar_aceite_whatsapp(
+    solicitacao_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Envia o link de aceite ao cliente. Não envia o contrato final."""
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    telefone = _limpar_tel_whatsapp(item.cliente.telefone or item.cliente.identificador)
+    if not telefone:
+        raise HTTPException(400, "Cliente sem telefone para WhatsApp")
+
+    if item.status == "pre_reserva" and item.contrato_id and len(item.itens) > 0:
+        item.status = "contrato_enviado"
+        db.commit()
+
+    texto = montar_mensagem_whatsapp_aceite(request, empresa, item, db)
+
+    return RedirectResponse(
+        f"https://wa.me/{telefone}?text={quote(texto)}",
+        status_code=303,
+    )
+
+
+@app.get("/painel/solicitacao/{solicitacao_id}/whatsapp-contrato")
 def compartilhar_contrato_whatsapp(
     solicitacao_id: int,
     request: Request,
     db: Session = Depends(get_db),
     empresa: Empresa = Depends(empresa_logada),
 ):
+    """Envia o contrato final somente após aceite do cliente ou aceite manual."""
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
 
-    telefone = _limpar_tel_whatsapp(
-        item.cliente.telefone or item.cliente.identificador
-    )
+    if not status_reserva_confirmada(item.status):
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=O contrato final só pode ser enviado depois do aceite do cliente ou aceite manual.",
+            status_code=303,
+        )
+
+    telefone = _limpar_tel_whatsapp(item.cliente.telefone or item.cliente.identificador)
     if not telefone:
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
-
-    # Marca como enviado somente na primeira vez.
-    if (
-        item.status == "pre_reserva"
-        and item.contrato_id
-        and len(item.itens) > 0
-    ):
-        item.status = "contrato_enviado"
-        db.commit()
 
     texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
 

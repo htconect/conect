@@ -9,6 +9,7 @@
 {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
 {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=item.id) %}
 {% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=item.id) %}
+{% set link_aceite_whatsapp = request.url_for('compartilhar_aceite_whatsapp', solicitacao_id=item.id) %}
 {% set link_contrato_whatsapp = request.url_for('compartilhar_contrato_whatsapp', solicitacao_id=item.id) %}
 {% set tem_itens = item.itens and item.itens|length > 0 %}
 {% set contrato_aceito = status_reserva_confirmada(item.status) %}
@@ -55,19 +56,20 @@
 <section class="proxima-acao">
   <small>Próxima ação</small>
   <b>Salvar e enviar para o cliente</b>
-  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">Compartilhar WhatsApp</a>
+  <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}">WhatsApp para aceite</a>
 </section>
 {% elif contrato_pendente %}
 <section class="proxima-acao aviso-acao">
   <small>Status</small>
   <b>Aguardando aceite do cliente</b>
-  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">Compartilhar WhatsApp</a>
+  <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}">WhatsApp para aceite</a>
 </section>
 {% else %}
 <section class="proxima-acao ok-acao">
   <small>Status</small>
   <b>Contrato aceito</b>
   <button class="botao largura-total" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
+  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">WhatsApp contrato</a>
 </section>
 {% endif %}
 
@@ -89,7 +91,7 @@
     {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
       <p><small>Responsável no local</small><b>{{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</b></p>
     {% endif %}
-    {% if item.observacoes %}<p><small>Observações</small><b>{{ item.observacoes }}</b></p>{% endif %}
+    {% if item.observacoes %}<p class="observacao-destaque"><small>Observações</small><b>{{ item.observacoes }}</b></p>{% endif %}
   </div>
 </section>
 
@@ -272,9 +274,12 @@
   </div>
 
   {% if tem_itens %}
-    <a class="botao largura-total" href="{{ link_contrato_visual }}" target="_blank">Ver contrato</a>
-    <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}" target="_blank">Compartilhar WhatsApp</a>
-    <a class="botao largura-total" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
+    <a class="botao largura-total" href="{{ link_contrato_visual }}" target="_blank">Ver tela de aceite</a>
+    <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}" target="_blank">WhatsApp para aceite</a>
+    {% if contrato_aceito %}
+      <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}" target="_blank">WhatsApp contrato</a>
+      <a class="botao largura-total" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
+    {% endif %}
   {% endif %}
 
   {% if tem_itens and not contrato_aceito %}
