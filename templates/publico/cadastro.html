@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<h1>Pré-contrato - {{ empresa.nome }}</h1>
-<p class="texto-discreto">Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.</p>
+<h1>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Editar dados do contrato{% else %}Pré-contrato{% endif %} - {{ empresa.nome }}</h1>
+<p class="texto-discreto">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Corrija seus dados e salve. Depois confira novamente o contrato para aceitar.{% else %}Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.{% endif %}</p>
 
 {% if erro %}
 <div class="box aviso">
@@ -26,7 +26,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="/e/{{ empresa.slug }}/reserva" class="box tema-{{ empresa.tema or 'azul' }}">
+<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}">
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
 
   <section class="secao-form">
@@ -75,22 +75,22 @@
   <section class="secao-form">
     <h2>3. Evento</h2>
     <div class="grid duas">
-      <div><label>Data do evento *</label><input name="data_evento" type="date" required></div>
-      <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" required></div>
+      <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required></div>
+      <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio if form is defined else '' }}" required></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
     {% if empresa.mostrar_mensagem_hora_fim %}
       <p class="box aviso">{{ empresa.mensagem_hora_fim or 'Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber.' }}</p>
     {% endif %}
-    <label>Nome do local</label><input name="local_nome" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
-    <label>Referência do local</label><input name="local" placeholder="Ex.: Portaria 2, salão térreo, entrada pela rua lateral">
+    <label>Nome do local</label><input name="local_nome" value="{{ form.local_nome if form is defined else '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
+    <label>Referência do local</label><input name="local" value="{{ form.local if form is defined else '' }}" placeholder="Ex.: Portaria 2, salão térreo, entrada pela rua lateral">
     <label>Acesso ao local</label>
     <select name="acesso_local">
       <option value="">Selecione</option>
-      <option>Térreo</option>
-      <option>Elevador</option>
-      <option>Escada</option>
-      <option>Elevador + escada</option>
+      <option {% if form is defined and form.acesso_local == 'Térreo' %}selected{% endif %}>Térreo</option>
+      <option {% if form is defined and form.acesso_local == 'Elevador' %}selected{% endif %}>Elevador</option>
+      <option {% if form is defined and form.acesso_local == 'Escada' %}selected{% endif %}>Escada</option>
+      <option {% if form is defined and form.acesso_local == 'Elevador + escada' %}selected{% endif %}>Elevador + escada</option>
     </select>
   </section>
 
@@ -98,13 +98,13 @@
     <h2>4. Responsável no local</h2>
     <p class="texto-discreto">Opcional, mas muito importante quando outra pessoa recebe a equipe.</p>
     <div class="grid duas">
-      <div><label>Nome do responsável</label><input name="local_responsavel_nome" placeholder="Quem estará no local?"></div>
-      <div><label>Telefone do responsável</label><input name="local_responsavel_telefone" placeholder="WhatsApp ou telefone"></div>
+      <div><label>Nome do responsável</label><input name="local_responsavel_nome" value="{{ form.local_responsavel_nome if form is defined else '' }}" placeholder="Quem estará no local?"></div>
+      <div><label>Telefone do responsável</label><input name="local_responsavel_telefone" value="{{ form.local_responsavel_telefone if form is defined else '' }}" placeholder="WhatsApp ou telefone"></div>
     </div>
     <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
   </section>
 
-  <button>Enviar reserva</button>
+  <button>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Salvar correções{% else %}Enviar reserva{% endif %}</button>
 </form>
 
 <script>

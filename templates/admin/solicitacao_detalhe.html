@@ -91,7 +91,8 @@
     {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
       <p><small>Responsável no local</small><b>{{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</b></p>
     {% endif %}
-    {% if item.observacoes %}<p class="observacao-destaque"><small>Observações</small><b>{{ item.observacoes }}</b></p>{% endif %}
+    {% set observacao_reserva = item.observacoes or item.cliente.observacoes %}
+    {% if observacao_reserva %}<p class="observacao-destaque"><small>Observações</small><b>{{ observacao_reserva }}</b></p>{% endif %}
   </div>
 </section>
 

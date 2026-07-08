@@ -10,19 +10,41 @@
 <div class="lista-mobile">
 {% for i in solicitacoes %}
   {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=i.id) %}
+  {% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=i.id) %}
+  {% set contrato_aceito = status_reserva_confirmada(i.status) %}
   <article class="card reserva-cliente">
     <a class="card-link-limpo" href="/painel/solicitacao/{{ i.id }}">
       <div class="agenda-topo">
         <div>
           <b>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.hora_inicio.strftime('%H:%M') }}</b>
           <small>{{ i.bairro or cliente.bairro or '-' }} · R$ {{ i.valor|moeda_br }}</small>
+          {% set observacao_card = i.observacoes or cliente.observacoes %}
+          {% if observacao_card %}<small class="observacao-destaque">{{ observacao_card }}</small>{% endif %}
         </div>
         <span class="seta-card">›</span>
       </div>
     </a>
-    <div class="acoes linha-acoes">
-      <a class="botao secundario" href="{{ link_contrato_visual }}" target="_blank">Contrato</a>
-      <a class="botao-whats" target="_blank" href="https://wa.me/55{{ (cliente.telefone or cliente.identificador)|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}?text={{ ('Olá! Segue o contrato da sua reserva: ' ~ link_contrato_visual)|urlencode }}">WhatsApp</a>
+    <div class="acoes linha-acoes acoes-cliente-reserva">
+      {% if contrato_aceito %}
+        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">WhatsApp contrato</a>
+      {% else %}
+        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp">WhatsApp aceite</a>
+      {% endif %}
+      <a class="botao secundario" href="/painel/solicitacao/{{ i.id }}/editar-completo">Editar</a>
+      <a class="botao secundario" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
+      <form method="post" action="/painel/solicitacao/{{ i.id }}/usar-como-base">
+        <button class="secundario" type="submit">Usar como base</button>
+      </form>
+      {% if not contrato_aceito %}
+        <form method="post" action="/painel/solicitacao/{{ i.id }}/aceite-manual">
+          <input type="hidden" name="observacao_aceite" value="Aceite manual registrado pela busca do cliente.">
+          <button class="secundario" type="submit" onclick="return confirm('Registrar aceite manual desta reserva?')">Aceite manual</button>
+        </form>
+      {% endif %}
+      <form method="post" action="/painel/solicitacao/{{ i.id }}/status">
+        <input type="hidden" name="status" value="cancelada">
+        <button class="perigo" type="submit" onclick="return confirm('Cancelar esta reserva?')">Cancelar</button>
+      </form>
     </div>
   </article>
 {% else %}

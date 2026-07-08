@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text, inspect
+from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
@@ -2574,13 +2574,28 @@ def salvar_solicitacao_completa(
 @app.get("/painel/clientes", response_class=HTMLResponse)
 def clientes(request: Request, busca: str = "", db: Session = Depends(get_db),
              empresa: Empresa = Depends(empresa_logada)):
-    termo = limpar_identificador(busca)
+    termo_texto = (busca or "").strip()
+    termo_limpo = limpar_identificador(busca)
     itens = []
-    if termo:
-        q = db.query(Cliente).filter_by(empresa_id=empresa.id)
-        q = q.filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (
-            Cliente.identificador.contains(termo)))
-        itens = q.order_by(Cliente.nome).all()
+    if termo_texto:
+        condicoes = [
+            Cliente.nome.ilike(f"%{termo_texto}%"),
+            Cliente.email.ilike(f"%{termo_texto}%"),
+        ]
+        if termo_limpo:
+            condicoes.extend([
+                Cliente.cpf.contains(termo_limpo),
+                Cliente.cnpj.contains(termo_limpo),
+                Cliente.telefone.contains(termo_limpo),
+                Cliente.identificador.contains(termo_limpo),
+            ])
+        itens = (
+            db.query(Cliente)
+            .filter(Cliente.empresa_id == empresa.id)
+            .filter(or_(*condicoes))
+            .order_by(Cliente.nome)
+            .all()
+        )
     return templates.TemplateResponse("admin/clientes.html",
                                       {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
 
@@ -2601,6 +2616,56 @@ def cliente_detalhe(cliente_id: int, request: Request, db: Session = Depends(get
                                       {"request": request, "empresa": empresa, "cliente": cliente,
                                        "equipamentos": equipamentos, "solicitacoes": solicitacoes, "produtos": produtos,
                                        "contratos": contratos})
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/usar-como-base")
+def usar_solicitacao_como_base(
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    origem = db.get(Solicitacao, solicitacao_id)
+    if not origem or origem.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    nova = Solicitacao(
+        empresa_id=empresa.id,
+        cliente_id=origem.cliente_id,
+        produto_id=origem.produto_id,
+        contrato_id=origem.contrato_id,
+        data_evento=origem.data_evento,
+        hora_inicio=origem.hora_inicio,
+        hora_fim=origem.hora_fim,
+        bairro=origem.bairro,
+        local=origem.local,
+        local_nome=origem.local_nome,
+        local_responsavel_nome=origem.local_responsavel_nome,
+        local_responsavel_telefone=origem.local_responsavel_telefone,
+        acesso_local=origem.acesso_local,
+        valor=origem.valor,
+        sinal=origem.sinal,
+        valor_pago=0,
+        sinal_recebido=False,
+        observacoes=origem.observacoes,
+        status="pre_reserva",
+    )
+    db.add(nova)
+    db.flush()
+
+    for it in origem.itens:
+        db.add(ReservaItem(
+            empresa_id=empresa.id,
+            solicitacao_id=nova.id,
+            produto_id=it.produto_id,
+            nome=it.nome,
+            descricao=it.descricao,
+            quantidade=it.quantidade,
+            valor_unitario=it.valor_unitario,
+            valor_total=it.valor_total,
+        ))
+
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{nova.id}/editar-completo", status_code=303)
 
 
 @app.post("/painel/cliente/{cliente_id}/dados")
@@ -4221,6 +4286,103 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
     return templates.TemplateResponse("publico/contrato.html",
                                       {"request": request, "empresa": empresa, "item": item, "contrato": contrato,
                                        "produto": produto, "itens_reserva": itens_reserva})
+
+
+@app.get("/e/{slug}/contrato/{solicitacao_id}/editar", response_class=HTMLResponse)
+def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
+        raise HTTPException(404)
+    if status_reserva_confirmada(item.status) or item.status == "cancelado_cliente":
+        return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
+
+    return templates.TemplateResponse("publico/cadastro.html", {
+        "request": request,
+        "empresa": empresa,
+        "cliente": item.cliente,
+        "identificador": item.cliente.identificador or item.cliente.telefone or item.cliente.cpf or "",
+        "cliente_encontrado": True,
+        "cpf_confirmacao": "",
+        "erro": "",
+        "modo_edicao_contrato": True,
+        "item": item,
+        "form": {
+            "tipo_pessoa": "juridica" if item.cliente.cnpj else "fisica",
+            "nome": item.cliente.nome or "",
+            "telefone": item.cliente.telefone or "",
+            "cpf": item.cliente.cpf or "",
+            "cnpj": item.cliente.cnpj or "",
+            "email": item.cliente.email or "",
+            "endereco": item.cliente.endereco or "",
+            "numero": item.cliente.numero or "",
+            "complemento": item.cliente.complemento or "",
+            "bairro": item.bairro or item.cliente.bairro or "",
+            "cidade": item.cliente.cidade or "",
+            "estado": item.cliente.estado or "",
+            "cep": item.cliente.cep or "",
+            "local": item.local or "",
+            "local_nome": item.local_nome or "",
+            "acesso_local": item.acesso_local or "",
+            "local_responsavel_nome": item.local_responsavel_nome or "",
+            "local_responsavel_telefone": item.local_responsavel_telefone or "",
+            "data_evento": item.data_evento.isoformat() if item.data_evento else "",
+            "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
+            "observacoes": item.observacoes or item.cliente.observacoes or "",
+        },
+        "campos_cfg": {ce.campo.chave: ce for ce in
+                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+    })
+
+
+@app.post("/e/{slug}/contrato/{solicitacao_id}/editar")
+def salvar_dados_contrato_cliente(
+        slug: str, solicitacao_id: int,
+        identificador: str = Form(""), tipo_pessoa: str = Form("fisica"),
+        nome: str = Form(""), data_nascimento: str = Form(""), telefone: str = Form(""), cpf: str = Form(""),
+        cnpj: str = Form(""), email: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
+        complemento: str = Form(""), bairro: str = Form(""), cidade: str = Form(""), estado: str = Form(""),
+        cep: str = Form(""), local: str = Form(""), local_nome: str = Form(""), acesso_local: str = Form(""),
+        local_responsavel_nome: str = Form(""), local_responsavel_telefone: str = Form(""),
+        data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
+        db: Session = Depends(get_db)
+):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
+        raise HTTPException(404)
+    if status_reserva_confirmada(item.status) or item.status == "cancelado_cliente":
+        return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
+
+    cliente = item.cliente
+    cliente.nome = nome.strip()
+    cliente.data_nascimento = datetime.strptime(data_nascimento, "%Y-%m-%d").date() if data_nascimento else None
+    cliente.telefone = limpar_identificador(telefone) or telefone.strip()
+    cliente.cpf = limpar_identificador(cpf)
+    cliente.cnpj = limpar_identificador(cnpj)
+    cliente.email = email.strip()
+    cliente.endereco = endereco.strip()
+    cliente.numero = numero.strip()
+    cliente.complemento = complemento.strip()
+    cliente.bairro = bairro.strip()
+    cliente.cidade = cidade.strip()
+    cliente.estado = estado.strip()
+    cliente.cep = limpar_identificador(cep) or cep.strip()
+    cliente.observacoes = observacoes.strip()
+    cliente.identificador = cliente.cpf or cliente.cnpj or cliente.telefone or limpar_identificador(identificador) or cliente.identificador
+
+    item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    item.hora_inicio = datetime.strptime(hora_inicio, "%H:%M").time()
+    item.bairro = bairro.strip()
+    item.local = local.strip() or endereco.strip()
+    item.local_nome = local_nome.strip()
+    item.acesso_local = acesso_local.strip()
+    item.local_responsavel_nome = local_responsavel_nome.strip()
+    item.local_responsavel_telefone = limpar_identificador(local_responsavel_telefone) or local_responsavel_telefone.strip()
+    item.observacoes = observacoes.strip()
+
+    db.commit()
+    return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
 
 
 @app.post("/e/{slug}/cancelar/{solicitacao_id}")

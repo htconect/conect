@@ -3,11 +3,11 @@
 <section class="cabecalho-mobile">
   <a class="voltar" href="/painel">← Início</a>
   <h1>Buscar cliente</h1>
-  <p class="texto-discreto">Digite CPF ou telefone para ver as reservas e reenviar contrato.</p>
+  <p class="texto-discreto">Digite nome, telefone ou CPF para ver as reservas e ações do cliente.</p>
 </section>
 
 <form method="get" class="box busca-cliente">
-  <input name="busca" value="{{ busca or '' }}" placeholder="CPF ou telefone" inputmode="numeric" autofocus>
+  <input name="busca" value="{{ busca or '' }}" placeholder="Nome, telefone ou CPF" autofocus>
   <button>Pesquisar</button>
 </form>
 
@@ -24,7 +24,7 @@
   {% if busca %}
   <div class="box">
     <p>Nenhum cliente encontrado.</p>
-    <a class="botao largura-total" href="/painel/contrato-novo?busca={{ busca|urlencode }}">Criar contrato novo com este CPF/telefone</a>
+    <a class="botao largura-total" href="/painel/contrato-novo?busca={{ busca|urlencode }}">Criar contrato novo com esta busca</a>
   </div>
   {% endif %}
 {% endfor %}

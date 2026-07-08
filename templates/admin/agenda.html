@@ -49,8 +49,9 @@
         <small class="financeiro-mini">Situação: Cancelado</small>
       {% endif %}
       <small class="financeiro-mini">Valor R$ {{ s.valor|moeda_br }} · Pago R$ {{ s.valor_pago|moeda_br }} · Falta R$ {{ ((s.valor or 0) - (s.valor_pago or 0))|moeda_br }}</small>
-      {% if s.observacoes %}
-        <small class="observacao-destaque">{{ s.observacoes }}</small>
+      {% set observacao_card = s.observacoes or s.cliente.observacoes %}
+      {% if observacao_card %}
+        <small class="observacao-destaque">{{ observacao_card }}</small>
       {% endif %}
     </div>
     <span class="seta-card">›</span>
