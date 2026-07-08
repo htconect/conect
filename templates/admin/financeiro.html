@@ -2,40 +2,75 @@
 {% block conteudo %}
 <script>document.body.classList.add("tela-financeiro-desktop");</script>
 <section class="financeiro-novo">
-  <div class="financeiro-topline"><a href="/painel" class="btn-voltar">← Painel</a><strong>Financeiro</strong></div>
-  <form method="get" class="financeiro-filtros compact-card" data-loading-title="Atualizando financeiro" data-loading-text="Consultando lançamentos, contratos e saldos no Neon.">
-    <select name="conta_id" onchange="this.form.submit()">
-      {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
-    </select>
-    <input type="date" name="data_inicial" value="{{ data_inicial }}">
-    <input type="date" name="data_final" value="{{ data_final }}">
-    <select name="categoria"><option value="">Todas categorias</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
-    <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
-    <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
-    <button>Filtrar</button><a class="btn-limpar-filtros" href="/painel/financeiro">Limpar</a>
-  </form>
+  <div class="financeiro-cabecalho">
+    <div class="financeiro-titulo">
+      <span class="financeiro-menu-icone">☰</span>
+      <span class="financeiro-logo-mini">▮▮▮</span>
+      <div>
+        <h1>Financeiro</h1>
+        <p>Visão geral das finanças</p>
+      </div>
+    </div>
+    <div class="financeiro-topo-acoes">
+      <span class="financeiro-ajuda">ⓘ Ajuda</span>
+      <span class="financeiro-data-topo">📅 {{ data_final|replace('-', '/') }}</span>
+    </div>
+  </div>
+
+  <div class="financeiro-resumo">
+    <div class="indicador-card indicador-entrada">
+      <span class="indicador-icone">↓</span>
+      <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
+    </div>
+    <div class="indicador-card indicador-saida">
+      <span class="indicador-icone">↑</span>
+      <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
+    </div>
+    <div class="indicador-card indicador-saldo">
+      <span class="indicador-icone">▣</span>
+      <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
+    </div>
+    <div class="indicador-card indicador-receber">
+      <span class="indicador-icone">▤</span>
+      <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+    </div>
+    <div class="indicador-card indicador-contrato">
+      <span class="indicador-icone">▣</span>
+      <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber|moeda_br }}</b></div>
+    </div>
+    <div class="indicador-card indicador-contas">
+      <span class="indicador-icone">⌂</span>
+      <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+    </div>
+  </div>
+
+  <div class="financeiro-filtros-card">
+    <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
+      <select name="conta_id" onchange="this.form.submit()">
+        {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+      </select>
+      <input type="date" name="data_inicial" value="{{ data_inicial }}">
+      <input type="date" name="data_final" value="{{ data_final }}">
+      <select name="categoria"><option value="">Todas categorias</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
+      <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
+      <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
+      <button class="btn-filtrar">⌁ Filtrar</button>
+      <a class="btn-limpar-filtros" href="/painel/financeiro">⟳ Limpar</a>
+    </form>
+
+    {% if conta %}
+    <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="inline-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
+      <input type="hidden" name="conta_id" value="{{ conta.id }}">
+      <span>Extrato</span>
+      <input type="file" name="arquivo" accept=".csv,.xlsx,.xls" required>
+      <button class="btn-importar">⇧ Importar</button>
+    </form>
+    {% endif %}
+  </div>
 
   {% if request.query_params.get('importados') is not none %}
   <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
   {% endif %}
-
-  {% if conta %}
-  <div class="financeiro-acoes compact-grid">
-    <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="inline-form compact-card preserve-scroll" data-loading-title="Importando extrato" data-loading-text="Lendo o arquivo, evitando duplicados e conciliando os dados.">
-      <input type="hidden" name="conta_id" value="{{ conta.id }}">
-      <span>Extrato</span><input type="file" name="arquivo" accept=".csv,.xlsx,.xls" required><button>Importar</button>
-    </form>
-  </div>
-  {% endif %}
-
-  <div class="financeiro-resumo">
-    <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
-    <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
-    <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
-    <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
-    <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber|moeda_br }}</b></div>
-    <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
-  </div>
 
   <details class="financeiro-add compact-card">
     <summary>+ Lançamentos manuais</summary>
@@ -55,7 +90,7 @@
 
   <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
-      <div class="titulo-tabela"><h2>Banco</h2><span>{{ banco|length }} lançamentos</span></div>
+      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; ⟳</span></div>
       <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
       <table>
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ação</th></tr></thead>
@@ -134,7 +169,7 @@
     </section>
 
     <section class="box tabela-financeiro sistema-box">
-      <div class="titulo-tabela"><h2>Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
+      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
       <div class="filtro-direito">
         <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente">Pendentes</a>
         <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado">Vinculados</a>
@@ -173,6 +208,28 @@
       </details>
     </section>
   </div>
+
+  <div class="financeiro-rodape-cards">
+    <div class="contrato-card contrato-vencido">
+      <span class="contrato-icone">▣</span>
+      <div><small>Contratos a receber (Vencidos)</small><b>R$ {{ total_contratos_receber|moeda_br }}</b><em>{{ contratos_receber|length }} contratos</em></div>
+      <a href="#contratos-receber">Ver detalhes</a>
+    </div>
+    <div class="contrato-card contrato-dia">
+      <span class="contrato-icone">▣</span>
+      <div><small>Contratos a receber (Em dia)</small><b>R$ {{ total_contratos_receber|moeda_br }}</b><em>{{ contratos_receber|length }} contratos</em></div>
+      <a href="#contratos-receber">Ver detalhes</a>
+    </div>
+    <div class="contrato-card contrato-pago">
+      <span class="contrato-icone">✓</span>
+      <div><small>Contratos pagos (Mês)</small><b>R$ {{ total_contratos_receber|moeda_br }}</b><em>{{ pagamentos_sistema|length }} contratos</em></div>
+      <a href="#contratos-receber">Ver detalhes</a>
+    </div>
+    <div class="dica-card">
+      <b>💡 Dica</b>
+      <span>Mantenha seus lançamentos sempre atualizados para um controle financeiro eficiente.</span>
+    </div>
+  </div>
 </section>
 
 <script>
@@ -203,6 +260,56 @@
 </script>
 
 <style>
-.financeiro-topline{height:24px;display:flex;align-items:center;gap:8px;margin-bottom:4px}.btn-voltar{background:#0f172a;color:#fff;text-decoration:none;border-radius:7px;padding:4px 8px;font-size:11px;font-weight:900}.financeiro-novo{max-width:none;width:100%;padding:6px 9px 9px;box-sizing:border-box}.financeiro-alerta{background:#ecfdf5;border:1px solid #bbf7d0;border-radius:8px;padding:4px 8px;margin:4px 0;font-size:11px}.compact-card{background:#fff;border:1px solid #dbe2ea;border-radius:10px;padding:5px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.financeiro-filtros{display:grid;grid-template-columns:165px 125px 125px 140px 145px minmax(220px,1fr) 76px 76px;gap:6px;margin-bottom:5px}.financeiro-acoes{display:grid;grid-template-columns:minmax(380px,1fr);gap:6px;margin-bottom:5px}.inline-form{display:grid;grid-template-columns:48px 1fr 78px;align-items:center;gap:6px}.inline-form span{font-weight:800;font-size:11px}.financeiro-resumo{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:5px}.financeiro-resumo>div{background:#fff;border:1px solid #dbe2ea;border-radius:10px;padding:5px 8px}.financeiro-resumo small{display:block;color:#475569;font-size:10px}.financeiro-resumo b{font-size:14px}.financeiro-add{margin-bottom:6px}.financeiro-add summary{font-size:12px;font-weight:900;cursor:pointer}.forms-add{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.grid-form{display:grid;grid-template-columns:115px 1fr 115px 130px 118px;gap:5px}.financeiro-duas-colunas{display:grid;grid-template-columns:minmax(900px,1.65fr) minmax(430px,.7fr);gap:8px;height:calc(100vh - 178px);min-height:500px}.box{background:#fff;border:1px solid #dbe2ea;border-radius:12px;overflow:hidden}.titulo-tabela{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #e5e7eb}.titulo-tabela h2{font-size:17px;margin:0}.titulo-tabela span{font-size:11px;color:#64748b}.tabela-scroll{overflow:auto;height:calc(100% - 35px)}.sistema-scroll{height:calc(100% - 94px)}.receber-scroll{max-height:132px}.tabela-financeiro table{width:100%;border-collapse:collapse;font-size:11px}.tabela-financeiro th,.tabela-financeiro td{border-bottom:1px solid #e5e7eb;padding:4px 6px;text-align:left;vertical-align:middle;white-space:nowrap}.tabela-financeiro th{background:#f8fafc;position:sticky;top:0;z-index:2}.hist-cell{white-space:normal!important;min-width:260px}.hist-cell small{display:block;color:#64748b;font-size:9px}.cliente-cell{white-space:normal!important}.positivo{color:#059669}.negativo{color:#dc2626}.linha-vinculada{background:#f0fdf4}.tipo-form,.vinculo-form,.acoes-linha{display:flex;align-items:center;gap:4px}.tipo-form select{width:100px}.vinculo-form select{width:230px}.vinculo-atual{font-size:10.5px;color:#166534;white-space:normal}.texto-discreto{color:#64748b;font-size:11px}.filtro-direito{display:flex;gap:5px;padding:5px 8px;border-bottom:1px solid #e5e7eb}.filtro-direito a{font-size:11px;text-decoration:none;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:4px 8px;font-weight:800}.filtro-direito a.ativo{background:#2563eb;color:#fff}.badge-ok,.badge-pendente{border-radius:999px;padding:2px 6px;font-size:10px;font-weight:800}.badge-ok{background:#dcfce7;color:#166534}.badge-pendente{background:#fef3c7;color:#92400e}.receber-mini{border-top:1px solid #e5e7eb}.receber-mini summary{padding:5px 8px;font-weight:900;cursor:pointer;font-size:12px}input,select,button{height:28px;border:1px solid #cbd5e1;border-radius:7px;padding:0 7px;font-size:11px;box-sizing:border-box}button{border:0;background:#2563eb;color:#fff;font-weight:900;cursor:pointer}.btn-ok{background:#e2e8f0!important;color:#0f172a!important;min-width:32px}.btn-ok.confirmado{background:#22c55e!important;color:#fff!important}.btn-mover{background:#94a3b8!important;min-width:26px;padding:0 5px!important}.btn-secundario{background:#64748b!important}.btn-lancar{background:#0f766e!important;min-width:70px}.btn-perigo{background:#dc2626!important}.input-data-mini{width:104px}.input-desc-mini{width:100%;min-width:170px}.input-valor-mini{width:100px}.input-tipo-mini{width:100px}.btn-limpar-filtros{height:28px;display:flex;align-items:center;justify-content:center;border:1px solid #cbd5e1;border-radius:7px;color:#0f172a;background:#fff;text-decoration:none;font-size:11px;font-weight:900}body.tela-financeiro-desktop{background:#f6f7fb;overflow:hidden}body.tela-financeiro-desktop .topo-app,body.tela-financeiro-desktop .nav-inferior{display:none!important}body.tela-financeiro-desktop .container-app{max-width:none;width:100vw;height:100vh;margin:0;padding:0;overflow:hidden}@media(max-width:900px){body.tela-financeiro-desktop{overflow:auto}.financeiro-filtros,.financeiro-acoes,.financeiro-resumo,.forms-add,.financeiro-duas-colunas,.grid-form{display:block;height:auto}.financeiro-duas-colunas{height:auto}.tabela-scroll,.sistema-scroll{height:auto;max-height:60vh}.compact-card,.box,.financeiro-resumo>div{margin-bottom:8px}}
+:root{
+  --azul:#2563eb;--azul-escuro:#0f2a5f;--borda:#dde6f2;--texto:#0f172a;--muted:#64748b;
+  --fundo:#f7f9fd;--verde:#079647;--vermelho:#dc2626;--roxo:#5b21d6;--laranja:#f59e0b;--teal:#0f8fa3;
+}
+body.tela-financeiro-desktop{background:var(--fundo);overflow:auto}
+body.tela-financeiro-desktop .topo-app,body.tela-financeiro-desktop .nav-inferior{display:none!important}
+body.tela-financeiro-desktop .container-app{max-width:none;width:100%;margin:0;padding:0}
+.financeiro-novo{width:100%;padding:22px 28px 28px;box-sizing:border-box;color:var(--texto)}
+.financeiro-cabecalho{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+.financeiro-titulo{display:flex;align-items:center;gap:14px}
+.financeiro-menu-icone{font-size:24px;color:#334155}
+.financeiro-logo-mini{width:36px;height:36px;border-radius:12px;background:#eaf2ff;color:#2563eb;display:flex;align-items:end;justify-content:center;font-size:15px;font-weight:900;padding-bottom:7px;box-sizing:border-box;letter-spacing:1px}
+.financeiro-titulo h1{margin:0;font-size:24px;line-height:1.05}
+.financeiro-titulo p{margin:5px 0 0;color:#64748b;font-size:14px}
+.financeiro-topo-acoes{display:flex;align-items:center;gap:24px;font-size:13px;color:#0f172a}
+.financeiro-data-topo{border:1px solid var(--borda);background:#fff;border-radius:12px;padding:10px 14px;font-weight:800;box-shadow:0 8px 20px rgba(15,23,42,.04)}
+.financeiro-resumo{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}
+.indicador-card{height:92px;background:#fff;border:1px solid var(--borda);border-radius:16px;box-shadow:0 8px 24px rgba(15,23,42,.045);display:flex;align-items:center;gap:18px;padding:0 18px;box-sizing:border-box}
+.indicador-icone{width:46px;height:46px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:900;flex:0 0 auto}
+.indicador-card small{display:block;color:#475569;font-size:13px;margin-bottom:7px}
+.indicador-card b{font-size:20px;letter-spacing:.1px}
+.indicador-entrada .indicador-icone{background:#e8f8ee;color:#16a34a}.indicador-saida .indicador-icone{background:#fdecec;color:#dc2626}.indicador-saldo .indicador-icone{background:#eaf2ff;color:#2563eb}.indicador-receber .indicador-icone{background:#fff3dd;color:#f59e0b}.indicador-contrato .indicador-icone{background:#f0eaff;color:#6d28d9}.indicador-contas .indicador-icone{background:#e8f8fb;color:#0f8fa3}
+.positivo{color:var(--verde)!important}.negativo{color:var(--vermelho)!important}
+.financeiro-filtros-card{background:#fff;border:1px solid var(--borda);border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.045);margin-bottom:14px}
+.financeiro-filtros{display:grid;grid-template-columns:180px 150px 150px 170px 170px minmax(260px,1fr) 112px 112px;gap:12px;margin-bottom:14px}
+.financeiro-filtros input,.financeiro-filtros select,.inline-form input,.inline-form select{height:40px;border:1px solid #cfd9e8;border-radius:10px;background:#fff;padding:0 13px;font-size:14px;color:#0f172a;box-sizing:border-box}
+.financeiro-filtros button,.btn-limpar-filtros,.inline-form button{height:40px;border-radius:10px;font-size:14px;font-weight:900;text-decoration:none;display:flex;align-items:center;justify-content:center;box-sizing:border-box;cursor:pointer}
+.btn-filtrar,.btn-importar{border:0;background:#1767e8;color:#fff;box-shadow:0 8px 16px rgba(37,99,235,.18)}
+.btn-limpar-filtros{border:1px solid #cfd9e8;color:#0f172a;background:#fff}
+.inline-form{display:grid;grid-template-columns:58px minmax(260px,1fr) 124px;gap:10px;align-items:center}
+.inline-form span{font-weight:900;font-size:14px}
+.financeiro-alerta{background:#ecfdf5;border:1px solid #bbf7d0;border-radius:12px;padding:10px 14px;margin:0 0 14px;font-size:13px}
+.financeiro-add{background:#fff;border:1px solid var(--borda);border-radius:14px;padding:10px 14px;margin-bottom:14px;box-shadow:0 8px 24px rgba(15,23,42,.035)}
+.financeiro-add summary{font-size:14px;font-weight:900;cursor:pointer}
+.forms-add{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.grid-form{display:grid;grid-template-columns:140px 1fr 140px 150px 150px;gap:8px}
+.financeiro-duas-colunas{display:grid;grid-template-columns:minmax(720px,1.3fr) minmax(470px,1fr);gap:14px;align-items:start}
+.box{background:#fff;border:1px solid var(--borda);border-radius:16px;overflow:hidden;box-shadow:0 10px 26px rgba(15,23,42,.045)}
+.titulo-tabela{display:flex;align-items:center;justify-content:space-between;padding:18px 18px 14px;border-bottom:1px solid #edf1f7}
+.titulo-tabela h2{font-size:18px;margin:0;display:flex;align-items:center;gap:9px}.titulo-icone{width:24px;height:24px;border-radius:8px;background:#eaf2ff;color:#2563eb;display:flex;align-items:center;justify-content:center;font-size:13px}
+.titulo-tabela span{font-size:13px;color:#475569}.tabela-scroll{overflow:auto;max-height:548px}.sistema-scroll{max-height:412px}.receber-scroll{max-height:170px}
+.tabela-financeiro table{width:100%;border-collapse:collapse;font-size:13px}.tabela-financeiro th,.tabela-financeiro td{border-bottom:1px solid #edf1f7;padding:11px 12px;text-align:left;vertical-align:middle;white-space:nowrap}.tabela-financeiro th{background:#fbfcff;color:#0f172a;font-size:12px;font-weight:900;position:sticky;top:0;z-index:2}
+.tabela-financeiro tbody tr:hover{background:#f8fbff}.hist-cell{white-space:normal!important;min-width:260px}.hist-cell small{display:block;color:#64748b;font-size:11px}.cliente-cell{white-space:normal!important}.linha-vinculada{background:#f0fdf4}
+.tipo-form,.vinculo-form,.acoes-linha{display:flex;align-items:center;gap:6px}.tipo-form select{width:120px}.vinculo-form select{width:250px}.vinculo-atual{font-size:12px;color:#166534;white-space:normal}.texto-discreto{color:#64748b;font-size:13px}
+.filtro-direito{display:flex;gap:7px;padding:12px 18px;border-bottom:1px solid #edf1f7}.filtro-direito a{font-size:13px;text-decoration:none;background:#f1f5f9;color:#0f172a;border-radius:999px;padding:7px 12px;font-weight:900}.filtro-direito a.ativo{background:#2563eb;color:#fff}
+.badge-ok,.badge-pendente{border-radius:999px;padding:5px 10px;font-size:12px;font-weight:900}.badge-ok{background:#dcfce7;color:#166534}.badge-pendente{background:#fef3c7;color:#b45309}
+.receber-mini{border-top:1px solid #edf1f7}.receber-mini summary{padding:12px 18px;font-weight:900;cursor:pointer;font-size:14px}
+button{height:36px;border:0;border-radius:9px;padding:0 12px;font-size:13px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff}.btn-ok{background:#22c55e!important;color:#fff!important;min-width:38px}.btn-mover{background:#94a3b8!important;min-width:34px;padding:0 8px!important}.btn-secundario{background:#64748b!important}.btn-lancar{background:#0f766e!important;min-width:92px}.btn-perigo{background:#dc2626!important}
+.input-data-mini{width:120px}.input-desc-mini{width:100%;min-width:180px}.input-valor-mini{width:110px}.input-tipo-mini{width:120px}
+.financeiro-rodape-cards{display:grid;grid-template-columns:1fr 1fr 1fr .95fr;gap:14px;margin-top:14px}.contrato-card,.dica-card{background:#fff;border:1px solid var(--borda);border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.045);min-height:96px;padding:18px;box-sizing:border-box;display:flex;align-items:center;gap:16px}.contrato-icone{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900}.contrato-card small{display:block;color:#334155;font-size:13px}.contrato-card b{display:block;font-size:20px;margin:8px 0 6px}.contrato-card em{font-style:normal;color:#475569;font-size:13px}.contrato-card a{margin-left:auto;border:1px solid #dbeafe;border-radius:9px;padding:9px 14px;text-decoration:none;color:#2563eb;font-weight:900;font-size:13px;white-space:nowrap}.contrato-vencido .contrato-icone{background:#fdecec;color:#dc2626}.contrato-dia .contrato-icone{background:#e8f8ee;color:#16a34a}.contrato-pago .contrato-icone{background:#eaf2ff;color:#2563eb}.dica-card{align-items:flex-start;flex-direction:column;gap:8px}.dica-card b{font-size:18px}.dica-card span{color:#475569;font-size:14px;line-height:1.45}
+@media(max-width:1200px){.financeiro-resumo{grid-template-columns:repeat(3,1fr)}.financeiro-filtros{grid-template-columns:repeat(4,1fr)}.financeiro-duas-colunas,.financeiro-rodape-cards{grid-template-columns:1fr}.tabela-scroll,.sistema-scroll{max-height:none}}
+@media(max-width:700px){body.tela-financeiro-desktop .topo-app,body.tela-financeiro-desktop .nav-inferior{display:flex!important}.financeiro-novo{padding:14px 12px 84px}.financeiro-cabecalho{display:none}.financeiro-resumo{grid-template-columns:1fr 1fr}.financeiro-filtros,.inline-form,.forms-add,.grid-form{display:block}.financeiro-filtros>* , .inline-form>*{width:100%;margin-bottom:10px}.indicador-card{height:86px;padding:0 12px}.indicador-card b{font-size:17px}.financeiro-duas-colunas{display:flex;flex-direction:column-reverse}.financeiro-rodape-cards{grid-template-columns:1fr}.tabela-financeiro{overflow:auto}}
 </style>
 {% endblock %}

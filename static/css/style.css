@@ -928,7 +928,7 @@ body{overflow-x:hidden}
 .pagamento-detalhes-consulta strong{color:#0f172a}
 
 
-/* Camada global de carregamento: reduz a sensação de travamento em consultas lentas no Neon/Render */
+/* Camada global de carregamento: reduz a sensação de travamento em consultas lentas */
 .app-loading{
   position:fixed;
   inset:0;

@@ -35,7 +35,7 @@
   <div class="app-loading-card">
     <div class="app-loading-spinner"></div>
     <strong id="app-loading-title">Carregando informações</strong>
-    <span id="app-loading-text">Consultando o banco de dados. Isso pode levar alguns segundos.</span>
+    <span id="app-loading-text">Organizando suas informações...</span>
     <div class="app-loading-bar"><i></i></div>
   </div>
 </div>
@@ -106,7 +106,7 @@
   document.addEventListener("submit", function (e) {
     const form = e.target;
     if (!form || form.dataset.noLoading === "1") return;
-    const msg = form.dataset.loadingText || "Salvando e atualizando os dados no Neon.";
+    const msg = form.dataset.loadingText || "Atualizando informações...";
     mostrarCarregando(form.dataset.loadingTitle || "Processando solicitação", msg);
     const botao = form.querySelector('button[type="submit"], button:not([type])');
     if (botao) {
@@ -124,7 +124,7 @@
 
   document.querySelectorAll("select[onchange*='submit']").forEach(function (select) {
     select.addEventListener("change", function () {
-      mostrarCarregando("Atualizando filtros", "Buscando informações atualizadas no financeiro.");
+      mostrarCarregando("CONECT", "Atualizando informações...");
     });
   });
 
