@@ -34,6 +34,7 @@
     <input name="senha_admin" value="{{ empresa.senha_admin if empresa else '' }}" required>
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea>
+    <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
 
     <div class="linha">
       <div>

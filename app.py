@@ -513,16 +513,44 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
 
 
 def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem para o cliente aceitar a reserva. Usa o link da tela de aceite."""
-    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    """Mensagem para o cliente aceitar a reserva. Usa o texto do cadastro da empresa e complementos do sistema."""
     link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+    cliente_nome = item.cliente.nome if item.cliente else "cliente"
 
-    linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
+    texto_base = aplicar_variaveis_mensagem(
+        mensagens_empresa(empresa).get("aceite", ""),
+        link=link_aceite,
+        empresa=empresa.nome,
+        cliente=cliente_nome,
+        valor_sinal=moeda_br(item.sinal or 0),
+        pix=empresa.pix_copia_cola or "",
+    ).strip()
+
+    linhas = [texto_base] if texto_base else []
+
+    if getattr(empresa, "exige_sinal", False):
+        linhas.extend([
+            "",
+            "Para concluir a confirmação, realize o PIX do sinal para a chave abaixo e envie o comprovante.",
+            "",
+            f"PIX: {empresa.pix_copia_cola or '-'}",
+            "",
+            "Assim que o aceite do pré-contrato e a confirmação do pagamento do sinal forem concluídos, sua reserva será efetivada.",
+        ])
+    else:
+        linhas.extend([
+            "",
+            "Assim que o aceite do pré-contrato for concluído, sua reserva será efetivada.",
+        ])
+
     linhas.extend([
         "",
-        "Para confirmar sua reserva, confira os dados e aceite pelo link abaixo:",
-        link_aceite,
+        "Em seguida, você receberá:",
+        "• O resumo da reserva;",
+        "• O contrato em PDF;",
+        "• As cláusulas do contrato para sua consulta.",
     ])
+
     return "\n".join(linhas).strip()
 
 
@@ -534,8 +562,6 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
 
     linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
     linhas.extend([
-        "",
-        "Sua reserva foi confirmada.",
         "",
         "📄 Contrato final:",
         link_contrato,
@@ -602,6 +628,8 @@ def garantir_colunas_novas():
     cols_emp = colunas("empresas")
     if "pix_copia_cola" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN pix_copia_cola TEXT")
+    if "exige_sinal" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN exige_sinal BOOLEAN DEFAULT false")
     if "suporte_inicio" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN suporte_inicio VARCHAR(5)")
     if "suporte_fim" not in cols_emp:
@@ -957,19 +985,23 @@ def mensagens_empresa(empresa: Empresa) -> dict:
     """Mensagens prontas. A empresa pode editar sem precisar entender o sistema."""
     return {
         "reserva": empresa.mensagem_reserva or (
-            "Olá! Para agilizar sua reserva, preencha este formulário rápido: {{link}}. "
-            "Depois disso, aguarde nossa equipe montar equipamentos, valores e contrato."
+            "Olá!\n\n"
+            "Para agilizar sua reserva, preencha este formulário:\n"
+            "{{link}}\n\n"
+            "Após o envio, nossa equipe irá preparar os equipamentos, valores e o pré-contrato.\n\n"
+            "Assim que estiver tudo pronto, você receberá o contrato para análise e aceite."
         ),
         "aceite": empresa.mensagem_aceite or (
-            "Olá, {{cliente}}! Sua reserva está pronta para conferência. "
-            "Acesse o link, revise os dados e aceite ou cancele: {{link}}"
+            "Olá, {{cliente}}!\n\n"
+            "Seu pré-contrato está pronto.\n\n"
+            "Confira atentamente as informações e, se estiver tudo correto, efetue o aceite pelo link abaixo:\n"
+            "{{link}}"
         ),
-        "pagamento": empresa.mensagem_pagamento or (
-            "Sua reserva foi aceita. Para confirmar, envie o sinal de {{valor_sinal}} via PIX: {{pix}}. "
-            "Assim que confirmarmos o recebimento, sua reserva será efetivada."
-        ),
+        # Mantido apenas por compatibilidade com bancos antigos. Não é mais exibido nem utilizado no fluxo.
+        "pagamento": "",
         "confirmacao": empresa.mensagem_confirmacao or (
-            "Pagamento confirmado.\nSua reserva foi efetuada com sucesso.\nObrigado pela confiança!"
+            "Sua reserva foi efetivada com sucesso.\n\n"
+            "Obrigado pela confiança!"
         ),
         "hora_fim": empresa.mensagem_hora_fim or (
             "Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber."
@@ -1050,6 +1082,7 @@ def admin_criar_empresa(
         senha_admin: str = Form(...),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
+        exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
         mostrar_suporte_contrato: Optional[str] = Form(None),
@@ -1076,6 +1109,7 @@ def admin_criar_empresa(
         usuario_admin=usuario_admin.strip(),
         senha_admin=senha_admin.strip(),
         pix_copia_cola=pix_copia_cola.strip(),
+        exige_sinal=bool(exige_sinal),
         suporte_inicio=suporte_inicio.strip(),
         suporte_fim=suporte_fim.strip(),
         mostrar_suporte_contrato=bool(mostrar_suporte_contrato),
@@ -1141,6 +1175,7 @@ def admin_salvar_empresa(
         senha_admin: str = Form(...),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
+        exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
         mostrar_suporte_contrato: Optional[str] = Form(None),
@@ -1161,6 +1196,7 @@ def admin_salvar_empresa(
     empresa.usuario_admin = usuario_admin.strip()
     empresa.senha_admin = senha_admin.strip()
     empresa.pix_copia_cola = pix_copia_cola.strip()
+    empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
@@ -1353,7 +1389,6 @@ Este é um contrato fictício inicial. Edite este texto conforme a política da 
     mensagens = mensagens_empresa(empresa)
     empresa.mensagem_reserva = empresa.mensagem_reserva or mensagens["reserva"]
     empresa.mensagem_aceite = empresa.mensagem_aceite or mensagens["aceite"]
-    empresa.mensagem_pagamento = empresa.mensagem_pagamento or mensagens["pagamento"]
     empresa.mensagem_confirmacao = empresa.mensagem_confirmacao or mensagens["confirmacao"]
     empresa.mensagem_hora_fim = empresa.mensagem_hora_fim or mensagens["hora_fim"]
     if empresa.mostrar_mensagem_hora_fim is None:
@@ -1410,9 +1445,20 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         Solicitacao.valor > Solicitacao.valor_pago
     ).count()
 
+    link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
+    mensagem_pre_contrato = aplicar_variaveis_mensagem(
+        mensagens_empresa(empresa).get("reserva", ""),
+        link=link_pre_contrato,
+        empresa=empresa.nome,
+        cliente="",
+        valor_sinal="",
+        pix=empresa.pix_copia_cola or "",
+    )
+
     return templates.TemplateResponse("admin/painel.html", {
         "request": request,
         "empresa": empresa,
+        "mensagem_pre_contrato": mensagem_pre_contrato,
         "solicitacoes": solicitacoes,
         "total_clientes": total_clientes,
         "total_produtos": total_produtos,
@@ -1442,6 +1488,7 @@ def configuracoes_empresa(request: Request, db: Session = Depends(get_db), empre
 async def salvar_configuracoes_empresa(
         request: Request,
         pix_copia_cola: str = Form(""),
+        exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
         mostrar_suporte_contrato: Optional[str] = Form(None),
@@ -1461,6 +1508,7 @@ async def salvar_configuracoes_empresa(
         empresa: Empresa = Depends(empresa_logada)
 ):
     empresa.pix_copia_cola = pix_copia_cola.strip()
+    empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
@@ -1485,7 +1533,6 @@ async def salvar_configuracoes_empresa(
     empresa.tema = tema
     empresa.mensagem_reserva = mensagem_reserva.strip()
     empresa.mensagem_aceite = mensagem_aceite.strip()
-    empresa.mensagem_pagamento = mensagem_pagamento.strip()
     empresa.mensagem_confirmacao = mensagem_confirmacao.strip()
     empresa.mensagem_hora_fim = mensagem_hora_fim.strip()
     empresa.mostrar_mensagem_hora_fim = bool(mostrar_mensagem_hora_fim)
@@ -4129,11 +4176,23 @@ def salvar_pre_cadastro(
 
 
 def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", tamanho=10):
+    """Quebra texto respeitando margem inferior para não invadir o rodapé."""
+    margem_inferior = 110
+    margem_superior = c._pagesize[1] - 70
+
+    def nova_pagina_se_precisar(y_atual):
+        if y_atual < margem_inferior:
+            c.showPage()
+            c.setFont(fonte, tamanho)
+            return margem_superior
+        return y_atual
+
     c.setFont(fonte, tamanho)
     for paragrafo in (texto or "").splitlines():
         palavras = paragrafo.split()
         if not palavras:
             y -= leading
+            y = nova_pagina_se_precisar(y)
             continue
         linha = ""
         for palavra in palavras:
@@ -4141,14 +4200,12 @@ def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", taman
             if c.stringWidth(teste, fonte, tamanho) <= largura:
                 linha = teste
             else:
+                y = nova_pagina_se_precisar(y)
                 c.drawString(x, y, linha)
                 y -= leading
                 linha = palavra
-                if y < 50:
-                    c.showPage();
-                    y = 800;
-                    c.setFont(fonte, tamanho)
         if linha:
+            y = nova_pagina_se_precisar(y)
             c.drawString(x, y, linha)
             y -= leading
     return y
@@ -4174,7 +4231,7 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     w, h = A4
-    y = h - 48
+    y = h - 70
 
     logo = empresa.logo_url or empresa.logo_idb_url
     if logo and logo.startswith("/static/"):
@@ -4195,9 +4252,9 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     c.drawString(40, y, "Dados preenchidos");
     y -= 16
     for linha in linhas_informacoes_preenchidas_contrato(item, formato="texto"):
-        if y < 70:
+        if y < 110:
             c.showPage();
-            y = h - 60
+            y = h - 70
         y = _wrap_pdf_text(c, linha, 40, y, w - 80, leading=13, tamanho=9)
     y -= 8
 
@@ -4220,7 +4277,7 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     y -= 24
     if y < 120:
         c.showPage();
-        y = h - 60
+        y = h - 70
     c.setFont("Helvetica", 10)
     c.drawString(40, y, "Declaro estar ciente e de acordo com as condições desta locação.")
     y -= 42
@@ -4231,7 +4288,10 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     c.drawString(40, y, "Data: ____/____/________")
     y -= 20
     c.setFont("Helvetica", 9)
-    c.drawString(40, max(y, 40), f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} - {empresa.nome}")
+    if y < 90:
+        c.showPage()
+        y = h - 70
+    c.drawString(40, y, f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} - {empresa.nome}")
     c.save()
     buffer.seek(0)
     nome_pdf = f"contrato_{empresa.slug}_{item.id}.pdf"

@@ -31,7 +31,7 @@
     {% set link_contrato = request.base_url|string ~ 'e/' ~ empresa.slug %}
     <div class="acoes empilhadas">
         <a class="botao-whats" target="_blank"
-           href="https://wa.me/?text={{ ('Olá! Preencha seu pré-contrato por este link: ' ~ link_pre_contrato)|urlencode }}">Compartilhar
+           href="https://wa.me/?text={{ mensagem_pre_contrato|urlencode }}">Compartilhar
             pré-contrato</a>
         <a class="botao secundario" href="{{ link_pre_contrato }}" target="_blank">Abrir pré-contrato</a>
     </div>

@@ -18,6 +18,7 @@ class Empresa(Base):
     senha_admin = Column(String(120), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     pix_copia_cola = Column(Text, nullable=True)
+    exige_sinal = Column(Boolean, default=False)
     suporte_inicio = Column(String(5), nullable=True)
     suporte_fim = Column(String(5), nullable=True)
     mostrar_suporte_contrato = Column(Boolean, default=False)

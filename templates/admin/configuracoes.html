@@ -6,6 +6,7 @@
   <form method="post" enctype="multipart/form-data">
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola or '' }}</textarea>
+    <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
 
     <div class="linha">
       <div>
@@ -55,16 +56,16 @@
     <h3>Módulo contrato / reserva</h3>
     <p class="texto-discreto">Variáveis disponíveis: {{ '{{link}}' }}, {{ '{{empresa}}' }}, {{ '{{cliente}}' }}, {{ '{{valor_sinal}}' }}, {{ '{{pix}}' }}.</p>
 
-    <label>Mensagem da reserva</label>
+    <label>Mensagem Pré-Contrato</label>
+    <p class="texto-discreto">Utilizada no botão "Compartilhar Pré-Contrato".</p>
     <textarea name="mensagem_reserva">{{ empresa.mensagem_reserva or mensagens_padrao.reserva }}</textarea>
 
     <label>Mensagem do aceite</label>
+    <p class="texto-discreto">Utilizada no botão "Aceite". O sistema acrescenta automaticamente o PIX quando a empresa exige sinal.</p>
     <textarea name="mensagem_aceite">{{ empresa.mensagem_aceite or mensagens_padrao.aceite }}</textarea>
 
-    <label>Mensagem de pagamento do sinal</label>
-    <textarea name="mensagem_pagamento">{{ empresa.mensagem_pagamento or mensagens_padrao.pagamento }}</textarea>
-
     <label>Mensagem de reserva confirmada</label>
+    <p class="texto-discreto">Texto final da mensagem automática enviada no botão "WhatsApp Contrato".</p>
     <textarea name="mensagem_confirmacao">{{ empresa.mensagem_confirmacao or mensagens_padrao.confirmacao }}</textarea>
 
     <label>Mensagem abaixo do horário de fim</label>
