@@ -921,3 +921,8 @@ body{overflow-x:hidden}
 }
 .form-excluir-contrato{margin-top:12px;}
 .botao-enviando{opacity:.65;cursor:wait;}
+
+.pagamento-consulta{align-items:flex-start}
+.pagamento-detalhes-consulta{margin-top:8px;display:grid;gap:3px;font-size:12px;color:#475569;line-height:1.35}
+.pagamento-detalhes-consulta span{display:block}
+.pagamento-detalhes-consulta strong{color:#0f172a}

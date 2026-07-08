@@ -28,6 +28,10 @@
     </div>
 </form>
 
+{% if request.query_params.get('op_erro') %}
+<div class="alerta-operacao-pagamento">{{ request.query_params.get('op_erro') }}</div>
+{% endif %}
+
 <div class="lista-agenda agenda-compacta lista-roteirizacao" id="listaRoteirizacao">
     {% for a in itens %}
     {% set data_agenda = a.data.strftime('%d/%m') if a.data else (a.solicitacao.data_evento.strftime('%d/%m') if
@@ -226,6 +230,7 @@
 
 
 <style>
+    .alerta-operacao-pagamento{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:12px;padding:10px 12px;margin:10px 0;font-weight:800;font-size:13px}
     .lista-roteirizacao .linha-operacao{
       background:#fff !important;
       transition: background .2s ease, border-color .2s ease, transform .15s ease;

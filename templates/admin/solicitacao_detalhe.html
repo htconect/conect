@@ -239,10 +239,20 @@
   {% if item.pagamentos %}
   <div class="pagamentos-lista">
     {% for p in item.pagamentos %}
-    <div class="linha-item-mobile">
+    <div class="linha-item-mobile pagamento-consulta">
       <div>
         <b>R$ {{ p.valor|moeda_br }} · {{ p.forma_pagamento }}</b>
         <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · {{ "Conciliado" if p.conciliado_em else "Pendente" }}</small>
+        <div class="pagamento-detalhes-consulta">
+          <span><strong>Data:</strong> {{ p.data_pagamento.strftime('%d/%m/%Y') }}</span>
+          <span><strong>Comprovante no nome do cliente:</strong> {{ "Sim" if p.comprovante_no_nome_cliente else "Não" }}</span>
+          {% if p.nome_comprovante %}
+          <span><strong>Nome no comprovante:</strong> {{ p.nome_comprovante }}</span>
+          {% endif %}
+          {% if p.observacoes %}
+          <span><strong>Observação:</strong> {{ p.observacoes }}</span>
+          {% endif %}
+        </div>
       </div>
       {% if not p.conciliado_em %}
       <form method="post" action="/painel/solicitacao/{{ item.id }}/pagamento/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este pagamento?')">

@@ -2979,6 +2979,21 @@ def financeiro(
                                            LancamentoManualFinanceiro.id.asc()).all()
     receber = q_receber.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
 
+    q_contratos_receber = db.query(Solicitacao).join(Cliente).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009
+    )
+    if data_inicial:
+        q_contratos_receber = q_contratos_receber.filter(Solicitacao.data_evento >= inicio)
+    if data_final:
+        q_contratos_receber = q_contratos_receber.filter(Solicitacao.data_evento <= fim)
+    if busca:
+        like = f"%{busca.strip()}%"
+        q_contratos_receber = q_contratos_receber.filter(Cliente.nome.ilike(like))
+    contratos_receber = q_contratos_receber.order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc()).all()
+    total_contratos_receber = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_receber)
+
     q_pagamentos_sistema = db.query(Pagamento).join(Solicitacao).join(Cliente).filter(
         Pagamento.empresa_id == empresa.id
     )
@@ -3008,7 +3023,7 @@ def financeiro(
         abs(l.valor or 0) for l in manuais_reais if (l.valor or 0) < 0)
     saldo_real = entradas - saidas
     total_receber = sum(max(l.valor or 0, 0) for l in receber)
-    saldo_previsto = saldo_real + total_receber
+    saldo_previsto = saldo_real + total_receber + total_contratos_receber
 
     saldo_todos = 0
     for c in contas:
@@ -3036,6 +3051,7 @@ def financeiro(
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
         "status_sistema": status_sistema,
         "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagamentos_sistema": pagamentos_sistema,
+        "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
         "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber,
         "saldo_previsto": saldo_previsto, "saldo_todos": saldo_todos,
         "candidatos_vinculo": candidatos_vinculo,
@@ -3214,6 +3230,44 @@ def financeiro_mover_banco(
         raise HTTPException(404)
     mover_lancamento_na_lista(db, LancamentoBanco, lanc, direcao)
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/sistema/{pagamento_id}/lancar")
+def financeiro_lancar_pagamento_sistema(
+        request: Request,
+        pagamento_id: int,
+        conta_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    conta = db.get(ContaFinanceira, conta_id)
+    pagamento = db.get(Pagamento, pagamento_id)
+    if not conta or conta.empresa_id != empresa.id or not pagamento or pagamento.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    existente_banco = db.query(LancamentoBanco).filter_by(empresa_id=empresa.id, pagamento_id=pagamento.id).first()
+    existente_manual = db.query(LancamentoManualFinanceiro).filter_by(empresa_id=empresa.id, pagamento_id=pagamento.id, tipo="real").first()
+    if not existente_banco and not existente_manual:
+        proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(
+            empresa_id=empresa.id, conta_id=conta.id).scalar() or 0) + 1
+        cliente_nome = pagamento.solicitacao.cliente.nome if pagamento.solicitacao and pagamento.solicitacao.cliente else "Cliente"
+        forma = (pagamento.forma_pagamento or "pagamento").strip()
+        db.add(LancamentoManualFinanceiro(
+            empresa_id=empresa.id,
+            conta_id=conta.id,
+            data=pagamento.data_pagamento,
+            descricao=f"{cliente_nome} - {forma}",
+            valor=pagamento.valor or 0,
+            categoria="aluguel",
+            tipo="real",
+            recebido=False,
+            pagamento_id=pagamento.id,
+            ordem=proxima_ordem
+        ))
+    pagamento.conciliado_em = agora_utc()
+    pagamento.conciliado_por = request.session.get("usuario_nome") or "Financeiro"
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta.id}", status_code=303)
 
 
 @app.post("/painel/financeiro/manual")
@@ -3707,9 +3761,21 @@ def atualizar_roteiro(
     data_anterior = item.data
     hora_anterior = item.hora_inicio
 
+    novo_status = status_operacional if status_operacional in {"pendente", "concluido"} else "pendente"
+    falta_pagamento = 0
+    if item.solicitacao:
+        falta_pagamento = max((item.solicitacao.valor or 0) - (item.solicitacao.valor_pago or 0), 0)
+    if item.tipo_evento == "retirada" and novo_status == "concluido" and falta_pagamento > 0.009:
+        destino = request.headers.get("referer") or "/painel/reservas"
+        partes = urlparse(destino)
+        qs = dict(parse_qsl(partes.query, keep_blank_values=True))
+        qs["op_erro"] = f"Não é possível encerrar a busca: falta receber R$ {falta_pagamento:,.2f}.".replace(",", "X").replace(".", ",").replace("X", ".")
+        destino = urlunparse((partes.scheme, partes.netloc, partes.path, partes.params, urlencode(qs), partes.fragment))
+        return RedirectResponse(destino, status_code=303)
+
     item.previsao_entrega = previsao_entrega
     item.link_localizacao = link_localizacao
-    item.status_operacional = status_operacional if status_operacional in {"pendente", "concluido"} else "pendente"
+    item.status_operacional = novo_status
 
     nova_data = None
     data_informada = (data_operacao or data_evento or "").strip()
