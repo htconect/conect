@@ -988,3 +988,98 @@ body{overflow-x:hidden}
   .app-loading{align-items:flex-end}
   .app-loading-card{border-radius:22px 22px 0 0;margin-bottom:0}
 }
+
+.voltar-painel{display:inline-flex;align-items:center;background:#0f172a;color:#fff;text-decoration:none;padding:8px 12px;border-radius:10px;font-weight:600;margin-right:14px}
+.financeiro-corpo{grid-template-columns:68% 32%!important}
+.financeiro-banco{flex:1.15!important}
+.financeiro-sistema{flex:.85!important;max-height:max-content!important}
+.importar-direita{margin-left:auto;display:flex;gap:8px;align-items:center}
+.inline-form{display:flex;align-items:center}
+.coluna-vinculo{max-width:110px!important}
+
+
+/* Correção final da barra inferior no mobile */
+@media (max-width:700px){
+  body{
+    padding-bottom:calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .nav-inferior{
+    position:fixed;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:999;
+    height:74px;
+    padding:4px 8px calc(5px + env(safe-area-inset-bottom));
+    box-sizing:border-box;
+    display:grid!important;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    align-items:center;
+    gap:2px;
+    background:#fff;
+    border-top:1px solid #e2e8f0;
+    box-shadow:0 -10px 24px rgba(15,23,42,.10);
+  }
+
+  .nav-inferior a,
+  .nav-inferior .nav-item{
+    min-width:0;
+    height:56px;
+    padding:4px 2px;
+    box-sizing:border-box;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:3px;
+    border-radius:14px;
+    color:#0f172a;
+    text-decoration:none;
+    font-size:19px;
+    line-height:1;
+    overflow:hidden;
+    white-space:nowrap;
+  }
+
+  .nav-inferior span{
+    display:block;
+    width:100%;
+    max-width:64px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    text-align:center;
+    font-size:10px;
+    line-height:1.05;
+    font-weight:600;
+  }
+
+  .nav-inferior .ativo:not(.nav-principal){
+    background:#eef4ff;
+    color:#2563eb;
+    font-weight:800;
+  }
+
+  .nav-inferior .nav-principal{
+    width:52px;
+    height:52px;
+    margin:0 auto;
+    border-radius:16px;
+    background:var(--azul);
+    color:#fff;
+    font-size:30px;
+    box-shadow:0 10px 22px rgba(31,111,235,.34);
+    transform:translateY(-4px);
+  }
+
+  .nav-inferior .nav-principal span{
+    color:#fff;
+    font-size:10px;
+    font-weight:700;
+    max-width:48px;
+  }
+
+  .nav-inferior .nav-principal.ativo{
+    background:#1d4ed8;
+  }
+}

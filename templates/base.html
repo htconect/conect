@@ -42,12 +42,12 @@
 
 
 {% if request.session.get('empresa_id') %}
-<nav class="nav-inferior">
-  <a href="/painel">🏠<span>Início</span></a>
-  <a href="/painel/agenda">📅<span>Agenda</span></a>
-  <a href="/painel/disponibilidade">📦<span>Disponível</span></a>
-  <a href="/painel/financeiro">💰<span>Financeiro</span></a>
-  <a class="nav-principal" href="/painel/contrato-novo">＋<span>Manual</span></a>
+<nav class="nav-inferior" aria-label="Navegação principal">
+  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel">🏠<span>Início</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">📅<span>Agenda</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">📦<span>Disponível</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro">💰<span>Financeiro</span></a>
+  <a class="nav-item nav-principal {% if request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/contrato-novo">＋<span>Manual</span></a>
 </nav>
 {% endif %}
 

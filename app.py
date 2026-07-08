@@ -2994,6 +2994,12 @@ def financeiro(
     contratos_receber = q_contratos_receber.order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc()).all()
     total_contratos_receber = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_receber)
 
+    hoje = date.today()
+    contratos_vencidos = [c for c in contratos_receber if c.data_evento and c.data_evento < hoje]
+    contratos_em_dia = [c for c in contratos_receber if not c.data_evento or c.data_evento >= hoje]
+    total_contratos_vencidos = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_vencidos)
+    total_contratos_em_dia = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_em_dia)
+
     q_pagamentos_sistema = db.query(Pagamento).join(Solicitacao).join(Cliente).filter(
         Pagamento.empresa_id == empresa.id
     )
@@ -3004,6 +3010,10 @@ def financeiro(
     if busca:
         like = f"%{busca.strip()}%"
         q_pagamentos_sistema = q_pagamentos_sistema.filter(Cliente.nome.ilike(like))
+
+    pagamentos_sistema_mes = q_pagamentos_sistema.order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc()).all()
+    total_contratos_pagos_mes = sum(float(p.valor or 0) for p in pagamentos_sistema_mes)
+
     if status_sistema == "vinculado":
         q_pagamentos_sistema = q_pagamentos_sistema.filter(Pagamento.conciliado_em != None)
     elif status_sistema != "todos":
@@ -3052,6 +3062,9 @@ def financeiro(
         "status_sistema": status_sistema,
         "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagamentos_sistema": pagamentos_sistema,
         "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
+        "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
+        "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
+        "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
         "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber,
         "saldo_previsto": saldo_previsto, "saldo_todos": saldo_todos,
         "candidatos_vinculo": candidatos_vinculo,
