@@ -24,12 +24,20 @@
 
   <details class="accordion interno" open>
     <summary>Onde está nessa data</summary>
+    {% if produto_selecionado.conflito %}
+      <div class="alerta-conflito-disponibilidade">
+        ⚠️ Conflito identificado: {{ produto_selecionado.alugados }} locação(ões) para {{ produto_selecionado.total }} equipamento(s).
+      </div>
+    {% endif %}
     {% if produto_selecionado.locais %}
       {% for loc in produto_selecionado.locais %}
         <a class="linha-local" href="/painel/solicitacao/{{ loc.reserva_id }}">
           <div>
             <b>{{ loc.hora }} · {{ loc.bairro }}</b>
             <small>{{ loc.quantidade }}x alugado · {{ loc.cliente }}</small>
+            {% if loc.observacoes %}
+              <small class="observacao-destaque">{{ loc.observacoes }}</small>
+            {% endif %}
           </div>
           <span>›</span>
         </a>
@@ -56,7 +64,7 @@
       <b>{{ item.produto.nome }}</b>
       <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
     </div>
-    <strong>{% if item.status == 'disponivel' %}🟢{% elif item.status == 'atencao' %}🟡{% else %}🔴{% endif %}</strong>
+    <strong>{% if item.status == 'disponivel' %}🟢{% elif item.status == 'atencao' %}🟡{% elif item.status == 'conflito' %}⚠️{% else %}🔴{% endif %}</strong>
   </a>
 {% else %}
   <div class="box"><p>Nenhum item cadastrado.</p></div>

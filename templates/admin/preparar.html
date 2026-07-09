@@ -95,6 +95,9 @@
                 <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
                 <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or
                     0))|moeda_br }}</small>
+                {% if a.solicitacao.observacoes %}
+                <small class="observacao-destaque">{{ a.solicitacao.observacoes }}</small>
+                {% endif %}
                 <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}{% if concluido %} encerrado{% endif %}</em>
             </div>
             <span class="seta-card seta-expandir">⌄</span>

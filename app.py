@@ -3940,9 +3940,11 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             locais_por_produto.setdefault(chave, []).append({
                 "cliente": reserva.cliente.nome if reserva.cliente else "Cliente",
                 "hora": reserva.hora_inicio.strftime("%H:%M") if reserva.hora_inicio else "-",
+                "hora_ordenacao": reserva.hora_inicio or time.min,
                 "bairro": reserva.bairro or (reserva.cliente.bairro if reserva.cliente else "") or "-",
                 "quantidade": item.quantidade or 1,
                 "reserva_id": reserva.id,
+                "observacoes": (reserva.observacoes or "").strip(),
             })
 
     itens = []
@@ -3951,14 +3953,20 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
         total = produto.quantidade_disponivel or 0
         alugados = alugado_por_produto.get(produto.id, 0)
         disponiveis = max(total - alugados, 0)
-        status = "disponivel" if disponiveis > 1 else ("atencao" if disponiveis == 1 else "indisponivel")
+        conflito = alugados > total
+        status = "conflito" if conflito else ("disponivel" if disponiveis > 1 else ("atencao" if disponiveis == 1 else "indisponivel"))
+        locais_ordenados = sorted(
+            locais_por_produto.get(produto.id, []),
+            key=lambda loc: (loc.get("hora_ordenacao") or time.min, loc.get("reserva_id") or 0)
+        )
         dados = {
             "produto": produto,
             "total": total,
             "alugados": alugados,
             "disponiveis": disponiveis,
             "status": status,
-            "locais": locais_por_produto.get(produto.id, []),
+            "conflito": conflito,
+            "locais": locais_ordenados,
         }
         itens.append(dados)
         if produto.id == produto_id:

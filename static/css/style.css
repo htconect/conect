@@ -168,10 +168,12 @@ table{display:block;overflow-x:auto;border-radius:16px}.topo,.container{display:
 .disponibilidade-card{padding:13px 14px}
 .disponibilidade-card.indisponivel{opacity:.7}
 .disponibilidade-card.atencao{border-color:#f59e0b;background:#fffbeb}
+.disponibilidade-card.conflito{border-color:#dc2626;background:#fee2e2;opacity:1}
 .resumo-disponibilidade{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;text-align:center}
 .resumo-disponibilidade div{background:#f8fafc;border:1px solid #eef2f7;border-radius:14px;padding:10px}
 .resumo-disponibilidade small{display:block;color:#64748b;font-size:12px}
 .resumo-disponibilidade b{font-size:20px}
+.alerta-conflito-disponibilidade{border:1px solid #dc2626;background:#fee2e2;color:#991b1b;border-radius:12px;padding:10px 12px;font-weight:800;margin:10px 0 4px}
 .linha-local{display:flex;justify-content:space-between;gap:8px;align-items:center;text-decoration:none;color:inherit;border-top:1px solid #eef2f7;padding:12px 0}
 .linha-local:first-of-type{border-top:0}
 .linha-local small{display:block;color:#64748b;font-size:13px;margin-top:3px}
