@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="cabecalho-mobile">
+  <p class="mini">Conta</p>
+  <h1>Meu perfil</h1>
+  <p>Atualize seus dados de acesso ao Conect.</p>
+</div>
+
+{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+{% if sucesso %}<div class="alerta ok">{{ sucesso }}</div>{% endif %}
+
+<form class="card formulario-mobile" method="post" action="/painel/perfil">
+  <label>Nome</label>
+  <input type="text" name="nome" value="{{ perfil_nome }}" required>
+
+  <label>Usuário</label>
+  <input type="text" name="usuario" value="{{ perfil_usuario }}" required>
+
+  <label>Empresa</label>
+  <input type="text" value="{{ empresa.nome }}" disabled>
+
+  <div class="acoes empilhadas" style="margin-top:14px">
+    <button type="submit">Salvar perfil</button>
+    <a class="botao secundario" href="/painel">Voltar</a>
+  </div>
+</form>
+{% endblock %}

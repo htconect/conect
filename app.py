@@ -1439,11 +1439,49 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
     operacao_buscar_qtd = operacao_base.filter(Agenda.tipo_evento == "retirada").count()
     operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
 
-    pendencias_financeiras = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-        Solicitacao.valor > Solicitacao.valor_pago
-    ).count()
+    pendencias_agenda = solicitacoes
+
+    pendencias_sinal = []
+    if empresa.exige_sinal:
+        pendencias_sinal = (
+            db.query(Solicitacao)
+            .filter(
+                Solicitacao.empresa_id == empresa.id,
+                Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                Solicitacao.valor_pago <= 0
+            )
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+            .limit(12)
+            .all()
+        )
+
+    hoje = date.today()
+    pendencias_operacao = (
+        db.query(Agenda)
+        .join(Solicitacao)
+        .filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.data < hoje,
+            Agenda.status_operacional != "concluido",
+            ~Solicitacao.status.in_(status_agenda_inativos)
+        )
+        .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc())
+        .limit(12)
+        .all()
+    )
+
+    pendencias_financeiras = (
+        db.query(Pagamento)
+        .join(Solicitacao)
+        .join(Cliente)
+        .filter(
+            Pagamento.empresa_id == empresa.id,
+            Pagamento.conciliado_em == None
+        )
+        .order_by(Pagamento.data_pagamento.asc(), Pagamento.id.asc())
+        .limit(12)
+        .all()
+    )
 
     link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
     mensagem_pre_contrato = aplicar_variaveis_mensagem(
@@ -1460,6 +1498,10 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "empresa": empresa,
         "mensagem_pre_contrato": mensagem_pre_contrato,
         "solicitacoes": solicitacoes,
+        "pendencias_agenda": pendencias_agenda,
+        "pendencias_sinal": pendencias_sinal,
+        "pendencias_operacao": pendencias_operacao,
+        "pendencias_financeiras": pendencias_financeiras,
         "total_clientes": total_clientes,
         "total_produtos": total_produtos,
         "pendentes": pendentes,
@@ -1469,9 +1511,124 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "operacao_buscar_qtd": operacao_buscar_qtd,
         "inicio_semana": inicio_semana,
         "fim_semana": fim_semana,
-        "pendencias_financeiras": pendencias_financeiras,
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
     })
+
+
+
+def usuario_empresa_atual(db: Session, empresa: Empresa, request: Request):
+    usuario_sessao = (request.session.get("usuario_sistema") or request.session.get("usuario") or "").strip()
+    usuario_busca = usuario_sessao.lower()
+    usuario = None
+    if usuario_busca:
+        usuario = (
+            db.query(UsuarioEmpresa)
+            .filter(
+                UsuarioEmpresa.empresa_id == empresa.id,
+                func.lower(UsuarioEmpresa.usuario) == usuario_busca,
+                UsuarioEmpresa.ativo == True,
+            )
+            .first()
+        )
+    if usuario:
+        return "usuario", usuario
+    return "admin", empresa
+
+
+@app.get("/painel/perfil", response_class=HTMLResponse)
+def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    tipo, usuario = usuario_empresa_atual(db, empresa, request)
+    perfil_nome = usuario.nome if tipo == "usuario" else (request.session.get("usuario_nome") or empresa.usuario_admin or "Administrador")
+    perfil_usuario_valor = usuario.usuario if tipo == "usuario" else (empresa.usuario_admin or request.session.get("usuario_sistema") or "")
+    return templates.TemplateResponse("admin/perfil.html", {
+        "request": request,
+        "empresa": empresa,
+        "perfil_nome": perfil_nome,
+        "perfil_usuario": perfil_usuario_valor,
+        "erro": request.query_params.get("erro"),
+        "sucesso": request.query_params.get("sucesso"),
+    })
+
+
+@app.post("/painel/perfil")
+def salvar_perfil_usuario(
+        request: Request,
+        nome: str = Form(...),
+        usuario: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    nome_limpo = nome.strip()
+    usuario_limpo = usuario.strip()
+    if not nome_limpo or not usuario_limpo:
+        return RedirectResponse("/painel/perfil?erro=Informe nome e usuário.", status_code=303)
+
+    tipo, registro = usuario_empresa_atual(db, empresa, request)
+    usuario_busca = usuario_limpo.lower()
+
+    empresa_com_usuario = (
+        db.query(Empresa)
+        .filter(func.lower(Empresa.usuario_admin) == usuario_busca, Empresa.id != empresa.id)
+        .first()
+    )
+    usuario_com_usuario = (
+        db.query(UsuarioEmpresa)
+        .filter(func.lower(UsuarioEmpresa.usuario) == usuario_busca)
+        .first()
+    )
+    if empresa_com_usuario or (usuario_com_usuario and (tipo != "usuario" or usuario_com_usuario.id != registro.id)):
+        return RedirectResponse("/painel/perfil?erro=Este usuário já está em uso.", status_code=303)
+
+    if tipo == "usuario":
+        registro.nome = nome_limpo
+        registro.usuario = usuario_limpo
+        request.session["usuario_nome"] = nome_limpo
+        request.session["usuario_sistema"] = usuario_limpo
+    else:
+        empresa.usuario_admin = usuario_limpo
+        request.session["usuario_nome"] = nome_limpo
+        request.session["usuario_sistema"] = usuario_limpo
+
+    db.commit()
+    return RedirectResponse("/painel/perfil?sucesso=Perfil atualizado com sucesso.", status_code=303)
+
+
+@app.get("/painel/alterar-senha", response_class=HTMLResponse)
+def alterar_senha_form(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/alterar_senha.html", {
+        "request": request,
+        "empresa": empresa,
+        "erro": request.query_params.get("erro"),
+        "sucesso": request.query_params.get("sucesso"),
+    })
+
+
+@app.post("/painel/alterar-senha")
+def alterar_senha_salvar(
+        request: Request,
+        senha_atual: str = Form(...),
+        nova_senha: str = Form(...),
+        confirmar_senha: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    senha_atual = senha_atual.strip()
+    nova_senha = nova_senha.strip()
+    confirmar_senha = confirmar_senha.strip()
+    if len(nova_senha) < 6:
+        return RedirectResponse("/painel/alterar-senha?erro=A nova senha precisa ter pelo menos 6 caracteres.", status_code=303)
+    if nova_senha != confirmar_senha:
+        return RedirectResponse("/painel/alterar-senha?erro=A confirmação da senha não confere.", status_code=303)
+
+    tipo, registro = usuario_empresa_atual(db, empresa, request)
+    senha_cadastrada = registro.senha if tipo == "usuario" else empresa.senha_admin
+    if senha_atual != (senha_cadastrada or ""):
+        return RedirectResponse("/painel/alterar-senha?erro=Senha atual incorreta.", status_code=303)
+
+    if tipo == "usuario":
+        registro.senha = nova_senha
+    else:
+        empresa.senha_admin = nova_senha
+    db.commit()
+    return RedirectResponse("/painel/alterar-senha?sucesso=Senha alterada com sucesso.", status_code=303)
 
 
 @app.get("/painel/configuracoes", response_class=HTMLResponse)

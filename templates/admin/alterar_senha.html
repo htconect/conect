@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="cabecalho-mobile">
+  <p class="mini">Conta</p>
+  <h1>Alterar senha</h1>
+  <p>Informe a senha atual e cadastre uma nova senha.</p>
+</div>
+
+{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+{% if sucesso %}<div class="alerta ok">{{ sucesso }}</div>{% endif %}
+
+<form class="card formulario-mobile" method="post" action="/painel/alterar-senha">
+  <label>Senha atual</label>
+  <input type="password" name="senha_atual" required autocomplete="current-password">
+
+  <label>Nova senha</label>
+  <input type="password" name="nova_senha" required minlength="6" autocomplete="new-password">
+
+  <label>Confirmar nova senha</label>
+  <input type="password" name="confirmar_senha" required minlength="6" autocomplete="new-password">
+
+  <div class="acoes empilhadas" style="margin-top:14px">
+    <button type="submit">Salvar nova senha</button>
+    <a class="botao secundario" href="/painel/perfil">Voltar ao perfil</a>
+  </div>
+</form>
+{% endblock %}

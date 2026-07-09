@@ -583,7 +583,7 @@ body.tela-financeiro-desktop .container-app{
   flex:1 1 auto;
   min-height:0;
   display:grid;
-  grid-template-columns:minmax(760px,1.55fr) minmax(560px,1fr);
+  grid-template-columns:minmax(0,4fr) minmax(300px,1fr);
   gap:12px;
   align-items:stretch;
 }
@@ -910,7 +910,7 @@ button{
   font-size:14px;
 }
 .financeiro-duas-colunas{
-  grid-template-columns:minmax(820px,1.38fr) minmax(640px,1fr);
+  grid-template-columns:minmax(0,4fr) minmax(300px,1fr);
 }
 .tabela-financeiro table{
   font-size:14px;
@@ -995,6 +995,55 @@ button{
 .financeiro-topo-acoes{
   min-width:120px;
   justify-content:flex-end;
+}
+
+/* Painel Sistema menor e mais compacto */
+.sistema-box{
+  min-width:0;
+}
+.sistema-box .titulo-tabela{
+  padding:0 12px;
+}
+.sistema-box .titulo-tabela h2{
+  font-size:16px;
+}
+.sistema-box .titulo-tabela span{
+  font-size:12px;
+}
+.sistema-box .filtro-direito{
+  height:44px;
+  padding:0 12px;
+  gap:6px;
+  overflow-x:auto;
+}
+.sistema-box .filtro-direito a{
+  padding:7px 10px;
+  font-size:12px;
+}
+.sistema-box .tabela-financeiro th,
+.sistema-box .tabela-financeiro td,
+.sistema-box th,
+.sistema-box td{
+  padding:8px 10px;
+}
+.tabela-sistema{
+  width:100%;
+  min-width:0;
+}
+.tabela-sistema .col-data-sistema{width:52px}
+.tabela-sistema .col-valor-sistema{width:82px}
+.tabela-sistema .col-status-sistema{width:82px}
+.tabela-sistema .col-acao-sistema{width:86px}
+.receber-mini summary{
+  padding:10px 12px;
+}
+.receber-mini table{
+  width:100%;
+  min-width:0;
+}
+.receber-mini th,
+.receber-mini td{
+  padding:8px 10px;
 }
 
 /* Em telas menores, libera rolagem de página */
