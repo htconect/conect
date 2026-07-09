@@ -3944,7 +3944,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
                 "bairro": reserva.bairro or (reserva.cliente.bairro if reserva.cliente else "") or "-",
                 "quantidade": item.quantidade or 1,
                 "reserva_id": reserva.id,
-                "observacoes": (reserva.observacoes or "").strip(),
+                "observacoes": ((reserva.observacoes or "") or (reserva.cliente.observacoes if reserva.cliente else "") or "").strip(),
             })
 
     itens = []
