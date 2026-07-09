@@ -30,6 +30,12 @@
     <p>{{ item.bairro or item.cliente.bairro or "-" }}</p>
     {% if item.acesso_local %}<p>Acesso: {{ item.acesso_local }}</p>{% endif %}
     <p>{{ item.cliente.telefone or item.cliente.identificador or "-" }}</p>
+    {% if item.retirada_obrigatoria %}
+      <div class="alerta-retirada-obrigatoria">
+        <b>Retirada obrigatória</b>
+        <span>{{ (item.retirada_data or item.data_evento).strftime('%d/%m/%Y') if (item.retirada_data or item.data_evento) else '-' }} · {{ (item.retirada_hora or item.hora_fim or item.hora_inicio).strftime('%H:%M') if (item.retirada_hora or item.hora_fim or item.hora_inicio) else '-' }}</span>
+      </div>
+    {% endif %}
     <a class="botao-cliente-card" href="/painel/solicitacao/{{ item.id }}/cliente">Editar cliente</a>
   </div>
 

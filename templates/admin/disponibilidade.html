@@ -35,6 +35,9 @@
           <div>
             <b>{{ loc.hora }} · {{ loc.bairro }}</b>
             <small>{{ loc.quantidade }}x alugado · {{ loc.cliente }}</small>
+            {% if loc.retirada_obrigatoria %}
+              <small class="retirada-obrigatoria-mini">Retirada obrigatória: {{ (loc.retirada_data or data_consulta).strftime('%d/%m/%Y') if (loc.retirada_data or data_consulta) else '-' }} às {{ loc.retirada_hora.strftime('%H:%M') if loc.retirada_hora else '-' }}</small>
+            {% endif %}
             {% if loc.observacoes %}
               <small class="observacao-destaque">{{ loc.observacoes }}</small>
             {% endif %}

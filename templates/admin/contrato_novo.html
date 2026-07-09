@@ -66,6 +66,24 @@
   <label>Hora de início</label>
   <input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio or '' }}" required>
 
+  <div class="retirada-obrigatoria-box">
+    <label class="check">
+      <input type="checkbox" name="retirada_obrigatoria" value="1" {% if form.retirada_obrigatoria %}checked{% endif %}>
+      Retirada obrigatória solicitada pelo cliente
+    </label>
+    <div class="grid-2">
+      <div>
+        <label>Data da retirada</label>
+        <input name="retirada_data" type="date" value="{{ form.retirada_data or form.data_evento or '' }}">
+      </div>
+      <div>
+        <label>Hora da retirada</label>
+        <input name="retirada_hora" type="time" step="1800" value="{{ form.retirada_hora or '' }}">
+      </div>
+    </div>
+    <p class="texto-discreto">Use quando o cliente exigir retirada no mesmo dia ou em horário específico. Essa decisão aparecerá na agenda, disponibilidade, operação e contrato.</p>
+  </div>
+
   <label>Item principal</label>
   <select name="produto_id">
     <option value="">Selecionar depois</option>
@@ -135,5 +153,12 @@ function bloquearEnvioContratoNovo(form){
   }
   return true;
 }
+
+document.addEventListener('change', function(ev){
+  if(ev.target && ev.target.name === 'data_evento'){
+    const dataRetirada = document.querySelector('input[name="retirada_data"]');
+    if(dataRetirada && !dataRetirada.value){ dataRetirada.value = ev.target.value; }
+  }
+});
 </script>
 {% endblock %}

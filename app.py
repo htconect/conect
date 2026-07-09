@@ -257,8 +257,8 @@ def recalcular_valores_reservas(db: Session):
 def limpar_agenda_operacional(db: Session):
     """
     Remove duplicidade operacional.
-    Regra atual: a reserva nasce apenas com ENTREGA.
-    A RETIRADA é criada quando a entrega for marcada como concluída.
+    Regra atual: a reserva nasce com ENTREGA.
+    A RETIRADA nasce ao concluir a entrega, exceto quando o cliente exigiu retirada obrigatória.
     """
     alterou = False
     reservas = db.query(Solicitacao).all()
@@ -289,7 +289,16 @@ def limpar_agenda_operacional(db: Session):
                 db.delete(duplicado)
                 alterou = True
 
-        # Retiradas só devem existir depois que a entrega foi concluída.
+        if retirada_obrigatoria_ativa(reserva):
+            criar_ou_atualizar_retirada_obrigatoria(db, reserva)
+            alterou = True
+            if len(retiradas) > 1:
+                for duplicada in retiradas[1:]:
+                    db.delete(duplicada)
+                    alterou = True
+            continue
+
+        # Retiradas comuns só devem existir depois que a entrega foi concluída.
         entrega_concluida = bool(entregas and entregas[0].status_operacional == "concluido")
         if not entrega_concluida:
             for retirada in retiradas:
@@ -302,7 +311,6 @@ def limpar_agenda_operacional(db: Session):
 
     if alterou:
         db.commit()
-
 
 def janela_uma_hora(hora) -> str:
     if not hora:
@@ -685,6 +693,12 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em DATETIME")
         if "cancelado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN cancelado_em DATETIME")
+        if "retirada_obrigatoria" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_obrigatoria BOOLEAN DEFAULT false")
+        if "retirada_data" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_data DATE")
+        if "retirada_hora" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_hora TIME")
         if "local_nome" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_nome VARCHAR(160)")
         if "local_responsavel_nome" not in cols_sol:
@@ -881,8 +895,53 @@ def nome_item_reserva(item: Solicitacao) -> str:
     return "Reserva"
 
 
+def retirada_obrigatoria_ativa(item: Solicitacao) -> bool:
+    return bool(getattr(item, "retirada_obrigatoria", False))
+
+
+def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
+    """
+    Cria o card de BUSCA antes da entrega ser concluída quando o cliente exigiu retirada.
+    Esse card fica com data/hora do contrato, não deve ser duplicado depois da entrega.
+    """
+    if not item or not item.id:
+        return
+
+    retirada = (
+        db.query(Agenda)
+        .filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id, tipo_evento="retirada")
+        .first()
+    )
+
+    if not retirada_obrigatoria_ativa(item):
+        # Se a busca obrigatória foi removida e a busca ainda não foi executada, remove o card especial.
+        if retirada and retirada.status_operacional != "concluido":
+            db.delete(retirada)
+        return
+
+    data_retirada = item.retirada_data or item.data_evento
+    hora_retirada = item.retirada_hora or item.hora_fim or item.hora_inicio
+    titulo_base = f"{nome_item_reserva(item)} - {item.cliente.nome if item.cliente else 'Cliente'}"
+
+    if not retirada:
+        retirada = Agenda(
+            empresa_id=item.empresa_id,
+            solicitacao_id=item.id,
+            tipo_evento="retirada",
+            status_operacional="pendente",
+        )
+        db.add(retirada)
+
+    retirada.data = data_retirada
+    retirada.hora_inicio = hora_retirada
+    retirada.hora_fim = None
+    retirada.titulo = titulo_base
+    retirada.bairro = item.bairro
+    retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
+
+
 def criar_eventos_operacionais(db: Session, item: Solicitacao):
-    """Garante apenas o evento de entrega. A retirada nasce quando a entrega é concluída."""
+    """Garante a entrega e, se existir retirada obrigatória, garante também a busca do cliente."""
     if not item or not item.id:
         return
 
@@ -922,6 +981,7 @@ def criar_eventos_operacionais(db: Session, item: Solicitacao):
         entrega.titulo = titulo_base
         entrega.bairro = item.bairro
 
+    criar_ou_atualizar_retirada_obrigatoria(db, item)
 
 def garantir_agenda_reservas(db: Session, empresa_id: int | None = None):
     """
@@ -942,7 +1002,7 @@ def garantir_agenda_reservas(db: Session, empresa_id: int | None = None):
             .filter_by(empresa_id=reserva.empresa_id, solicitacao_id=reserva.id, tipo_evento="entrega")
             .first()
         )
-        if not existe:
+        if not existe or retirada_obrigatoria_ativa(reserva):
             criar_eventos_operacionais(db, reserva)
             alterou = True
 
@@ -954,6 +1014,12 @@ def criar_retirada_apos_entrega(db: Session, entrega: Agenda):
     """Ao concluir uma entrega, cria a retirada sugerida uma única vez."""
     reserva = entrega.solicitacao
     if not reserva:
+        return
+
+    # Se o cliente já exigiu retirada obrigatória, o card de busca já existe
+    # e a entrega concluída não deve criar outro card vermelho de busca.
+    if retirada_obrigatoria_ativa(reserva):
+        criar_ou_atualizar_retirada_obrigatoria(db, reserva)
         return
 
     retirada_existente = (
@@ -2437,6 +2503,9 @@ def contrato_novo_salvar(
         contrato_id: str = Form(""),
         data_evento: str = Form(...),
         hora_inicio: str = Form(...),
+        retirada_obrigatoria: str = Form(""),
+        retirada_data: str = Form(""),
+        retirada_hora: str = Form(""),
         valor: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
@@ -2529,6 +2598,9 @@ def contrato_novo_salvar(
         return render_erro("No contrato manual, informe pelo menos um item principal.")
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
+    retirada_obrigatoria_bool = bool(retirada_obrigatoria)
+    retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
+    retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
     valor_float = texto_para_float(valor)
     sinal_float = texto_para_float(sinal)
     manual = modo_criacao == "manual"
@@ -2541,6 +2613,9 @@ def contrato_novo_salvar(
         data_evento=data_evento_obj,
         hora_inicio=inicio_obj,
         hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
+        retirada_obrigatoria=retirada_obrigatoria_bool,
+        retirada_data=retirada_data_obj if retirada_obrigatoria_bool else None,
+        retirada_hora=retirada_hora_obj,
         bairro=bairro.strip(),
         local=local.strip() or endereco.strip(),
         local_nome=local_nome.strip(),
@@ -2558,6 +2633,9 @@ def contrato_novo_salvar(
         valor_pago=sinal_float if manual and sinal_float > 0 else 0,
         pagamento_confirmado_em=agora_utc() if manual and sinal_float > 0 else None
     )
+    if item.retirada_obrigatoria and not item.retirada_hora:
+        item.retirada_hora = item.hora_fim or item.hora_inicio
+
     db.add(item)
     db.flush()
 
@@ -2614,6 +2692,9 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
         "cep": cliente.cep if cliente else "",
         "data_evento": item.data_evento.isoformat() if item.data_evento else "",
         "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
+        "retirada_obrigatoria": "1" if retirada_obrigatoria_ativa(item) else "",
+        "retirada_data": item.retirada_data.isoformat() if item.retirada_data else (item.data_evento.isoformat() if item.data_evento else ""),
+        "retirada_hora": item.retirada_hora.strftime("%H:%M") if item.retirada_hora else (item.hora_fim.strftime("%H:%M") if item.hora_fim else ""),
         "produto_id": str(item.produto_id or ""),
         "contrato_id": str(item.contrato_id or ""),
         "valor": moeda_br(item.valor or 0),
@@ -2673,6 +2754,9 @@ def salvar_solicitacao_completa(
         contrato_id: str = Form(""),
         data_evento: str = Form(...),
         hora_inicio: str = Form(...),
+        retirada_obrigatoria: str = Form(""),
+        retirada_data: str = Form(""),
+        retirada_hora: str = Form(""),
         valor: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
@@ -2694,7 +2778,9 @@ def salvar_solicitacao_completa(
         nome=nome, telefone=telefone, cpf=cpf, cnpj=cnpj, email=email, endereco=endereco,
         numero=numero, complemento=complemento, bairro=bairro, cidade=cidade, estado=estado,
         cep=cep, produto_id=produto_id, contrato_id=contrato_id, data_evento=data_evento,
-        hora_inicio=hora_inicio, valor=valor, sinal=sinal, local_nome=local_nome, local=local,
+        hora_inicio=hora_inicio, retirada_obrigatoria=retirada_obrigatoria,
+        retirada_data=retirada_data, retirada_hora=retirada_hora,
+        valor=valor, sinal=sinal, local_nome=local_nome, local=local,
         acesso_local=acesso_local, local_responsavel_nome=local_responsavel_nome,
         local_responsavel_telefone=local_responsavel_telefone, observacoes=observacoes,
         modo_criacao="manual"
@@ -2740,14 +2826,21 @@ def salvar_solicitacao_completa(
     cliente.cep = cep.strip()
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
+    data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    retirada_obrigatoria_bool = bool(retirada_obrigatoria)
+    retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
+    retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
     valor_float = texto_para_float(valor)
     sinal_float = texto_para_float(sinal)
 
     item.produto_id = produto.id if produto else None
     item.contrato_id = int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None)
-    item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    item.data_evento = data_evento_obj
     item.hora_inicio = inicio_obj
     item.hora_fim = somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else item.hora_fim
+    item.retirada_obrigatoria = retirada_obrigatoria_bool
+    item.retirada_data = retirada_data_obj if retirada_obrigatoria_bool else None
+    item.retirada_hora = retirada_hora_obj or (item.hora_fim or item.hora_inicio if retirada_obrigatoria_bool else None)
     item.bairro = bairro.strip()
     item.local = local.strip() or endereco.strip()
     item.local_nome = local_nome.strip()
@@ -3945,6 +4038,9 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
                 "quantidade": item.quantidade or 1,
                 "reserva_id": reserva.id,
                 "observacoes": ((reserva.observacoes or "") or (reserva.cliente.observacoes if reserva.cliente else "") or "").strip(),
+                "retirada_obrigatoria": retirada_obrigatoria_ativa(reserva),
+                "retirada_data": reserva.retirada_data,
+                "retirada_hora": reserva.retirada_hora,
             })
 
     itens = []
@@ -4107,9 +4203,11 @@ def atualizar_roteiro(
     item.link_localizacao = link_localizacao
     item.status_operacional = novo_status
 
+    retirada_bloqueada = bool(item.tipo_evento == "retirada" and item.solicitacao and retirada_obrigatoria_ativa(item.solicitacao))
+
     nova_data = None
     data_informada = (data_operacao or data_evento or "").strip()
-    if data_informada:
+    if not retirada_bloqueada and data_informada:
         try:
             nova_data = datetime.strptime(data_informada, "%Y-%m-%d").date()
         except ValueError:
@@ -4123,13 +4221,17 @@ def atualizar_roteiro(
         item.data = nova_data
 
     previsao_entrega = (previsao_entrega or "").strip()
-    if previsao_entrega:
+    if not retirada_bloqueada and previsao_entrega:
         try:
             nova_hora = datetime.strptime(previsao_entrega, "%H:%M").time()
         except ValueError:
             raise HTTPException(400, "Hora da operação inválida.")
         item.previsao_entrega = previsao_entrega
         item.hora_inicio = nova_hora
+    elif retirada_bloqueada:
+        item.data = item.solicitacao.retirada_data or item.solicitacao.data_evento
+        item.hora_inicio = item.solicitacao.retirada_hora or item.solicitacao.hora_fim or item.solicitacao.hora_inicio
+        item.previsao_entrega = item.hora_inicio.strftime("%H:%M") if item.hora_inicio else ""
 
     # Marca visualmente que este card já foi roteirizado.
     # A cor cinza clara da tela usa este marcador dentro do histórico.

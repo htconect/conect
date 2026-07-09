@@ -16,6 +16,9 @@
     <h2>Resumo do evento</h2>
     <p><b>Data do evento:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
     <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
+    {% if item.retirada_obrigatoria %}
+      <p class="retirada-obrigatoria-mini"><b>Retirada obrigatória:</b> {{ (item.retirada_data or item.data_evento).strftime('%d/%m/%Y') if (item.retirada_data or item.data_evento) else '-' }} às {{ (item.retirada_hora or item.hora_fim or item.hora_inicio).strftime('%H:%M') if (item.retirada_hora or item.hora_fim or item.hora_inicio) else '-' }}</p>
+    {% endif %}
     <p><b>Valor total:</b> R$ {{ item.valor|moeda_br }}</p>
     <p><b>Valor recebido:</b> R$ {{ item.valor_pago|moeda_br }}</p>
     <p><b>Sinal previsto:</b> R$ {{ item.sinal|moeda_br }}</p>

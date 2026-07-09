@@ -57,6 +57,7 @@
     {% set hora_card_contrato = hora_contrato_texto|replace(':00','H') if hora_contrato_texto != '-' else '-' %}
     {% set entrega_fora_data = tipo == 'entrega' and a.solicitacao and a.solicitacao.data_evento and a.data and a.data
     != a.solicitacao.data_evento %}
+    {% set retirada_obrigatoria = tipo == 'retirada' and a.solicitacao and a.solicitacao.retirada_obrigatoria %}
     {% set tel = a.solicitacao.cliente.telefone or a.solicitacao.cliente.identificador %}
     {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
     {% set hora_previsao_inicio = ajustar_hora_texto(hora_entrega, -1) %}
@@ -84,7 +85,7 @@
     {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) %}
     {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
     <details
-            class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
+            class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
             draggable="true" data-agenda-id="{{ a.id }}">
         <summary>
             <div class="alca-arrastar" title="Arrastar para reordenar">⋮⋮</div>
@@ -95,6 +96,9 @@
                 <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
                 <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or
                     0))|moeda_br }}</small>
+                {% if retirada_obrigatoria %}
+                <small class="retirada-obrigatoria-mini">Retirada obrigatória solicitada pelo cliente: {{ data_entrega_texto }} às {{ hora_entrega }}</small>
+                {% endif %}
                 {% if a.solicitacao.observacoes %}
                 <small class="observacao-destaque">{{ a.solicitacao.observacoes }}</small>
                 {% endif %}
@@ -113,12 +117,14 @@
             <div class="linha">
                 <div>
                     <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
-                    <input type="date" name="data_operacao" value="{{ data_entrega }}">
+                    <input type="date" name="data_operacao" value="{{ data_entrega }}" {% if retirada_obrigatoria %}readonly disabled{% endif %}>
+                    {% if retirada_obrigatoria %}<input type="hidden" name="data_operacao" value="{{ data_entrega }}">{% endif %}
                 </div>
                 <div>
                     <label>{{ 'Hora da busca' if tipo == 'retirada' else 'Hora da entrega' }}</label>
                     <input type="time" name="previsao_entrega"
-                           value="{{ hora_entrega if hora_entrega != '--' else '' }}">
+                           value="{{ hora_entrega if hora_entrega != '--' else '' }}" {% if retirada_obrigatoria %}readonly disabled{% endif %}>
+                    {% if retirada_obrigatoria %}<input type="hidden" name="previsao_entrega" value="{{ hora_entrega if hora_entrega != '--' else '' }}">{% endif %}
                 </div>
             </div>
 
@@ -126,9 +132,15 @@
                 <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
                 <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
             </div>
-            <p class="texto-discreto operacao-ajuda">Data do contrato: <b>{{ data_contrato_texto }}</b>. {% if tipo ==
-                'retirada' %}A busca pode ser depois, mas nunca antes do contrato.{% else %}A entrega pode ser antes,
-                mas nunca depois do contrato.{% endif %}</p>
+            <p class="texto-discreto operacao-ajuda">
+                {% if retirada_obrigatoria %}
+                  Retirada obrigatória solicitada pelo cliente. Data e hora bloqueadas para respeitar o contrato.
+                {% else %}
+                  Data do contrato: <b>{{ data_contrato_texto }}</b>. {% if tipo ==
+                  'retirada' %}A busca pode ser depois, mas nunca antes do contrato.{% else %}A entrega pode ser antes,
+                  mas nunca depois do contrato.{% endif %}
+                {% endif %}
+            </p>
 
             <div class="acoes-rota operacao-acoes-novas">
                 <a class="botao-mini botao-whats-btn" target="_blank"
@@ -249,6 +261,10 @@
     .lista-roteirizacao .linha-operacao.roteiro-retirada{
       background:#FFECEC !important;
       border-color:#F6B8B8;
+    }
+    .lista-roteirizacao .linha-operacao.roteiro-retirada-obrigatoria{
+      background:#FFF8DB !important;
+      border-color:#F3D675;
     }
     .lista-roteirizacao .linha-operacao.concluido{
       background:#ECFDF3 !important;

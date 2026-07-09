@@ -50,6 +50,9 @@
       {% endif %}
       <small class="financeiro-mini">Valor R$ {{ s.valor|moeda_br }} · Pago R$ {{ s.valor_pago|moeda_br }} · Falta R$ {{ ((s.valor or 0) - (s.valor_pago or 0))|moeda_br }}</small>
       {% set observacao_card = s.observacoes or s.cliente.observacoes %}
+      {% if s.retirada_obrigatoria %}
+        <small class="retirada-obrigatoria-mini">Retirada obrigatória: {{ (s.retirada_data or s.data_evento).strftime('%d/%m/%Y') if (s.retirada_data or s.data_evento) else '-' }} às {{ (s.retirada_hora or s.hora_fim or s.hora_inicio).strftime('%H:%M') if (s.retirada_hora or s.hora_fim or s.hora_inicio) else '-' }}</small>
+      {% endif %}
       {% if observacao_card %}
         <small class="observacao-destaque">{{ observacao_card }}</small>
       {% endif %}
