@@ -68,7 +68,7 @@
 <section class="proxima-acao ok-acao">
   <small>Status</small>
   <b>Contrato aceito</b>
-  <button class="botao largura-total" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
+  <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
   <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}">WhatsApp contrato</a>
 </section>
 {% endif %}
@@ -200,7 +200,7 @@
 <section class="card-reserva" id="pagamento">
   <div class="card-reserva-head">
     <h2>Pagamento</h2>
-    <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar</button>
+    <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
   </div>
 
   <div class="resumo-financeiro-mobile">
@@ -236,7 +236,7 @@
       <label>Observação</label>
       <input name="observacoes_pagamento" placeholder="Ex.: dinheiro entregue ao Júnior">
     </details>
-    <button class="largura-total" {% if falta <= 0 %}disabled{% endif %}>Registrar pagamento</button>
+    <button class="largura-total btn-krj-primary" {% if falta <= 0 %}disabled{% endif %}>Registrar pagamento</button>
   </form>
 
   {% if item.pagamentos %}
@@ -275,7 +275,7 @@
   </div>
 
   {% if tem_itens %}
-    <a class="botao largura-total" href="{{ link_contrato_visual }}" target="_blank">Ver tela de aceite</a>
+    <a class="botao largura-total btn-krj-info" href="{{ link_contrato_visual }}" target="_blank">Ver tela de aceite</a>
     <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}" target="_blank">WhatsApp para aceite</a>
     {% if contrato_aceito %}
       <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}" target="_blank">WhatsApp contrato</a>

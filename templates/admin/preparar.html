@@ -140,11 +140,11 @@
                 {% endif %}
 
                 {% if endereco_rota|trim %}
-                <a class="botao-mini botao-rota desabilitado" href="#" data-waze="{{ url_waze }}"
+                <a class="botao-mini botao-rota btn-krj-route" href="#" data-waze="{{ url_waze }}"
                    data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}"
-                   title="Clique em A caminho para liberar a navegação.">Iniciar rota</a>
+                   title="Iniciar rota">Iniciar rota</a>
                 {% else %}
-                <span class="botao-mini botao-rota desabilitado"
+                <span class="botao-mini botao-rota btn-krj-route"
                       title="Cadastre o endereço/local da reserva para iniciar rota.">Iniciar rota</span>
                 {% endif %}
             </div>

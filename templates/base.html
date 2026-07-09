@@ -8,6 +8,7 @@
   <meta name="theme-color" content="#0f172a">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 <body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %}">
 <header class="topo-app">
@@ -42,6 +43,66 @@
 <main class="container-app">
   {% block conteudo %}{% endblock %}
 </main>
+
+
+<style id="orion-botoes-padrao">
+/* ORION: padrão global de botões + ícones sem duplicidade */
+.botao,
+button,
+a.botao,
+a.botao-whats,
+.botao-whats,
+.botao-whats-btn,
+.btn-filtrar,
+.btn-limpar-filtros,
+.btn-importar-topo,
+.btn-importar,
+.btn-ok,
+.btn-mover,
+.btn-secundario,
+.btn-lancar,
+.btn-perigo,
+.botao-pequeno,
+.botao-secundario,
+.botao-perigo,
+.botao-mini,
+.link-botao,
+.remover-item-texto,
+.registrar-pagamento-operacao > summary{
+  min-height:42px !important;
+  border-radius:14px !important;
+  padding:10px 15px !important;
+  border:1px solid transparent !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:8px !important;
+  font-size:14px !important;
+  font-weight:900 !important;
+  line-height:1.15 !important;
+  text-decoration:none !important;
+  cursor:pointer !important;
+  transition:transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease !important;
+  white-space:nowrap;
+}
+.registrar-pagamento-operacao > summary{list-style:none;width:100%!important;}
+.registrar-pagamento-operacao > summary::-webkit-details-marker{display:none;}
+.botao i, button i, .botao-whats i, .botao-whats-btn i, .botao-mini i, .botao-rota i, .btn-importar-topo i, .link-botao i, .registrar-pagamento-operacao > summary i{font-size:1.05em;line-height:1;}
+.botao:hover, button:hover, a.botao:hover, .botao-whats:hover, .btn-importar-topo:hover, .link-botao:hover, .registrar-pagamento-operacao > summary:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(15,23,42,.10);}
+button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!important;box-shadow:none!important;opacity:.55!important;cursor:not-allowed!important;}
+.btn-krj-primary, button.btn-krj-primary, .botao.btn-krj-primary, .registrar-pagamento-operacao > summary.btn-krj-primary{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important;box-shadow:0 7px 16px rgba(22,163,74,.18);}
+.btn-krj-outline, button.btn-krj-outline, .botao.btn-krj-outline, .link-botao.btn-krj-outline{background:rgba(22,163,74,.06)!important;color:#15803d!important;border-color:#86efac!important;}
+.btn-krj-info, button.btn-krj-info, .botao.btn-krj-info{background:rgba(37,99,235,.06)!important;color:#1d4ed8!important;border-color:#bfdbfe!important;}
+.btn-krj-warning, button.btn-krj-warning, .botao.btn-krj-warning{background:rgba(245,158,11,.09)!important;color:#b45309!important;border-color:#fde68a!important;}
+.btn-krj-danger, button.btn-krj-danger, .botao.btn-krj-danger, .perigo.btn-krj-danger, .botao-perigo.btn-krj-danger, .btn-perigo.btn-krj-danger{background:#ef4444!important;color:#fff!important;border-color:#ef4444!important;}
+.btn-krj-ghost, button.btn-krj-ghost, .botao.btn-krj-ghost{background:#fff!important;color:#334155!important;border-color:#cbd5e1!important;}
+.btn-krj-route, button.btn-krj-route, .botao.btn-krj-route{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important;box-shadow:0 7px 16px rgba(22,163,74,.18);}
+.btn-krj-compact{min-height:34px!important;padding:7px 10px!important;font-size:12px!important;border-radius:11px!important;}
+.largura-total.btn-krj-primary, .largura-total.btn-krj-outline, .largura-total.btn-krj-info, .largura-total.btn-krj-warning, .largura-total.btn-krj-danger, .largura-total.btn-krj-ghost{width:100%!important;}
+.acoes, .linha-acoes, .acoes-lancamento{gap:9px!important;}
+@media(max-width:520px){.botao, button, a.botao, .botao-whats, .btn-filtrar, .btn-limpar-filtros, .btn-importar-topo, .registrar-pagamento-operacao > summary{min-height:44px!important;font-size:14px!important}.acoes.empilhadas .botao,.acoes.empilhadas .botao-whats,.acoes.empilhadas button,.largura-total{width:100%!important}}
+</style>
+
 
 <div id="app-loading" class="app-loading" aria-live="polite" aria-hidden="true">
   <div class="app-loading-card">
@@ -153,6 +214,75 @@
   });
 })();
 </script>
+
+
+<script id="orion-botoes-icones">
+(function(){
+  const regras = [
+    [/pré-contrato|pre-contrato|compartilh|whatsapp|whats/i, 'bi-whatsapp', 'btn-krj-primary'],
+    [/registrar pagamento|pagamento|pagar|registrar$/i, 'bi-cash-stack', 'btn-krj-primary'],
+    [/iniciar rota|rota/i, 'bi-play-circle-fill', 'btn-krj-route'],
+    [/previsão|previsao/i, 'bi-whatsapp', 'btn-krj-primary'],
+    [/a caminho/i, 'bi-whatsapp', 'btn-krj-primary'],
+    [/salvar|criar|confirmar|aceitar|ativar|finalizar|ok$|^ok$/i, 'bi-check-circle', 'btn-krj-primary'],
+    [/editar|alterar|desv\.*/i, 'bi-pencil-square', 'btn-krj-outline'],
+    [/buscar|pesquisar|filtrar|continuar|carregar/i, 'bi-search', 'btn-krj-outline'],
+    [/atualizar|limpar|recarregar/i, 'bi-arrow-clockwise', 'btn-krj-outline'],
+    [/iniciar contrato|adicionar|novo|manual|crédito|credito|lançar/i, 'bi-plus-circle', 'btn-krj-outline'],
+    [/ver contrato|visualizar/i, 'bi-eye', 'btn-krj-info'],
+    [/aceite/i, 'bi-file-earmark-check', 'btn-krj-info'],
+    [/pdf|gerar pdf|política|politica|modelo|imprimir/i, 'bi-file-earmark-pdf', 'btn-krj-info'],
+    [/importar|exportar|download|upload/i, 'bi-cloud-arrow-up', 'btn-krj-info'],
+    [/copiar|duplicar|reenviar|usar como base/i, 'bi-files', 'btn-krj-warning'],
+    [/cancelar|cancelada/i, 'bi-x-circle', 'btn-krj-danger'],
+    [/excluir|remover/i, 'bi-trash3', 'btn-krj-danger'],
+    [/sair/i, 'bi-box-arrow-right', 'btn-krj-danger'],
+    [/subir|↑/i, 'bi-arrow-up', 'btn-krj-ghost'],
+    [/descer|↓/i, 'bi-arrow-down', 'btn-krj-ghost']
+  ];
+  const emojiRx = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu;
+  function textoDo(el){return (el.innerText || el.textContent || el.getAttribute('title') || '').replace(emojiRx,'').replace(/\s+/g,' ').trim();}
+  function limparIconesAntigos(el){
+    el.querySelectorAll('svg').forEach(svg => svg.remove());
+    Array.from(el.childNodes).forEach(n => {
+      if(n.nodeType === Node.TEXT_NODE){
+        n.nodeValue = n.nodeValue.replace(emojiRx,'').replace(/^\s*[·•-]?\s*/, '');
+      }
+    });
+  }
+  function decorar(el){
+    if(!el || el.dataset.iconizado === '1') return;
+    if(el.closest('.nav-inferior') || el.closest('.menu-topo-card')) return;
+    const textoInicial = textoDo(el);
+    if(!textoInicial && !el.getAttribute('title')) return;
+    let regra = regras.find(([rx]) => rx.test(textoInicial) || rx.test(el.getAttribute('title') || ''));
+    if(!regra) regra = ['','bi-circle','btn-krj-ghost'];
+    const classeAtual = el.className || '';
+    if(/botao-rota/i.test(classeAtual)) regra = ['', 'bi-play-circle-fill', 'btn-krj-route'];
+    if(/whats/i.test(classeAtual) && /whats|whatsapp|pré-contrato|pre-contrato|compartilh|a caminho/i.test(textoInicial)) regra = ['', 'bi-whatsapp', 'btn-krj-primary'];
+    if(/perigo|danger|btn-perigo|botao-perigo/i.test(classeAtual)){
+      if(/cancel/i.test(textoInicial)) regra = ['', 'bi-x-circle', 'btn-krj-danger'];
+      else if(/sair/i.test(textoInicial)) regra = ['', 'bi-box-arrow-right', 'btn-krj-danger'];
+      else regra = ['', 'bi-trash3', 'btn-krj-danger'];
+    }
+    limparIconesAntigos(el);
+    el.classList.add(regra[2]);
+    if(textoInicial.length <= 3 || /btn-ok|btn-mover|remover-item/.test(classeAtual)) el.classList.add('btn-krj-compact');
+    if(!el.querySelector('i.bi')){
+      const i=document.createElement('i');
+      i.className='bi '+regra[1];
+      i.setAttribute('aria-hidden','true');
+      el.prepend(i);
+    }
+    el.dataset.iconizado='1';
+  }
+  function aplicar(){
+    document.querySelectorAll('button, a.botao, a.botao-whats, .botao-whats, .botao-whats-btn, .botao-rota, label.btn-importar-topo, a.btn-limpar-filtros, .link-botao, .registrar-pagamento-operacao > summary').forEach(decorar);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', aplicar); else aplicar();
+})();
+</script>
+
 
 </body>
 </html>
