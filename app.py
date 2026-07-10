@@ -1349,7 +1349,8 @@ def admin_criar_usuario_empresa(
         empresa_id: int,
         nome: str = Form(...),
         usuario: str = Form(...),
-        senha: str = Form(...),
+        senha: Optional[str] = Form(None),
+        usuario_id: Optional[int] = Form(None),
         ativo: Optional[str] = Form("1"),
         acesso_agenda: Optional[str] = Form(None),
         acesso_operacao: Optional[str] = Form(None),
@@ -1363,10 +1364,32 @@ def admin_criar_usuario_empresa(
     empresa = db.get(Empresa, empresa_id)
     if not empresa:
         raise HTTPException(404)
+
     usuario_limpo = usuario.strip()
-    existente = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id, usuario=usuario_limpo).first()
+    if not usuario_limpo:
+        raise HTTPException(400, "Informe o usuário.")
+
+    existente = None
+    if usuario_id:
+        existente = db.get(UsuarioEmpresa, usuario_id)
+        if not existente or existente.empresa_id != empresa.id:
+            raise HTTPException(404, "Usuário não encontrado.")
+
+    conflito = (
+        db.query(UsuarioEmpresa)
+        .filter(
+            UsuarioEmpresa.empresa_id == empresa.id,
+            UsuarioEmpresa.usuario == usuario_limpo
+        )
+        .first()
+    )
+    if conflito and (not existente or conflito.id != existente.id):
+        raise HTTPException(400, "Já existe um usuário com este login nesta empresa.")
+
     dados = {
-        "nome": nome.strip(), "senha": senha.strip(), "ativo": bool(ativo),
+        "nome": nome.strip(),
+        "usuario": usuario_limpo,
+        "ativo": bool(ativo),
         "acesso_agenda": bool(acesso_agenda),
         "acesso_operacao": bool(acesso_operacao),
         "acesso_buscar_cliente": bool(acesso_buscar_cliente),
@@ -1374,11 +1397,21 @@ def admin_criar_usuario_empresa(
         "acesso_cadastros": bool(acesso_cadastros),
         "acesso_relatorios": bool(acesso_relatorios),
     }
+
     if existente:
         for campo, valor in dados.items():
             setattr(existente, campo, valor)
+        if senha and senha.strip():
+            existente.senha = senha.strip()
     else:
-        db.add(UsuarioEmpresa(empresa_id=empresa.id, usuario=usuario_limpo, **dados))
+        if not senha or not senha.strip():
+            raise HTTPException(400, "Informe a senha para criar o usuário.")
+        db.add(UsuarioEmpresa(
+            empresa_id=empresa.id,
+            senha=senha.strip(),
+            **dados
+        ))
+
     db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 

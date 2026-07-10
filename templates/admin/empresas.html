@@ -90,20 +90,22 @@
   <h2>Usuários da empresa</h2>
   <p class="texto-discreto">Somente o administrador geral cria ou remove usuários. O login principal da empresa continua funcionando.</p>
 
-  <form method="post" action="/admin/empresa/{{ empresa.id }}/usuarios">
+  <form method="post" action="/admin/empresa/{{ empresa.id }}/usuarios" id="form-usuario">
+    <input type="hidden" name="usuario_id" id="usuario_id">
     <div class="linha">
       <div>
         <label>Nome</label>
-        <input name="nome" placeholder="Luiz" required>
+        <input name="nome" id="usuario_nome" placeholder="Luiz" required>
       </div>
       <div>
         <label>Usuário</label>
-        <input name="usuario" placeholder="luiz" required>
+        <input name="usuario" id="usuario_login" placeholder="luiz" required>
       </div>
     </div>
-    <label>Senha</label>
-    <input name="senha" required>
-    <label class="check"><input type="checkbox" name="ativo" value="1" checked> Usuário ativo</label>
+    <label id="label_senha">Senha</label>
+    <input name="senha" id="usuario_senha" required>
+    <small class="texto-discreto" id="aviso_senha" style="display:none">Deixe em branco para manter a senha atual.</small>
+    <label class="check"><input type="checkbox" name="ativo" id="usuario_ativo" value="1" checked> Usuário ativo</label>
 
     <div class="box-mini">
       <h3>Áreas de trabalho</h3>
@@ -117,7 +119,10 @@
         <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
       </div>
     </div>
-    <button>Criar ou atualizar usuário</button>
+    <div class="acoes-formulario">
+      <button id="botao_salvar_usuario">Criar usuário</button>
+      <button type="button" id="botao_cancelar_edicao" class="botao-secundario" style="display:none" onclick="limparEdicaoUsuario()">Cancelar edição</button>
+    </div>
   </form>
 
   <div class="lista-mobile">
@@ -137,7 +142,25 @@
           Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }}
         </small>
       </div>
-      <a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
+      <div class="acoes-usuario">
+        <button
+          type="button"
+          class="acao-icone"
+          title="Editar usuário"
+          onclick='editarUsuario({{ {
+            "id": u.id,
+            "nome": u.nome,
+            "usuario": u.usuario,
+            "ativo": u.ativo,
+            "acesso_agenda": u.acesso_agenda,
+            "acesso_operacao": u.acesso_operacao,
+            "acesso_buscar_cliente": u.acesso_buscar_cliente,
+            "acesso_financeiro": u.acesso_financeiro,
+            "acesso_cadastros": u.acesso_cadastros,
+            "acesso_relatorios": u.acesso_relatorios
+          }|tojson }})'>✏️</button>
+        <a class="acao-icone" title="Excluir usuário" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
+      </div>
     </div>
   {% else %}
     <p class="texto-discreto">Nenhum usuário extra criado.</p>
@@ -158,4 +181,48 @@
   </div>
 {% endfor %}
 </div>
+
+
+<script>
+function editarUsuario(usuario) {
+  document.getElementById("usuario_id").value = usuario.id;
+  document.getElementById("usuario_nome").value = usuario.nome || "";
+  document.getElementById("usuario_login").value = usuario.usuario || "";
+  document.getElementById("usuario_senha").value = "";
+  document.getElementById("usuario_senha").required = false;
+  document.getElementById("usuario_ativo").checked = Boolean(usuario.ativo);
+
+  const campos = [
+    "acesso_agenda",
+    "acesso_operacao",
+    "acesso_buscar_cliente",
+    "acesso_financeiro",
+    "acesso_cadastros",
+    "acesso_relatorios"
+  ];
+  campos.forEach((campo) => {
+    const elemento = document.querySelector(`[name="${campo}"]`);
+    if (elemento) elemento.checked = Boolean(usuario[campo]);
+  });
+
+  document.getElementById("label_senha").textContent = "Nova senha";
+  document.getElementById("aviso_senha").style.display = "block";
+  document.getElementById("botao_salvar_usuario").textContent = "Salvar alterações";
+  document.getElementById("botao_cancelar_edicao").style.display = "inline-flex";
+  document.getElementById("form-usuario").scrollIntoView({ behavior: "smooth", block: "start" });
+  document.getElementById("usuario_nome").focus();
+}
+
+function limparEdicaoUsuario() {
+  const formulario = document.getElementById("form-usuario");
+  formulario.reset();
+  document.getElementById("usuario_id").value = "";
+  document.getElementById("usuario_senha").required = true;
+  document.getElementById("label_senha").textContent = "Senha";
+  document.getElementById("aviso_senha").style.display = "none";
+  document.getElementById("botao_salvar_usuario").textContent = "Criar usuário";
+  document.getElementById("botao_cancelar_edicao").style.display = "none";
+}
+</script>
+
 {% endblock %}
