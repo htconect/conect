@@ -143,12 +143,25 @@
             </p>
 
             <div class="acoes-rota operacao-acoes-novas">
-                <a class="botao-mini botao-whats-btn" target="_blank"
-                   href="https://wa.me/55{{ tel_limpo }}?text={{ msg_preparacao|urlencode }}">Previsão</a>
+                <button type="button" class="botao-mini botao-whats-btn escolher-contato-whatsapp"
+                   data-msg="{{ msg_preparacao|urlencode }}"
+                   data-cliente-nome="{{ a.solicitacao.cliente.nome or 'Responsável pelo contrato' }}"
+                   data-cliente-tel="{{ tel_limpo }}"
+                   data-local-nome="{{ a.solicitacao.local_responsavel_nome or '' }}"
+                   data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
+                   data-retirada-nome="{{ a.solicitacao.retirada_responsavel_nome or '' }}"
+                   data-retirada-tel="{{ (a.solicitacao.retirada_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
+                   data-tipo="{{ tipo }}">Previsão</button>
                 {% if data_entrega and hora_entrega != '--' %}
-                <a class="botao-mini botao-whats-btn botao-a-caminho" target="_blank"
-                   href="https://wa.me/55{{ tel_limpo }}?text={{ msg_caminho|urlencode }}" data-agenda-id="{{ a.id }}">A
-                    caminho</a>
+                <button type="button" class="botao-mini botao-whats-btn botao-a-caminho escolher-contato-whatsapp"
+                   data-msg="{{ msg_caminho|urlencode }}"
+                   data-cliente-nome="{{ a.solicitacao.cliente.nome or 'Responsável pelo contrato' }}"
+                   data-cliente-tel="{{ tel_limpo }}"
+                   data-local-nome="{{ a.solicitacao.local_responsavel_nome or '' }}"
+                   data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
+                   data-retirada-nome="{{ a.solicitacao.retirada_responsavel_nome or '' }}"
+                   data-retirada-tel="{{ (a.solicitacao.retirada_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
+                   data-tipo="{{ tipo }}" data-agenda-id="{{ a.id }}">A caminho</button>
                 {% else %}
                 <span class="botao-mini botao-whats-btn desabilitado"
                       title="Salve a data e a hora para liberar o aviso ao cliente.">A caminho</span>
@@ -164,6 +177,18 @@
                 {% endif %}
             </div>
         </form>
+
+        <details class="responsavel-retirada-box">
+            <summary>Responsável pela retirada</summary>
+            <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/responsavel-retirada" data-loading-title="Salvando contato" data-loading-text="Atualizando o responsável pela retirada...">
+                <p class="texto-discreto">Use quando, durante a entrega, informarem outra pessoa para acompanhar a retirada.</p>
+                <div class="linha">
+                    <div><label>Nome</label><input name="retirada_responsavel_nome" value="{{ a.solicitacao.retirada_responsavel_nome or '' }}"></div>
+                    <div><label>WhatsApp</label><input name="retirada_responsavel_telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ a.solicitacao.retirada_responsavel_telefone or '' }}"></div>
+                </div>
+                <button type="submit" class="botao-mini principal">Salvar responsável</button>
+            </form>
+        </details>
 
         <div class="falta-receber-operacao">
             <span>Falta receber</span>
@@ -243,6 +268,31 @@
     </ul>
 </details>
 
+
+<script>
+document.addEventListener('click', function(e){
+  const b=e.target.closest('.escolher-contato-whatsapp'); if(!b)return;
+  const contatos=[]; const usados=new Set();
+  function add(rotulo,nome,tel){tel=(tel||'').replace(/\D/g,'');if(!tel||usados.has(tel))return;usados.add(tel);contatos.push({rotulo,nome,tel});}
+  if(b.dataset.tipo==='retirada') add('Responsável pela retirada',b.dataset.retiradaNome,b.dataset.retiradaTel);
+  add('Responsável no local',b.dataset.localNome,b.dataset.localTel);
+  add('Responsável pelo contrato',b.dataset.clienteNome,b.dataset.clienteTel);
+  if(!contatos.length){alert('Nenhum WhatsApp válido foi encontrado.');return;}
+  let escolhido=0;
+  if(contatos.length>1){
+    const texto=contatos.map((c,i)=>`${i+1}. ${c.rotulo}: ${c.nome||c.tel}`).join('
+');
+    const r=prompt(`Enviar mensagem para:
+
+${texto}
+
+Digite o número da opção:`, '1');
+    if(r===null)return; escolhido=parseInt(r,10)-1; if(!contatos[escolhido]){alert('Opção inválida.');return;}
+  }
+  let tel=contatos[escolhido].tel; if(!tel.startsWith('55'))tel='55'+tel;
+  window.open(`https://wa.me/${tel}?text=${b.dataset.msg||''}`,'_blank');
+});
+</script>
 
 <style>
     .alerta-operacao-pagamento{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:12px;padding:10px 12px;margin:10px 0;font-weight:800;font-size:13px}

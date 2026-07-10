@@ -11,7 +11,7 @@ from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
 
 from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, Contrato, Empresa, EquipamentoCliente, Pagamento, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro
 from seed import inicializar_dados
@@ -705,6 +705,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_responsavel_nome VARCHAR(160)")
         if "local_responsavel_telefone" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_responsavel_telefone VARCHAR(40)")
+        if "retirada_responsavel_nome" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_responsavel_nome VARCHAR(160)")
+        if "retirada_responsavel_telefone" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_responsavel_telefone VARCHAR(40)")
 
         if "acesso_local" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN acesso_local VARCHAR(40)")
@@ -2491,6 +2495,82 @@ def celular_brasileiro_valido(valor: str) -> bool:
     return len(numero) == 11 and numero[2] == "9" and numero[:2] != "00"
 
 
+def endereco_cliente_payload(item: EnderecoCliente) -> dict:
+    return {
+        "id": item.id, "apelido": item.apelido or "", "endereco": item.endereco or "",
+        "numero": item.numero or "", "complemento": item.complemento or "",
+        "bairro": item.bairro or "", "cidade": item.cidade or "",
+        "estado": item.estado or "", "cep": item.cep or ""
+    }
+
+
+def salvar_endereco_cliente(db: Session, empresa_id: int, cliente_id: int, endereco: str, numero: str = "",
+                            complemento: str = "", bairro: str = "", cidade: str = "",
+                            estado: str = "", cep: str = ""):
+    dados = {
+        "endereco": (endereco or "").strip(), "numero": (numero or "").strip(),
+        "complemento": (complemento or "").strip(), "bairro": (bairro or "").strip(),
+        "cidade": (cidade or "").strip(), "estado": (estado or "").strip(), "cep": (cep or "").strip(),
+    }
+    if not dados["endereco"]:
+        return None
+    existente = db.query(EnderecoCliente).filter_by(empresa_id=empresa_id, cliente_id=cliente_id, **dados).first()
+    if existente:
+        existente.ativo = True
+        return existente
+    item = EnderecoCliente(empresa_id=empresa_id, cliente_id=cliente_id, **dados)
+    db.add(item)
+    return item
+
+
+@app.get("/e/{slug}/api/clientes/por-telefone")
+def api_publico_cliente_por_telefone(slug: str, telefone: str, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug).first()
+    if not empresa:
+        raise HTTPException(404)
+    tel = limpar_identificador(telefone)
+    if tel.startswith("55") and len(tel) == 13:
+        tel = tel[2:]
+    if len(tel) != 11 or tel[2] != "9":
+        return JSONResponse({"encontrado": False, "enderecos": []})
+    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, or_(Cliente.telefone == tel, Cliente.identificador == tel)).all()
+    if not clientes:
+        return JSONResponse({"encontrado": False, "enderecos": []})
+    cliente = clientes[0]
+    ids = [c.id for c in clientes]
+    enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
+    if not enderecos:
+        for c in clientes:
+            if c.endereco:
+                salvar_endereco_cliente(db, empresa.id, c.id, c.endereco, c.numero, c.complemento, c.bairro, c.cidade, c.estado, c.cep)
+        db.commit()
+        enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
+    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
+
+
+@app.get("/api/clientes/por-telefone")
+def api_cliente_por_telefone(request: Request, telefone: str, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    tel = limpar_identificador(telefone)
+    if tel.startswith("55") and len(tel) == 13:
+        tel = tel[2:]
+    if len(tel) < 10:
+        return JSONResponse({"encontrado": False, "enderecos": []})
+    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, or_(Cliente.telefone == tel, Cliente.identificador == tel)).all()
+    if not clientes:
+        return JSONResponse({"encontrado": False, "enderecos": []})
+    cliente = clientes[0]
+    ids = [c.id for c in clientes]
+    enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
+    # Compatibilidade: transforma o endereço antigo do cliente em endereço oficial na primeira consulta.
+    if not enderecos:
+        for c in clientes:
+            if c.endereco:
+                salvar_endereco_cliente(db, empresa.id, c.id, c.endereco, c.numero, c.complemento, c.bairro, c.cidade, c.estado, c.cep)
+        db.commit()
+        enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
+    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
+
+
 @app.post("/painel/contrato-novo")
 def contrato_novo_salvar(
         request: Request,
@@ -2509,8 +2589,8 @@ def contrato_novo_salvar(
         cep: str = Form(""),
         produto_id: str = Form(""),
         contrato_id: str = Form(""),
-        data_evento: str = Form(...),
-        hora_inicio: str = Form(...),
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
         retirada_obrigatoria: str = Form(""),
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
@@ -2533,7 +2613,19 @@ def contrato_novo_salvar(
 
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    form = dict(awaitable_form_fallback(request))
+    form = {
+        "nome": nome, "telefone": telefone, "whatsapp_brasil": whatsapp_brasil,
+        "cpf": cpf, "cnpj": cnpj, "email": email, "endereco": endereco,
+        "numero": numero, "complemento": complemento, "bairro": bairro,
+        "cidade": cidade, "estado": estado, "cep": cep, "produto_id": produto_id,
+        "contrato_id": contrato_id, "data_evento": data_evento, "hora_inicio": hora_inicio,
+        "retirada_obrigatoria": retirada_obrigatoria, "retirada_data": retirada_data,
+        "retirada_hora": retirada_hora, "valor": valor, "sinal": sinal,
+        "local_nome": local_nome, "local": local, "acesso_local": acesso_local,
+        "local_responsavel_nome": local_responsavel_nome,
+        "local_responsavel_telefone": local_responsavel_telefone,
+        "observacoes": observacoes, "modo_criacao": modo_criacao,
+    }
 
     def render_erro(mensagem: str):
         return templates.TemplateResponse("admin/contrato_novo.html", {
@@ -2551,23 +2643,31 @@ def contrato_novo_salvar(
         return render_erro("Informe o WhatsApp ou telefone do cliente.")
     if whatsapp_brasil and not celular_brasileiro_valido(telefone):
         return render_erro("Informe um WhatsApp brasileiro válido no formato (DD) 9XXXX-XXXX.")
-    if not celular_brasileiro_valido(local_responsavel_telefone):
-        return render_erro("Informe um WhatsApp brasileiro válido para o responsável no local.")
-    if not local_responsavel_nome.strip():
-        return render_erro("Informe o nome do responsável no local.")
-    if not hora_meia_em_meia_valida(hora_inicio):
-        return render_erro("A hora precisa estar em intervalo de 30 minutos. Exemplo: 18:00 ou 18:30.")
     if cpf_limpo and not cpf_valido(cpf_limpo):
         return render_erro("CPF inválido.")
     if cnpj_limpo and not cnpj_valido(cnpj_limpo):
         return render_erro("CNPJ inválido.")
+    if not endereco.strip() or not numero.strip() or not bairro.strip():
+        return render_erro("Informe o endereço, número e bairro.")
 
-    data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
-    duplicado_q = db.query(Solicitacao).join(Cliente, Solicitacao.cliente_id == Cliente.id).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.data_evento == data_evento_obj,
-        ~Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
-    )
+    cadastro_cliente = modo_criacao == "cadastro"
+    if not cadastro_cliente and not celular_brasileiro_valido(local_responsavel_telefone):
+        return render_erro("Informe um WhatsApp brasileiro válido para o responsável no local.")
+    if not cadastro_cliente and not local_responsavel_nome.strip():
+        return render_erro("Informe o nome do responsável no local.")
+    if not cadastro_cliente and (not data_evento or not hora_inicio):
+        return render_erro("Informe a data e a hora do evento.")
+    if not cadastro_cliente and not hora_meia_em_meia_valida(hora_inicio):
+        return render_erro("A hora precisa estar em intervalo de 30 minutos. Exemplo: 18:00 ou 18:30.")
+
+    data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date() if data_evento else None
+    duplicado_q = None
+    if not cadastro_cliente:
+        duplicado_q = db.query(Solicitacao).join(Cliente, Solicitacao.cliente_id == Cliente.id).filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.data_evento == data_evento_obj,
+            ~Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
+        )
     condicoes = []
     if telefone_limpo:
         condicoes.append(Cliente.telefone == telefone_limpo)
@@ -2579,13 +2679,17 @@ def contrato_novo_salvar(
         condicoes.append(Cliente.cnpj == cnpj_limpo)
         condicoes.append(Cliente.identificador == cnpj_limpo)
     from sqlalchemy import or_
-    if condicoes:
+    if condicoes and duplicado_q is not None:
         duplicado = duplicado_q.filter(or_(*condicoes)).first()
         if duplicado:
             return render_erro(
                 f"Já existe uma reserva/contrato para este telefone/CPF/CNPJ nesta data: #{duplicado.id} - {duplicado.cliente.nome}.")
 
-    cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=identificador).first()
+    cliente = None
+    if telefone_limpo:
+        cliente = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, or_(Cliente.telefone == telefone_limpo, Cliente.identificador == telefone_limpo)).first()
+    if not cliente:
+        cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=identificador).first()
     if not cliente:
         cliente = Cliente(empresa_id=empresa.id, identificador=identificador)
         db.add(cliente)
@@ -2604,6 +2708,11 @@ def contrato_novo_salvar(
     cliente.cep = cep.strip()
     cliente.observacoes = observacoes.strip()
     db.flush()
+    salvar_endereco_cliente(db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep)
+
+    if cadastro_cliente:
+        db.commit()
+        return RedirectResponse(f"/painel/cliente/{cliente.id}?cadastro=salvo", status_code=303)
 
     produto = db.get(ProdutoServico, int(produto_id)) if produto_id else None
     if produto and produto.empresa_id != empresa.id:
@@ -2766,8 +2875,8 @@ def salvar_solicitacao_completa(
         cep: str = Form(""),
         produto_id: str = Form(""),
         contrato_id: str = Form(""),
-        data_evento: str = Form(...),
-        hora_inicio: str = Form(...),
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
         retirada_obrigatoria: str = Form(""),
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
@@ -3032,8 +3141,8 @@ def criar_pre_reserva_rapida(
         cliente_id: int,
         produto_id: str = Form(""),
         contrato_id: str = Form(""),
-        data_evento: str = Form(...),
-        hora_inicio: str = Form(...),
+        data_evento: str = Form(""),
+        hora_inicio: str = Form(""),
         valor: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
@@ -4179,6 +4288,18 @@ def agenda(
         "mensagens": mensagens,
     })
 
+
+@app.post("/painel/solicitacao/{solicitacao_id}/responsavel-retirada")
+def salvar_responsavel_retirada(solicitacao_id: int, request: Request, retirada_responsavel_nome: str = Form(""), retirada_responsavel_telefone: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item:
+        raise HTTPException(404)
+    if retirada_responsavel_telefone and not celular_brasileiro_valido(retirada_responsavel_telefone):
+        raise HTTPException(400, "Informe um WhatsApp brasileiro válido para o responsável pela retirada.")
+    item.retirada_responsavel_nome = retirada_responsavel_nome.strip()
+    item.retirada_responsavel_telefone = limpar_identificador(retirada_responsavel_telefone) or retirada_responsavel_telefone.strip()
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/preparar", status_code=303)
 
 @app.post("/painel/agenda/{agenda_id}/roteiro")
 def atualizar_roteiro(

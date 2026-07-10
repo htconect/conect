@@ -163,6 +163,14 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     }, 120);
   }
 
+  window.mostrarCarregando = mostrarCarregando;
+  window.fecharCarregando = function(){
+    clearTimeout(timer);
+    if(!overlay) return;
+    overlay.classList.remove("ativo");
+    overlay.setAttribute("aria-hidden", "true");
+  };
+
   function linkInternoValido(link) {
     if (!link || link.target === "_blank" || link.hasAttribute("download")) return false;
     if (link.dataset.noLoading === "1") return false;

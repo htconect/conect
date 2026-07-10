@@ -33,29 +33,29 @@
 
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>
-    <p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
+    <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required><div id="statusBuscaClientePublico" class="texto-discreto">Digite o WhatsApp para localizar seu cadastro.</div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
     <div class="linha">
       <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" checked onchange="alternarPessoa()"> Pessoa física</label>
       <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" onchange="alternarPessoa()"> Pessoa jurídica</label>
     </div>
 
     <div id="area-fisica">
-      <label>Nome completo{% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %} *{% endif %}</label><input name="nome" value="{{ cliente.nome if cliente else '' }}" {% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %}required{% endif %}>
-      {% if not campos_cfg.get('cpf') or campos_cfg.get('cpf').visivel %}<label>CPF{% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %} *{% endif %}</label><input name="cpf" inputmode="numeric" value="{{ form.cpf if form is defined else cliente.cpf if cliente else '' }}" {% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="cpf" value="">{% endif %}
+      <label>Nome completo{% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %} *{% endif %}</label><input id="nomeClientePublico" name="nome" value="{{ cliente.nome if cliente else '' }}" {% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %}required{% endif %}>
+      {% if not campos_cfg.get('cpf') or campos_cfg.get('cpf').visivel %}<label>CPF{% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %} *{% endif %}</label><input id="cpfClientePublico" name="cpf" inputmode="numeric" value="{{ form.cpf if form is defined else cliente.cpf if cliente else '' }}" {% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="cpf" value="">{% endif %}
       {% if not campos_cfg.get('data_nascimento') or campos_cfg.get('data_nascimento').visivel %}<label>Data de nascimento{% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %} *{% endif %}</label><input name="data_nascimento" type="date" value="{{ cliente.data_nascimento if cliente and cliente.data_nascimento else '' }}" {% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="data_nascimento" value="">{% endif %}
     </div>
 
     <div id="area-juridica" style="display:none">
       <label>Razão social / nome da empresa *</label><input name="nome_empresa" oninput="document.querySelector('input[name=nome]').value=this.value">
-      <label>CNPJ *</label><input name="cnpj" inputmode="numeric" value="{{ form.cnpj if form is defined else cliente.cnpj if cliente else '' }}">
+      <label>CNPJ *</label><input id="cnpjClientePublico" name="cnpj" inputmode="numeric" value="{{ form.cnpj if form is defined else cliente.cnpj if cliente else '' }}">
     </div>
 
-    <label>WhatsApp *</label><input name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
-    {% if not campos_cfg.get('email') or campos_cfg.get('email').visivel %}<label>E-mail{% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %} *{% endif %}</label><input name="email" type="email" value="{{ cliente.email if cliente else '' }}" {% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %}required{% endif %}>{% endif %}
+    
+    {% if not campos_cfg.get('email') or campos_cfg.get('email').visivel %}<label>E-mail{% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %} *{% endif %}</label><input id="emailClientePublico" name="email" type="email" value="{{ cliente.email if cliente else '' }}" {% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %}required{% endif %}>{% endif %}
   </section>
 
   <section class="secao-form">
-    <h2>2. Endereço do evento</h2>
+    <h2>2. Endereço do evento</h2><div id="enderecosEncontradosPublico" class="enderecos-encontrados" hidden></div>
     <div class="linha">
       <div>
         <label>CEP</label><input id="cep" name="cep" value="{{ cliente.cep if cliente else '' }}">
@@ -64,8 +64,8 @@
     </div>
     <label>Rua / endereço{% if campos_cfg.get('endereco') and campos_cfg.get('endereco').obrigatorio %} *{% endif %}</label><input id="endereco" name="endereco" value="{{ cliente.endereco if cliente else '' }}" {% if campos_cfg.get('endereco') and campos_cfg.get('endereco').obrigatorio %}required{% endif %}>
     <div class="grid duas">
-      <div><label>Número{% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %} *{% endif %}</label><input name="numero" value="{{ cliente.numero if cliente else '' }}" {% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %}required{% endif %}></div>
-      <div><label>Complemento</label><input name="complemento" value="{{ cliente.complemento if cliente else '' }}"></div>
+      <div><label>Número{% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %} *{% endif %}</label><input id="numeroEventoPublico" name="numero" value="{{ cliente.numero if cliente else '' }}" {% if campos_cfg.get('numero') and campos_cfg.get('numero').obrigatorio %}required{% endif %}></div>
+      <div><label>Complemento</label><input id="complementoEventoPublico" name="complemento" value="{{ cliente.complemento if cliente else '' }}"></div>
     </div>
     <div class="grid duas">
       <div><label>Bairro{% if campos_cfg.get('bairro') and campos_cfg.get('bairro').obrigatorio %} *{% endif %}</label><input id="bairro" name="bairro" value="{{ cliente.bairro if cliente else '' }}" {% if campos_cfg.get('bairro') and campos_cfg.get('bairro').obrigatorio %}required{% endif %}></div>
@@ -110,6 +110,12 @@
 </form>
 
 <script>
+let timerBuscaPublico=null;
+function preencherEnderecoPublico(e){const m={cep:'cep',endereco:'endereco',numero:'numeroEventoPublico',complemento:'complementoEventoPublico',bairro:'bairro',cidade:'cidade',estado:'estado'};Object.entries(m).forEach(([k,id])=>{const el=document.getElementById(id);if(el)el.value=e[k]||'';});}
+function mostrarEnderecosPublico(lista){const box=document.getElementById('enderecosEncontradosPublico');if(!box)return;box.innerHTML='';if(!lista||!lista.length){box.hidden=true;return;}box.hidden=false;box.innerHTML='<p><b>Escolha o endereço deste evento</b></p>';lista.forEach(e=>{const b=document.createElement('button');b.type='button';b.className='endereco-opcao';b.textContent=`${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;b.onclick=()=>preencherEnderecoPublico(e);box.appendChild(b);});const n=document.createElement('button');n.type='button';n.className='endereco-opcao';n.textContent='Usar um novo endereço';n.onclick=()=>preencherEnderecoPublico({});box.appendChild(n);}
+async function consultarClientePublico(){let tel=(document.getElementById('telefoneClientePublico').value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length!==11||tel[2]!=='9')return;const st=document.getElementById('statusBuscaClientePublico');st.textContent='Consultando cadastro...';if(window.mostrarCarregando)mostrarCarregando('Consultando cadastro','Localizando seus dados e endereços já utilizados.');try{const r=await fetch(`/e/{{ empresa.slug }}/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();if(d.encontrado){const c=d.cliente;[['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj],['emailClientePublico',c.email]].forEach(([id,v])=>{const el=document.getElementById(id);if(el){el.value=v||'';el.readOnly=true;el.classList.add('campo-travado');}});mostrarEnderecosPublico(d.enderecos);st.textContent='Cadastro encontrado. Escolha o endereço do evento.';}else{st.textContent='Novo cadastro. Complete seus dados.';}}catch(e){st.textContent='Não foi possível consultar agora. Continue preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}}
+document.addEventListener('DOMContentLoaded',()=>{const t=document.getElementById('telefoneClientePublico');if(t)t.addEventListener('input',()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);});});
+
 function alternarPessoa(){
   const tipo = document.querySelector('input[name=tipo_pessoa]:checked').value;
   const fisica = document.getElementById('area-fisica');

@@ -109,6 +109,34 @@ class Cliente(Base):
     empresa = relationship("Empresa", back_populates="clientes")
     solicitacoes = relationship("Solicitacao", back_populates="cliente")
     equipamentos = relationship("EquipamentoCliente", back_populates="cliente")
+    enderecos = relationship("EnderecoCliente", back_populates="cliente", cascade="all, delete-orphan")
+
+
+class EnderecoCliente(Base):
+    __tablename__ = "enderecos_clientes"
+    __table_args__ = (
+        UniqueConstraint(
+            "empresa_id", "cliente_id", "endereco", "numero", "complemento", "bairro", "cidade", "estado", "cep",
+            name="uq_endereco_cliente_completo"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False, index=True)
+    apelido = Column(String(120))
+    endereco = Column(String(200), nullable=False)
+    numero = Column(String(30))
+    complemento = Column(String(120))
+    bairro = Column(String(120))
+    cidade = Column(String(120))
+    estado = Column(String(40))
+    cep = Column(String(20))
+    ativo = Column(Boolean, default=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    cliente = relationship("Cliente", back_populates="enderecos")
 
 
 class EquipamentoCliente(Base):
@@ -181,6 +209,8 @@ class Solicitacao(Base):
     local_nome = Column(String(160))
     local_responsavel_nome = Column(String(160))
     local_responsavel_telefone = Column(String(40))
+    retirada_responsavel_nome = Column(String(160))
+    retirada_responsavel_telefone = Column(String(40))
     acesso_local = Column(String(40))
     valor = Column(Float, default=0)
     sinal = Column(Float, default=0)

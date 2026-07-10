@@ -3,12 +3,16 @@
 <section class="cabecalho-mobile">
   <a class="voltar" href="/painel">← Início</a>
   <h1>{% if modo_edicao %}Editar contrato{% else %}Novo contrato{% endif %}</h1>
-  <p class="texto-discreto">Os dois processos usam os mesmos dados. No WhatsApp, o cliente preenche; no manual, o usuário do sistema preenche também itens e pagamento.</p>
+  <p class="texto-discreto">Os três processos usam os mesmos dados iniciais. Você pode apenas cadastrar o cliente, enviar o link ou criar o contrato completo.</p>
   {% if not modo_edicao %}
   <div class="box fluxo-contrato">
     <h2>Processo</h2>
     <label class="opcao-fluxo">
-      <input type="radio" name="modo_criacao" value="whatsapp" form="formContratoNovo" checked>
+      <input type="radio" name="modo_criacao" value="cadastro" form="formContratoNovo" {% if form.modo_criacao == 'cadastro' %}checked{% endif %}>
+      <span><b>Cadastrar cliente</b><small>Preencha somente as etapas 1 e 2 para salvar o cliente e seus endereços.</small></span>
+    </label>
+    <label class="opcao-fluxo">
+      <input type="radio" name="modo_criacao" value="whatsapp" form="formContratoNovo" {% if form.modo_criacao is not defined or form.modo_criacao == 'whatsapp' %}checked{% endif %}>
       <span><b>Cliente pelo WhatsApp</b><small>Você envia o link e o cliente preenche as etapas 1 a 4.</small></span>
     </label>
     <label class="opcao-fluxo">
@@ -24,24 +28,26 @@
 <form id="formContratoNovo" method="post" action="{% if modo_edicao %}/painel/solicitacao/{{ item.id }}/editar-completo{% else %}/painel/contrato-novo{% endif %}" class="box" onsubmit="return bloquearEnvioContratoNovo(this)">
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>
-    <label>Nome do cliente *</label>
-    <input name="nome" value="{{ form.nome or '' }}" required>
-
     <label class="check"><input id="whatsappBrasil" type="checkbox" name="whatsapp_brasil" value="1" {% if form.whatsapp_brasil is not defined or form.whatsapp_brasil %}checked{% endif %} onchange="alternarTipoTelefone()"> WhatsApp do Brasil</label>
     <label id="rotuloTelefone">WhatsApp *</label>
-    <input id="telefoneCliente" name="telefone" value="{{ form.telefone or '' }}" inputmode="tel" placeholder="(21) 99999-9999" required>
-    <p id="ajudaTelefone" class="texto-discreto">Informe um celular brasileiro com DDD.</p>
+    <input id="telefoneCliente" name="telefone" value="{{ form.telefone or '' }}" inputmode="tel" placeholder="(21) 99999-9999" required autocomplete="tel">
+    <p id="ajudaTelefone" class="texto-discreto">Digite o número completo. O sistema localizará o cadastro e os endereços já utilizados.</p>
+    <div id="statusBuscaCliente" class="texto-discreto"></div>
+
+    <label>Nome do cliente *</label>
+    <input id="nomeCliente" name="nome" value="{{ form.nome or '' }}" required>
 
     <div class="linha">
-      <div><label>CPF</label><input name="cpf" value="{{ form.cpf or '' }}" inputmode="numeric"></div>
-      <div><label>CNPJ</label><input name="cnpj" value="{{ form.cnpj or '' }}" inputmode="numeric"></div>
+      <div><label>CPF</label><input id="cpfCliente" name="cpf" value="{{ form.cpf or '' }}" inputmode="numeric"></div>
+      <div><label>CNPJ</label><input id="cnpjCliente" name="cnpj" value="{{ form.cnpj or '' }}" inputmode="numeric"></div>
     </div>
     <label>E-mail</label>
-    <input name="email" value="{{ form.email or '' }}" type="email">
+    <input id="emailCliente" name="email" value="{{ form.email or '' }}" type="email">
   </section>
 
   <section class="secao-form">
     <h2>2. Endereço do evento</h2>
+    <div id="enderecosEncontrados" class="enderecos-encontrados" hidden></div>
     <div class="linha">
       <div><label>CEP</label><input id="cep" name="cep" value="{{ form.cep or '' }}" inputmode="numeric"></div>
       <button type="button" onclick="buscarCEP()">Buscar CEP</button>
@@ -49,8 +55,8 @@
     <label>Rua / endereço *</label>
     <input id="endereco" name="endereco" value="{{ form.endereco or '' }}" required>
     <div class="grid duas">
-      <div><label>Número *</label><input name="numero" value="{{ form.numero or '' }}" required></div>
-      <div><label>Complemento</label><input name="complemento" value="{{ form.complemento or '' }}"></div>
+      <div><label>Número *</label><input id="numeroEvento" name="numero" value="{{ form.numero or '' }}" required></div>
+      <div><label>Complemento</label><input id="complementoEvento" name="complemento" value="{{ form.complemento or '' }}"></div>
     </div>
     <div class="grid duas">
       <div><label>Bairro *</label><input id="bairro" name="bairro" value="{{ form.bairro or '' }}" required></div>
@@ -60,7 +66,7 @@
     <input type="hidden" name="local" value="{{ form.endereco or form.local or '' }}">
   </section>
 
-  <section class="secao-form">
+  <section class="secao-form etapa-contrato">
     <h2>3. Evento</h2>
     <div class="grid duas">
       <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento or '' }}" required></div>
@@ -83,7 +89,7 @@
     </div>
   </section>
 
-  <section class="secao-form">
+  <section class="secao-form etapa-contrato">
     <h2>4. Responsável no local</h2>
     <p class="texto-discreto">O contato do responsável deve ser obrigatoriamente um WhatsApp brasileiro.</p>
     <div class="grid duas">
@@ -132,8 +138,22 @@ function alternarTipoTelefone(){
   campo.placeholder = marcado ? '(21) 99999-9999' : 'Telefone de contato';
 }
 function alternarEtapas(){
-  const manual = document.querySelector('input[name="modo_criacao"]:checked')?.value === 'manual';
+  const modo = document.querySelector('input[name="modo_criacao"]:checked')?.value || 'whatsapp';
+  const cadastro = modo === 'cadastro';
+  const manual = modo === 'manual';
+  document.querySelectorAll('.etapa-contrato').forEach(el => el.style.display = cadastro ? 'none' : '');
   document.querySelectorAll('.etapa-manual').forEach(el => el.style.display = manual ? '' : 'none');
+
+  const obrigatoriosContrato = ['data_evento','hora_inicio','local_responsavel_nome','local_responsavel_telefone'];
+  obrigatoriosContrato.forEach(nome => {
+    const el = document.querySelector(`[name="${nome}"]`);
+    if(el) el.required = !cadastro;
+  });
+
+  const btn = document.getElementById('btnContratoNovo');
+  if(btn && !{{ 'true' if modo_edicao else 'false' }}){
+    btn.textContent = cadastro ? 'Salvar cliente' : (manual ? 'Criar contrato manual' : 'Criar pré-contrato');
+  }
 }
 async function buscarCEP(){
   const cep = (document.getElementById('cep').value || '').replace(/\D/g, '');
@@ -153,9 +173,37 @@ document.addEventListener('change', function(ev){
   }
   if(ev.target?.name === 'endereco') document.querySelector('input[name="local"]').value=ev.target.value;
 });
+
+let timerBuscaCliente=null;
+function somenteDigitos(v){return (v||'').replace(/\D/g,'');}
+function travarDadosCliente(travar){['nomeCliente','cpfCliente','cnpjCliente','emailCliente'].forEach(id=>{const el=document.getElementById(id);if(el){el.readOnly=travar;el.classList.toggle('campo-travado',travar);}});}
+function preencherEndereco(e){
+  const mapa={cep:'cep',endereco:'endereco',numero:'numeroEvento',complemento:'complementoEvento',bairro:'bairro',cidade:'cidade',estado:'estado'};
+  Object.entries(mapa).forEach(([k,id])=>{const el=document.getElementById(id);if(el) el.value=e[k]||'';});
+}
+function mostrarEnderecos(lista){
+  const box=document.getElementById('enderecosEncontrados'); if(!box)return; box.innerHTML='';
+  if(!lista||!lista.length){box.hidden=true;return;} box.hidden=false;
+  const titulo=document.createElement('p');titulo.innerHTML='<b>Escolha o endereço deste evento</b>';box.appendChild(titulo);
+  lista.forEach((e,i)=>{const b=document.createElement('button');b.type='button';b.className='endereco-opcao';b.textContent=`${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;b.onclick=()=>preencherEndereco(e);box.appendChild(b);});
+  const novo=document.createElement('button');novo.type='button';novo.className='endereco-opcao';novo.textContent='Usar um novo endereço';novo.onclick=()=>preencherEndereco({});box.appendChild(novo);
+}
+async function consultarClientePorTelefone(){
+  if(!document.getElementById('whatsappBrasil').checked) return;
+  let tel=somenteDigitos(document.getElementById('telefoneCliente').value); if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);
+  if(tel.length!==11||tel[2]!=='9')return;
+  const st=document.getElementById('statusBuscaCliente'); st.textContent='Consultando cadastro...';
+  if(window.mostrarCarregando) mostrarCarregando('Consultando cadastro','Localizando cliente e endereços já utilizados.');
+  try{const r=await fetch(`/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();
+    if(d.encontrado){document.getElementById('nomeCliente').value=d.cliente.nome||'';document.getElementById('cpfCliente').value=d.cliente.cpf||'';document.getElementById('cnpjCliente').value=d.cliente.cnpj||'';document.getElementById('emailCliente').value=d.cliente.email||'';travarDadosCliente(true);mostrarEnderecos(d.enderecos);st.textContent='Cadastro encontrado. Confirme o endereço do evento.';}
+    else{travarDadosCliente(false);mostrarEnderecos([]);st.textContent='Novo cliente. Complete os dados abaixo.';}
+  }catch(e){st.textContent='Não foi possível consultar agora. Você pode continuar preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
   alternarTipoTelefone(); alternarEtapas();
+  const tel=document.getElementById('telefoneCliente'); if(tel) tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});
 });
 function bloquearEnvioContratoNovo(form){
   if(form.dataset.enviando === '1') return false;
