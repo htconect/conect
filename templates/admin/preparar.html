@@ -272,6 +272,8 @@
 <script>
 document.addEventListener('click', function(e){
   const b=e.target.closest('.escolher-contato-whatsapp'); if(!b)return;
+  e.preventDefault();
+  e.stopPropagation();
   const contatos=[]; const usados=new Set();
   function add(rotulo,nome,tel){tel=(tel||'').replace(/\D/g,'');if(!tel||usados.has(tel))return;usados.add(tel);contatos.push({rotulo,nome,tel});}
   if(b.dataset.tipo==='retirada') add('Responsável pela retirada',b.dataset.retiradaNome,b.dataset.retiradaTel);
@@ -280,8 +282,7 @@ document.addEventListener('click', function(e){
   if(!contatos.length){alert('Nenhum WhatsApp válido foi encontrado.');return;}
   let escolhido=0;
   if(contatos.length>1){
-    const texto=contatos.map((c,i)=>`${i+1}. ${c.rotulo}: ${c.nome||c.tel}`).join('
-');
+    const texto=contatos.map((c,i)=>`${i+1}. ${c.rotulo}: ${c.nome||c.tel}`).join('\\n');
     const r=prompt(`Enviar mensagem para:
 
 ${texto}
