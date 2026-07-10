@@ -26,6 +26,8 @@
           <a href="/painel/contratos">📄 Política / modelos</a>
           <a href="/painel/produtos">📦 Itens de locação</a>
           <a href="/painel/configuracoes">🏢 Empresa e campos</a>
+          <strong>Consultas</strong>
+          <a href="/painel/relatorios">📊 Relatórios</a>
           <strong>Conta</strong>
           <a href="/painel/perfil">👤 Meu perfil</a>
           <a href="/painel/alterar-senha">🔒 Alterar senha</a>
@@ -120,7 +122,6 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
   <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">📅<span>Agenda</span></a>
   <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">📦<span>Disponível</span></a>
   <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro">💰<span>Financeiro</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/relatorios') %}ativo{% endif %}" href="/painel/relatorios">📊<span>Relatórios</span></a>
   <a class="nav-item nav-principal {% if request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/contrato-novo"><span style="max-width:52px;font-size:10px;line-height:1.05;text-align:center;">Contrato<br>Manual</span></a>
 </nav>
 {% endif %}

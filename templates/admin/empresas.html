@@ -86,11 +86,16 @@
 
 
 {% if empresa %}
-<div class="box">
-  <h2>Usuários da empresa</h2>
+<div class="box usuarios-empresa-box">
+  <div class="cabecalho-secao-usuarios">
+    <div>
+      <p class="mini">Controle de acesso</p>
+      <h2>Usuários da empresa</h2>
+    </div>
+  </div>
   <p class="texto-discreto">Somente o administrador geral cria ou remove usuários. O login principal da empresa continua funcionando.</p>
 
-  <form method="post" action="/admin/empresa/{{ empresa.id }}/usuarios" id="form-usuario">
+  <form method="post" action="/admin/empresa/{{ empresa.id }}/usuarios" id="form-usuario" class="form-usuario-organizado">
     <input type="hidden" name="usuario_id" id="usuario_id">
     <div class="linha">
       <div>
@@ -107,7 +112,7 @@
     <small class="texto-discreto" id="aviso_senha" style="display:none">Deixe em branco para manter a senha atual.</small>
     <label class="check"><input type="checkbox" name="ativo" id="usuario_ativo" value="1" checked> Usuário ativo</label>
 
-    <div class="box-mini">
+    <div class="box-mini bloco-permissoes">
       <h3>Áreas de trabalho</h3>
       <p class="texto-discreto">Marque somente os módulos em que este usuário poderá entrar. Cards e pendências do painel continuam visíveis.</p>
       <div class="grade-permissoes">
@@ -119,13 +124,15 @@
         <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
       </div>
     </div>
-    <div class="acoes-formulario">
+    <div class="acoes-formulario acoes-usuario-form">
       <button id="botao_salvar_usuario">Criar usuário</button>
       <button type="button" id="botao_cancelar_edicao" class="botao-secundario" style="display:none" onclick="limparEdicaoUsuario()">Cancelar edição</button>
     </div>
   </form>
 
-  <div class="lista-mobile">
+  <div class="separador-usuarios"></div>
+  <div class="titulo-lista-usuarios"><h3>Usuários cadastrados</h3><span>{{ (usuarios_empresa or [])|length }}</span></div>
+  <div class="lista-mobile lista-usuarios-organizada">
   {% for u in usuarios_empresa or [] %}
     <div class="card-lista">
       <div>

@@ -182,11 +182,11 @@
             <summary>Responsável pela retirada</summary>
             <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/responsavel-retirada" data-loading-title="Salvando contato" data-loading-text="Atualizando o responsável pela retirada...">
                 <p class="texto-discreto">Use quando, durante a entrega, informarem outra pessoa para acompanhar a retirada.</p>
-                <div class="linha">
-                    <div><label>Nome</label><input name="retirada_responsavel_nome" value="{{ a.solicitacao.retirada_responsavel_nome or '' }}"></div>
-                    <div><label>WhatsApp</label><input name="retirada_responsavel_telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ a.solicitacao.retirada_responsavel_telefone or '' }}"></div>
+                <div class="linha-responsavel-retirada">
+                    <div class="campo-responsavel"><label>Nome</label><input name="retirada_responsavel_nome" value="{{ a.solicitacao.retirada_responsavel_nome or '' }}"></div>
+                    <div class="campo-responsavel campo-whatsapp"><label>WhatsApp</label><input name="retirada_responsavel_telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ a.solicitacao.retirada_responsavel_telefone or '' }}"></div>
+                    <button type="submit" class="botao-mini principal botao-salvar-responsavel">Salvar responsável</button>
                 </div>
-                <button type="submit" class="botao-mini principal botao-salvar-responsavel">Salvar responsável</button>
             </form>
         </details>
 
