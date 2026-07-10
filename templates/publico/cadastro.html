@@ -9,6 +9,8 @@
   {% if erro == 'cpf_invalido' %}CPF inválido. Confira os números informados.{% endif %}
   {% if erro == 'cnpj_invalido' %}CNPJ inválido. Confira os números informados.{% endif %}
   {% if erro == 'hora_invalida' %}Horário inválido. Use horários de 30 em 30 minutos, como 14:00 ou 14:30.{% endif %}
+  {% if erro == 'whatsapp_invalido' %}Informe um WhatsApp brasileiro válido no formato (DD) 9XXXX-XXXX.{% endif %}
+  {% if erro == 'responsavel_whatsapp_invalido' %}Informe um WhatsApp brasileiro válido para o responsável no local.{% endif %}
   {% if erro == 'rascunho_duplicado' %}Seu contrato já foi informado para este telefone nesta data. Leia o contrato quando receber. Caso precise alterar alguma informação, chame a empresa pelo WhatsApp.{% endif %}
 </div>
 {% endif %}
@@ -48,7 +50,7 @@
       <label>CNPJ *</label><input name="cnpj" inputmode="numeric" value="{{ form.cnpj if form is defined else cliente.cnpj if cliente else '' }}">
     </div>
 
-    <label>Telefone / WhatsApp{% if campos_cfg.get('telefone') and campos_cfg.get('telefone').obrigatorio %} *{% endif %}</label><input name="telefone" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" {% if campos_cfg.get('telefone') and campos_cfg.get('telefone').obrigatorio %}required{% endif %}>
+    <label>WhatsApp *</label><input name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
     {% if not campos_cfg.get('email') or campos_cfg.get('email').visivel %}<label>E-mail{% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %} *{% endif %}</label><input name="email" type="email" value="{{ cliente.email if cliente else '' }}" {% if campos_cfg.get('email') and campos_cfg.get('email').obrigatorio %}required{% endif %}>{% endif %}
   </section>
 
@@ -83,7 +85,7 @@
       <p class="box aviso">{{ empresa.mensagem_hora_fim or 'Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber.' }}</p>
     {% endif %}
     <label>Nome do local</label><input name="local_nome" value="{{ form.local_nome if form is defined else '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
-    <label>Referência do local</label><input name="local" value="{{ form.local if form is defined else '' }}" placeholder="Ex.: Portaria 2, salão térreo, entrada pela rua lateral">
+    <input type="hidden" name="local" value="{{ form.endereco if form is defined else cliente.endereco if cliente else '' }}">
     <label>Acesso ao local</label>
     <select name="acesso_local">
       <option value="">Selecione</option>
@@ -96,10 +98,10 @@
 
   <section class="secao-form">
     <h2>4. Responsável no local</h2>
-    <p class="texto-discreto">Opcional, mas muito importante quando outra pessoa recebe a equipe.</p>
+    <p class="texto-discreto">O contato do responsável deve ser obrigatoriamente um WhatsApp brasileiro.</p>
     <div class="grid duas">
-      <div><label>Nome do responsável</label><input name="local_responsavel_nome" value="{{ form.local_responsavel_nome if form is defined else '' }}" placeholder="Quem estará no local?"></div>
-      <div><label>Telefone do responsável</label><input name="local_responsavel_telefone" value="{{ form.local_responsavel_telefone if form is defined else '' }}" placeholder="WhatsApp ou telefone"></div>
+      <div><label>Nome do responsável *</label><input name="local_responsavel_nome" value="{{ form.local_responsavel_nome if form is defined else '' }}" placeholder="Quem estará no local?" required></div>
+      <div><label>WhatsApp do responsável *</label><input name="local_responsavel_telefone" inputmode="tel" value="{{ form.local_responsavel_telefone if form is defined else '' }}" placeholder="(21) 99999-9999" required></div>
     </div>
     <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
   </section>
@@ -129,6 +131,7 @@ async function buscarCEP(){
     document.getElementById('bairro').value = dados.bairro || '';
     document.getElementById('cidade').value = dados.localidade || '';
     document.getElementById('estado').value = dados.uf || '';
+    const local = document.querySelector('input[name=local]'); if (local) local.value = dados.logradouro || '';
   } catch (e) { alert('Não foi possível buscar o CEP agora.'); }
 }
 
@@ -146,6 +149,7 @@ for (const [nome, valor] of Object.entries(formAnterior)) {
 }
 {% endif %}
 
+document.getElementById('endereco')?.addEventListener('input', e => { const local = document.querySelector('input[name=local]'); if(local) local.value = e.target.value; });
 alternarPessoa();
 </script>
 {% endblock %}

@@ -3,17 +3,17 @@
 <section class="cabecalho-mobile">
   <a class="voltar" href="/painel">← Início</a>
   <h1>{% if modo_edicao %}Editar contrato{% else %}Novo contrato{% endif %}</h1>
-  <p class="texto-discreto">{% if modo_edicao %}Altere qualquer dado do cliente, endereço, reserva ou contrato em uma única tela.{% else %}Escolha o processo e preencha tudo em uma única tela.{% endif %}</p>
+  <p class="texto-discreto">Os dois processos usam os mesmos dados. No WhatsApp, o cliente preenche; no manual, o usuário do sistema preenche também itens e pagamento.</p>
   {% if not modo_edicao %}
   <div class="box fluxo-contrato">
     <h2>Processo</h2>
     <label class="opcao-fluxo">
       <input type="radio" name="modo_criacao" value="whatsapp" form="formContratoNovo" checked>
-      <span><b>Cliente pelo WhatsApp</b><small>Você envia o link, o cliente preenche, você inclui itens e manda para aprovação. Pagamento só depois do aceite.</small></span>
+      <span><b>Cliente pelo WhatsApp</b><small>Você envia o link e o cliente preenche as etapas 1 a 4.</small></span>
     </label>
     <label class="opcao-fluxo">
       <input type="radio" name="modo_criacao" value="manual" form="formContratoNovo">
-      <span><b>Contrato manual</b><small>Você preenche cliente, itens e sinal agora. A reserva já fica aprovada.</small></span>
+      <span><b>Contrato manual</b><small>Você preenche as etapas 1 a 6 e pode adiantar itens e pagamento.</small></span>
     </label>
   </div>
   {% endif %}
@@ -22,106 +22,99 @@
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 
 <form id="formContratoNovo" method="post" action="{% if modo_edicao %}/painel/solicitacao/{{ item.id }}/editar-completo{% else %}/painel/contrato-novo{% endif %}" class="box" onsubmit="return bloquearEnvioContratoNovo(this)">
-  <h2>Cliente</h2>
-  <label>Nome do cliente</label>
-  <input name="nome" value="{{ form.nome or '' }}" required>
+  <section class="secao-form">
+    <h2>1. Quem está reservando?</h2>
+    <label>Nome do cliente *</label>
+    <input name="nome" value="{{ form.nome or '' }}" required>
 
-  <div class="linha">
-    <div>
-      <label>Telefone</label>
-      <input name="telefone" value="{{ form.telefone or '' }}" inputmode="tel" placeholder="DDD + número">
+    <label class="check"><input id="whatsappBrasil" type="checkbox" name="whatsapp_brasil" value="1" {% if form.whatsapp_brasil is not defined or form.whatsapp_brasil %}checked{% endif %} onchange="alternarTipoTelefone()"> WhatsApp do Brasil</label>
+    <label id="rotuloTelefone">WhatsApp *</label>
+    <input id="telefoneCliente" name="telefone" value="{{ form.telefone or '' }}" inputmode="tel" placeholder="(21) 99999-9999" required>
+    <p id="ajudaTelefone" class="texto-discreto">Informe um celular brasileiro com DDD.</p>
+
+    <div class="linha">
+      <div><label>CPF</label><input name="cpf" value="{{ form.cpf or '' }}" inputmode="numeric"></div>
+      <div><label>CNPJ</label><input name="cnpj" value="{{ form.cnpj or '' }}" inputmode="numeric"></div>
     </div>
-    <div>
-      <label>CPF</label>
-      <input name="cpf" value="{{ form.cpf or '' }}" inputmode="numeric">
+    <label>E-mail</label>
+    <input name="email" value="{{ form.email or '' }}" type="email">
+  </section>
+
+  <section class="secao-form">
+    <h2>2. Endereço do evento</h2>
+    <div class="linha">
+      <div><label>CEP</label><input id="cep" name="cep" value="{{ form.cep or '' }}" inputmode="numeric"></div>
+      <button type="button" onclick="buscarCEP()">Buscar CEP</button>
     </div>
-  </div>
+    <label>Rua / endereço *</label>
+    <input id="endereco" name="endereco" value="{{ form.endereco or '' }}" required>
+    <div class="grid duas">
+      <div><label>Número *</label><input name="numero" value="{{ form.numero or '' }}" required></div>
+      <div><label>Complemento</label><input name="complemento" value="{{ form.complemento or '' }}"></div>
+    </div>
+    <div class="grid duas">
+      <div><label>Bairro *</label><input id="bairro" name="bairro" value="{{ form.bairro or '' }}" required></div>
+      <div><label>Cidade</label><input id="cidade" name="cidade" value="{{ form.cidade or '' }}"></div>
+    </div>
+    <label>Estado</label><input id="estado" name="estado" value="{{ form.estado or '' }}">
+    <input type="hidden" name="local" value="{{ form.endereco or form.local or '' }}">
+  </section>
 
-  <label>CNPJ</label>
-  <input name="cnpj" value="{{ form.cnpj or '' }}" inputmode="numeric">
+  <section class="secao-form">
+    <h2>3. Evento</h2>
+    <div class="grid duas">
+      <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento or '' }}" required></div>
+      <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio or '' }}" required></div>
+    </div>
+    <label>Nome do local</label>
+    <input name="local_nome" value="{{ form.local_nome or '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
+    <label>Acesso ao local</label>
+    <select name="acesso_local">
+      <option value="">Selecione</option>
+      {% for acesso in ['Térreo','Elevador','Escada','Elevador + escada'] %}<option {% if form.acesso_local == acesso %}selected{% endif %}>{{ acesso }}</option>{% endfor %}
+    </select>
 
-  <label>E-mail</label>
-  <input name="email" value="{{ form.email or '' }}" type="email">
-
-  <h2>Endereço</h2>
-  <label>Endereço / referência</label>
-  <input name="endereco" value="{{ form.endereco or '' }}">
-  <div class="linha">
-    <div><label>Número</label><input name="numero" value="{{ form.numero or '' }}"></div>
-    <div><label>Bairro</label><input name="bairro" value="{{ form.bairro or '' }}"></div>
-  </div>
-  <label>Complemento</label>
-  <input name="complemento" value="{{ form.complemento or '' }}">
-  <div class="linha">
-    <div><label>Cidade</label><input name="cidade" value="{{ form.cidade or '' }}"></div>
-    <div><label>Estado</label><input name="estado" value="{{ form.estado or '' }}"></div>
-  </div>
-  <label>CEP</label>
-  <input name="cep" value="{{ form.cep or '' }}" inputmode="numeric">
-
-  <h2>Dados da reserva</h2>
-  <label>Data do evento</label>
-  <input name="data_evento" type="date" value="{{ form.data_evento or '' }}" required>
-
-  <label>Hora de início</label>
-  <input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio or '' }}" required>
-
-  <div class="retirada-obrigatoria-box">
-    <label class="check">
-      <input type="checkbox" name="retirada_obrigatoria" value="1" {% if form.retirada_obrigatoria %}checked{% endif %}>
-      Retirada obrigatória solicitada pelo cliente
-    </label>
-    <div class="grid-2">
-      <div>
-        <label>Data da retirada</label>
-        <input name="retirada_data" type="date" value="{{ form.retirada_data or form.data_evento or '' }}">
+    <div class="retirada-obrigatoria-box">
+      <label class="check"><input type="checkbox" name="retirada_obrigatoria" value="1" {% if form.retirada_obrigatoria %}checked{% endif %}> Retirada obrigatória solicitada pelo cliente</label>
+      <div class="grid duas">
+        <div><label>Data da retirada</label><input name="retirada_data" type="date" value="{{ form.retirada_data or form.data_evento or '' }}"></div>
+        <div><label>Hora da retirada</label><input name="retirada_hora" type="time" step="1800" value="{{ form.retirada_hora or '' }}"></div>
       </div>
-      <div>
-        <label>Hora da retirada</label>
-        <input name="retirada_hora" type="time" step="1800" value="{{ form.retirada_hora or '' }}">
-      </div>
     </div>
-    <p class="texto-discreto">Use quando o cliente exigir retirada no mesmo dia ou em horário específico. Essa decisão aparecerá na agenda, disponibilidade, operação e contrato.</p>
-  </div>
+  </section>
 
-  <label>Item principal</label>
-  <select name="produto_id">
-    <option value="">Selecionar depois</option>
-    {% for p in produtos %}
-      <option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>
-    {% endfor %}
-  </select>
+  <section class="secao-form">
+    <h2>4. Responsável no local</h2>
+    <p class="texto-discreto">O contato do responsável deve ser obrigatoriamente um WhatsApp brasileiro.</p>
+    <div class="grid duas">
+      <div><label>Nome do responsável *</label><input name="local_responsavel_nome" value="{{ form.local_responsavel_nome or '' }}" required></div>
+      <div><label>WhatsApp do responsável *</label><input name="local_responsavel_telefone" value="{{ form.local_responsavel_telefone or '' }}" inputmode="tel" placeholder="(21) 99999-9999" required></div>
+    </div>
+    <label>Observações</label><textarea name="observacoes">{{ form.observacoes or '' }}</textarea>
+  </section>
 
-  <label>Modelo de contrato</label>
-  <select name="contrato_id">
-    <option value="">Selecionar depois</option>
-    {% for c in contratos %}
-      <option value="{{ c.id }}" {% if form.contrato_id == c.id|string %}selected{% endif %}>{{ c.nome }}</option>
-    {% endfor %}
-  </select>
+  <section class="secao-form etapa-manual">
+    <h2>5. Itens</h2>
+    <label>Item principal</label>
+    <select name="produto_id">
+      <option value="">Selecionar depois</option>
+      {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
+    </select>
+    <label>Modelo de contrato</label>
+    <select name="contrato_id">
+      <option value="">Selecionar depois</option>
+      {% for c in contratos %}<option value="{{ c.id }}" {% if form.contrato_id == c.id|string %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+    </select>
+  </section>
 
-  <div class="linha">
-    <div><label>Valor total</label><input name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal"></div>
-    <div><label>Sinal</label><input name="sinal" value="{{ form.sinal or '0,00' }}" inputmode="decimal"></div>
-  </div>
-
-  <label>Nome do local</label>
-  <input name="local_nome" value="{{ form.local_nome or '' }}" placeholder="Ex.: Casa, salão, sítio">
-
-  <label>Endereço do evento</label>
-  <input name="local" value="{{ form.local or '' }}" placeholder="Use somente se for diferente do endereço do cliente">
-
-  <label>Acesso ao local</label>
-  <input name="acesso_local" value="{{ form.acesso_local or '' }}" placeholder="Ex.: escada, elevador, térreo">
-
-  <label>Responsável no local</label>
-  <input name="local_responsavel_nome" value="{{ form.local_responsavel_nome or '' }}">
-
-  <label>Telefone do responsável</label>
-  <input name="local_responsavel_telefone" value="{{ form.local_responsavel_telefone or '' }}" inputmode="tel">
-
-  <label>Observações</label>
-  <textarea name="observacoes">{{ form.observacoes or '' }}</textarea>
+  <section class="secao-form etapa-manual">
+    <h2>6. Pagamento</h2>
+    <p class="texto-discreto">Pode ser preenchido agora para adiantar o contrato manual ou deixado em zero.</p>
+    <div class="linha">
+      <div><label>Valor total</label><input name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal"></div>
+      <div><label>Valor pago / sinal</label><input name="sinal" value="{{ form.sinal or '0,00' }}" inputmode="decimal"></div>
+    </div>
+  </section>
 
   <button id="btnContratoNovo">{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
 </form>
@@ -129,36 +122,45 @@
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
   const contrato = document.querySelector('select[name="contrato_id"]');
-  if(contratoId && contrato){
-    contrato.value = contratoId;
-  }
+  if(contratoId && contrato) contrato.value = contratoId;
+}
+function alternarTipoTelefone(){
+  const marcado = document.getElementById('whatsappBrasil').checked;
+  const campo = document.getElementById('telefoneCliente');
+  document.getElementById('rotuloTelefone').textContent = marcado ? 'WhatsApp *' : 'Telefone *';
+  document.getElementById('ajudaTelefone').textContent = marcado ? 'Informe um celular brasileiro com DDD.' : 'Informe um telefone de contato.';
+  campo.placeholder = marcado ? '(21) 99999-9999' : 'Telefone de contato';
+}
+function alternarEtapas(){
+  const manual = document.querySelector('input[name="modo_criacao"]:checked')?.value === 'manual';
+  document.querySelectorAll('.etapa-manual').forEach(el => el.style.display = manual ? '' : 'none');
+}
+async function buscarCEP(){
+  const cep = (document.getElementById('cep').value || '').replace(/\D/g, '');
+  if(cep.length !== 8){ alert('Informe um CEP válido com 8 números.'); return; }
+  try{
+    const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`); const d = await r.json();
+    if(d.erro){ alert('CEP não encontrado.'); return; }
+    document.getElementById('endereco').value=d.logradouro||''; document.getElementById('bairro').value=d.bairro||'';
+    document.getElementById('cidade').value=d.localidade||''; document.getElementById('estado').value=d.uf||'';
+  }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target && ev.target.name === 'produto_id'){
-    aplicarContratoPadrao(ev.target);
+  if(ev.target?.name === 'produto_id') aplicarContratoPadrao(ev.target);
+  if(ev.target?.name === 'modo_criacao') alternarEtapas();
+  if(ev.target?.name === 'data_evento'){
+    const dr=document.querySelector('input[name="retirada_data"]'); if(dr && !dr.value) dr.value=ev.target.value;
   }
+  if(ev.target?.name === 'endereco') document.querySelector('input[name="local"]').value=ev.target.value;
 });
 document.addEventListener('DOMContentLoaded', function(){
-  const produto = document.querySelector('select[name="produto_id"]');
-  if(produto) aplicarContratoPadrao(produto);
+  const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
+  alternarTipoTelefone(); alternarEtapas();
 });
-
 function bloquearEnvioContratoNovo(form){
   if(form.dataset.enviando === '1') return false;
-  form.dataset.enviando = '1';
-  const btn = document.getElementById('btnContratoNovo');
-  if(btn){
-    btn.disabled = true;
-    btn.textContent = 'Salvando...';
-  }
-  return true;
+  form.dataset.enviando='1'; const btn=document.getElementById('btnContratoNovo');
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';} return true;
 }
-
-document.addEventListener('change', function(ev){
-  if(ev.target && ev.target.name === 'data_evento'){
-    const dataRetirada = document.querySelector('input[name="retirada_data"]');
-    if(dataRetirada && !dataRetirada.value){ dataRetirada.value = ev.target.value; }
-  }
-});
 </script>
 {% endblock %}

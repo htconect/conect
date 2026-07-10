@@ -36,20 +36,9 @@
   </div>
 
   <div class="card">
-    <h2>Endereço do cliente</h2>
-    <p><b>Endereço:</b> {{ item.cliente.endereco or '-' }}</p>
-    <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
-    <p><b>Complemento:</b> {{ item.cliente.complemento or '-' }}</p>
-    <p><b>Bairro:</b> {{ item.cliente.bairro or '-' }}</p>
-    <p><b>Cidade/UF:</b> {{ item.cliente.cidade or '-' }}{% if item.cliente.estado %} - {{ item.cliente.estado }}{% endif %}</p>
-    <p><b>CEP:</b> {{ item.cliente.cep or '-' }}</p>
-    <p><b>Observações do cliente:</b> {{ item.cliente.observacoes or '-' }}</p>
-  </div>
-
-  <div class="card">
     <h2>Local do evento</h2>
     <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
-    <p><b>Endereço/referência:</b> {{ item.local or item.cliente.endereco or '-' }}</p>
+    <p><b>Endereço do evento:</b> {{ item.local or item.cliente.endereco or '-' }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}</p>
     <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
     <p><b>Bairro:</b> {{ item.bairro or item.cliente.bairro or '-' }}</p>
     <p><b>Acesso:</b> {{ item.acesso_local or '-' }}</p>

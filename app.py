@@ -451,13 +451,13 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     add(linhas, "Hora de fim", fmt_hora(item.hora_fim))
 
     add(linhas, "Nome do local", item.local_nome)
-    add(linhas, "Endereço / referência do evento", item.local)
+    add(linhas, "Endereço do evento", item.local)
     add(linhas, "Bairro do evento", item.bairro)
     add(linhas, "Acesso ao local", item.acesso_local)
     add(linhas, "Responsável no local", item.local_responsavel_nome)
     add(linhas, "Telefone do responsável", item.local_responsavel_telefone)
 
-    add(linhas, "Endereço do cliente", getattr(cliente, "endereco", ""))
+    add(linhas, "Endereço do evento", item.local or getattr(cliente, "endereco", ""))
     add(linhas, "Número", getattr(cliente, "numero", ""))
     add(linhas, "Complemento", getattr(cliente, "complemento", ""))
     add(linhas, "Bairro do cliente", getattr(cliente, "bairro", ""))
@@ -2484,11 +2484,19 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
     })
 
 
+def celular_brasileiro_valido(valor: str) -> bool:
+    numero = limpar_identificador(valor)
+    if numero.startswith("55") and len(numero) == 13:
+        numero = numero[2:]
+    return len(numero) == 11 and numero[2] == "9" and numero[:2] != "00"
+
+
 @app.post("/painel/contrato-novo")
 def contrato_novo_salvar(
         request: Request,
         nome: str = Form(""),
         telefone: str = Form(""),
+        whatsapp_brasil: str = Form(""),
         cpf: str = Form(""),
         cnpj: str = Form(""),
         email: str = Form(""),
@@ -2539,8 +2547,14 @@ def contrato_novo_salvar(
 
     if not nome.strip():
         return render_erro("Informe o nome do cliente.")
-    if not telefone_limpo and not cpf_limpo and not cnpj_limpo:
-        return render_erro("Informe pelo menos telefone, CPF ou CNPJ.")
+    if not telefone.strip():
+        return render_erro("Informe o WhatsApp ou telefone do cliente.")
+    if whatsapp_brasil and not celular_brasileiro_valido(telefone):
+        return render_erro("Informe um WhatsApp brasileiro válido no formato (DD) 9XXXX-XXXX.")
+    if not celular_brasileiro_valido(local_responsavel_telefone):
+        return render_erro("Informe um WhatsApp brasileiro válido para o responsável no local.")
+    if not local_responsavel_nome.strip():
+        return render_erro("Informe o nome do responsável no local.")
     if not hora_meia_em_meia_valida(hora_inicio):
         return render_erro("A hora precisa estar em intervalo de 30 minutos. Exemplo: 18:00 ou 18:30.")
     if cpf_limpo and not cpf_valido(cpf_limpo):
@@ -2617,7 +2631,7 @@ def contrato_novo_salvar(
         retirada_data=retirada_data_obj if retirada_obrigatoria_bool else None,
         retirada_hora=retirada_hora_obj,
         bairro=bairro.strip(),
-        local=local.strip() or endereco.strip(),
+        local=endereco.strip(),
         local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome.strip(),
         local_responsavel_telefone=limpar_identificador(
@@ -4381,6 +4395,12 @@ def salvar_pre_cadastro(
             "campos_cfg": campos_empresa, "form": form_data
         }, status_code=400)
 
+    if not celular_brasileiro_valido(telefone):
+        return render_erro("whatsapp_invalido")
+    if not celular_brasileiro_valido(local_responsavel_telefone):
+        return render_erro("responsavel_whatsapp_invalido")
+    if not local_responsavel_nome.strip():
+        return render_erro("responsavel_whatsapp_invalido")
     if cpf_limpo and cnpj_limpo:
         return render_erro("cpf_cnpj")
     if tipo_pessoa == "fisica" and cpf_limpo and not cpf_valido(cpf_limpo):
@@ -4432,7 +4452,7 @@ def salvar_pre_cadastro(
     fim_obj = None
     solicitacao = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=data_obj, hora_inicio=inicio_obj,
-        hora_fim=fim_obj, bairro=bairro, local=local, local_nome=local_nome,
+        hora_fim=fim_obj, bairro=bairro, local=endereco.strip(), local_nome=local_nome,
         local_responsavel_nome=local_responsavel_nome, local_responsavel_telefone=local_responsavel_telefone,
         acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva"
     )
