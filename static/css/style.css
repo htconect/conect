@@ -1310,3 +1310,31 @@ button.principal{
   .linha-responsavel-retirada .botao-salvar-responsavel{grid-column:auto}
   .responsavel-retirada-box summary{font-size:15px;white-space:nowrap}
 }
+
+
+/* PWA: instalação do Conect pelo menu superior */
+.menu-topo-card .menu-instalar{
+  width:100%;
+  min-height:auto;
+  margin:0;
+  padding:11px 10px!important;
+  border:0!important;
+  border-radius:12px!important;
+  background:transparent!important;
+  color:#172033!important;
+  box-shadow:none!important;
+  font-size:15px!important;
+  font-weight:800!important;
+  line-height:1.2!important;
+  display:flex!important;
+  align-items:center;
+  justify-content:flex-start!important;
+  gap:8px!important;
+  text-align:left;
+}
+.menu-topo-card .menu-instalar:hover{
+  transform:none!important;
+  background:#f1f5f9!important;
+  box-shadow:none!important;
+}
+.menu-topo-card .menu-instalar[hidden]{display:none!important;}

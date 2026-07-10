@@ -31,6 +31,7 @@
           <strong>Conta</strong>
           <a href="/painel/perfil">👤 Meu perfil</a>
           <a href="/painel/alterar-senha">🔒 Alterar senha</a>
+          <button type="button" id="instalar-conect" class="menu-instalar" hidden>📲 Instalar Conect</button>
           <a class="menu-sair" href="/empresa/sair">🚪 Sair</a>
         </div>
       </details>
@@ -226,6 +227,54 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
 </script>
 
 
+
+<script id="orion-pwa">
+(function () {
+  let eventoInstalacao = null;
+  const botao = document.getElementById("instalar-conect");
+  const emModoApp = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const ehIOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/static/service-worker.js").catch(function () {});
+    });
+  }
+
+  if (!botao || emModoApp) return;
+
+  window.addEventListener("beforeinstallprompt", function (evento) {
+    evento.preventDefault();
+    eventoInstalacao = evento;
+    botao.hidden = false;
+  });
+
+  if (ehIOS) botao.hidden = false;
+
+  botao.addEventListener("click", async function () {
+    if (eventoInstalacao) {
+      eventoInstalacao.prompt();
+      await eventoInstalacao.userChoice;
+      eventoInstalacao = null;
+      botao.hidden = true;
+      return;
+    }
+
+    if (ehIOS) {
+      alert("Toque em Compartilhar e depois em Adicionar à Tela de Início.");
+      return;
+    }
+
+    alert("Abra o menu do navegador e toque em Instalar app.");
+  });
+
+  window.addEventListener("appinstalled", function () {
+    botao.hidden = true;
+    eventoInstalacao = null;
+  });
+})();
+</script>
+
 <script id="orion-botoes-icones">
 (function(){
   const regras = [
@@ -234,6 +283,8 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     [/iniciar rota|rota/i, 'bi-play-circle-fill', 'btn-krj-route'],
     [/previsão|previsao/i, 'bi-whatsapp', 'btn-krj-primary'],
     [/a caminho/i, 'bi-whatsapp', 'btn-krj-primary'],
+    [/entrar/i, 'bi-box-arrow-in-right', 'btn-krj-primary'],
+    [/voltar/i, 'bi-arrow-left-circle', 'btn-krj-ghost'],
     [/salvar|criar|confirmar|aceitar|ativar|finalizar|ok$|^ok$/i, 'bi-check-circle', 'btn-krj-primary'],
     [/editar|alterar|desv\.*/i, 'bi-pencil-square', 'btn-krj-outline'],
     [/buscar|pesquisar|filtrar|continuar|carregar/i, 'bi-search', 'btn-krj-outline'],
