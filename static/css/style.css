@@ -1211,3 +1211,18 @@ body{overflow-x:hidden}
 }
 
 .enderecos-encontrados{padding:12px;background:#f8fafc;border:1px solid #dbe3ee;border-radius:14px;margin-bottom:14px}.endereco-opcao{display:block;width:100%;text-align:left;margin:7px 0;background:#fff;color:#334155;border:1px solid #cbd5e1}.campo-travado{background:#f1f5f9!important;color:#475569}.contatos-whatsapp-operacao{display:none}.responsavel-retirada-box{margin-top:12px;padding:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px}
+
+
+/* Conect 21: seleção compacta de endereços e responsável pela retirada */
+.enderecos-encontrados{padding:12px;background:#f8fafc;border:1px solid #dbe3ee;border-radius:14px;margin-bottom:14px}
+.enderecos-encontrados label{display:block;margin:0 0 7px;font-weight:800}
+.endereco-select{width:100%;margin:0 0 9px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.botao-novo-endereco{width:100%;margin:0;background:#fff;color:#0f5fd7;border:1px solid #93c5fd;font-weight:800}
+.responsavel-retirada-box{margin-top:12px;padding:12px;background:#fff8dc;border:1px solid #f3d66d;border-radius:14px}
+.responsavel-retirada-box summary{font-weight:900;font-size:16px;line-height:1.2;cursor:default;list-style:none;margin-bottom:8px}
+.responsavel-retirada-box summary::-webkit-details-marker{display:none}
+.responsavel-retirada-box .texto-discreto{margin:0 0 10px;line-height:1.35}
+.responsavel-retirada-box .linha{align-items:end;gap:10px}
+.responsavel-retirada-box .linha>div{min-width:0}
+.botao-salvar-responsavel{width:100%;margin-top:8px;justify-content:center}
+@media(max-width:600px){.responsavel-retirada-box .linha{display:grid;grid-template-columns:1fr}.responsavel-retirada-box input{width:100%}.responsavel-retirada-box summary{white-space:normal}}

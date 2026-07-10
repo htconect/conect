@@ -48,21 +48,23 @@
   <section class="secao-form">
     <h2>2. Endereço do evento</h2>
     <div id="enderecosEncontrados" class="enderecos-encontrados" hidden></div>
-    <div class="linha">
-      <div><label>CEP</label><input id="cep" name="cep" value="{{ form.cep or '' }}" inputmode="numeric"></div>
-      <button type="button" onclick="buscarCEP()">Buscar CEP</button>
+    <div id="camposNovoEndereco">
+      <div class="linha">
+        <div><label>CEP</label><input id="cep" name="cep" value="{{ form.cep or '' }}" inputmode="numeric"></div>
+        <button type="button" onclick="buscarCEP()">Buscar CEP</button>
+      </div>
+      <label>Rua / endereço *</label>
+      <input id="endereco" name="endereco" value="{{ form.endereco or '' }}" required>
+      <div class="grid duas">
+        <div><label>Número *</label><input id="numeroEvento" name="numero" value="{{ form.numero or '' }}" required></div>
+        <div><label>Complemento</label><input id="complementoEvento" name="complemento" value="{{ form.complemento or '' }}"></div>
+      </div>
+      <div class="grid duas">
+        <div><label>Bairro *</label><input id="bairro" name="bairro" value="{{ form.bairro or '' }}" required></div>
+        <div><label>Cidade</label><input id="cidade" name="cidade" value="{{ form.cidade or '' }}"></div>
+      </div>
+      <label>Estado</label><input id="estado" name="estado" value="{{ form.estado or '' }}">
     </div>
-    <label>Rua / endereço *</label>
-    <input id="endereco" name="endereco" value="{{ form.endereco or '' }}" required>
-    <div class="grid duas">
-      <div><label>Número *</label><input id="numeroEvento" name="numero" value="{{ form.numero or '' }}" required></div>
-      <div><label>Complemento</label><input id="complementoEvento" name="complemento" value="{{ form.complemento or '' }}"></div>
-    </div>
-    <div class="grid duas">
-      <div><label>Bairro *</label><input id="bairro" name="bairro" value="{{ form.bairro or '' }}" required></div>
-      <div><label>Cidade</label><input id="cidade" name="cidade" value="{{ form.cidade or '' }}"></div>
-    </div>
-    <label>Estado</label><input id="estado" name="estado" value="{{ form.estado or '' }}">
     <input type="hidden" name="local" value="{{ form.endereco or form.local or '' }}">
   </section>
 
@@ -181,12 +183,20 @@ function preencherEndereco(e){
   const mapa={cep:'cep',endereco:'endereco',numero:'numeroEvento',complemento:'complementoEvento',bairro:'bairro',cidade:'cidade',estado:'estado'};
   Object.entries(mapa).forEach(([k,id])=>{const el=document.getElementById(id);if(el) el.value=e[k]||'';});
 }
+function alternarCamposEndereco(mostrar){
+  const area=document.getElementById('camposNovoEndereco'); if(area) area.hidden=!mostrar;
+}
 function mostrarEnderecos(lista){
   const box=document.getElementById('enderecosEncontrados'); if(!box)return; box.innerHTML='';
-  if(!lista||!lista.length){box.hidden=true;return;} box.hidden=false;
-  const titulo=document.createElement('p');titulo.innerHTML='<b>Escolha o endereço deste evento</b>';box.appendChild(titulo);
-  lista.forEach((e,i)=>{const b=document.createElement('button');b.type='button';b.className='endereco-opcao';b.textContent=`${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;b.onclick=()=>preencherEndereco(e);box.appendChild(b);});
-  const novo=document.createElement('button');novo.type='button';novo.className='endereco-opcao';novo.textContent='Usar um novo endereço';novo.onclick=()=>preencherEndereco({});box.appendChild(novo);
+  if(!lista||!lista.length){box.hidden=true;alternarCamposEndereco(true);return;}
+  box.hidden=false;
+  const label=document.createElement('label');label.textContent='Endereço salvo';box.appendChild(label);
+  const select=document.createElement('select');select.className='endereco-select';
+  lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=`Endereço ${i+1} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});
+  select.onchange=()=>{const e=lista[Number(select.value)];preencherEndereco(e);alternarCamposEndereco(false);};
+  box.appendChild(select);
+  const novo=document.createElement('button');novo.type='button';novo.className='botao-novo-endereco';novo.textContent='+ Usar novo endereço';novo.onclick=()=>{select.value='';preencherEndereco({});alternarCamposEndereco(true);document.getElementById('cep')?.focus();};box.appendChild(novo);
+  select.dispatchEvent(new Event('change'));
 }
 async function consultarClientePorTelefone(){
   if(!document.getElementById('whatsappBrasil').checked) return;
