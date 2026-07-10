@@ -104,8 +104,20 @@
     <label>Senha</label>
     <input name="senha" required>
     <label class="check"><input type="checkbox" name="ativo" value="1" checked> Usuário ativo</label>
-    <label class="check"><input type="checkbox" name="visualiza_financeiro" value="1" checked> Visualiza financeiro</label>
-    <button>Criar usuário</button>
+
+    <div class="box-mini">
+      <h3>Áreas de trabalho</h3>
+      <p class="texto-discreto">Marque somente os módulos em que este usuário poderá entrar. Cards e pendências do painel continuam visíveis.</p>
+      <div class="grade-permissoes">
+        <label class="check"><input type="checkbox" name="acesso_agenda" value="1"> Agenda</label>
+        <label class="check"><input type="checkbox" name="acesso_operacao" value="1"> Operação</label>
+        <label class="check"><input type="checkbox" name="acesso_buscar_cliente" value="1"> Buscar cliente</label>
+        <label class="check"><input type="checkbox" name="acesso_financeiro" value="1"> Financeiro</label>
+        <label class="check"><input type="checkbox" name="acesso_cadastros" value="1"> Cadastros</label>
+        <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
+      </div>
+    </div>
+    <button>Criar ou atualizar usuário</button>
   </form>
 
   <div class="lista-mobile">
@@ -113,7 +125,17 @@
     <div class="card-lista">
       <div>
         <b>{{ u.nome }}</b>
-        <small>{{ u.usuario }} · {{ "Ativo" if u.ativo else "Inativo" }} · Financeiro: {{ "Sim" if u.visualiza_financeiro else "Não" }}</small>
+        <small>
+          {{ u.usuario }} · {{ "Ativo" if u.ativo else "Inativo" }} ·
+          {% set acessos = [] %}
+          {% if u.acesso_agenda %}{% set _ = acessos.append("Agenda") %}{% endif %}
+          {% if u.acesso_operacao %}{% set _ = acessos.append("Operação") %}{% endif %}
+          {% if u.acesso_buscar_cliente %}{% set _ = acessos.append("Buscar cliente") %}{% endif %}
+          {% if u.acesso_financeiro %}{% set _ = acessos.append("Financeiro") %}{% endif %}
+          {% if u.acesso_cadastros %}{% set _ = acessos.append("Cadastros") %}{% endif %}
+          {% if u.acesso_relatorios %}{% set _ = acessos.append("Relatórios") %}{% endif %}
+          Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }}
+        </small>
       </div>
       <a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
     </div>

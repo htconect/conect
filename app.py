@@ -28,7 +28,48 @@ from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em
 
 from fastapi.templating import Jinja2Templates
 
+class ControleAcessoMiddleware:
+    """Bloqueia a entrada nos módulos sem esconder cards, alertas ou pendências."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = scope.get("path", "")
+            session = scope.get("session") or {}
+            if session.get("empresa_id") and not session.get("acesso_total"):
+                area = self.area_da_rota(path)
+                acessos = session.get("acessos") or {}
+                if area and not acessos.get(area, False):
+                    response = RedirectResponse(f"/painel/acesso-negado?area={area}", status_code=303)
+                    await response(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def area_da_rota(path: str):
+        # A permissão protege o módulo de destino. Pendências e dados exibidos no painel continuam visíveis.
+        if path == "/painel/agenda" or path.startswith("/painel/agenda/"):
+            return "agenda"
+        if path == "/painel/reservas" or path.startswith("/painel/reservas/"):
+            return "operacao"
+        if path == "/painel/clientes" or path.startswith("/painel/cliente/"):
+            return "buscar_cliente"
+        if path == "/painel/financeiro" or path.startswith("/painel/financeiro/"):
+            return "financeiro"
+        if path == "/painel/relatorios" or path.startswith("/painel/relatorios/"):
+            return "relatorios"
+        prefixos_cadastro = (
+            "/painel/configuracoes", "/painel/produtos", "/painel/produto/",
+            "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
+        )
+        if any(path == p or path.startswith(p) for p in prefixos_cadastro):
+            return "cadastros"
+        return None
+
+
 app = FastAPI(title=APP_NOME)
+app.add_middleware(ControleAcessoMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
@@ -724,8 +765,17 @@ def garantir_colunas_novas():
 
     if "usuarios_empresa" in tabelas:
         cols_usu = colunas("usuarios_empresa")
-        if "visualiza_financeiro" not in cols_usu:
-            comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN visualiza_financeiro BOOLEAN DEFAULT true")
+        novas_permissoes = {
+            "acesso_agenda": "BOOLEAN DEFAULT false",
+            "acesso_operacao": "BOOLEAN DEFAULT false",
+            "acesso_buscar_cliente": "BOOLEAN DEFAULT false",
+            "acesso_financeiro": "BOOLEAN DEFAULT false",
+            "acesso_cadastros": "BOOLEAN DEFAULT false",
+            "acesso_relatorios": "BOOLEAN DEFAULT false",
+        }
+        for coluna, tipo in novas_permissoes.items():
+            if coluna not in cols_usu:
+                comandos.append(f"ALTER TABLE usuarios_empresa ADD COLUMN {coluna} {tipo}")
 
     if "contas_financeiras" not in tabelas:
         comandos.append("""
@@ -1301,7 +1351,12 @@ def admin_criar_usuario_empresa(
         usuario: str = Form(...),
         senha: str = Form(...),
         ativo: Optional[str] = Form("1"),
-        visualiza_financeiro: Optional[str] = Form("1"),
+        acesso_agenda: Optional[str] = Form(None),
+        acesso_operacao: Optional[str] = Form(None),
+        acesso_buscar_cliente: Optional[str] = Form(None),
+        acesso_financeiro: Optional[str] = Form(None),
+        acesso_cadastros: Optional[str] = Form(None),
+        acesso_relatorios: Optional[str] = Form(None),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
@@ -1310,20 +1365,20 @@ def admin_criar_usuario_empresa(
         raise HTTPException(404)
     usuario_limpo = usuario.strip()
     existente = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id, usuario=usuario_limpo).first()
+    dados = {
+        "nome": nome.strip(), "senha": senha.strip(), "ativo": bool(ativo),
+        "acesso_agenda": bool(acesso_agenda),
+        "acesso_operacao": bool(acesso_operacao),
+        "acesso_buscar_cliente": bool(acesso_buscar_cliente),
+        "acesso_financeiro": bool(acesso_financeiro),
+        "acesso_cadastros": bool(acesso_cadastros),
+        "acesso_relatorios": bool(acesso_relatorios),
+    }
     if existente:
-        existente.nome = nome.strip()
-        existente.senha = senha.strip()
-        existente.ativo = bool(ativo)
-        existente.visualiza_financeiro = bool(visualiza_financeiro)
+        for campo, valor in dados.items():
+            setattr(existente, campo, valor)
     else:
-        db.add(UsuarioEmpresa(
-            empresa_id=empresa.id,
-            nome=nome.strip(),
-            usuario=usuario_limpo,
-            senha=senha.strip(),
-            ativo=bool(ativo),
-            visualiza_financeiro=bool(visualiza_financeiro)
-        ))
+        db.add(UsuarioEmpresa(empresa_id=empresa.id, usuario=usuario_limpo, **dados))
     db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 
@@ -1372,6 +1427,8 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
         request.session["empresa_id"] = empresa.id
         request.session["usuario_sistema"] = usuario_limpo
         request.session["usuario_nome"] = empresa.usuario_admin or usuario_limpo
+        request.session["acesso_total"] = True
+        request.session["acessos"] = {}
         return RedirectResponse("/painel", status_code=303)
 
     usuario_empresa = (
@@ -1386,6 +1443,16 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
         request.session["empresa_id"] = usuario_empresa.empresa_id
         request.session["usuario_sistema"] = usuario_empresa.usuario
         request.session["usuario_nome"] = usuario_empresa.nome
+        request.session["usuario_empresa_id"] = usuario_empresa.id
+        request.session["acesso_total"] = False
+        request.session["acessos"] = {
+            "agenda": bool(usuario_empresa.acesso_agenda),
+            "operacao": bool(usuario_empresa.acesso_operacao),
+            "buscar_cliente": bool(usuario_empresa.acesso_buscar_cliente),
+            "financeiro": bool(usuario_empresa.acesso_financeiro),
+            "cadastros": bool(usuario_empresa.acesso_cadastros),
+            "relatorios": bool(usuario_empresa.acesso_relatorios),
+        }
         return RedirectResponse("/painel", status_code=303)
 
     return RedirectResponse(
@@ -1464,6 +1531,22 @@ Este é um contrato fictício inicial. Edite este texto conforme a política da 
     if empresa.mostrar_mensagem_hora_fim is None:
         empresa.mostrar_mensagem_hora_fim = True
     db.commit()
+
+
+@app.get("/painel/acesso-negado", response_class=HTMLResponse)
+def acesso_negado(request: Request, area: str = "", empresa: Empresa = Depends(empresa_logada)):
+    nomes = {
+        "agenda": "Agenda", "operacao": "Operação", "buscar_cliente": "Buscar cliente",
+        "financeiro": "Financeiro", "cadastros": "Cadastros", "relatorios": "Relatórios"
+    }
+    return templates.TemplateResponse("admin/acesso_negado.html", {
+        "request": request, "empresa": empresa, "area": nomes.get(area, area)
+    }, status_code=403)
+
+
+@app.get("/painel/relatorios", response_class=HTMLResponse)
+def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/relatorios.html", {"request": request, "empresa": empresa})
 
 
 @app.get("/painel", response_class=HTMLResponse)

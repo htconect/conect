@@ -1226,3 +1226,9 @@ body{overflow-x:hidden}
 .responsavel-retirada-box .linha>div{min-width:0}
 .botao-salvar-responsavel{width:100%;margin-top:8px;justify-content:center}
 @media(max-width:600px){.responsavel-retirada-box .linha{display:grid;grid-template-columns:1fr}.responsavel-retirada-box input{width:100%}.responsavel-retirada-box summary{white-space:normal}}
+
+/* Áreas de trabalho */
+.grade-permissoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px}
+.grade-permissoes .check{margin:0;padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}
+.acesso-negado{max-width:560px;margin:48px auto;text-align:center;padding:36px}
+.icone-acesso-negado{font-size:48px;margin-bottom:8px}

@@ -51,7 +51,13 @@ class UsuarioEmpresa(Base):
     usuario = Column(String(80), nullable=False, index=True)
     senha = Column(String(120), nullable=False)
     ativo = Column(Boolean, default=True)
-    visualiza_financeiro = Column(Boolean, default=True)
+    # Acessos por área de trabalho. O administrador principal da empresa ignora estas marcações.
+    acesso_agenda = Column(Boolean, default=False)
+    acesso_operacao = Column(Boolean, default=False)
+    acesso_buscar_cliente = Column(Boolean, default=False)
+    acesso_financeiro = Column(Boolean, default=False)
+    acesso_cadastros = Column(Boolean, default=False)
+    acesso_relatorios = Column(Boolean, default=False)
     criado_em = Column(DateTime, server_default=func.now())
 
     empresa = relationship("Empresa")

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box acesso-negado">
+  <div class="icone-acesso-negado">🔒</div>
+  <p class="mini">Área de trabalho protegida</p>
+  <h1>Acesso não permitido.</h1>
+  <p>Seu usuário não possui acesso ao módulo <b>{{ area or "solicitado" }}</b>.</p>
+  <a class="botao" href="/painel">Voltar ao início</a>
+</div>
+{% endblock %}
