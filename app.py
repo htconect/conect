@@ -3565,6 +3565,8 @@ def financeiro(
         categoria: str = "",
         busca: str = "",
         status_sistema: str = "pendente",
+        mes_cards: str = "",
+        semana_cards: str = "",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -3581,6 +3583,31 @@ def financeiro(
     data_final = data_final or hoje.isoformat()
     inicio = datetime.strptime(data_inicial, "%Y-%m-%d").date()
     fim = datetime.strptime(data_final, "%Y-%m-%d").date()
+
+    # Períodos independentes dos cards: mês vigente no topo e semana vigente (segunda a domingo) no rodapé.
+    def primeiro_dia_mes(valor: date) -> date:
+        return valor.replace(day=1)
+
+    def avancar_mes(valor: date, quantidade: int) -> date:
+        indice = (valor.year * 12 + valor.month - 1) + quantidade
+        return date(indice // 12, indice % 12 + 1, 1)
+
+    mes_vigente = primeiro_dia_mes(hoje)
+    try:
+        mes_cards_inicio = datetime.strptime(mes_cards, "%Y-%m").date().replace(day=1) if mes_cards else mes_vigente
+    except ValueError:
+        mes_cards_inicio = mes_vigente
+    mes_cards_fim = avancar_mes(mes_cards_inicio, 1) - timedelta(days=1)
+    meses_cards = [avancar_mes(mes_vigente, deslocamento) for deslocamento in range(3)]
+
+    semana_vigente_inicio = hoje - timedelta(days=hoje.weekday())
+    try:
+        semana_cards_inicio = datetime.strptime(semana_cards, "%Y-%m-%d").date() if semana_cards else semana_vigente_inicio
+        semana_cards_inicio -= timedelta(days=semana_cards_inicio.weekday())
+    except ValueError:
+        semana_cards_inicio = semana_vigente_inicio
+    semana_cards_fim = semana_cards_inicio + timedelta(days=6)
+    semanas_cards = [semana_vigente_inicio + timedelta(days=7 * deslocamento) for deslocamento in range(3)]
 
     q_banco = db.query(LancamentoBanco).filter(LancamentoBanco.empresa_id == empresa.id)
     q_manual_real = db.query(LancamentoManualFinanceiro).filter(
@@ -3668,23 +3695,74 @@ def financeiro(
         Pagamento.conciliado_em == None
     ).all()
 
-    entradas = sum(l.valor for l in banco if (l.valor or 0) > 0) + sum(
-        l.valor for l in manuais_reais if (l.valor or 0) > 0)
-    saidas = sum(abs(l.valor or 0) for l in banco if (l.valor or 0) < 0) + sum(
-        abs(l.valor or 0) for l in manuais_reais if (l.valor or 0) < 0)
-    saldo_real = entradas - saidas
-    total_receber = sum(max(l.valor or 0, 0) for l in receber)
-    saldo_previsto = saldo_real + total_receber + total_contratos_receber
+    # Cards superiores: sempre obedecem somente ao pequeno seletor de mês.
+    q_banco_cards = db.query(LancamentoBanco).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.data >= mes_cards_inicio,
+        LancamentoBanco.data <= mes_cards_fim
+    )
+    q_manual_cards = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.data >= mes_cards_inicio,
+        LancamentoManualFinanceiro.data <= mes_cards_fim
+    )
+    if conta:
+        q_banco_cards = q_banco_cards.filter(LancamentoBanco.conta_id == conta.id)
+        q_manual_cards = q_manual_cards.filter(LancamentoManualFinanceiro.conta_id == conta.id)
 
-    saldo_todos = 0
-    for c in contas:
-        banco_c = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter_by(empresa_id=empresa.id,
-                                                                                        conta_id=c.id).scalar() or 0
-        manual_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(
-            empresa_id=empresa.id, conta_id=c.id, tipo="real").scalar() or 0
-        receber_c = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter_by(
-            empresa_id=empresa.id, conta_id=c.id, tipo="receber", recebido=False).scalar() or 0
-        saldo_todos += float(banco_c or 0) + float(manual_c or 0) + float(receber_c or 0)
+    banco_cards = q_banco_cards.all()
+    manuais_cards = q_manual_cards.all()
+    entradas = sum(float(l.valor or 0) for l in banco_cards if (l.valor or 0) > 0) + sum(
+        float(l.valor or 0) for l in manuais_cards if l.tipo == "real" and (l.valor or 0) > 0)
+    saidas = sum(abs(float(l.valor or 0)) for l in banco_cards if (l.valor or 0) < 0) + sum(
+        abs(float(l.valor or 0)) for l in manuais_cards if l.tipo == "real" and (l.valor or 0) < 0)
+    saldo_real = entradas - saidas
+    total_receber = sum(
+        max(float(l.valor or 0), 0) for l in manuais_cards if l.tipo == "receber" and not l.recebido)
+
+    contratos_cards = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.data_evento >= mes_cards_inicio,
+        Solicitacao.data_evento <= mes_cards_fim
+    ).all()
+    quantidade_contratos_cards = len(contratos_cards)
+    total_contratos_receber_cards = sum(
+        max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
+
+    # Saldo consolidado de todas as contas no ano selecionado.
+    # Soma o saldo inicial das contas com os movimentos reais desde 01/01
+    # até o último dia do mês escolhido, preservando o saldo dos meses anteriores.
+    inicio_ano_cards = date(mes_cards_inicio.year, 1, 1)
+    saldo_inicial_todas = db.query(func.coalesce(func.sum(ContaFinanceira.saldo_inicial), 0)).filter(
+        ContaFinanceira.empresa_id == empresa.id,
+        ContaFinanceira.ativa == True
+    ).scalar() or 0
+    banco_todas_cards = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.data >= inicio_ano_cards,
+        LancamentoBanco.data <= mes_cards_fim
+    ).scalar() or 0
+    manual_todas_cards = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.data >= inicio_ano_cards,
+        LancamentoManualFinanceiro.data <= mes_cards_fim
+    ).scalar() or 0
+    saldo_todos = float(saldo_inicial_todas) + float(banco_todas_cards) + float(manual_todas_cards)
+    saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
+
+    # Cards inferiores: semana escolhida, sempre de segunda-feira a domingo.
+    contratos_semana = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.data_evento >= semana_cards_inicio,
+        Solicitacao.data_evento <= semana_cards_fim
+    ).all()
+    quantidade_contratos_semana = len(contratos_semana)
+    valor_total_contratos_semana = sum(float(c.valor or 0) for c in contratos_semana)
+    valor_receber_contratos_semana = sum(
+        max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana)
 
     candidatos_vinculo = {
         l.id: melhores_vinculos_para_banco(l, pagamentos_pendentes_vinculo)
@@ -3701,8 +3779,18 @@ def financeiro(
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
         "status_sistema": status_sistema,
+        "mes_cards": mes_cards_inicio.strftime("%Y-%m"), "meses_cards": meses_cards,
+        "mes_cards_inicio": mes_cards_inicio, "mes_cards_fim": mes_cards_fim,
+        "semana_cards": semana_cards_inicio.isoformat(), "semanas_cards": semanas_cards,
+        "semana_cards_inicio": semana_cards_inicio, "semana_cards_fim": semana_cards_fim,
+        "timedelta": timedelta,
         "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagamentos_sistema": pagamentos_sistema,
         "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
+        "quantidade_contratos_cards": quantidade_contratos_cards,
+        "total_contratos_receber_cards": total_contratos_receber_cards,
+        "quantidade_contratos_semana": quantidade_contratos_semana,
+        "valor_total_contratos_semana": valor_total_contratos_semana,
+        "valor_receber_contratos_semana": valor_receber_contratos_semana,
         "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,

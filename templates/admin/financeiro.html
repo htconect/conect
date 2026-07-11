@@ -21,35 +21,60 @@
     </div>
   </div>
 
-  <div class="financeiro-resumo">
-    <div class="indicador-card indicador-entrada">
-      <span class="indicador-icone">↓</span>
-      <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
-    </div>
-    <div class="indicador-card indicador-saida">
-      <span class="indicador-icone">↑</span>
-      <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
-    </div>
-    <div class="indicador-card indicador-saldo">
-      <span class="indicador-icone">▣</span>
-      <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
-    </div>
-    <div class="indicador-card indicador-receber">
-      <span class="indicador-icone">▤</span>
-      <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
-    </div>
-    <div class="indicador-card indicador-contrato">
-      <span class="indicador-icone">▣</span>
-      <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber|moeda_br }}</b></div>
-    </div>
-    <div class="indicador-card indicador-contas">
-      <span class="indicador-icone">⌂</span>
-      <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+  <div class="financeiro-resumo-linha">
+    <form method="get" class="seletor-periodo seletor-mes-cards" aria-label="Selecionar mês dos cards superiores">
+      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
+      <input type="hidden" name="data_final" value="{{ data_final }}">
+      <input type="hidden" name="categoria" value="{{ categoria }}">
+      <input type="hidden" name="busca" value="{{ busca }}">
+      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
+      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
+      <select name="mes_cards" onchange="this.form.submit()" title="Mês dos cards">
+        {% for mes in meses_cards %}
+          <option value="{{ mes.strftime('%Y-%m') }}" {% if mes.strftime('%Y-%m') == mes_cards %}selected{% endif %}>
+            Mês {{ loop.index }} · {{ mes.strftime('%m/%Y') }}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+
+    <div class="financeiro-resumo">
+      <div class="indicador-card indicador-entrada">
+        <span class="indicador-icone">↓</span>
+        <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-saida">
+        <span class="indicador-icone">↑</span>
+        <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-saldo">
+        <span class="indicador-icone">▣</span>
+        <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-quantidade">
+        <span class="indicador-icone">#</span>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b></div>
+      </div>
+      <div class="indicador-card indicador-receber">
+        <span class="indicador-icone">▤</span>
+        <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-contrato">
+        <span class="indicador-icone">▣</span>
+        <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-contas">
+        <span class="indicador-icone">⌂</span>
+        <div><small>Todas contas · acumulado no ano</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+      </div>
     </div>
   </div>
 
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
+      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
+      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
       <select name="conta_id" onchange="this.form.submit()">
         {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
       </select>
@@ -134,7 +159,7 @@
                 <span class="texto-discreto">—</span>
               {% elif candidatos_vinculo.get(l.id) %}
                 <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular" class="vinculo-form preserve-scroll">
-                  <select name="pagamento_id">
+                  <select name="pagamento_id" class="combo-vinculo">
                     {% for c in candidatos_vinculo.get(l.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
                   </select><button>✓</button>
                 </form>
@@ -166,7 +191,7 @@
                 <span class="texto-discreto">—</span>
               {% elif candidatos_manual.get(m.id) %}
                 <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="vinculo-form preserve-scroll">
-                  <select name="pagamento_id">
+                  <select name="pagamento_id" class="combo-vinculo">
                     {% for c in candidatos_manual.get(m.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
                   </select><button title="Vincular">✓</button>
                 </form>
@@ -190,9 +215,9 @@
     <section class="box tabela-financeiro sistema-box">
       <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
       <div class="filtro-direito">
-        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente">Pendentes</a>
-        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado">Vinculados</a>
-        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos">Todos</a>
+        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
+        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
+        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
       </div>
       <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
       <table class="tabela-sistema">
@@ -235,25 +260,45 @@
     </section>
   </div>
 
-  <div class="financeiro-rodape-cards">
-    <div class="contrato-card contrato-vencido">
-      <span class="contrato-icone">▣</span>
-      <div><small>Vencidos no período</small><b>R$ {{ total_contratos_vencidos|moeda_br }}</b><em>{{ contratos_vencidos|length }} contratos</em></div>
-      <a href="/painel/agenda?data_inicial={{ data_inicial }}&data_final={{ data_final }}&ativos=1">Ver agenda</a>
-    </div>
-    <div class="contrato-card contrato-dia">
-      <span class="contrato-icone">▣</span>
-      <div><small>Em dia no período</small><b>R$ {{ total_contratos_em_dia|moeda_br }}</b><em>{{ contratos_em_dia|length }} contratos</em></div>
-      <a href="/painel/agenda?data_inicial={{ data_inicial }}&data_final={{ data_final }}&ativos=1">Ver agenda</a>
-    </div>
-    <div class="contrato-card contrato-pago">
-      <span class="contrato-icone">✓</span>
-      <div><small>Pagos no período</small><b>R$ {{ total_contratos_pagos_mes|moeda_br }}</b><em>{{ pagamentos_sistema_mes|length }} pagamentos</em></div>
-      <a href="/painel/agenda?data_inicial={{ data_inicial }}&data_final={{ data_final }}&ativos=1">Ver agenda</a>
-    </div>
-    <div class="dica-card">
-      <b>💡 Dica</b>
-      <span>Os cards seguem o período filtrado. Para ver outro mês, use o seletor de mês acima.</span>
+  <div class="financeiro-rodape-linha">
+    <form method="get" class="seletor-periodo seletor-semana-cards" aria-label="Selecionar semana dos cards inferiores">
+      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
+      <input type="hidden" name="data_final" value="{{ data_final }}">
+      <input type="hidden" name="categoria" value="{{ categoria }}">
+      <input type="hidden" name="busca" value="{{ busca }}">
+      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
+      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
+      <select name="semana_cards" onchange="this.form.submit()" title="Semana dos cards">
+        {% for semana in semanas_cards %}
+          {% set domingo = semana + timedelta(days=6) %}
+          <option value="{{ semana.isoformat() }}" {% if semana.isoformat() == semana_cards %}selected{% endif %}>
+            Semana {{ loop.index }} · {{ semana.strftime('%d/%m') }} a {{ domingo.strftime('%d/%m') }}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+
+    <div class="financeiro-rodape-cards">
+      <div class="contrato-card contrato-quantidade">
+        <span class="contrato-icone">#</span>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>Segunda a domingo</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="contrato-card contrato-total">
+        <span class="contrato-icone">▣</span>
+        <div><small>Valor total</small><b>R$ {{ valor_total_contratos_semana|moeda_br }}</b><em>{{ quantidade_contratos_semana }} contratos</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="contrato-card contrato-receber-semana">
+        <span class="contrato-icone">↓</span>
+        <div><small>Valor a receber</small><b>R$ {{ valor_receber_contratos_semana|moeda_br }}</b><em>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }}</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="dica-card">
+        <b>💡 Dica</b>
+        <span>As semanas sempre começam na segunda e terminam no domingo.</span>
+      </div>
     </div>
   </div>
 </section>
@@ -301,6 +346,15 @@
       form.submit();
     });
   }
+
+  document.querySelectorAll('.combo-vinculo').forEach(function(select){
+    function atualizarTitulo(){
+      var opcao = select.options[select.selectedIndex];
+      select.title = opcao ? opcao.text : '';
+    }
+    atualizarTitulo();
+    select.addEventListener('change', atualizarTitulo);
+  });
 
   document.querySelectorAll('.importar-topo-form input[type="file"]').forEach(function(input){
     input.addEventListener('change', function(){
@@ -426,11 +480,38 @@ body.tela-financeiro-desktop .container-app{
 }
 .btn-importar-topo:hover{background:var(--azul-hover)}
 
-.financeiro-resumo{
+.financeiro-resumo-linha{
   min-height:78px;
   display:grid;
-  grid-template-columns:repeat(6,minmax(0,1fr));
+  grid-template-columns:92px minmax(0,1fr);
   gap:10px;
+}
+.financeiro-resumo{
+  min-width:0;
+  display:grid;
+  grid-template-columns:repeat(7,minmax(0,1fr));
+  gap:10px;
+}
+.seletor-periodo{
+  margin:0;
+  min-width:0;
+}
+.seletor-periodo select{
+  width:100%;
+  height:100%;
+  min-height:38px;
+  border:1px solid var(--borda);
+  border-radius:14px;
+  background:#fff;
+  color:#0f172a;
+  font-size:11px;
+  font-weight:900;
+  padding:0 7px;
+  cursor:pointer;
+  box-shadow:var(--sombra);
+}
+.seletor-mes-cards select{
+  height:78px;
 }
 .indicador-card{
   height:78px;
@@ -476,6 +557,7 @@ body.tela-financeiro-desktop .container-app{
 .indicador-saldo .indicador-icone{background:#eaf2ff;color:#2563eb}
 .indicador-receber .indicador-icone{background:#fff3dd;color:#f59e0b}
 .indicador-contrato .indicador-icone{background:#f0eaff;color:#6d28d9}
+.indicador-quantidade .indicador-icone{background:#eef2ff;color:#4338ca}
 .indicador-contas .indicador-icone{background:#e8f8fb;color:#0f8fa3}
 .positivo{color:var(--verde)!important}
 .negativo{color:var(--vermelho)!important}
@@ -678,10 +760,10 @@ body.tela-financeiro-desktop .container-app{
   background:#f8fbff;
 }
 .tabela-banco .col-data{width:64px}
-.tabela-banco .col-historico{width:35%}
+.tabela-banco .col-historico{width:29%}
 .tabela-banco .col-valor{width:115px}
 .tabela-banco .col-tipo{width:165px}
-.tabela-banco .col-vinculo{width:30%}
+.tabela-banco .col-vinculo{width:38%}
 .tabela-banco .col-acoes{width:178px}
 
 .tabela-sistema .col-data-sistema{width:64px}
@@ -718,11 +800,19 @@ body.tela-financeiro-desktop .container-app{
   height:34px;
   border-radius:10px;
 }
-.vinculo-form select{
+.vinculo-form{
   width:100%;
-  min-width:190px;
+  min-width:0;
+}
+.vinculo-form select{
+  flex:1 1 auto;
+  width:0;
+  min-width:0;
   height:34px;
   border-radius:10px;
+}
+.vinculo-form button{
+  flex:0 0 42px;
 }
 .vinculo-atual{
   font-size:12px;
@@ -822,8 +912,18 @@ button{
 .input-valor-mini{width:100px}
 
 /* Rodapé sempre visível */
-.financeiro-rodape-cards{
+.financeiro-rodape-linha{
   min-height:76px;
+  display:grid;
+  grid-template-columns:150px minmax(0,1fr);
+  gap:10px;
+}
+.seletor-semana-cards select{
+  height:76px;
+  white-space:normal;
+}
+.financeiro-rodape-cards{
+  min-width:0;
   display:grid;
   grid-template-columns:1fr 1fr 1fr .95fr;
   gap:12px;
