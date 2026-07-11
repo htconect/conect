@@ -3770,34 +3770,37 @@ def financeiro(
     # Lançamentos manuais posteriores ao último extrato são somados ao saldo.
     # Sem extrato, o total é a soma dos lançamentos manuais reais.
     def saldo_real_conta(conta_calculo):
-        ultimo_lancamento = db.query(LancamentoBanco).filter(
+        """
+        Calcula o saldo da conta pela movimentação registrada no sistema.
+
+        Regra:
+        saldo inicial + lançamentos importados + lançamentos manuais reais.
+
+        Dessa forma, a mesma conta pode trabalhar somente com importação,
+        somente com lançamentos manuais ou com os dois formatos ao mesmo tempo.
+        O campo de saldo vindo do extrato é usado apenas como informação de
+        conferência e não como base do cálculo.
+        """
+        saldo_inicial = float(conta_calculo.saldo_inicial or 0)
+
+        total_importado = db.query(
+            func.coalesce(func.sum(LancamentoBanco.valor), 0)
+        ).filter(
             LancamentoBanco.empresa_id == empresa.id,
             LancamentoBanco.conta_id == conta_calculo.id,
-            LancamentoBanco.data <= mes_cards_fim,
-            LancamentoBanco.saldo != None
-        ).order_by(
-            LancamentoBanco.data.desc(),
-            LancamentoBanco.id.desc()
-        ).first()
+            LancamentoBanco.data <= mes_cards_fim
+        ).scalar() or 0
 
-        if ultimo_lancamento:
-            total = float(ultimo_lancamento.saldo or 0)
-            manuais_posteriores = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
-                LancamentoManualFinanceiro.empresa_id == empresa.id,
-                LancamentoManualFinanceiro.conta_id == conta_calculo.id,
-                LancamentoManualFinanceiro.tipo == "real",
-                LancamentoManualFinanceiro.data > ultimo_lancamento.data,
-                LancamentoManualFinanceiro.data <= mes_cards_fim
-            ).scalar() or 0
-            return total + float(manuais_posteriores)
-
-        total_manual = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+        total_manual = db.query(
+            func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)
+        ).filter(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
             LancamentoManualFinanceiro.conta_id == conta_calculo.id,
             LancamentoManualFinanceiro.tipo == "real",
             LancamentoManualFinanceiro.data <= mes_cards_fim
         ).scalar() or 0
-        return float(total_manual)
+
+        return saldo_inicial + float(total_importado) + float(total_manual)
 
     saldo_banco = saldo_real_conta(conta) if conta else 0.0
     saldo_todos = sum(saldo_real_conta(c) for c in contas if c.ativa)
