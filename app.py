@@ -7,6 +7,8 @@ import csv
 import uuid
 import hashlib
 import re
+import zipfile
+from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
 
@@ -3654,7 +3656,17 @@ def financeiro(
         q_banco = q_banco.filter(LancamentoBanco.data <= fim)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data <= fim)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.data <= fim)
-    if categoria:
+    if categoria == "sem_categoria":
+        q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
+        q_manual_real = q_manual_real.filter(or_(
+            LancamentoManualFinanceiro.categoria == None,
+            LancamentoManualFinanceiro.categoria == ""
+        ))
+        q_receber = q_receber.filter(or_(
+            LancamentoManualFinanceiro.categoria == None,
+            LancamentoManualFinanceiro.categoria == ""
+        ))
+    elif categoria:
         q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.categoria == categoria)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.categoria == categoria)
@@ -3753,44 +3765,73 @@ def financeiro(
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
 
-    # Saldo consolidado de todas as contas no ano selecionado.
-    # Soma o saldo inicial das contas com os movimentos reais desde 01/01
-    # até o último dia do mês escolhido, preservando o saldo dos meses anteriores.
-    inicio_ano_cards = date(mes_cards_inicio.year, 1, 1)
-    saldo_inicial_todas = db.query(func.coalesce(func.sum(ContaFinanceira.saldo_inicial), 0)).filter(
-        ContaFinanceira.empresa_id == empresa.id,
-        ContaFinanceira.ativa == True
-    ).scalar() or 0
-    banco_todas_cards = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.data >= inicio_ano_cards,
-        LancamentoBanco.data <= mes_cards_fim
-    ).scalar() or 0
-    manual_todas_cards = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa.id,
-        LancamentoManualFinanceiro.tipo == "real",
-        LancamentoManualFinanceiro.data >= inicio_ano_cards,
-        LancamentoManualFinanceiro.data <= mes_cards_fim
-    ).scalar() or 0
-    saldo_todos = float(saldo_inicial_todas) + float(banco_todas_cards) + float(manual_todas_cards)
-
-    # Total acumulado da conta selecionada no mesmo período anual.
-    saldo_banco = 0.0
-    if conta:
-        banco_conta_cards = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
+    # Saldo real por conta.
+    # Quando há extrato importado, o saldo mais recente do extrato é a fonte principal.
+    # Lançamentos manuais posteriores ao último extrato são somados ao saldo.
+    # Sem extrato, o total é a soma dos lançamentos manuais reais.
+    def saldo_real_conta(conta_calculo):
+        ultimo_lancamento = db.query(LancamentoBanco).filter(
             LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.conta_id == conta.id,
-            LancamentoBanco.data >= inicio_ano_cards,
-            LancamentoBanco.data <= mes_cards_fim
-        ).scalar() or 0
-        manual_conta_cards = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+            LancamentoBanco.conta_id == conta_calculo.id,
+            LancamentoBanco.data <= mes_cards_fim,
+            LancamentoBanco.saldo != None
+        ).order_by(
+            LancamentoBanco.data.desc(),
+            LancamentoBanco.id.desc()
+        ).first()
+
+        if ultimo_lancamento:
+            total = float(ultimo_lancamento.saldo or 0)
+            manuais_posteriores = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+                LancamentoManualFinanceiro.empresa_id == empresa.id,
+                LancamentoManualFinanceiro.conta_id == conta_calculo.id,
+                LancamentoManualFinanceiro.tipo == "real",
+                LancamentoManualFinanceiro.data > ultimo_lancamento.data,
+                LancamentoManualFinanceiro.data <= mes_cards_fim
+            ).scalar() or 0
+            return total + float(manuais_posteriores)
+
+        total_manual = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
-            LancamentoManualFinanceiro.conta_id == conta.id,
+            LancamentoManualFinanceiro.conta_id == conta_calculo.id,
             LancamentoManualFinanceiro.tipo == "real",
-            LancamentoManualFinanceiro.data >= inicio_ano_cards,
             LancamentoManualFinanceiro.data <= mes_cards_fim
         ).scalar() or 0
-        saldo_banco = float(conta.saldo_inicial or 0) + float(banco_conta_cards) + float(manual_conta_cards)
+        return float(total_manual)
+
+    saldo_banco = saldo_real_conta(conta) if conta else 0.0
+    saldo_todos = sum(saldo_real_conta(c) for c in contas if c.ativa)
+
+    # Relatório mensal por semana, sempre limitado ao mês selecionado.
+    relatorio_semanal = []
+    for indice, periodo in enumerate(semanas_cards, start=1):
+        contratos_periodo = db.query(Solicitacao).filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.cancelado_em == None,
+            Solicitacao.data_evento >= periodo["inicio"],
+            Solicitacao.data_evento <= periodo["fim"]
+        ).all()
+        valor_total_periodo = sum(float(c.valor or 0) for c in contratos_periodo)
+        valor_recebido_periodo = sum(min(float(c.valor_pago or 0), float(c.valor or 0)) for c in contratos_periodo)
+        valor_receber_periodo = sum(
+            max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_periodo
+        )
+        relatorio_semanal.append({
+            "numero": indice,
+            "inicio": periodo["inicio"],
+            "fim": periodo["fim"],
+            "quantidade": len(contratos_periodo),
+            "valor_total": valor_total_periodo,
+            "valor_recebido": valor_recebido_periodo,
+            "valor_receber": valor_receber_periodo,
+        })
+
+    relatorio_total = {
+        "quantidade": sum(item["quantidade"] for item in relatorio_semanal),
+        "valor_total": sum(item["valor_total"] for item in relatorio_semanal),
+        "valor_recebido": sum(item["valor_recebido"] for item in relatorio_semanal),
+        "valor_receber": sum(item["valor_receber"] for item in relatorio_semanal),
+    }
 
     saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
 
@@ -3838,10 +3879,236 @@ def financeiro(
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
         "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber,
         "saldo_previsto": saldo_previsto, "saldo_banco": saldo_banco, "saldo_todos": saldo_todos,
+        "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção")]
     })
+
+
+
+def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
+    try:
+        inicio_mes = datetime.strptime(mes_ref, "%Y-%m").date().replace(day=1)
+    except ValueError:
+        raise HTTPException(400, "Mês inválido.")
+    indice = inicio_mes.year * 12 + inicio_mes.month
+    fim_mes = date(indice // 12, indice % 12 + 1, 1) - timedelta(days=1)
+
+    semanas = []
+    cursor = inicio_mes
+    numero = 1
+    while cursor <= fim_mes:
+        fim_semana = min(cursor + timedelta(days=6 - cursor.weekday()), fim_mes)
+        contratos = db.query(Solicitacao).filter(
+            Solicitacao.empresa_id == empresa_id,
+            Solicitacao.cancelado_em == None,
+            Solicitacao.data_evento >= cursor,
+            Solicitacao.data_evento <= fim_semana
+        ).all()
+        valor_total = sum(float(c.valor or 0) for c in contratos)
+        recebido = sum(min(float(c.valor_pago or 0), float(c.valor or 0)) for c in contratos)
+        receber = sum(max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos)
+        semanas.append({
+            "numero": numero,
+            "inicio": cursor,
+            "fim": fim_semana,
+            "quantidade": len(contratos),
+            "valor_total": valor_total,
+            "valor_recebido": recebido,
+            "valor_receber": receber,
+        })
+        cursor = fim_semana + timedelta(days=1)
+        numero += 1
+
+    total = {
+        "quantidade": sum(s["quantidade"] for s in semanas),
+        "valor_total": sum(s["valor_total"] for s in semanas),
+        "valor_recebido": sum(s["valor_recebido"] for s in semanas),
+        "valor_receber": sum(s["valor_receber"] for s in semanas),
+    }
+    return inicio_mes, fim_mes, semanas, total
+
+
+def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
+    # Gera um XLSX simples e válido sem dependência adicional.
+    linhas = [
+        ["Relatório financeiro mensal", "", "", "", "", ""],
+        [inicio_mes.strftime("%m/%Y"), "", "", "", "", ""],
+        ["Semana", "Período", "Qtd. contratos", "Valor total", "Recebido", "A receber"],
+    ]
+    for item in semanas:
+        linhas.append([
+            f"Semana {item['numero']}",
+            f"{item['inicio'].strftime('%d/%m/%Y')} a {item['fim'].strftime('%d/%m/%Y')}",
+            item["quantidade"],
+            item["valor_total"],
+            item["valor_recebido"],
+            item["valor_receber"],
+        ])
+    linhas.append([
+        "TOTAL DO MÊS", "",
+        total["quantidade"], total["valor_total"],
+        total["valor_recebido"], total["valor_receber"],
+    ])
+
+    def coluna_excel(numero):
+        resultado = ""
+        while numero:
+            numero, resto = divmod(numero - 1, 26)
+            resultado = chr(65 + resto) + resultado
+        return resultado
+
+    cells = []
+    for r, linha in enumerate(linhas, start=1):
+        for c, valor in enumerate(linha, start=1):
+            ref = f"{coluna_excel(c)}{r}"
+            if isinstance(valor, (int, float)):
+                estilo = ' s="2"' if c >= 4 else ' s="1"'
+                cells.append(f'<c r="{ref}"{estilo}><v>{valor}</v></c>')
+            else:
+                estilo = ' s="3"' if r == 1 else (' s="4"' if r in (3, len(linhas)) else '')
+                cells.append(f'<c r="{ref}" t="inlineStr"{estilo}><is><t>{xml_escape(str(valor))}</t></is></c>')
+
+    rows_xml = []
+    idx = 0
+    for r, linha in enumerate(linhas, start=1):
+        quantidade = len(linha)
+        rows_xml.append(f'<row r="{r}">' + "".join(cells[idx:idx+quantidade]) + '</row>')
+        idx += quantidade
+
+    sheet_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/>
+<col min="3" max="3" width="16" customWidth="1"/><col min="4" max="6" width="17" customWidth="1"/></cols>
+<sheetData>{''.join(rows_xml)}</sheetData>
+<mergeCells count="2"><mergeCell ref="A1:F1"/><mergeCell ref="A2:F2"/></mergeCells>
+</worksheet>'''
+    styles_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="R$ #,##0.00"/></numFmts>
+<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="12"/><name val="Calibri"/></font></fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellXfs count="5">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>
+</cellXfs></styleSheet>'''
+    arquivos = {
+        "[Content_Types].xml": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>''',
+        "_rels/.rels": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>''',
+        "xl/workbook.xml": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Relatório mensal" sheetId="1" r:id="rId1"/></sheets></workbook>''',
+        "xl/_rels/workbook.xml.rels": '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>''',
+        "xl/worksheets/sheet1.xml": sheet_xml,
+        "xl/styles.xml": styles_xml,
+    }
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as pacote:
+        for nome, conteudo in arquivos.items():
+            pacote.writestr(nome, conteudo)
+    return buffer.getvalue()
+
+
+@app.get("/painel/financeiro/relatorio-mensal.xlsx")
+def financeiro_relatorio_excel(
+        request: Request,
+        mes: str,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+    inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
+    conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total)
+    nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.xlsx"
+    return Response(
+        conteudo,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'}
+    )
+
+
+@app.get("/painel/financeiro/relatorio-mensal.pdf")
+def financeiro_relatorio_pdf(
+        request: Request,
+        mes: str,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    except Exception:
+        raise HTTPException(500, "Para gerar PDF, instale a dependência reportlab.")
+
+    inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
+    estilos = getSampleStyleSheet()
+    elementos = [
+        Paragraph(f"Relatório financeiro mensal - {inicio_mes.strftime('%m/%Y')}", estilos["Title"]),
+        Spacer(1, 14),
+    ]
+    dados = [["Semana", "Período", "Qtd. contratos", "Valor total", "Recebido", "A receber"]]
+    moeda = lambda v: f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    for item in semanas:
+        dados.append([
+            f"Semana {item['numero']}",
+            f"{item['inicio'].strftime('%d/%m/%Y')} a {item['fim'].strftime('%d/%m/%Y')}",
+            str(item["quantidade"]),
+            moeda(item["valor_total"]),
+            moeda(item["valor_recebido"]),
+            moeda(item["valor_receber"]),
+        ])
+    dados.append([
+        "TOTAL DO MÊS", "", str(total["quantidade"]),
+        moeda(total["valor_total"]), moeda(total["valor_recebido"]), moeda(total["valor_receber"])
+    ])
+    tabela = Table(dados, colWidths=[80, 155, 90, 105, 105, 105], repeatRows=1)
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#F8FAFC")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.white, colors.HexColor("#F8FAFC")]),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    elementos.append(tabela)
+    doc.build(elementos)
+    nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.pdf"
+    return Response(
+        buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'}
+    )
 
 
 @app.post("/painel/financeiro/conta")

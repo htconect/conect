@@ -39,7 +39,7 @@
       </select>
     </form>
 
-    <div class="financeiro-resumo">
+    <div class="financeiro-resumo" aria-label="Resumo mensal e acumulado">
       <div class="indicador-card indicador-entrada">
         <span class="indicador-icone">↓</span>
         <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
@@ -75,6 +75,41 @@
     </div>
   </div>
 
+  <details class="relatorio-mensal-card">
+    <summary>
+      <span><b>Relatório mensal</b> · {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
+      <span class="relatorio-acoes">
+        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
+        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
+      </span>
+    </summary>
+    <div class="relatorio-semanas-grid">
+      {% for item in relatorio_semanal %}
+      <article class="relatorio-semana">
+        <header>
+          <b>Semana {{ item.numero }}</b>
+          <small>{{ item.inicio.strftime('%d/%m') }} a {{ item.fim.strftime('%d/%m') }}</small>
+        </header>
+        <dl>
+          <div><dt>Qtd.</dt><dd>{{ item.quantidade }}</dd></div>
+          <div><dt>Valor total</dt><dd>R$ {{ item.valor_total|moeda_br }}</dd></div>
+          <div><dt>Recebido</dt><dd class="positivo">R$ {{ item.valor_recebido|moeda_br }}</dd></div>
+          <div><dt>A receber</dt><dd>R$ {{ item.valor_receber|moeda_br }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+      <article class="relatorio-semana relatorio-total">
+        <header><b>Total do mês</b><small>{{ mes_cards_inicio.strftime('%m/%Y') }}</small></header>
+        <dl>
+          <div><dt>Qtd.</dt><dd>{{ relatorio_total.quantidade }}</dd></div>
+          <div><dt>Valor total</dt><dd>R$ {{ relatorio_total.valor_total|moeda_br }}</dd></div>
+          <div><dt>Recebido</dt><dd class="positivo">R$ {{ relatorio_total.valor_recebido|moeda_br }}</dd></div>
+          <div><dt>A receber</dt><dd>R$ {{ relatorio_total.valor_receber|moeda_br }}</dd></div>
+        </dl>
+      </article>
+    </div>
+  </details>
+
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
@@ -100,7 +135,7 @@
       </select>
       <input type="date" name="data_inicial" value="{{ data_inicial }}">
       <input type="date" name="data_final" value="{{ data_final }}">
-      <select name="categoria"><option value="">Todas categorias</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
+      <select name="categoria"><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
       <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
       <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
       <button class="btn-filtrar">⌁ Filtrar</button>
@@ -1188,5 +1223,118 @@ button{
   .financeiro-rodape-cards{grid-template-columns:1fr}
   .tabela-financeiro{overflow:auto}
 }
+
+/* Resumo separado entre mês e acumulado */
+.financeiro-resumo{
+  position:relative;
+  padding-top:20px;
+}
+.financeiro-resumo::before{
+  content:"MÊS";
+  position:absolute;
+  top:2px;
+  left:4px;
+  font-size:10px;
+  font-weight:900;
+  color:#64748b;
+  letter-spacing:.08em;
+}
+.financeiro-resumo .indicador-banco{
+  margin-left:8px;
+  position:relative;
+}
+.financeiro-resumo .indicador-banco::before{
+  content:"ACUMULADO";
+  position:absolute;
+  top:-18px;
+  left:4px;
+  font-size:10px;
+  font-weight:900;
+  color:#64748b;
+  letter-spacing:.08em;
+}
+
+/* Relatório mensal por semana */
+.relatorio-mensal-card{
+  background:#fff;
+  border:1px solid var(--borda);
+  border-radius:14px;
+  box-shadow:var(--sombra);
+  overflow:hidden;
+}
+.relatorio-mensal-card>summary{
+  min-height:42px;
+  padding:0 14px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  cursor:pointer;
+  list-style:none;
+  font-size:13px;
+}
+.relatorio-mensal-card>summary::-webkit-details-marker{display:none}
+.relatorio-acoes{
+  display:flex;
+  gap:7px;
+}
+.relatorio-acoes a{
+  border:1px solid #bfdbfe;
+  border-radius:8px;
+  padding:6px 11px;
+  color:#1d4ed8;
+  text-decoration:none;
+  font-weight:900;
+  background:#eff6ff;
+}
+.relatorio-semanas-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(205px,1fr));
+  gap:10px;
+  padding:10px 12px 12px;
+  border-top:1px solid #edf1f7;
+  background:#f8fafc;
+}
+.relatorio-semana{
+  background:#fff;
+  border:1px solid #dbe4f0;
+  border-radius:12px;
+  padding:10px;
+}
+.relatorio-semana header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:8px;
+}
+.relatorio-semana header small{color:#64748b}
+.relatorio-semana dl{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:7px;
+  margin:0;
+}
+.relatorio-semana dl div{
+  background:#f8fafc;
+  border-radius:8px;
+  padding:7px;
+}
+.relatorio-semana dt{
+  font-size:10px;
+  color:#64748b;
+  text-transform:uppercase;
+  font-weight:800;
+}
+.relatorio-semana dd{
+  margin:3px 0 0;
+  font-size:13px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.relatorio-total{
+  border-color:#93c5fd;
+  background:#eff6ff;
+}
+
 </style>
 {% endblock %}
