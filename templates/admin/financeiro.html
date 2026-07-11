@@ -52,21 +52,25 @@
         <span class="indicador-icone">▣</span>
         <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
       </div>
-      <div class="indicador-card indicador-quantidade">
-        <span class="indicador-icone">#</span>
-        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b></div>
-      </div>
       <div class="indicador-card indicador-receber">
         <span class="indicador-icone">▤</span>
         <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-quantidade">
+        <span class="indicador-icone">#</span>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b></div>
       </div>
       <div class="indicador-card indicador-contrato">
         <span class="indicador-icone">▣</span>
         <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b></div>
       </div>
+      <div class="indicador-card indicador-banco">
+        <span class="indicador-icone">▣</span>
+        <div><small>Total do banco</small><b>R$ {{ saldo_banco|moeda_br }}</b></div>
+      </div>
       <div class="indicador-card indicador-contas">
         <span class="indicador-icone">⌂</span>
-        <div><small>Todas contas · acumulado no ano</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+        <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
       </div>
     </div>
   </div>
@@ -271,9 +275,8 @@
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
       <select name="semana_cards" onchange="this.form.submit()" title="Semana dos cards">
         {% for semana in semanas_cards %}
-          {% set domingo = semana + timedelta(days=6) %}
-          <option value="{{ semana.isoformat() }}" {% if semana.isoformat() == semana_cards %}selected{% endif %}>
-            Semana {{ loop.index }} · {{ semana.strftime('%d/%m') }} a {{ domingo.strftime('%d/%m') }}
+          <option value="{{ semana.inicio.isoformat() }}" {% if semana.inicio.isoformat() == semana_cards %}selected{% endif %}>
+            Semana {{ loop.index }} · {{ semana.inicio.strftime('%d/%m') }} a {{ semana.fim.strftime('%d/%m') }}
           </option>
         {% endfor %}
       </select>
@@ -282,7 +285,7 @@
     <div class="financeiro-rodape-cards">
       <div class="contrato-card contrato-quantidade">
         <span class="contrato-icone">#</span>
-        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>Segunda a domingo</em></div>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }}</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="contrato-card contrato-total">
@@ -297,7 +300,7 @@
       </div>
       <div class="dica-card">
         <b>💡 Dica</b>
-        <span>As semanas sempre começam na segunda e terminam no domingo.</span>
+        <span>As semanas seguem de segunda a domingo, respeitando o início e o fim do mês.</span>
       </div>
     </div>
   </div>
@@ -489,7 +492,7 @@ body.tela-financeiro-desktop .container-app{
 .financeiro-resumo{
   min-width:0;
   display:grid;
-  grid-template-columns:repeat(7,minmax(0,1fr));
+  grid-template-columns:repeat(8,minmax(0,1fr));
   gap:10px;
 }
 .seletor-periodo{

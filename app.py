@@ -3600,14 +3600,37 @@ def financeiro(
     mes_cards_fim = avancar_mes(mes_cards_inicio, 1) - timedelta(days=1)
     meses_cards = [avancar_mes(mes_vigente, deslocamento) for deslocamento in range(3)]
 
-    semana_vigente_inicio = hoje - timedelta(days=hoje.weekday())
+    # Semanas do mês selecionado. A primeira e a última podem ser parciais,
+    # garantindo que todos os contratos do mês apareçam em exatamente uma semana.
+    semanas_cards = []
+    cursor_semana = mes_cards_inicio
+    while cursor_semana <= mes_cards_fim:
+        dias_ate_domingo = 6 - cursor_semana.weekday()
+        fim_periodo = min(cursor_semana + timedelta(days=dias_ate_domingo), mes_cards_fim)
+        semanas_cards.append({"inicio": cursor_semana, "fim": fim_periodo})
+        cursor_semana = fim_periodo + timedelta(days=1)
+
+    semana_cards_inicio_solicitada = None
     try:
-        semana_cards_inicio = datetime.strptime(semana_cards, "%Y-%m-%d").date() if semana_cards else semana_vigente_inicio
-        semana_cards_inicio -= timedelta(days=semana_cards_inicio.weekday())
+        if semana_cards:
+            semana_cards_inicio_solicitada = datetime.strptime(semana_cards, "%Y-%m-%d").date()
     except ValueError:
-        semana_cards_inicio = semana_vigente_inicio
-    semana_cards_fim = semana_cards_inicio + timedelta(days=6)
-    semanas_cards = [semana_vigente_inicio + timedelta(days=7 * deslocamento) for deslocamento in range(3)]
+        semana_cards_inicio_solicitada = None
+
+    semana_selecionada = next(
+        (periodo for periodo in semanas_cards
+         if periodo["inicio"] == semana_cards_inicio_solicitada),
+        None
+    )
+    if not semana_selecionada:
+        semana_selecionada = next(
+            (periodo for periodo in semanas_cards
+             if periodo["inicio"] <= hoje <= periodo["fim"]),
+            semanas_cards[0]
+        )
+
+    semana_cards_inicio = semana_selecionada["inicio"]
+    semana_cards_fim = semana_selecionada["fim"]
 
     q_banco = db.query(LancamentoBanco).filter(LancamentoBanco.empresa_id == empresa.id)
     q_manual_real = db.query(LancamentoManualFinanceiro).filter(
@@ -3750,6 +3773,25 @@ def financeiro(
         LancamentoManualFinanceiro.data <= mes_cards_fim
     ).scalar() or 0
     saldo_todos = float(saldo_inicial_todas) + float(banco_todas_cards) + float(manual_todas_cards)
+
+    # Total acumulado da conta selecionada no mesmo período anual.
+    saldo_banco = 0.0
+    if conta:
+        banco_conta_cards = db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
+            LancamentoBanco.empresa_id == empresa.id,
+            LancamentoBanco.conta_id == conta.id,
+            LancamentoBanco.data >= inicio_ano_cards,
+            LancamentoBanco.data <= mes_cards_fim
+        ).scalar() or 0
+        manual_conta_cards = db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+            LancamentoManualFinanceiro.empresa_id == empresa.id,
+            LancamentoManualFinanceiro.conta_id == conta.id,
+            LancamentoManualFinanceiro.tipo == "real",
+            LancamentoManualFinanceiro.data >= inicio_ano_cards,
+            LancamentoManualFinanceiro.data <= mes_cards_fim
+        ).scalar() or 0
+        saldo_banco = float(conta.saldo_inicial or 0) + float(banco_conta_cards) + float(manual_conta_cards)
+
     saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
 
     # Cards inferiores: semana escolhida, sempre de segunda-feira a domingo.
@@ -3795,7 +3837,7 @@ def financeiro(
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
         "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber,
-        "saldo_previsto": saldo_previsto, "saldo_todos": saldo_todos,
+        "saldo_previsto": saldo_previsto, "saldo_banco": saldo_banco, "saldo_todos": saldo_todos,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção")]
