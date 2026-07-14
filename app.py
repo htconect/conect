@@ -3766,7 +3766,7 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
 
     # Acumulado do banco: independente do mês escolhido nos cards.
-    # Considera o saldo inicial e todas as movimentações reais do ano corrente até hoje.
+    # Considera todas as movimentações reais do ano corrente até hoje.
     inicio_ano = hoje.replace(month=1, day=1)
 
     def saldo_real_conta(conta_calculo):
@@ -3774,13 +3774,13 @@ def financeiro(
         Calcula quanto existe na conta neste momento.
 
         Regra:
-        saldo inicial + entradas - saídas do ano corrente até hoje.
+        entradas - saídas do ano corrente até hoje.
 
         O seletor de mês afeta apenas os cards e o relatório mensal. Lançamentos
         futuros não entram no saldo atual.
         """
-        saldo_inicial = float(conta_calculo.saldo_inicial or 0)
-
+        # O acumulado anual representa somente as movimentações reais do ano.
+        # O saldo inicial cadastrado na conta não entra neste cartão.
         total_importado = db.query(
             func.coalesce(func.sum(LancamentoBanco.valor), 0)
         ).filter(
@@ -3800,7 +3800,7 @@ def financeiro(
             LancamentoManualFinanceiro.data <= hoje
         ).scalar() or 0
 
-        return saldo_inicial + float(total_importado) + float(total_manual)
+        return float(total_importado) + float(total_manual)
 
     saldo_banco = saldo_real_conta(conta) if conta else 0.0
     saldo_todos = sum(saldo_real_conta(c) for c in contas if c.ativa)
