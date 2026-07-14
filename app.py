@@ -3765,21 +3765,19 @@ def financeiro(
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
 
-    # Saldo real por conta.
-    # Quando há extrato importado, o saldo mais recente do extrato é a fonte principal.
-    # Lançamentos manuais posteriores ao último extrato são somados ao saldo.
-    # Sem extrato, o total é a soma dos lançamentos manuais reais.
+    # Acumulado do banco: independente do mês escolhido nos cards.
+    # Considera o saldo inicial e todas as movimentações reais do ano corrente até hoje.
+    inicio_ano = hoje.replace(month=1, day=1)
+
     def saldo_real_conta(conta_calculo):
         """
-        Calcula o saldo da conta pela movimentação registrada no sistema.
+        Calcula quanto existe na conta neste momento.
 
         Regra:
-        saldo inicial + lançamentos importados + lançamentos manuais reais.
+        saldo inicial + entradas - saídas do ano corrente até hoje.
 
-        Dessa forma, a mesma conta pode trabalhar somente com importação,
-        somente com lançamentos manuais ou com os dois formatos ao mesmo tempo.
-        O campo de saldo vindo do extrato é usado apenas como informação de
-        conferência e não como base do cálculo.
+        O seletor de mês afeta apenas os cards e o relatório mensal. Lançamentos
+        futuros não entram no saldo atual.
         """
         saldo_inicial = float(conta_calculo.saldo_inicial or 0)
 
@@ -3788,7 +3786,8 @@ def financeiro(
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
             LancamentoBanco.conta_id == conta_calculo.id,
-            LancamentoBanco.data <= mes_cards_fim
+            LancamentoBanco.data >= inicio_ano,
+            LancamentoBanco.data <= hoje
         ).scalar() or 0
 
         total_manual = db.query(
@@ -3797,7 +3796,8 @@ def financeiro(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
             LancamentoManualFinanceiro.conta_id == conta_calculo.id,
             LancamentoManualFinanceiro.tipo == "real",
-            LancamentoManualFinanceiro.data <= mes_cards_fim
+            LancamentoManualFinanceiro.data >= inicio_ano,
+            LancamentoManualFinanceiro.data <= hoje
         ).scalar() or 0
 
         return saldo_inicial + float(total_importado) + float(total_manual)
