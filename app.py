@@ -802,6 +802,7 @@ def garantir_colunas_novas():
             "acesso_financeiro": "BOOLEAN DEFAULT false",
             "acesso_cadastros": "BOOLEAN DEFAULT false",
             "acesso_relatorios": "BOOLEAN DEFAULT false",
+            "acesso_nao_roteirizados": "BOOLEAN DEFAULT false",
         }
         for coluna, tipo in novas_permissoes.items():
             if coluna not in cols_usu:
