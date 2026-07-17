@@ -89,19 +89,24 @@
             data-agenda-id="{{ a.id }}">
         <summary>
             <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
-            <div class="data-agenda">{{ data_agenda }}</div>
-            <div class="info-agenda">
-                <b>{{ hora_card_operacao }} / {{ hora_card_contrato }} · {{ a.solicitacao.cliente.nome }}</b>
-                <small>{{ item_nome }} · {{ a.bairro or a.solicitacao.bairro or '-' }}</small>
-                <small class="financeiro-mini">Falta R$ {{ ((a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or
-                    0))|moeda_br }}</small>
-                {% if retirada_obrigatoria %}
-                <small class="retirada-obrigatoria-mini">Retirada obrigatória solicitada pelo cliente: {{ data_entrega_texto }} às {{ hora_entrega }}</small>
+            <div class="operacao-data-card">
+                <small>{{ hora_card_operacao }}</small>
+                <strong>{{ data_agenda }}</strong>
+            </div>
+            <div class="info-agenda operacao-info-card">
+                <b>{{ item_nome }}</b>
+                <small>{{ a.solicitacao.cliente.nome }}</small>
+                <small>{{ a.bairro or a.solicitacao.bairro or '-' }}</small>
+                <em>{{ 'RETIRADA' if tipo == 'retirada' else 'ENTREGA' }}</em>
+            </div>
+            <div class="status-rota-card {% if concluido %}status-encerrado{% elif roteirizado %}status-roteirizado{% else %}status-nao-roteirizado{% endif %}">
+                {% if concluido %}
+                    Encerrado
+                {% elif roteirizado %}
+                    Roteirizado{% if a.equipe %}<small>{{ a.equipe.nome }}</small>{% endif %}
+                {% else %}
+                    Não roteirizado
                 {% endif %}
-                {% if a.solicitacao.observacoes %}
-                <small class="observacao-destaque">{{ a.solicitacao.observacoes }}</small>
-                {% endif %}
-                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }} · {% if roteirizado %}Roteirizado · {{ a.equipe.nome if a.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}{% if concluido %} · encerrado{% endif %}</em>
             </div>
             <span class="seta-card seta-expandir">⌄</span>
         </summary>
