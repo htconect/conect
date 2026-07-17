@@ -51,10 +51,15 @@
     '' %}
     {% set data_contrato_texto = a.solicitacao.data_evento.strftime('%d/%m/%Y') if a.solicitacao and
     a.solicitacao.data_evento else '-' %}
-    {% set hora_contrato_texto = a.solicitacao.hora_inicio.strftime('%H:%M') if a.solicitacao and
-    a.solicitacao.hora_inicio else '-' %}
+    {% if tipo == 'retirada' %}
+        {% set hora_contrato_obj = a.solicitacao.retirada_hora or a.solicitacao.hora_fim or a.solicitacao.hora_inicio if a.solicitacao else none %}
+    {% else %}
+        {% set hora_contrato_obj = a.solicitacao.hora_inicio if a.solicitacao else none %}
+    {% endif %}
+    {% set hora_contrato_texto = hora_contrato_obj.strftime('%H:%M') if hora_contrato_obj else '-' %}
     {% set hora_card_operacao = hora_entrega|replace(':00','H') if hora_entrega != '--' else '--' %}
     {% set hora_card_contrato = hora_contrato_texto|replace(':00','H') if hora_contrato_texto != '-' else '-' %}
+    {% set horarios_card = hora_card_operacao ~ (' / ' ~ hora_card_contrato if hora_card_contrato != '-' else '') %}
     {% set entrega_fora_data = tipo == 'entrega' and a.solicitacao and a.solicitacao.data_evento and a.data and a.data
     != a.solicitacao.data_evento %}
     {% set retirada_obrigatoria = tipo == 'retirada' and a.solicitacao and a.solicitacao.retirada_obrigatoria %}
@@ -90,7 +95,7 @@
         <summary>
             <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
             <div class="operacao-data-card">
-                <small>{{ hora_card_operacao }}</small>
+                <small>{{ horarios_card }}</small>
                 <strong>{{ data_agenda }}</strong>
             </div>
             <div class="info-agenda operacao-info-card">
