@@ -124,6 +124,13 @@
         <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
       </div>
     </div>
+    <div class="box-mini bloco-permissoes">
+      <h3>Equipes visíveis</h3>
+      <div class="grade-permissoes">
+        <label class="check"><input type="checkbox" name="acesso_equipe_1" value="1" checked> Equipe 1</label>
+        <label class="check"><input type="checkbox" name="acesso_equipe_2" value="1"> Equipe 2</label>
+      </div>
+    </div>
     <div class="acoes-formulario acoes-usuario-form">
       <button id="botao_salvar_usuario">Criar usuário</button>
       <button type="button" id="botao_cancelar_edicao" class="botao-secundario" style="display:none" onclick="limparEdicaoUsuario()">Cancelar edição</button>
@@ -146,7 +153,7 @@
           {% if u.acesso_financeiro %}{% set _ = acessos.append("Financeiro") %}{% endif %}
           {% if u.acesso_cadastros %}{% set _ = acessos.append("Cadastros") %}{% endif %}
           {% if u.acesso_relatorios %}{% set _ = acessos.append("Relatórios") %}{% endif %}
-          Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }}
+          Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }} · Equipes: {% if u.acesso_equipe_1 %}1{% endif %}{% if u.acesso_equipe_1 and u.acesso_equipe_2 %}, {% endif %}{% if u.acesso_equipe_2 %}2{% endif %}
         </small>
       </div>
       <div class="acoes-usuario">
@@ -164,7 +171,9 @@
             "acesso_buscar_cliente": u.acesso_buscar_cliente,
             "acesso_financeiro": u.acesso_financeiro,
             "acesso_cadastros": u.acesso_cadastros,
-            "acesso_relatorios": u.acesso_relatorios
+            "acesso_relatorios": u.acesso_relatorios,
+            "acesso_equipe_1": u.acesso_equipe_1,
+            "acesso_equipe_2": u.acesso_equipe_2
           }|tojson }})'>✏️</button>
         <a class="acao-icone" title="Excluir usuário" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
       </div>
@@ -205,7 +214,9 @@ function editarUsuario(usuario) {
     "acesso_buscar_cliente",
     "acesso_financeiro",
     "acesso_cadastros",
-    "acesso_relatorios"
+    "acesso_relatorios",
+    "acesso_equipe_1",
+    "acesso_equipe_2"
   ];
   campos.forEach((campo) => {
     const elemento = document.querySelector(`[name="${campo}"]`);

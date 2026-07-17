@@ -18,6 +18,22 @@
         <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
     </label>
 
+    <label>
+        <span>Equipe</span>
+        <select name="equipe" onchange="this.form.submit()">
+            {% for numero in equipes_permitidas %}
+            <option value="{{ numero }}" {% if equipe_selecionada == numero %}selected{% endif %}>Equipe {{ numero }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>
+        <span>Situação</span>
+        <select name="situacao_rota" onchange="this.form.submit()">
+            <option value="roteirizado" {% if situacao_rota == 'roteirizado' %}selected{% endif %}>Roteirizado</option>
+            <option value="nao_roteirizado" {% if situacao_rota == 'nao_roteirizado' %}selected{% endif %}>Não roteirizado</option>
+        </select>
+    </label>
+
     <div class="filtros-operacao filtros-operacao-compactos">
         <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %}
                       onchange="this.form.submit()"> 🔵 Entregar</label>
@@ -44,9 +60,7 @@
     {% set tipo = a.tipo_evento or 'entrega' %}
     {% set falta_receber = (a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0) %}
     {% set concluido = a.status_operacional == 'concluido' %}
-    {% set roteirizado = (a.previsao_entrega or (a.observacoes_operacionais and 'Roteirização salva' in
-    a.observacoes_operacionais) or a.ordem_rota or (a.solicitacao and a.solicitacao.data_evento and a.data and a.data !=
-    a.solicitacao.data_evento)) %}
+    {% set roteirizado = (a.previsao_entrega and a.ordem_rota in [1, 2]) %}
     {% set data_contrato_iso = a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else
     '' %}
     {% set data_contrato_texto = a.solicitacao.data_evento.strftime('%d/%m/%Y') if a.solicitacao and
@@ -86,7 +100,7 @@
     {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
     <details
             class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
-            draggable="true" data-agenda-id="{{ a.id }}">
+            draggable="false" data-agenda-id="{{ a.id }}">
         <summary>
             <div class="alca-arrastar" title="Arrastar para reordenar">⋮⋮</div>
             <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
@@ -102,7 +116,7 @@
                 {% if a.solicitacao.observacoes %}
                 <small class="observacao-destaque">{{ a.solicitacao.observacoes }}</small>
                 {% endif %}
-                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}{% if concluido %} encerrado{% endif %}</em>
+                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }} · {{ 'Roteirizado · Equipe ' ~ a.ordem_rota if roteirizado else 'Não roteirizado' }}{% if concluido %} · encerrado{% endif %}</em>
             </div>
             <span class="seta-card seta-expandir">⌄</span>
         </summary>
@@ -115,6 +129,14 @@
                 contrato</a>
 
             <div class="linha">
+                <div>
+                    <label>Equipe</label>
+                    <select name="equipe" required>
+                        {% for numero in equipes_permitidas %}
+                        <option value="{{ numero }}" {% if (a.ordem_rota or equipe_selecionada) == numero %}selected{% endif %}>Equipe {{ numero }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
                 <div>
                     <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
                     <input type="date" name="data_operacao" value="{{ data_entrega }}" {% if retirada_obrigatoria %}readonly disabled{% endif %}>

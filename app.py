@@ -774,6 +774,8 @@ def garantir_colunas_novas():
             "acesso_financeiro": "BOOLEAN DEFAULT false",
             "acesso_cadastros": "BOOLEAN DEFAULT false",
             "acesso_relatorios": "BOOLEAN DEFAULT false",
+            "acesso_equipe_1": "BOOLEAN DEFAULT true",
+            "acesso_equipe_2": "BOOLEAN DEFAULT false",
         }
         for coluna, tipo in novas_permissoes.items():
             if coluna not in cols_usu:
@@ -1360,6 +1362,8 @@ def admin_criar_usuario_empresa(
         acesso_financeiro: Optional[str] = Form(None),
         acesso_cadastros: Optional[str] = Form(None),
         acesso_relatorios: Optional[str] = Form(None),
+        acesso_equipe_1: Optional[str] = Form(None),
+        acesso_equipe_2: Optional[str] = Form(None),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
@@ -1398,6 +1402,8 @@ def admin_criar_usuario_empresa(
         "acesso_financeiro": bool(acesso_financeiro),
         "acesso_cadastros": bool(acesso_cadastros),
         "acesso_relatorios": bool(acesso_relatorios),
+        "acesso_equipe_1": bool(acesso_equipe_1),
+        "acesso_equipe_2": bool(acesso_equipe_2),
     }
 
     if existente:
@@ -2026,6 +2032,23 @@ def copiar_contrato(contrato_id: int, db: Session = Depends(get_db), empresa: Em
     return RedirectResponse(f"/painel/contrato/{novo.id}", status_code=303)
 
 
+def equipes_permitidas_usuario(request: Request, db: Session) -> list[int]:
+    if request.session.get("acesso_total"):
+        return [1, 2]
+    usuario_id = request.session.get("usuario_empresa_id")
+    usuario = db.get(UsuarioEmpresa, usuario_id) if usuario_id else None
+    equipes = []
+    if usuario and getattr(usuario, "acesso_equipe_1", True):
+        equipes.append(1)
+    if usuario and getattr(usuario, "acesso_equipe_2", False):
+        equipes.append(2)
+    return equipes or [1]
+
+
+def agenda_roteirizada(item: Agenda) -> bool:
+    return bool((item.previsao_entrega or "").strip() and (item.ordem_rota or 0) in (1, 2))
+
+
 @app.get("/painel/reservas", response_class=HTMLResponse)
 def preparar_reservas(
         request: Request,
@@ -2034,12 +2057,20 @@ def preparar_reservas(
         mostrar_entregas: str = "",
         mostrar_retiradas: str = "",
         mostrar_concluidas: str = "",
+        equipe: str = "",
+        situacao_rota: str = "roteirizado",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     inicio, fim = periodo_semana_atual()
     data_inicial = data_inicial or inicio.isoformat()
     data_final = data_final or fim.isoformat()
+    equipes_permitidas = equipes_permitidas_usuario(request, db)
+    equipe_salva = request.session.get("operacao_equipe")
+    equipe_num = int(equipe) if equipe in {"1", "2"} else (equipe_salva if equipe_salva in equipes_permitidas else equipes_permitidas[0])
+    if equipe_num not in equipes_permitidas:
+        equipe_num = equipes_permitidas[0]
+    request.session["operacao_equipe"] = equipe_num
 
     # Checkbox desmarcado não vem no GET. Se for o primeiro acesso da tela,
     # começa com Entregar e Retirar ligados. Depois disso, respeita exatamente
@@ -2055,6 +2086,11 @@ def preparar_reservas(
         mostrar_concluidas = "1" if "mostrar_concluidas" in query else ""
 
     q = db.query(Agenda).filter_by(empresa_id=empresa.id)
+    if situacao_rota == "nao_roteirizado":
+        q = q.filter((Agenda.previsao_entrega == None) | (Agenda.previsao_entrega == "") | (~Agenda.ordem_rota.in_([1, 2])))
+    else:
+        situacao_rota = "roteirizado"
+        q = q.filter(Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota == equipe_num)
     if data_inicial:
         q = q.filter(Agenda.data >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
     if data_final:
@@ -2078,18 +2114,11 @@ def preparar_reservas(
     sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
 
     def chave_operacao(a: Agenda):
-        # Ordem operacional:
-        # 1) se já foi roteirizado, usa data/hora de entrega ou busca;
-        # 2) dentro do mesmo horário, respeita a ordem manual do arrastar;
-        # 3) se ainda não foi roteirizado, usa data/hora do contrato.
-        roteirizado = bool((a.previsao_entrega or "").strip() or (a.ordem_rota or 0) or (
-                a.observacoes_operacionais and "Roteirização salva" in a.observacoes_operacionais))
         sol = a.solicitacao
-        data_base = (a.data if roteirizado and a.data else (sol.data_evento if sol else a.data))
-        hora_base = (a.hora_inicio if roteirizado and a.hora_inicio else (sol.hora_inicio if sol else a.hora_inicio))
-        ordem_manual = a.ordem_rota or 999999
+        data_base = a.data if agenda_roteirizada(a) else (sol.data_evento if sol else a.data)
+        hora_base = a.hora_inicio if agenda_roteirizada(a) else (sol.hora_inicio if sol else a.hora_inicio)
         nome = (sol.cliente.nome if sol and sol.cliente else "").lower()
-        return (data_base or date.max, hora_base or time.max, ordem_manual, nome, a.id)
+        return (data_base or date.max, hora_base or time.max, nome, a.id)
 
     itens = sorted(itens, key=chave_operacao)
     return templates.TemplateResponse("admin/preparar.html", {
@@ -2102,6 +2131,9 @@ def preparar_reservas(
         "mostrar_entregas": mostrar_entregas,
         "mostrar_retiradas": mostrar_retiradas,
         "mostrar_concluidas": mostrar_concluidas,
+        "equipe_selecionada": equipe_num,
+        "equipes_permitidas": equipes_permitidas,
+        "situacao_rota": situacao_rota,
         "mensagens": mensagens_empresa(empresa),
     })
 
@@ -4727,10 +4759,18 @@ def agenda(
         ativos: str = "1",
         credito: str = "",
         cancelados: str = "",
+        equipe: str = "",
+        situacao_rota: str = "todos",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     garantir_agenda_reservas(db, empresa.id)
+    equipes_permitidas = equipes_permitidas_usuario(request, db)
+    equipe_salva = request.session.get("agenda_equipe")
+    equipe_num = int(equipe) if equipe in {"1", "2"} else (equipe_salva if equipe_salva in equipes_permitidas else equipes_permitidas[0])
+    if equipe_num not in equipes_permitidas:
+        equipe_num = equipes_permitidas[0]
+    request.session["agenda_equipe"] = equipe_num
     inicio, fim = periodo_semana_atual()
 
     # Mantém o último filtro usado na agenda para a equipe não precisar refazer a busca.
@@ -4748,6 +4788,8 @@ def agenda(
         "ativos": "1" if ativos else "",
         "credito": "1" if credito else "",
         "cancelados": "1" if cancelados else "",
+        "equipe": equipe_num,
+        "situacao_rota": situacao_rota,
     }
 
     status_credito = {"aguardando_nova_data"}
@@ -4763,6 +4805,16 @@ def agenda(
         filtros_status.append("cancelados")
 
     q = db.query(Solicitacao).filter_by(empresa_id=empresa.id)
+    agenda_ids = db.query(Agenda.solicitacao_id).filter(Agenda.empresa_id == empresa.id)
+    if situacao_rota == "roteirizado":
+        agenda_ids = agenda_ids.filter(Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota == equipe_num)
+        q = q.filter(Solicitacao.id.in_(agenda_ids))
+    elif situacao_rota == "nao_roteirizado":
+        roteirizados_ids = db.query(Agenda.solicitacao_id).filter(Agenda.empresa_id == empresa.id, Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota.in_([1, 2]))
+        q = q.filter(~Solicitacao.id.in_(roteirizados_ids))
+    else:
+        situacao_rota = "todos"
+
     if data_inicial:
         q = q.filter(Solicitacao.data_evento >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
     if data_final:
@@ -4801,6 +4853,9 @@ def agenda(
         "filtro_ativos": bool(ativos),
         "filtro_credito": bool(credito),
         "filtro_cancelados": bool(cancelados),
+        "equipe_selecionada": equipe_num,
+        "equipes_permitidas": equipes_permitidas,
+        "situacao_rota": situacao_rota,
         "mensagens": mensagens,
     })
 
@@ -4826,6 +4881,7 @@ def atualizar_roteiro(
         data_evento: str = Form(""),
         data_operacao: str = Form(""),
         status_operacional: str = Form("pendente"),
+        equipe: int = Form(1),
         link_localizacao: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
@@ -4850,6 +4906,10 @@ def atualizar_roteiro(
         destino = urlunparse((partes.scheme, partes.netloc, partes.path, partes.params, urlencode(qs), partes.fragment))
         return RedirectResponse(destino, status_code=303)
 
+    equipes_permitidas = equipes_permitidas_usuario(request, db)
+    if equipe not in equipes_permitidas:
+        raise HTTPException(403, "Você não possui acesso a esta equipe.")
+    item.ordem_rota = equipe  # campo existente reaproveitado para identificar a equipe
     item.previsao_entrega = previsao_entrega
     item.link_localizacao = link_localizacao
     item.status_operacional = novo_status
@@ -4872,6 +4932,8 @@ def atualizar_roteiro(
         item.data = nova_data
 
     previsao_entrega = (previsao_entrega or "").strip()
+    if not data_informada or not previsao_entrega:
+        raise HTTPException(400, "Informe data, hora e equipe para roteirizar.")
     if not retirada_bloqueada and previsao_entrega:
         try:
             nova_hora = datetime.strptime(previsao_entrega, "%H:%M").time()

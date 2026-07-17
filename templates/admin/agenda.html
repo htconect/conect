@@ -15,6 +15,23 @@
     <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
   </label>
 
+  <label>
+    <span>Equipe</span>
+    <select name="equipe" onchange="this.form.submit()">
+      {% for numero in equipes_permitidas %}
+      <option value="{{ numero }}" {% if equipe_selecionada == numero %}selected{% endif %}>Equipe {{ numero }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    <span>Roteirização</span>
+    <select name="situacao_rota" onchange="this.form.submit()">
+      <option value="todos" {% if situacao_rota == 'todos' %}selected{% endif %}>Todos</option>
+      <option value="roteirizado" {% if situacao_rota == 'roteirizado' %}selected{% endif %}>Roteirizado</option>
+      <option value="nao_roteirizado" {% if situacao_rota == 'nao_roteirizado' %}selected{% endif %}>Não roteirizado</option>
+    </select>
+  </label>
+
   <div class="filtros-status-agenda">
     <label class="check">
       <input type="checkbox" name="ativos" value="1" {% if filtro_ativos %}checked{% endif %} onchange="this.form.submit()">
@@ -43,6 +60,9 @@
     <div class="info-agenda">
       <b>{{ hora_base }} · {{ s.cliente.nome }}</b>
       <small>{{ item_nome }} · {{ s.bairro or s.cliente.bairro or '-' }}</small>
+      {% set evento_rota = s.agenda %}
+      {% set esta_roteirizado = evento_rota and evento_rota.previsao_entrega and evento_rota.ordem_rota in [1, 2] %}
+      <small class="financeiro-mini">{{ 'Roteirizado · Equipe ' ~ evento_rota.ordem_rota if esta_roteirizado else 'Não roteirizado' }}</small>
       {% if eh_credito %}
         <small class="financeiro-mini">Situação: Em crédito</small>
       {% elif eh_cancelado %}
