@@ -1390,7 +1390,7 @@ def admin_criar_usuario_empresa(
         nome: str = Form(...),
         usuario: str = Form(...),
         senha: Optional[str] = Form(None),
-        usuario_id: Optional[int] = Form(None),
+        usuario_id: Optional[str] = Form(None),
         ativo: Optional[str] = Form("1"),
         acesso_agenda: Optional[str] = Form(None),
         acesso_operacao: Optional[str] = Form(None),
@@ -1410,9 +1410,10 @@ def admin_criar_usuario_empresa(
     if not usuario_limpo:
         raise HTTPException(400, "Informe o usuário.")
 
+    usuario_id_int = int(usuario_id) if usuario_id and str(usuario_id).strip() else None
     existente = None
-    if usuario_id:
-        existente = db.get(UsuarioEmpresa, usuario_id)
+    if usuario_id_int:
+        existente = db.get(UsuarioEmpresa, usuario_id_int)
         if not existente or existente.empresa_id != empresa.id:
             raise HTTPException(404, "Usuário não encontrado.")
 
