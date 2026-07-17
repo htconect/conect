@@ -892,8 +892,6 @@ def garantir_colunas_novas():
 
     if "agenda" in tabelas:
         cols_ag = colunas("agenda")
-        if "ordem_rota" not in cols_ag:
-            comandos.append("ALTER TABLE agenda ADD COLUMN ordem_rota INTEGER DEFAULT 0")
         if "previsao_entrega" not in cols_ag:
             comandos.append("ALTER TABLE agenda ADD COLUMN previsao_entrega VARCHAR(5)")
         if "link_localizacao" not in cols_ag:
@@ -1063,7 +1061,6 @@ def criar_eventos_operacionais(db: Session, item: Solicitacao):
         # A data/hora do contrato continua em Solicitacao; a operação usa Agenda.
         ja_roteirizado = bool(
             (entrega.previsao_entrega or "").strip()
-            or (entrega.ordem_rota or 0)
             or (entrega.observacoes_operacionais and "Roteirização salva" in entrega.observacoes_operacionais)
             or (entrega.data and item.data_evento and entrega.data != item.data_evento)
             or (entrega.hora_inicio and item.hora_inicio and entrega.hora_inicio != item.hora_inicio)
@@ -2174,12 +2171,31 @@ def preparar_reservas(
                                                                               Solicitacao.cliente_id == Cliente.id).all()
     sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
 
+    def hora_roteirizada(a: Agenda):
+        """
+        Retorna a hora que aparece no card da operação.
+
+        Registros antigos podem ter previsao_entrega diferente de hora_inicio.
+        A ordenação precisa usar exatamente a hora roteirizada exibida na tela,
+        nunca posição salva, ordem de criação ou nome do cliente.
+        """
+        if a.roteirizado:
+            previsao = (a.previsao_entrega or "").strip()
+            if previsao:
+                try:
+                    return datetime.strptime(previsao, "%H:%M").time()
+                except ValueError:
+                    pass
+            if a.hora_inicio:
+                return a.hora_inicio
+
+        sol = a.solicitacao
+        return sol.hora_inicio if sol and sol.hora_inicio else (a.hora_inicio or time.max)
+
     def chave_operacao(a: Agenda):
         sol = a.solicitacao
         data_base = a.data if a.roteirizado and a.data else (sol.data_evento if sol else a.data)
-        hora_base = a.hora_inicio if a.roteirizado and a.hora_inicio else (sol.hora_inicio if sol else a.hora_inicio)
-        nome = (sol.cliente.nome if sol and sol.cliente else "").lower()
-        return (data_base or date.max, hora_base or time.max, nome, a.id)
+        return (data_base or date.max, hora_roteirizada(a), a.id)
 
     itens = sorted(itens, key=chave_operacao)
     return templates.TemplateResponse("admin/preparar.html", {
@@ -4972,7 +4988,6 @@ def atualizar_roteiro(
     item.previsao_entrega = previsao_entrega
     item.equipe_id = equipe.id
     item.roteirizado = True
-    item.ordem_rota = 0
     item.link_localizacao = link_localizacao
     item.status_operacional = novo_status
 
@@ -5025,34 +5040,6 @@ def atualizar_roteiro(
     db.commit()
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
-
-
-@app.post("/painel/reservas/roteirizacao")
-async def salvar_roteirizacao_geral(
-        request: Request,
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)
-):
-    dados = await request.json()
-    ids = dados.get("ordem", [])
-    usuario = request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-    for posicao, agenda_id in enumerate(ids, start=1):
-        try:
-            agenda_id = int(agenda_id)
-        except (TypeError, ValueError):
-            continue
-
-        item = db.get(Agenda, agenda_id)
-        if not item or item.empresa_id != empresa.id:
-            continue
-
-        marcador = f"[{agora}] Organização visual da operação salva por {usuario}."
-        item.observacoes_operacionais = ((item.observacoes_operacionais or "") + "\n" + marcador).strip()
-
-    db.commit()
-    return {"ok": True}
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)

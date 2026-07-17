@@ -312,7 +312,6 @@ class Agenda(Base):
     titulo = Column(String(180), nullable=False)
     bairro = Column(String(120))
     criado_em = Column(DateTime, server_default=func.now())
-    ordem_rota = Column(Integer, default=0)
     equipe_id = Column(Integer, ForeignKey("equipes.id"), nullable=True, index=True)
     roteirizado = Column(Boolean, default=False)
     previsao_entrega = Column(String(5))
