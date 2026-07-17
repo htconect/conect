@@ -1021,13 +1021,13 @@ def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
         )
         db.add(retirada)
 
-    # A busca obrigatória nasce com a data/hora do contrato, mas depois que for
-    # roteirizada esses valores ficam congelados até um novo Salvar da rota.
-    if not retirada.roteirizado:
-        retirada.data = data_retirada
-        retirada.hora_inicio = hora_retirada
-        retirada.hora_fim = None
-        retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
+    # Retirada obrigatória é uma exigência contratual. Ao alterar a data/hora
+    # no contrato, a rota deve acompanhar imediatamente, mesmo que já estivesse
+    # roteirizada. Assim as duas horas exibidas permanecem iguais.
+    retirada.data = data_retirada
+    retirada.hora_inicio = hora_retirada
+    retirada.hora_fim = None
+    retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
     retirada.titulo = titulo_base
     retirada.bairro = item.bairro
 
@@ -1398,6 +1398,7 @@ def admin_criar_usuario_empresa(
         acesso_financeiro: Optional[str] = Form(None),
         acesso_cadastros: Optional[str] = Form(None),
         acesso_relatorios: Optional[str] = Form(None),
+        acesso_nao_roteirizados: Optional[str] = Form(None),
         equipes_permitidas: list[int] = Form([]),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
@@ -1438,6 +1439,7 @@ def admin_criar_usuario_empresa(
         "acesso_financeiro": bool(acesso_financeiro),
         "acesso_cadastros": bool(acesso_cadastros),
         "acesso_relatorios": bool(acesso_relatorios),
+        "acesso_nao_roteirizados": bool(acesso_nao_roteirizados),
     }
 
     if existente:
@@ -2096,6 +2098,17 @@ def copiar_contrato(contrato_id: int, db: Session = Depends(get_db), empresa: Em
     return RedirectResponse(f"/painel/contrato/{novo.id}", status_code=303)
 
 
+def usuario_pode_ver_nao_roteirizados(request: Request, db: Session) -> bool:
+    """Administrador vê tudo; usuário comum depende da permissão cadastrada."""
+    if request.session.get("acesso_total"):
+        return True
+    usuario_id = request.session.get("usuario_empresa_id")
+    if not usuario_id:
+        return False
+    usuario = db.get(UsuarioEmpresa, usuario_id)
+    return bool(usuario and usuario.ativo and usuario.acesso_nao_roteirizados)
+
+
 def equipes_visiveis_usuario(request: Request, db: Session, empresa_id: int):
     q = db.query(Equipe).filter(Equipe.empresa_id == empresa_id, Equipe.ativa == True)
     if request.session.get("acesso_total"):
@@ -2144,8 +2157,22 @@ def preparar_reservas(
         mostrar_concluidas = "1" if "mostrar_concluidas" in query else ""
 
     q = db.query(Agenda).filter_by(empresa_id=empresa.id)
+    pode_ver_nao_roteirizados = usuario_pode_ver_nao_roteirizados(request, db)
     if equipe_id:
-        q = q.filter((Agenda.equipe_id == equipe_id) | (Agenda.roteirizado == False))
+        # Usuário restrito só passa a enxergar o card quando ele for roteirizado
+        # para uma de suas equipes. Cards sem rota ficam apenas para quem possui
+        # a permissão "Roteirizados e não roteirizados".
+        if pode_ver_nao_roteirizados:
+            q = q.filter(
+                (Agenda.equipe_id == equipe_id) |
+                (Agenda.roteirizado == False) |
+                (Agenda.roteirizado == None)
+            )
+        else:
+            q = q.filter(
+                Agenda.equipe_id == equipe_id,
+                Agenda.roteirizado == True
+            )
     if situacao_rota == "roteirizado":
         q = q.filter(Agenda.roteirizado == True)
     elif situacao_rota == "nao_roteirizado":

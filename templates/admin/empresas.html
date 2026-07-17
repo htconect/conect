@@ -140,6 +140,7 @@
       <div class="grade-permissoes">
         <label class="check"><input type="checkbox" name="acesso_agenda" value="1"> Agenda</label>
         <label class="check"><input type="checkbox" name="acesso_operacao" value="1"> Operação</label>
+        <label class="check"><input type="checkbox" name="acesso_nao_roteirizados" value="1"> Roteirizados e não roteirizados</label>
         <label class="check"><input type="checkbox" name="acesso_buscar_cliente" value="1"> Buscar cliente</label>
         <label class="check"><input type="checkbox" name="acesso_financeiro" value="1"> Financeiro</label>
         <label class="check"><input type="checkbox" name="acesso_cadastros" value="1"> Cadastros</label>
@@ -169,6 +170,7 @@
           {% set acessos = [] %}
           {% if u.acesso_agenda %}{% set _ = acessos.append("Agenda") %}{% endif %}
           {% if u.acesso_operacao %}{% set _ = acessos.append("Operação") %}{% endif %}
+          {% if u.acesso_nao_roteirizados %}{% set _ = acessos.append("Roteirizados e não roteirizados") %}{% endif %}
           {% if u.acesso_buscar_cliente %}{% set _ = acessos.append("Buscar cliente") %}{% endif %}
           {% if u.acesso_financeiro %}{% set _ = acessos.append("Financeiro") %}{% endif %}
           {% if u.acesso_cadastros %}{% set _ = acessos.append("Cadastros") %}{% endif %}
@@ -188,6 +190,7 @@
             "ativo": u.ativo,
             "acesso_agenda": u.acesso_agenda,
             "acesso_operacao": u.acesso_operacao,
+            "acesso_nao_roteirizados": u.acesso_nao_roteirizados,
             "acesso_buscar_cliente": u.acesso_buscar_cliente,
             "acesso_financeiro": u.acesso_financeiro,
             "acesso_cadastros": u.acesso_cadastros,
@@ -230,6 +233,7 @@ function editarUsuario(usuario) {
   const campos = [
     "acesso_agenda",
     "acesso_operacao",
+    "acesso_nao_roteirizados",
     "acesso_buscar_cliente",
     "acesso_financeiro",
     "acesso_cadastros",

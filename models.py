@@ -58,6 +58,8 @@ class UsuarioEmpresa(Base):
     acesso_financeiro = Column(Boolean, default=False)
     acesso_cadastros = Column(Boolean, default=False)
     acesso_relatorios = Column(Boolean, default=False)
+    # Permite visualizar cards ainda sem equipe/roteirização na Operação.
+    acesso_nao_roteirizados = Column(Boolean, default=False)
     criado_em = Column(DateTime, server_default=func.now())
 
     empresa = relationship("Empresa")

@@ -142,6 +142,12 @@
                 <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
                 <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
             </div>
+            {% if a.solicitacao.observacoes %}
+            <div class="observacoes-contrato-operacao">
+                <b>Observações do contrato</b>
+                <p>{{ a.solicitacao.observacoes }}</p>
+            </div>
+            {% endif %}
             <p class="texto-discreto operacao-ajuda">
                 {% if retirada_obrigatoria %}
                   Retirada obrigatória solicitada pelo cliente. Data e hora bloqueadas para respeitar o contrato.
@@ -156,6 +162,7 @@
                 <button type="button" class="botao-mini botao-whats-btn escolher-contato-whatsapp"
                    data-msg="{{ msg_preparacao|urlencode }}"
                    data-cliente-nome="{{ a.solicitacao.cliente.nome or 'Responsável pelo contrato' }}"
+                   data-cliente-contrato="{{ a.solicitacao.cliente.nome or 'cliente' }}"
                    data-cliente-tel="{{ tel_limpo }}"
                    data-local-nome="{{ a.solicitacao.local_responsavel_nome or '' }}"
                    data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
@@ -166,6 +173,7 @@
                 <button type="button" class="botao-mini botao-whats-btn botao-a-caminho escolher-contato-whatsapp"
                    data-msg="{{ msg_caminho|urlencode }}"
                    data-cliente-nome="{{ a.solicitacao.cliente.nome or 'Responsável pelo contrato' }}"
+                   data-cliente-contrato="{{ a.solicitacao.cliente.nome or 'cliente' }}"
                    data-cliente-tel="{{ tel_limpo }}"
                    data-local-nome="{{ a.solicitacao.local_responsavel_nome or '' }}"
                    data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
@@ -178,7 +186,7 @@
                 {% endif %}
 
                 {% if endereco_rota|trim %}
-                <a class="botao-mini botao-rota btn-krj-route" href="#" data-waze="{{ url_waze }}"
+                <a class="botao-mini botao-rota btn-krj-route" href="{{ url_maps }}" target="_blank" rel="noopener" data-waze="{{ url_waze }}"
                    data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}"
                    title="Iniciar rota">Iniciar rota</a>
                 {% else %}
@@ -300,12 +308,39 @@ ${texto}
 Digite o número da opção:`, '1');
     if(r===null)return; escolhido=parseInt(r,10)-1; if(!contatos[escolhido]){alert('Opção inválida.');return;}
   }
-  let tel=contatos[escolhido].tel; if(!tel.startsWith('55'))tel='55'+tel;
-  window.open(`https://wa.me/${tel}?text=${b.dataset.msg||''}`,'_blank');
+  const contato = contatos[escolhido];
+  let tel=contato.tel; if(!tel.startsWith('55'))tel='55'+tel;
+  let mensagem = decodeURIComponent(b.dataset.msg || '');
+  const nomeDestino = contato.nome || 'cliente';
+  const nomeContrato = b.dataset.clienteContrato || b.dataset.clienteNome || 'cliente';
+  mensagem = mensagem.replace(/^Olá,\s*[^.]+\./i, `Olá, ${nomeDestino}.`);
+  if(contato.rotulo === 'Responsável no local'){
+    mensagem = mensagem.replace(
+      /Nossa equipe já está a caminho\./i,
+      `Estamos a caminho da entrega do equipamento de ${nomeContrato}.`
+    );
+  }
+  window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem)}`,'_blank');
+});
+
+document.addEventListener('click', function(e){
+  const botao = e.target.closest('a.botao-rota');
+  if(!botao) return;
+  // O href já aponta para o Google Maps. Em celulares com Waze disponível,
+  // oferece escolha sem bloquear a abertura da rota.
+  const waze = botao.dataset.waze;
+  const maps = botao.dataset.maps || botao.href;
+  if(waze && maps && window.confirm('Abrir a rota no Waze?\n\nOK = Waze\nCancelar = Google Maps')){
+    e.preventDefault();
+    window.open(waze, '_blank', 'noopener');
+  }
 });
 </script>
 
 <style>
+    .observacoes-contrato-operacao{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;margin:8px 0}
+    .observacoes-contrato-operacao b{display:block;margin-bottom:4px}
+    .observacoes-contrato-operacao p{margin:0;white-space:pre-wrap}
     .alerta-operacao-pagamento{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:12px;padding:10px 12px;margin:10px 0;font-weight:800;font-size:13px}
     .lista-roteirizacao .linha-operacao{
       background:#fff !important;
