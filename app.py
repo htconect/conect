@@ -323,9 +323,13 @@ def limpar_agenda_operacional(db: Session):
         if entregas:
             principal = entregas[0]
             principal.tipo_evento = "entrega"
-            principal.data = reserva.data_evento
-            principal.hora_inicio = reserva.hora_inicio
-            principal.hora_fim = reserva.hora_fim
+            # Depois de roteirizado, data e hora pertencem exclusivamente à rota.
+            # Alterações no contrato ou rotinas de sincronização não podem mudar
+            # a posição operacional; somente o botão Salvar da roteirização pode.
+            if not principal.roteirizado:
+                principal.data = reserva.data_evento
+                principal.hora_inicio = reserva.hora_inicio
+                principal.hora_fim = reserva.hora_fim
             principal.titulo = f"{nome_item_reserva(reserva)} - {reserva.cliente.nome if reserva.cliente else 'Cliente'}"
             principal.bairro = reserva.bairro
             for duplicado in entregas[1:]:
@@ -1019,12 +1023,15 @@ def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
         )
         db.add(retirada)
 
-    retirada.data = data_retirada
-    retirada.hora_inicio = hora_retirada
-    retirada.hora_fim = None
+    # A busca obrigatória nasce com a data/hora do contrato, mas depois que for
+    # roteirizada esses valores ficam congelados até um novo Salvar da rota.
+    if not retirada.roteirizado:
+        retirada.data = data_retirada
+        retirada.hora_inicio = hora_retirada
+        retirada.hora_fim = None
+        retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
     retirada.titulo = titulo_base
     retirada.bairro = item.bairro
-    retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
 
 
 def criar_eventos_operacionais(db: Session, item: Solicitacao):
