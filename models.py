@@ -58,11 +58,33 @@ class UsuarioEmpresa(Base):
     acesso_financeiro = Column(Boolean, default=False)
     acesso_cadastros = Column(Boolean, default=False)
     acesso_relatorios = Column(Boolean, default=False)
-    acesso_equipe_1 = Column(Boolean, default=True)
-    acesso_equipe_2 = Column(Boolean, default=False)
     criado_em = Column(DateTime, server_default=func.now())
 
     empresa = relationship("Empresa")
+    equipes = relationship("Equipe", secondary="usuarios_equipes", back_populates="usuarios")
+
+
+class Equipe(Base):
+    __tablename__ = "equipes"
+    __table_args__ = (UniqueConstraint("empresa_id", "nome", name="uq_equipe_empresa_nome"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    nome = Column(String(80), nullable=False)
+    ativa = Column(Boolean, default=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    empresa = relationship("Empresa")
+    usuarios = relationship("UsuarioEmpresa", secondary="usuarios_equipes", back_populates="equipes")
+
+
+class UsuarioEquipe(Base):
+    __tablename__ = "usuarios_equipes"
+    __table_args__ = (UniqueConstraint("usuario_id", "equipe_id", name="uq_usuario_equipe"),)
+
+    id = Column(Integer, primary_key=True)
+    usuario_id = Column(Integer, ForeignKey("usuarios_empresa.id"), nullable=False, index=True)
+    equipe_id = Column(Integer, ForeignKey("equipes.id"), nullable=False, index=True)
 
 
 class CampoGlobal(Base):
@@ -291,6 +313,8 @@ class Agenda(Base):
     bairro = Column(String(120))
     criado_em = Column(DateTime, server_default=func.now())
     ordem_rota = Column(Integer, default=0)
+    equipe_id = Column(Integer, ForeignKey("equipes.id"), nullable=True, index=True)
+    roteirizado = Column(Boolean, default=False)
     previsao_entrega = Column(String(5))
     link_localizacao = Column(Text)
     tipo_evento = Column(String(20), default="entrega")  # entrega ou retirada
@@ -298,6 +322,7 @@ class Agenda(Base):
     observacoes_operacionais = Column(Text, nullable=True)
 
     solicitacao = relationship("Solicitacao", back_populates="agenda")
+    equipe = relationship("Equipe")
 
 
 class ContaFinanceira(Base):

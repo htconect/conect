@@ -18,22 +18,8 @@
         <input type="date" name="data_final" value="{{ data_final }}" onchange="this.form.submit()">
     </label>
 
-    <label>
-        <span>Equipe</span>
-        <select name="equipe" onchange="this.form.submit()">
-            {% for numero in equipes_permitidas %}
-            <option value="{{ numero }}" {% if equipe_selecionada == numero %}selected{% endif %}>Equipe {{ numero }}</option>
-            {% endfor %}
-        </select>
-    </label>
-    <label>
-        <span>Situação</span>
-        <select name="situacao_rota" onchange="this.form.submit()">
-            <option value="roteirizado" {% if situacao_rota == 'roteirizado' %}selected{% endif %}>Roteirizado</option>
-            <option value="nao_roteirizado" {% if situacao_rota == 'nao_roteirizado' %}selected{% endif %}>Não roteirizado</option>
-        </select>
-    </label>
-
+    <label><span>Equipe</span><select name="equipe_id" onchange="this.form.submit()">{% for e in equipes %}<option value="{{ e.id }}" {% if e.id == equipe_id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></label>
+    <label><span>Situação</span><select name="situacao_rota" onchange="this.form.submit()"><option value="todos" {% if situacao_rota == 'todos' %}selected{% endif %}>Todos</option><option value="nao_roteirizado" {% if situacao_rota == 'nao_roteirizado' %}selected{% endif %}>Não roteirizados</option><option value="roteirizado" {% if situacao_rota == 'roteirizado' %}selected{% endif %}>Roteirizados</option></select></label>
     <div class="filtros-operacao filtros-operacao-compactos">
         <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %}
                       onchange="this.form.submit()"> 🔵 Entregar</label>
@@ -60,7 +46,7 @@
     {% set tipo = a.tipo_evento or 'entrega' %}
     {% set falta_receber = (a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0) %}
     {% set concluido = a.status_operacional == 'concluido' %}
-    {% set roteirizado = (a.previsao_entrega and a.ordem_rota in [1, 2]) %}
+    {% set roteirizado = a.roteirizado %}
     {% set data_contrato_iso = a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else
     '' %}
     {% set data_contrato_texto = a.solicitacao.data_evento.strftime('%d/%m/%Y') if a.solicitacao and
@@ -100,9 +86,8 @@
     {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
     <details
             class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
-            draggable="false" data-agenda-id="{{ a.id }}">
+            data-agenda-id="{{ a.id }}">
         <summary>
-            <div class="alca-arrastar" title="Arrastar para reordenar">⋮⋮</div>
             <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
             <div class="data-agenda">{{ data_agenda }}</div>
             <div class="info-agenda">
@@ -116,7 +101,7 @@
                 {% if a.solicitacao.observacoes %}
                 <small class="observacao-destaque">{{ a.solicitacao.observacoes }}</small>
                 {% endif %}
-                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }} · {{ 'Roteirizado · Equipe ' ~ a.ordem_rota if roteirizado else 'Não roteirizado' }}{% if concluido %} · encerrado{% endif %}</em>
+                <em>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }} · {% if roteirizado %}Roteirizado · {{ a.equipe.nome if a.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}{% if concluido %} · encerrado{% endif %}</em>
             </div>
             <span class="seta-card seta-expandir">⌄</span>
         </summary>
@@ -129,14 +114,7 @@
                 contrato</a>
 
             <div class="linha">
-                <div>
-                    <label>Equipe</label>
-                    <select name="equipe" required>
-                        {% for numero in equipes_permitidas %}
-                        <option value="{{ numero }}" {% if (a.ordem_rota or equipe_selecionada) == numero %}selected{% endif %}>Equipe {{ numero }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
+                <div><label>Equipe</label><select name="equipe_id" required><option value="">Selecione</option>{% for e in equipes %}<option value="{{ e.id }}" {% if a.equipe_id == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></div>
                 <div>
                     <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
                     <input type="date" name="data_operacao" value="{{ data_entrega }}" {% if retirada_obrigatoria %}readonly disabled{% endif %}>
@@ -556,118 +534,7 @@ Digite o número da opção:`, '1');
       }
     })();
 
-    (function(){
-      const lista = document.getElementById('listaRoteirizacao');
-      if(!lista) return;
-
-      let arrastado = null;
-
-      function cards(){
-        return Array.from(lista.querySelectorAll('.linha-operacao[data-agenda-id]'));
-      }
-
-      async function salvarOrdem(){
-        const ordem = cards().map(card => card.dataset.agendaId);
-        if(!ordem.length) return;
-
-        const resposta = await fetch('/painel/reservas/roteirizacao', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({ordem})
-        });
-
-        if(!resposta.ok){
-          alert('Não foi possível salvar a roteirização.');
-          return;
-        }
-
-        cards().forEach(card => {
-          if(!card.classList.contains('roteiro-outra-data') && !card.classList.contains('roteiro-retirada')){
-            card.classList.add('roteiro-salvo');
-          }
-        });
-      }
-
-      document.querySelectorAll('.botao-a-caminho[data-agenda-id]').forEach(botao => {
-        botao.addEventListener('click', () => {
-          const rota = document.querySelector(`[data-rota-agenda-id="${botao.dataset.agendaId}"]`);
-          if(rota){
-            rota.classList.remove('desabilitado');
-            rota.removeAttribute('title');
-          }
-        });
-      });
-
-      document.querySelectorAll('.botao-rota[data-waze][data-maps]').forEach(botao => {
-        botao.addEventListener('click', event => {
-          event.preventDefault();
-          if(botao.classList.contains('desabilitado')) return;
-
-          const waze = botao.dataset.waze;
-          const maps = botao.dataset.maps;
-          let saiuDoApp = false;
-
-          const marcarSaida = () => { saiuDoApp = true; };
-          document.addEventListener('visibilitychange', () => {
-            if(document.hidden) marcarSaida();
-          }, {once:true});
-
-    window.open(waze, "_blank");
-
-    setTimeout(() => {
-        if (!saiuDoApp) {
-            window.open(maps, "_blank");
-        }
-    }, 1400);
-        });
-      });
-
-      cards().forEach(card => {
-        card.addEventListener('dragstart', () => {
-          arrastado = card;
-          card.classList.add('arrastando');
-        });
-
-        card.addEventListener('dragend', async () => {
-          card.classList.remove('arrastando');
-          arrastado = null;
-          await salvarOrdem();
-        });
-
-        card.addEventListener('dragover', event => {
-          event.preventDefault();
-          const alvo = event.currentTarget;
-          if(!arrastado || alvo === arrastado) return;
-          const caixa = alvo.getBoundingClientRect();
-          const depois = event.clientY > caixa.top + caixa.height / 2;
-          lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
-        });
-
-        // Celular: permite segurar e arrastar com o dedo.
-        card.addEventListener('touchmove', event => {
-          if(!arrastado) return;
-          const toque = event.touches[0];
-          const alvo = document.elementFromPoint(toque.clientX, toque.clientY)?.closest('.linha-operacao[data-agenda-id]');
-          if(!alvo || alvo === arrastado || alvo.parentElement !== lista) return;
-          const caixa = alvo.getBoundingClientRect();
-          const depois = toque.clientY > caixa.top + caixa.height / 2;
-          lista.insertBefore(arrastado, depois ? alvo.nextSibling : alvo);
-        }, {passive:true});
-
-        card.addEventListener('touchstart', () => {
-          arrastado = card;
-          card.classList.add('arrastando');
-        }, {passive:true});
-
-        card.addEventListener('touchend', async () => {
-          if(!arrastado) return;
-          card.classList.remove('arrastando');
-          arrastado = null;
-          await salvarOrdem();
-        });
-      });
-
-    })();
+    
 
     function validarDataOperacao(form){
       const dataContrato = form.dataset.dataEvento;

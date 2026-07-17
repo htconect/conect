@@ -21,7 +21,7 @@ from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro
 from seed import inicializar_dados
@@ -765,6 +765,30 @@ def garantir_colunas_novas():
         if "conciliado_em" not in cols_pag:
             comandos.append("ALTER TABLE pagamentos ADD COLUMN conciliado_em DATETIME")
 
+    if "equipes" not in tabelas:
+        comandos.append("""
+        CREATE TABLE equipes (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            nome VARCHAR(80) NOT NULL,
+            ativa BOOLEAN DEFAULT true,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            UNIQUE(empresa_id, nome)
+        )
+        """)
+    if "usuarios_equipes" not in tabelas:
+        comandos.append("""
+        CREATE TABLE usuarios_equipes (
+            id INTEGER PRIMARY KEY,
+            usuario_id INTEGER NOT NULL,
+            equipe_id INTEGER NOT NULL,
+            FOREIGN KEY(usuario_id) REFERENCES usuarios_empresa (id),
+            FOREIGN KEY(equipe_id) REFERENCES equipes (id),
+            UNIQUE(usuario_id, equipe_id)
+        )
+        """)
+
     if "usuarios_empresa" in tabelas:
         cols_usu = colunas("usuarios_empresa")
         novas_permissoes = {
@@ -774,8 +798,6 @@ def garantir_colunas_novas():
             "acesso_financeiro": "BOOLEAN DEFAULT false",
             "acesso_cadastros": "BOOLEAN DEFAULT false",
             "acesso_relatorios": "BOOLEAN DEFAULT false",
-            "acesso_equipe_1": "BOOLEAN DEFAULT true",
-            "acesso_equipe_2": "BOOLEAN DEFAULT false",
         }
         for coluna, tipo in novas_permissoes.items():
             if coluna not in cols_usu:
@@ -878,6 +900,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE agenda ADD COLUMN status_operacional VARCHAR(20) DEFAULT 'pendente'")
         if "observacoes_operacionais" not in cols_ag:
             comandos.append("ALTER TABLE agenda ADD COLUMN observacoes_operacionais TEXT")
+        if "equipe_id" not in cols_ag:
+            comandos.append("ALTER TABLE agenda ADD COLUMN equipe_id INTEGER")
+        if "roteirizado" not in cols_ag:
+            comandos.append("ALTER TABLE agenda ADD COLUMN roteirizado BOOLEAN DEFAULT false")
 
     if comandos:
         with engine.begin() as conn:
@@ -936,6 +962,9 @@ def startup():
         for emp in db.query(Empresa).all():
             configurar_campos_empresa(db, emp.id)
             criar_modelos_iniciais_empresa(db, emp)
+            if db.query(Equipe).filter_by(empresa_id=emp.id).count() == 0:
+                db.add_all([Equipe(empresa_id=emp.id, nome="Equipe 1", ativa=True), Equipe(empresa_id=emp.id, nome="Equipe 2", ativa=True)])
+                db.commit()
             corrigir_valores_teste(db)
             recalcular_valores_reservas(db)
             corrigir_reservas_aprovadas_sem_itens(db)
@@ -1285,9 +1314,12 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
         raise HTTPException(404)
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
     usuarios_empresa = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id).order_by(UsuarioEmpresa.nome).all()
+    equipes = db.query(Equipe).filter_by(empresa_id=empresa.id).order_by(Equipe.nome).all()
+    equipes_usuario = {u.id: [e.id for e in u.equipes] for u in usuarios_empresa}
     return templates.TemplateResponse("admin/empresas.html",
                                       {"request": request, "empresas": empresas, "empresa": empresa,
-                                       "usuarios_empresa": usuarios_empresa})
+                                       "usuarios_empresa": usuarios_empresa, "equipes": equipes,
+                                       "equipes_usuario": equipes_usuario})
 
 
 @app.post("/admin/empresa/{empresa_id}")
@@ -1362,8 +1394,7 @@ def admin_criar_usuario_empresa(
         acesso_financeiro: Optional[str] = Form(None),
         acesso_cadastros: Optional[str] = Form(None),
         acesso_relatorios: Optional[str] = Form(None),
-        acesso_equipe_1: Optional[str] = Form(None),
-        acesso_equipe_2: Optional[str] = Form(None),
+        equipes_permitidas: list[int] = Form([]),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
@@ -1402,8 +1433,6 @@ def admin_criar_usuario_empresa(
         "acesso_financeiro": bool(acesso_financeiro),
         "acesso_cadastros": bool(acesso_cadastros),
         "acesso_relatorios": bool(acesso_relatorios),
-        "acesso_equipe_1": bool(acesso_equipe_1),
-        "acesso_equipe_2": bool(acesso_equipe_2),
     }
 
     if existente:
@@ -1421,6 +1450,36 @@ def admin_criar_usuario_empresa(
         ))
 
     db.commit()
+    alvo = existente or db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id, usuario=usuario_limpo).first()
+    permitidas = db.query(Equipe).filter(Equipe.empresa_id == empresa.id, Equipe.id.in_(equipes_permitidas or [-1])).all()
+    alvo.equipes = permitidas
+    db.commit()
+    return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
+
+
+@app.post("/admin/empresa/{empresa_id}/equipes")
+def admin_salvar_equipe(empresa_id: int, nome: str = Form(...), equipe_id: Optional[int] = Form(None), ativo: Optional[str] = Form("1"), db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+    empresa = db.get(Empresa, empresa_id)
+    if not empresa: raise HTTPException(404)
+    equipe = db.get(Equipe, equipe_id) if equipe_id else None
+    if equipe and equipe.empresa_id != empresa.id: raise HTTPException(404)
+    if not equipe:
+        equipe = Equipe(empresa_id=empresa.id)
+        db.add(equipe)
+    equipe.nome = nome.strip()
+    equipe.ativa = bool(ativo)
+    db.commit()
+    return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
+
+
+@app.get("/admin/empresa/{empresa_id}/equipe/{equipe_id}/excluir")
+def admin_excluir_equipe(empresa_id: int, equipe_id: int, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+    equipe = db.get(Equipe, equipe_id)
+    if equipe and equipe.empresa_id == empresa_id:
+        em_uso = db.query(Agenda).filter(Agenda.equipe_id == equipe.id).first()
+        if em_uso: equipe.ativa = False
+        else: db.delete(equipe)
+        db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 
 
@@ -2032,21 +2091,14 @@ def copiar_contrato(contrato_id: int, db: Session = Depends(get_db), empresa: Em
     return RedirectResponse(f"/painel/contrato/{novo.id}", status_code=303)
 
 
-def equipes_permitidas_usuario(request: Request, db: Session) -> list[int]:
+def equipes_visiveis_usuario(request: Request, db: Session, empresa_id: int):
+    q = db.query(Equipe).filter(Equipe.empresa_id == empresa_id, Equipe.ativa == True)
     if request.session.get("acesso_total"):
-        return [1, 2]
+        return q.order_by(Equipe.nome).all()
     usuario_id = request.session.get("usuario_empresa_id")
-    usuario = db.get(UsuarioEmpresa, usuario_id) if usuario_id else None
-    equipes = []
-    if usuario and getattr(usuario, "acesso_equipe_1", True):
-        equipes.append(1)
-    if usuario and getattr(usuario, "acesso_equipe_2", False):
-        equipes.append(2)
-    return equipes or [1]
-
-
-def agenda_roteirizada(item: Agenda) -> bool:
-    return bool((item.previsao_entrega or "").strip() and (item.ordem_rota or 0) in (1, 2))
+    if not usuario_id:
+        return []
+    return q.join(UsuarioEquipe, UsuarioEquipe.equipe_id == Equipe.id).filter(UsuarioEquipe.usuario_id == usuario_id).order_by(Equipe.nome).all()
 
 
 @app.get("/painel/reservas", response_class=HTMLResponse)
@@ -2057,20 +2109,21 @@ def preparar_reservas(
         mostrar_entregas: str = "",
         mostrar_retiradas: str = "",
         mostrar_concluidas: str = "",
-        equipe: str = "",
-        situacao_rota: str = "roteirizado",
+        equipe_id: int = 0,
+        situacao_rota: str = "todos",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     inicio, fim = periodo_semana_atual()
     data_inicial = data_inicial or inicio.isoformat()
     data_final = data_final or fim.isoformat()
-    equipes_permitidas = equipes_permitidas_usuario(request, db)
-    equipe_salva = request.session.get("operacao_equipe")
-    equipe_num = int(equipe) if equipe in {"1", "2"} else (equipe_salva if equipe_salva in equipes_permitidas else equipes_permitidas[0])
-    if equipe_num not in equipes_permitidas:
-        equipe_num = equipes_permitidas[0]
-    request.session["operacao_equipe"] = equipe_num
+    equipes = equipes_visiveis_usuario(request, db, empresa.id)
+    ids_equipes = {e.id for e in equipes}
+    filtro_salvo = request.session.get("operacao_equipe_id", 0)
+    if equipe_id not in ids_equipes:
+        equipe_id = filtro_salvo if filtro_salvo in ids_equipes else (equipes[0].id if equipes else 0)
+    if equipe_id:
+        request.session["operacao_equipe_id"] = equipe_id
 
     # Checkbox desmarcado não vem no GET. Se for o primeiro acesso da tela,
     # começa com Entregar e Retirar ligados. Depois disso, respeita exatamente
@@ -2086,11 +2139,12 @@ def preparar_reservas(
         mostrar_concluidas = "1" if "mostrar_concluidas" in query else ""
 
     q = db.query(Agenda).filter_by(empresa_id=empresa.id)
-    if situacao_rota == "nao_roteirizado":
-        q = q.filter((Agenda.previsao_entrega == None) | (Agenda.previsao_entrega == "") | (~Agenda.ordem_rota.in_([1, 2])))
-    else:
-        situacao_rota = "roteirizado"
-        q = q.filter(Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota == equipe_num)
+    if equipe_id:
+        q = q.filter((Agenda.equipe_id == equipe_id) | (Agenda.roteirizado == False))
+    if situacao_rota == "roteirizado":
+        q = q.filter(Agenda.roteirizado == True)
+    elif situacao_rota == "nao_roteirizado":
+        q = q.filter((Agenda.roteirizado == False) | (Agenda.roteirizado == None))
     if data_inicial:
         q = q.filter(Agenda.data >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
     if data_final:
@@ -2115,8 +2169,8 @@ def preparar_reservas(
 
     def chave_operacao(a: Agenda):
         sol = a.solicitacao
-        data_base = a.data if agenda_roteirizada(a) else (sol.data_evento if sol else a.data)
-        hora_base = a.hora_inicio if agenda_roteirizada(a) else (sol.hora_inicio if sol else a.hora_inicio)
+        data_base = a.data if a.roteirizado and a.data else (sol.data_evento if sol else a.data)
+        hora_base = a.hora_inicio if a.roteirizado and a.hora_inicio else (sol.hora_inicio if sol else a.hora_inicio)
         nome = (sol.cliente.nome if sol and sol.cliente else "").lower()
         return (data_base or date.max, hora_base or time.max, nome, a.id)
 
@@ -2131,9 +2185,7 @@ def preparar_reservas(
         "mostrar_entregas": mostrar_entregas,
         "mostrar_retiradas": mostrar_retiradas,
         "mostrar_concluidas": mostrar_concluidas,
-        "equipe_selecionada": equipe_num,
-        "equipes_permitidas": equipes_permitidas,
-        "situacao_rota": situacao_rota,
+        "equipes": equipes, "equipe_id": equipe_id, "situacao_rota": situacao_rota,
         "mensagens": mensagens_empresa(empresa),
     })
 
@@ -4759,18 +4811,16 @@ def agenda(
         ativos: str = "1",
         credito: str = "",
         cancelados: str = "",
-        equipe: str = "",
+        equipe_id: int = 0,
         situacao_rota: str = "todos",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     garantir_agenda_reservas(db, empresa.id)
-    equipes_permitidas = equipes_permitidas_usuario(request, db)
-    equipe_salva = request.session.get("agenda_equipe")
-    equipe_num = int(equipe) if equipe in {"1", "2"} else (equipe_salva if equipe_salva in equipes_permitidas else equipes_permitidas[0])
-    if equipe_num not in equipes_permitidas:
-        equipe_num = equipes_permitidas[0]
-    request.session["agenda_equipe"] = equipe_num
+    equipes = equipes_visiveis_usuario(request, db, empresa.id)
+    ids_equipes = {e.id for e in equipes}
+    if equipe_id and equipe_id not in ids_equipes:
+        equipe_id = 0
     inicio, fim = periodo_semana_atual()
 
     # Mantém o último filtro usado na agenda para a equipe não precisar refazer a busca.
@@ -4788,8 +4838,6 @@ def agenda(
         "ativos": "1" if ativos else "",
         "credito": "1" if credito else "",
         "cancelados": "1" if cancelados else "",
-        "equipe": equipe_num,
-        "situacao_rota": situacao_rota,
     }
 
     status_credito = {"aguardando_nova_data"}
@@ -4805,16 +4853,6 @@ def agenda(
         filtros_status.append("cancelados")
 
     q = db.query(Solicitacao).filter_by(empresa_id=empresa.id)
-    agenda_ids = db.query(Agenda.solicitacao_id).filter(Agenda.empresa_id == empresa.id)
-    if situacao_rota == "roteirizado":
-        agenda_ids = agenda_ids.filter(Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota == equipe_num)
-        q = q.filter(Solicitacao.id.in_(agenda_ids))
-    elif situacao_rota == "nao_roteirizado":
-        roteirizados_ids = db.query(Agenda.solicitacao_id).filter(Agenda.empresa_id == empresa.id, Agenda.previsao_entrega.isnot(None), Agenda.previsao_entrega != "", Agenda.ordem_rota.in_([1, 2]))
-        q = q.filter(~Solicitacao.id.in_(roteirizados_ids))
-    else:
-        situacao_rota = "todos"
-
     if data_inicial:
         q = q.filter(Solicitacao.data_evento >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
     if data_final:
@@ -4831,8 +4869,22 @@ def agenda(
         .all()
     )
 
+    agenda_operacional = db.query(Agenda).filter(Agenda.empresa_id == empresa.id, Agenda.solicitacao_id.in_([x.id for x in solicitacoes] or [-1])).all()
+    rotas_por_solicitacao = {}
+    for rota in agenda_operacional:
+        atual = rotas_por_solicitacao.get(rota.solicitacao_id)
+        if not atual or (rota.roteirizado and not atual.roteirizado):
+            rotas_por_solicitacao[rota.solicitacao_id] = rota
+
     itens = []
     for s in solicitacoes:
+        rota = rotas_por_solicitacao.get(s.id)
+        if equipe_id and (not rota or rota.equipe_id != equipe_id):
+            continue
+        if situacao_rota == "roteirizado" and (not rota or not rota.roteirizado):
+            continue
+        if situacao_rota == "nao_roteirizado" and rota and rota.roteirizado:
+            continue
         status_atual = s.status or ""
         eh_credito = status_atual in status_credito
         eh_cancelado = status_atual in status_cancelados
@@ -4853,9 +4905,8 @@ def agenda(
         "filtro_ativos": bool(ativos),
         "filtro_credito": bool(credito),
         "filtro_cancelados": bool(cancelados),
-        "equipe_selecionada": equipe_num,
-        "equipes_permitidas": equipes_permitidas,
-        "situacao_rota": situacao_rota,
+        "equipes": equipes, "equipe_id": equipe_id, "situacao_rota": situacao_rota,
+        "rotas_por_solicitacao": rotas_por_solicitacao,
         "mensagens": mensagens,
     })
 
@@ -4881,7 +4932,7 @@ def atualizar_roteiro(
         data_evento: str = Form(""),
         data_operacao: str = Form(""),
         status_operacional: str = Form("pendente"),
-        equipe: int = Form(1),
+        equipe_id: int = Form(...),
         link_localizacao: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
@@ -4889,6 +4940,11 @@ def atualizar_roteiro(
     item = db.get(Agenda, agenda_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+
+    equipe = db.query(Equipe).filter_by(id=equipe_id, empresa_id=empresa.id, ativa=True).first()
+    permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
+    if not equipe or equipe.id not in permitidas:
+        raise HTTPException(403, "Equipe não permitida para este usuário.")
 
     status_anterior = item.status_operacional
     data_anterior = item.data
@@ -4906,11 +4962,10 @@ def atualizar_roteiro(
         destino = urlunparse((partes.scheme, partes.netloc, partes.path, partes.params, urlencode(qs), partes.fragment))
         return RedirectResponse(destino, status_code=303)
 
-    equipes_permitidas = equipes_permitidas_usuario(request, db)
-    if equipe not in equipes_permitidas:
-        raise HTTPException(403, "Você não possui acesso a esta equipe.")
-    item.ordem_rota = equipe  # campo existente reaproveitado para identificar a equipe
     item.previsao_entrega = previsao_entrega
+    item.equipe_id = equipe.id
+    item.roteirizado = True
+    item.ordem_rota = 0
     item.link_localizacao = link_localizacao
     item.status_operacional = novo_status
 
@@ -4932,8 +4987,6 @@ def atualizar_roteiro(
         item.data = nova_data
 
     previsao_entrega = (previsao_entrega or "").strip()
-    if not data_informada or not previsao_entrega:
-        raise HTTPException(400, "Informe data, hora e equipe para roteirizar.")
     if not retirada_bloqueada and previsao_entrega:
         try:
             nova_hora = datetime.strptime(previsao_entrega, "%H:%M").time()
@@ -4988,8 +5041,7 @@ async def salvar_roteirizacao_geral(
         if not item or item.empresa_id != empresa.id:
             continue
 
-        item.ordem_rota = posicao
-        marcador = f"[{agora}] Roteirização salva por {usuario}. Ordem da rota: {posicao}."
+        marcador = f"[{agora}] Organização visual da operação salva por {usuario}."
         item.observacoes_operacionais = ((item.observacoes_operacionais or "") + "\n" + marcador).strip()
 
     db.commit()

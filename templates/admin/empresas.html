@@ -85,6 +85,28 @@
 </div>
 
 
+
+{% if empresa %}
+<div class="box usuarios-empresa-box">
+  <div class="cabecalho-secao-usuarios"><div><p class="mini">Operação</p><h2>Equipes</h2></div></div>
+  <p class="texto-discreto">Cadastre as equipes disponíveis para entrega e retirada. A equipe será escolhida somente ao salvar a roteirização.</p>
+  <form method="post" action="/admin/empresa/{{ empresa.id }}/equipes" class="form-usuario-organizado">
+    <input type="hidden" name="equipe_id" id="equipe_id">
+    <label>Nome da equipe</label>
+    <input name="nome" id="equipe_nome" placeholder="Equipe 1" required>
+    <label class="check"><input type="checkbox" name="ativo" id="equipe_ativa" value="1" checked> Equipe ativa</label>
+    <div class="acoes-formulario"><button id="botao_salvar_equipe">Criar equipe</button><button type="button" class="botao-secundario" onclick="limparEquipe()">Limpar</button></div>
+  </form>
+  <div class="lista-mobile lista-usuarios-organizada">
+  {% for e in equipes or [] %}
+    <div class="card-lista"><div><b>{{ e.nome }}</b><small>{{ 'Ativa' if e.ativa else 'Inativa' }}</small></div>
+      <div class="acoes-usuario"><button type="button" class="acao-icone" onclick='editarEquipe({{ {"id":e.id,"nome":e.nome,"ativa":e.ativa}|tojson }})'>✏️</button><a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/equipe/{{ e.id }}/excluir" onclick="return confirm('Excluir ou desativar esta equipe?')">🗑</a></div>
+    </div>
+  {% else %}<p class="texto-discreto">Nenhuma equipe cadastrada.</p>{% endfor %}
+  </div>
+</div>
+{% endif %}
+
 {% if empresa %}
 <div class="box usuarios-empresa-box">
   <div class="cabecalho-secao-usuarios">
@@ -123,12 +145,10 @@
         <label class="check"><input type="checkbox" name="acesso_cadastros" value="1"> Cadastros</label>
         <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
       </div>
-    </div>
-    <div class="box-mini bloco-permissoes">
-      <h3>Equipes visíveis</h3>
+      <h3>Equipes permitidas</h3>
+      <p class="texto-discreto">No filtro da Agenda e da Operação aparecerão somente as equipes marcadas.</p>
       <div class="grade-permissoes">
-        <label class="check"><input type="checkbox" name="acesso_equipe_1" value="1" checked> Equipe 1</label>
-        <label class="check"><input type="checkbox" name="acesso_equipe_2" value="1"> Equipe 2</label>
+        {% for e in equipes or [] %}<label class="check"><input type="checkbox" name="equipes_permitidas" value="{{ e.id }}" data-equipe-permissao="{{ e.id }}"> {{ e.nome }}</label>{% endfor %}
       </div>
     </div>
     <div class="acoes-formulario acoes-usuario-form">
@@ -153,7 +173,7 @@
           {% if u.acesso_financeiro %}{% set _ = acessos.append("Financeiro") %}{% endif %}
           {% if u.acesso_cadastros %}{% set _ = acessos.append("Cadastros") %}{% endif %}
           {% if u.acesso_relatorios %}{% set _ = acessos.append("Relatórios") %}{% endif %}
-          Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }} · Equipes: {% if u.acesso_equipe_1 %}1{% endif %}{% if u.acesso_equipe_1 and u.acesso_equipe_2 %}, {% endif %}{% if u.acesso_equipe_2 %}2{% endif %}
+          Áreas: {{ acessos|join(", ") if acessos else "nenhuma" }}
         </small>
       </div>
       <div class="acoes-usuario">
@@ -172,8 +192,7 @@
             "acesso_financeiro": u.acesso_financeiro,
             "acesso_cadastros": u.acesso_cadastros,
             "acesso_relatorios": u.acesso_relatorios,
-            "acesso_equipe_1": u.acesso_equipe_1,
-            "acesso_equipe_2": u.acesso_equipe_2
+            "equipes": equipes_usuario.get(u.id, [])
           }|tojson }})'>✏️</button>
         <a class="acao-icone" title="Excluir usuário" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
       </div>
@@ -214,13 +233,14 @@ function editarUsuario(usuario) {
     "acesso_buscar_cliente",
     "acesso_financeiro",
     "acesso_cadastros",
-    "acesso_relatorios",
-    "acesso_equipe_1",
-    "acesso_equipe_2"
+    "acesso_relatorios"
   ];
   campos.forEach((campo) => {
     const elemento = document.querySelector(`[name="${campo}"]`);
     if (elemento) elemento.checked = Boolean(usuario[campo]);
+  });
+  document.querySelectorAll('[data-equipe-permissao]').forEach((el) => {
+    el.checked = (usuario.equipes || []).includes(Number(el.value));
   });
 
   document.getElementById("label_senha").textContent = "Nova senha";
@@ -240,6 +260,18 @@ function limparEdicaoUsuario() {
   document.getElementById("aviso_senha").style.display = "none";
   document.getElementById("botao_salvar_usuario").textContent = "Criar usuário";
   document.getElementById("botao_cancelar_edicao").style.display = "none";
+}
+function editarEquipe(equipe){
+  document.getElementById('equipe_id').value=equipe.id;
+  document.getElementById('equipe_nome').value=equipe.nome||'';
+  document.getElementById('equipe_ativa').checked=Boolean(equipe.ativa);
+  document.getElementById('botao_salvar_equipe').textContent='Salvar equipe';
+}
+function limparEquipe(){
+  document.getElementById('equipe_id').value='';
+  document.getElementById('equipe_nome').value='';
+  document.getElementById('equipe_ativa').checked=true;
+  document.getElementById('botao_salvar_equipe').textContent='Criar equipe';
 }
 </script>
 
