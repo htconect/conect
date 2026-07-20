@@ -249,6 +249,11 @@ class Solicitacao(Base):
     valor_pago = Column(Float, default=0)
     sinal_recebido = Column(Boolean, default=False)
     pagamento_confirmado_em = Column(DateTime, nullable=True)
+    # Transferência operacional/financeira: o contrato continua pertencendo à empresa de origem,
+    # mas pode ser marcado para execução/repasse a outra empresa.
+    empresa_transferida_id = Column(Integer, ForeignKey("empresas.id"), nullable=True)
+    valor_repasse = Column(Float, default=0)
+    transferida_em = Column(DateTime, nullable=True)
     observacoes = Column(Text)
     status = Column(String(30), default="pre_reserva")  # pre_reserva, aprovada, rejeitada, alteracao
     aceite_em = Column(DateTime, server_default=func.now())
@@ -257,6 +262,7 @@ class Solicitacao(Base):
     cliente = relationship("Cliente", back_populates="solicitacoes")
     produto = relationship("ProdutoServico")
     contrato = relationship("Contrato")
+    empresa_transferida = relationship("Empresa", foreign_keys=[empresa_transferida_id])
     itens = relationship("ReservaItem", back_populates="solicitacao", cascade="all, delete-orphan")
     aprovado_em = Column(DateTime, nullable=True)
     cancelado_em = Column(DateTime, nullable=True)

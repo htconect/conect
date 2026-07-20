@@ -760,6 +760,13 @@ def garantir_colunas_novas():
         if "acesso_local" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN acesso_local VARCHAR(40)")
 
+        if "empresa_transferida_id" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN empresa_transferida_id INTEGER")
+        if "valor_repasse" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_repasse FLOAT DEFAULT 0")
+        if "transferida_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferida_em DATETIME")
+
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
         if "usuario_registro" not in cols_pag:
@@ -1709,12 +1716,26 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             .filter(
                 Solicitacao.empresa_id == empresa.id,
                 Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                Solicitacao.sinal > 0,
                 Solicitacao.valor_pago <= 0
             )
             .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
             .limit(12)
             .all()
         )
+
+    pendencias_a_receber = (
+        db.query(Solicitacao)
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.cancelado_em == None,
+            ~Solicitacao.status.in_(["cancelada", "cancelado", "cancelado_cliente", "rejeitada"]),
+            (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+        )
+        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+        .limit(12)
+        .all()
+    )
 
     hoje = date.today()
     pendencias_operacao = (
@@ -1761,6 +1782,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "solicitacoes": solicitacoes,
         "pendencias_agenda": pendencias_agenda,
         "pendencias_sinal": pendencias_sinal,
+        "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
         "total_clientes": total_clientes,
@@ -2266,10 +2288,53 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
     sincronizar_pagamentos_solicitacoes(db, [item])
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
+    empresas_transferencia = (
+        db.query(Empresa)
+        .filter(Empresa.ativa == True, Empresa.id != empresa.id)
+        .order_by(Empresa.nome.asc())
+        .all()
+    )
     mensagens = mensagens_empresa(empresa)
     return templates.TemplateResponse("admin/solicitacao_detalhe.html",
                                       {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
-                                       "contratos": contratos, "mensagens": mensagens})
+                                       "contratos": contratos, "empresas_transferencia": empresas_transferencia,
+                                       "mensagens": mensagens})
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/transferir")
+def transferir_solicitacao_empresa(
+    solicitacao_id: int,
+    empresa_destino_id: int = Form(0),
+    valor_repasse: str = Form(""),
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Marca o contrato para repasse a outra empresa sem retirar o histórico da empresa de origem."""
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    if not empresa_destino_id:
+        item.empresa_transferida_id = None
+        item.valor_repasse = 0
+        item.transferida_em = None
+        db.commit()
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+    destino = db.get(Empresa, empresa_destino_id)
+    if not destino or not destino.ativa or destino.id == empresa.id:
+        raise HTTPException(400, "Empresa de destino inválida.")
+
+    repasse = max(texto_para_float(valor_repasse or "0"), 0)
+    if repasse <= 0:
+        # Na ausência de um valor informado, usa o valor total do contrato como base de repasse.
+        repasse = max(float(item.valor or 0), 0)
+
+    item.empresa_transferida_id = destino.id
+    item.valor_repasse = repasse
+    item.transferida_em = agora_utc()
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/whatsapp")
@@ -3806,11 +3871,25 @@ def financeiro(
         q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.categoria == categoria)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.categoria == categoria)
+    valor_busca = None
     if busca:
-        like = f"%{busca.strip()}%"
-        q_banco = q_banco.filter(LancamentoBanco.historico.ilike(like))
-        q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.descricao.ilike(like))
-        q_receber = q_receber.filter(LancamentoManualFinanceiro.descricao.ilike(like))
+        termo_busca = busca.strip()
+        like = f"%{termo_busca}%"
+        # O campo de procura aceita texto e também valor em formato brasileiro (ex.: 100,00 ou R$ 100,00).
+        if re.fullmatch(r"[Rr$\\s0-9.\\-,]+", termo_busca):
+            try:
+                valor_busca = texto_para_float(termo_busca.replace("R$", "").replace("r$", "").strip())
+            except Exception:
+                valor_busca = None
+
+        filtro_banco = [LancamentoBanco.historico.ilike(like)]
+        filtro_manual = [LancamentoManualFinanceiro.descricao.ilike(like)]
+        if valor_busca is not None:
+            filtro_banco.append(func.abs(LancamentoBanco.valor - valor_busca) < 0.01)
+            filtro_manual.append(func.abs(LancamentoManualFinanceiro.valor - valor_busca) < 0.01)
+        q_banco = q_banco.filter(or_(*filtro_banco))
+        q_manual_real = q_manual_real.filter(or_(*filtro_manual))
+        q_receber = q_receber.filter(or_(*filtro_manual))
 
     banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.ordem.asc(), LancamentoBanco.id.asc()).all()
     manuais_reais = q_manual_real.order_by(LancamentoManualFinanceiro.data.desc(),
@@ -3829,7 +3908,13 @@ def financeiro(
         q_contratos_receber = q_contratos_receber.filter(Solicitacao.data_evento <= fim)
     if busca:
         like = f"%{busca.strip()}%"
-        q_contratos_receber = q_contratos_receber.filter(Cliente.nome.ilike(like))
+        filtros_contrato = [Cliente.nome.ilike(like)]
+        if valor_busca is not None:
+            filtros_contrato.extend([
+                func.abs(Solicitacao.valor - valor_busca) < 0.01,
+                func.abs((func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) - valor_busca) < 0.01,
+            ])
+        q_contratos_receber = q_contratos_receber.filter(or_(*filtros_contrato))
     contratos_receber = q_contratos_receber.order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc()).all()
     total_contratos_receber = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_receber)
 
@@ -3848,7 +3933,13 @@ def financeiro(
         q_pagamentos_sistema = q_pagamentos_sistema.filter(Pagamento.data_pagamento <= fim)
     if busca:
         like = f"%{busca.strip()}%"
-        q_pagamentos_sistema = q_pagamentos_sistema.filter(Cliente.nome.ilike(like))
+        filtros_pagamento = [
+            Cliente.nome.ilike(like),
+            Pagamento.nome_comprovante.ilike(like),
+        ]
+        if valor_busca is not None:
+            filtros_pagamento.append(func.abs(Pagamento.valor - valor_busca) < 0.01)
+        q_pagamentos_sistema = q_pagamentos_sistema.filter(or_(*filtros_pagamento))
 
     pagamentos_sistema_mes = q_pagamentos_sistema.order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc()).all()
     total_contratos_pagos_mes = sum(float(p.valor or 0) for p in pagamentos_sistema_mes)
@@ -3897,9 +3988,14 @@ def financeiro(
         Solicitacao.data_evento >= mes_cards_inicio,
         Solicitacao.data_evento <= mes_cards_fim
     ).all()
+    contratos_cards_proprios = [c for c in contratos_cards if not c.empresa_transferida_id]
+    contratos_cards_transferidos = [c for c in contratos_cards if c.empresa_transferida_id]
     quantidade_contratos_cards = len(contratos_cards)
+    quantidade_contratos_cards_proprios = len(contratos_cards_proprios)
+    quantidade_contratos_cards_transferidos = len(contratos_cards_transferidos)
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
+    total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
     # Acumulado do banco: independente do mês escolhido nos cards.
     # Considera todas as movimentações reais do ano corrente até hoje.
@@ -3955,12 +4051,19 @@ def financeiro(
         valor_receber_periodo = sum(
             max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_periodo
         )
+        contratos_proprios_periodo = [c for c in contratos_periodo if not c.empresa_transferida_id]
+        contratos_transferidos_periodo = [c for c in contratos_periodo if c.empresa_transferida_id]
         relatorio_semanal.append({
             "numero": indice,
             "inicio": periodo["inicio"],
             "fim": periodo["fim"],
             "quantidade": len(contratos_periodo),
+            "quantidade_proprios": len(contratos_proprios_periodo),
+            "quantidade_transferidos": len(contratos_transferidos_periodo),
             "valor_total": valor_total_periodo,
+            "valor_total_proprios": sum(float(c.valor or 0) for c in contratos_proprios_periodo),
+            "valor_total_transferidos": sum(float(c.valor or 0) for c in contratos_transferidos_periodo),
+            "valor_repasse": sum(float(c.valor_repasse or 0) for c in contratos_transferidos_periodo),
             "valor_recebido": valor_recebido_periodo,
             "valor_receber": valor_receber_periodo,
         })
@@ -3970,6 +4073,11 @@ def financeiro(
         "valor_total": sum(item["valor_total"] for item in relatorio_semanal),
         "valor_recebido": sum(item["valor_recebido"] for item in relatorio_semanal),
         "valor_receber": sum(item["valor_receber"] for item in relatorio_semanal),
+        "quantidade_proprios": sum(item["quantidade_proprios"] for item in relatorio_semanal),
+        "quantidade_transferidos": sum(item["quantidade_transferidos"] for item in relatorio_semanal),
+        "valor_total_proprios": sum(item["valor_total_proprios"] for item in relatorio_semanal),
+        "valor_total_transferidos": sum(item["valor_total_transferidos"] for item in relatorio_semanal),
+        "valor_repasse": sum(item["valor_repasse"] for item in relatorio_semanal),
     }
 
     saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
@@ -3981,10 +4089,21 @@ def financeiro(
         Solicitacao.data_evento >= semana_cards_inicio,
         Solicitacao.data_evento <= semana_cards_fim
     ).all()
+    contratos_semana_proprios = [c for c in contratos_semana if not c.empresa_transferida_id]
+    contratos_semana_transferidos = [c for c in contratos_semana if c.empresa_transferida_id]
     quantidade_contratos_semana = len(contratos_semana)
+    quantidade_contratos_semana_proprios = len(contratos_semana_proprios)
+    quantidade_contratos_semana_transferidos = len(contratos_semana_transferidos)
     valor_total_contratos_semana = sum(float(c.valor or 0) for c in contratos_semana)
+    valor_total_contratos_semana_proprios = sum(float(c.valor or 0) for c in contratos_semana_proprios)
+    valor_total_contratos_semana_transferidos = sum(float(c.valor or 0) for c in contratos_semana_transferidos)
     valor_receber_contratos_semana = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana)
+    valor_receber_contratos_semana_proprios = sum(
+        max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_proprios)
+    valor_receber_contratos_semana_transferidos = sum(
+        max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_transferidos)
+    valor_repasse_semana = sum(float(c.valor_repasse or 0) for c in contratos_semana_transferidos)
 
     candidatos_vinculo = {
         l.id: melhores_vinculos_para_banco(l, pagamentos_pendentes_vinculo)
@@ -4009,10 +4128,20 @@ def financeiro(
         "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagamentos_sistema": pagamentos_sistema,
         "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
         "quantidade_contratos_cards": quantidade_contratos_cards,
+        "quantidade_contratos_cards_proprios": quantidade_contratos_cards_proprios,
+        "quantidade_contratos_cards_transferidos": quantidade_contratos_cards_transferidos,
         "total_contratos_receber_cards": total_contratos_receber_cards,
+        "total_repasse_cards": total_repasse_cards,
         "quantidade_contratos_semana": quantidade_contratos_semana,
+        "quantidade_contratos_semana_proprios": quantidade_contratos_semana_proprios,
+        "quantidade_contratos_semana_transferidos": quantidade_contratos_semana_transferidos,
         "valor_total_contratos_semana": valor_total_contratos_semana,
+        "valor_total_contratos_semana_proprios": valor_total_contratos_semana_proprios,
+        "valor_total_contratos_semana_transferidos": valor_total_contratos_semana_transferidos,
         "valor_receber_contratos_semana": valor_receber_contratos_semana,
+        "valor_receber_contratos_semana_proprios": valor_receber_contratos_semana_proprios,
+        "valor_receber_contratos_semana_transferidos": valor_receber_contratos_semana_transferidos,
+        "valor_repasse_semana": valor_repasse_semana,
         "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
@@ -4045,6 +4174,8 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
             Solicitacao.data_evento >= cursor,
             Solicitacao.data_evento <= fim_semana
         ).all()
+        contratos_proprios = [c for c in contratos if not c.empresa_transferida_id]
+        contratos_transferidos = [c for c in contratos if c.empresa_transferida_id]
         valor_total = sum(float(c.valor or 0) for c in contratos)
         recebido = sum(min(float(c.valor_pago or 0), float(c.valor or 0)) for c in contratos)
         receber = sum(max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos)
@@ -4053,7 +4184,12 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
             "inicio": cursor,
             "fim": fim_semana,
             "quantidade": len(contratos),
+            "quantidade_proprios": len(contratos_proprios),
+            "quantidade_transferidos": len(contratos_transferidos),
             "valor_total": valor_total,
+            "valor_total_proprios": sum(float(c.valor or 0) for c in contratos_proprios),
+            "valor_total_transferidos": sum(float(c.valor or 0) for c in contratos_transferidos),
+            "valor_repasse": sum(float(c.valor_repasse or 0) for c in contratos_transferidos),
             "valor_recebido": recebido,
             "valor_receber": receber,
         })
@@ -4065,6 +4201,11 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
         "valor_total": sum(s["valor_total"] for s in semanas),
         "valor_recebido": sum(s["valor_recebido"] for s in semanas),
         "valor_receber": sum(s["valor_receber"] for s in semanas),
+        "quantidade_proprios": sum(s["quantidade_proprios"] for s in semanas),
+        "quantidade_transferidos": sum(s["quantidade_transferidos"] for s in semanas),
+        "valor_total_proprios": sum(s["valor_total_proprios"] for s in semanas),
+        "valor_total_transferidos": sum(s["valor_total_transferidos"] for s in semanas),
+        "valor_repasse": sum(s["valor_repasse"] for s in semanas),
     }
     return inicio_mes, fim_mes, semanas, total
 
@@ -4072,23 +4213,29 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
 def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
     # Gera um XLSX simples e válido sem dependência adicional.
     linhas = [
-        ["Relatório financeiro mensal", "", "", "", "", ""],
-        [inicio_mes.strftime("%m/%Y"), "", "", "", "", ""],
-        ["Semana", "Período", "Qtd. contratos", "Valor total", "Recebido", "A receber"],
+        ["Relatório financeiro mensal", "", "", "", "", "", "", "", "", "", ""],
+        [inicio_mes.strftime("%m/%Y"), "", "", "", "", "", "", "", "", "", ""],
+        ["Semana", "Período", "Qtd. total", "Qtd. próprios", "Qtd. transferidos", "Valor total", "Valor próprios", "Valor transferidos", "Repasse a pagar", "Recebido", "A receber"],
     ]
     for item in semanas:
         linhas.append([
             f"Semana {item['numero']}",
             f"{item['inicio'].strftime('%d/%m/%Y')} a {item['fim'].strftime('%d/%m/%Y')}",
             item["quantidade"],
+            item["quantidade_proprios"],
+            item["quantidade_transferidos"],
             item["valor_total"],
+            item["valor_total_proprios"],
+            item["valor_total_transferidos"],
+            item["valor_repasse"],
             item["valor_recebido"],
             item["valor_receber"],
         ])
     linhas.append([
         "TOTAL DO MÊS", "",
-        total["quantidade"], total["valor_total"],
-        total["valor_recebido"], total["valor_receber"],
+        total["quantidade"], total["quantidade_proprios"], total["quantidade_transferidos"],
+        total["valor_total"], total["valor_total_proprios"], total["valor_total_transferidos"],
+        total["valor_repasse"], total["valor_recebido"], total["valor_receber"],
     ])
 
     def coluna_excel(numero):
@@ -4103,7 +4250,7 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
         for c, valor in enumerate(linha, start=1):
             ref = f"{coluna_excel(c)}{r}"
             if isinstance(valor, (int, float)):
-                estilo = ' s="2"' if c >= 4 else ' s="1"'
+                estilo = ' s="2"' if c >= 6 else ' s="1"'
                 cells.append(f'<c r="{ref}"{estilo}><v>{valor}</v></c>')
             else:
                 estilo = ' s="3"' if r == 1 else (' s="4"' if r in (3, len(linhas)) else '')
@@ -4119,9 +4266,9 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
     sheet_xml = f'''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="2" width="28" customWidth="1"/>
-<col min="3" max="3" width="16" customWidth="1"/><col min="4" max="6" width="17" customWidth="1"/></cols>
+<col min="3" max="5" width="16" customWidth="1"/><col min="6" max="11" width="18" customWidth="1"/></cols>
 <sheetData>{''.join(rows_xml)}</sheetData>
-<mergeCells count="2"><mergeCell ref="A1:F1"/><mergeCell ref="A2:F2"/></mergeCells>
+<mergeCells count="2"><mergeCell ref="A1:K1"/><mergeCell ref="A2:K2"/></mergeCells>
 </worksheet>'''
     styles_xml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -4211,22 +4358,29 @@ def financeiro_relatorio_pdf(
         Paragraph(f"Relatório financeiro mensal - {inicio_mes.strftime('%m/%Y')}", estilos["Title"]),
         Spacer(1, 14),
     ]
-    dados = [["Semana", "Período", "Qtd. contratos", "Valor total", "Recebido", "A receber"]]
+    dados = [["Semana", "Período", "Qtd.", "Próprios", "Transf.", "Valor total", "Valor próprios", "Valor transf.", "Repasse", "Recebido", "A receber"]]
     moeda = lambda v: f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     for item in semanas:
         dados.append([
             f"Semana {item['numero']}",
             f"{item['inicio'].strftime('%d/%m/%Y')} a {item['fim'].strftime('%d/%m/%Y')}",
             str(item["quantidade"]),
+            str(item["quantidade_proprios"]),
+            str(item["quantidade_transferidos"]),
             moeda(item["valor_total"]),
+            moeda(item["valor_total_proprios"]),
+            moeda(item["valor_total_transferidos"]),
+            moeda(item["valor_repasse"]),
             moeda(item["valor_recebido"]),
             moeda(item["valor_receber"]),
         ])
     dados.append([
-        "TOTAL DO MÊS", "", str(total["quantidade"]),
-        moeda(total["valor_total"]), moeda(total["valor_recebido"]), moeda(total["valor_receber"])
+        "TOTAL DO MÊS", "", str(total["quantidade"]), str(total["quantidade_proprios"]),
+        str(total["quantidade_transferidos"]), moeda(total["valor_total"]), moeda(total["valor_total_proprios"]),
+        moeda(total["valor_total_transferidos"]), moeda(total["valor_repasse"]), moeda(total["valor_recebido"]),
+        moeda(total["valor_receber"])
     ])
-    tabela = Table(dados, colWidths=[80, 155, 90, 105, 105, 105], repeatRows=1)
+    tabela = Table(dados, colWidths=[58, 100, 38, 48, 42, 68, 68, 68, 68, 68, 68], repeatRows=1)
     tabela.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#0F172A")),

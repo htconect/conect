@@ -1,407 +1,5 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<script>document.body.classList.add("tela-financeiro-desktop");</script>
-<section class="financeiro-novo">
-  <div class="financeiro-cabecalho">
-    <div class="financeiro-titulo">
-      <a href="/painel" class="voltar-painel">← Painel</a>
-      <div>
-        <h1>Financeiro</h1>
-        <p>Visão geral das finanças</p>
-      </div>
-    </div>
-    <div class="financeiro-topo-acoes">
-      {% if conta %}
-      <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
-        <input type="hidden" name="conta_id" value="{{ conta.id }}">
-        <label class="btn-importar-topo" for="arquivo-extrato-topo">⇧ Importar</label>
-        <input id="arquivo-extrato-topo" type="file" name="arquivo" accept=".csv,.xlsx,.xls" required>
-      </form>
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="financeiro-resumo-linha">
-    <form method="get" class="seletor-periodo seletor-mes-cards" aria-label="Selecionar mês dos cards superiores">
-      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
-      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
-      <input type="hidden" name="data_final" value="{{ data_final }}">
-      <input type="hidden" name="categoria" value="{{ categoria }}">
-      <input type="hidden" name="busca" value="{{ busca }}">
-      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
-      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
-      <select name="mes_cards" onchange="this.form.submit()" title="Mês dos cards">
-        {% for mes in meses_cards %}
-          <option value="{{ mes.strftime('%Y-%m') }}" {% if mes.strftime('%Y-%m') == mes_cards %}selected{% endif %}>
-            Mês {{ loop.index }} · {{ mes.strftime('%m/%Y') }}
-          </option>
-        {% endfor %}
-      </select>
-    </form>
-
-    <div class="financeiro-resumo" aria-label="Resumo mensal e acumulado">
-      <div class="indicador-card indicador-entrada">
-        <span class="indicador-icone">↓</span>
-        <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-saida">
-        <span class="indicador-icone">↑</span>
-        <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-saldo">
-        <span class="indicador-icone">▣</span>
-        <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-receber">
-        <span class="indicador-icone">▤</span>
-        <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-quantidade">
-        <span class="indicador-icone">#</span>
-        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b></div>
-      </div>
-      <div class="indicador-card indicador-contrato">
-        <span class="indicador-icone">▣</span>
-        <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-banco">
-        <span class="indicador-icone">▣</span>
-        <div><small>Total do banco</small><b>R$ {{ saldo_banco|moeda_br }}</b></div>
-      </div>
-      <div class="indicador-card indicador-contas">
-        <span class="indicador-icone">⌂</span>
-        <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
-      </div>
-    </div>
-  </div>
-
-  <details class="relatorio-mensal-card">
-    <summary>
-      <span><b>Relatório mensal</b> · {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
-      <span class="relatorio-acoes">
-        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
-        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
-      </span>
-    </summary>
-    <div class="relatorio-semanas-grid">
-      {% for item in relatorio_semanal %}
-      <article class="relatorio-semana">
-        <header>
-          <b>Semana {{ item.numero }}</b>
-          <small>{{ item.inicio.strftime('%d/%m') }} a {{ item.fim.strftime('%d/%m') }}</small>
-        </header>
-        <dl>
-          <div><dt>Qtd.</dt><dd>{{ item.quantidade }}</dd></div>
-          <div><dt>Valor total</dt><dd>R$ {{ item.valor_total|moeda_br }}</dd></div>
-          <div><dt>Recebido</dt><dd class="positivo">R$ {{ item.valor_recebido|moeda_br }}</dd></div>
-          <div><dt>A receber</dt><dd>R$ {{ item.valor_receber|moeda_br }}</dd></div>
-        </dl>
-      </article>
-      {% endfor %}
-      <article class="relatorio-semana relatorio-total">
-        <header><b>Total do mês</b><small>{{ mes_cards_inicio.strftime('%m/%Y') }}</small></header>
-        <dl>
-          <div><dt>Qtd.</dt><dd>{{ relatorio_total.quantidade }}</dd></div>
-          <div><dt>Valor total</dt><dd>R$ {{ relatorio_total.valor_total|moeda_br }}</dd></div>
-          <div><dt>Recebido</dt><dd class="positivo">R$ {{ relatorio_total.valor_recebido|moeda_br }}</dd></div>
-          <div><dt>A receber</dt><dd>R$ {{ relatorio_total.valor_receber|moeda_br }}</dd></div>
-        </dl>
-      </article>
-    </div>
-  </details>
-
-  <div class="financeiro-filtros-card">
-    <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
-      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
-      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
-      <select name="conta_id" onchange="this.form.submit()">
-        {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
-      </select>
-      <select id="financeiro-mes" name="mes_ref" aria-label="Mês de referência">
-        <option value="">Todos os meses</option>
-        {% set mes_atual = data_inicial[5:7] if data_inicial else '' %}
-        <option value="01" {% if mes_atual == '01' %}selected{% endif %}>Janeiro</option>
-        <option value="02" {% if mes_atual == '02' %}selected{% endif %}>Fevereiro</option>
-        <option value="03" {% if mes_atual == '03' %}selected{% endif %}>Março</option>
-        <option value="04" {% if mes_atual == '04' %}selected{% endif %}>Abril</option>
-        <option value="05" {% if mes_atual == '05' %}selected{% endif %}>Maio</option>
-        <option value="06" {% if mes_atual == '06' %}selected{% endif %}>Junho</option>
-        <option value="07" {% if mes_atual == '07' %}selected{% endif %}>Julho</option>
-        <option value="08" {% if mes_atual == '08' %}selected{% endif %}>Agosto</option>
-        <option value="09" {% if mes_atual == '09' %}selected{% endif %}>Setembro</option>
-        <option value="10" {% if mes_atual == '10' %}selected{% endif %}>Outubro</option>
-        <option value="11" {% if mes_atual == '11' %}selected{% endif %}>Novembro</option>
-        <option value="12" {% if mes_atual == '12' %}selected{% endif %}>Dezembro</option>
-      </select>
-      <input type="date" name="data_inicial" value="{{ data_inicial }}">
-      <input type="date" name="data_final" value="{{ data_final }}">
-      <select name="categoria"><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
-      <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
-      <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
-      <button class="btn-filtrar">⌁ Filtrar</button>
-      <a class="btn-limpar-filtros" href="/painel/financeiro">⟳ Limpar</a>
-    </form>
-
-  </div>
-
-  {% if request.query_params.get('importados') is not none %}
-  <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
-  {% endif %}
-
-  <details class="financeiro-add compact-card">
-    <summary>+ Lançamentos manuais</summary>
-    <div class="forms-add">
-      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="real">
-        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="Descrição" required><input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required>
-        <select name="categoria">{% for valor, rotulo in categorias %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select><button>Salvar lançamento</button>
-      </form>
-      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="receber">
-        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="A receber" required><input name="valor" data-mascara="moeda" placeholder="Valor" required>
-        <select name="categoria"><option value="aluguel">Aluguel</option><option value="empresa">Empresa</option><option value="casa">Casa</option><option value="manutencao">Manutenção</option></select><button>Salvar a receber</button>
-      </form>
-    </div>
-  </details>
-
-  <div class="financeiro-duas-colunas">
-    <section class="box tabela-financeiro banco-box">
-      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; ⟳</span></div>
-      <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
-      <table class="tabela-banco">
-        <colgroup>
-          <col class="col-data">
-          <col class="col-historico">
-          <col class="col-valor">
-          <col class="col-tipo">
-          <col class="col-vinculo">
-          <col class="col-acoes">
-        </colgroup>
-        <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
-        <tbody>
-        {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento else '' }}">
-            <td>{{ l.data.strftime('%d/%m') }}</td>
-            <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
-            <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
-            <td>
-              <form id="categoria-banco-{{ l.id }}" method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll"></form>
-              <select form="categoria-banco-{{ l.id }}" name="categoria" class="select-tipo-banco">
-                {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
-              </select>
-              <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
-            </td>
-            <td>
-              {% if l.pagamento %}
-                <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
-              {% elif l.categoria != 'aluguel' %}
-                <span class="texto-discreto">—</span>
-              {% elif candidatos_vinculo.get(l.id) %}
-                <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular" class="vinculo-form preserve-scroll">
-                  <select name="pagamento_id" class="combo-vinculo">
-                    {% for c in candidatos_vinculo.get(l.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
-                  </select><button>✓</button>
-                </form>
-              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
-            </td>
-            <td class="acoes-linha">
-              <button form="categoria-banco-{{ l.id }}" class="btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo">💾</button>
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
-              {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
-            </td>
-          </tr>
-        {% else %}<tr><td colspan="6">Nenhum extrato importado neste filtro.</td></tr>{% endfor %}
-        {% for m in manuais_reais %}
-          <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento else '' }}">
-            <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
-            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
-            <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
-            <td>
-              <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
-                {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if m.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
-              </select>
-            </td>
-            <td>
-              {% if m.pagamento %}
-                <div class="vinculo-atual"><b>Vinculado</b> · {{ m.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ m.pagamento.solicitacao_id }}">{{ m.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ m.pagamento.valor|moeda_br }}</div>
-              {% elif m.categoria != 'aluguel' or m.valor <= 0 %}
-                <span class="texto-discreto">—</span>
-              {% elif candidatos_manual.get(m.id) %}
-                <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="vinculo-form preserve-scroll">
-                  <select name="pagamento_id" class="combo-vinculo">
-                    {% for c in candidatos_manual.get(m.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
-                  </select><button title="Vincular">✓</button>
-                </form>
-              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
-            </td>
-            <td class="acoes-linha">
-              <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
-              <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
-              {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      </div>
-    </section>
-
-    <section class="box tabela-financeiro sistema-box">
-      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
-      <div class="filtro-direito">
-        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
-        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
-        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
-      </div>
-      <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
-      <table class="tabela-sistema">
-        <colgroup>
-          <col class="col-data-sistema">
-          <col class="col-cliente-sistema">
-          <col class="col-valor-sistema">
-          <col class="col-status-sistema">
-          <col class="col-acao-sistema">
-        </colgroup>
-        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th><th>Ação</th></tr></thead>
-        <tbody>
-        {% for p in pagamentos_sistema %}
-          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.solicitacao.cliente.nome }}</a></td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td><td>{% if not p.conciliado_em and conta %}<form method="post" action="/painel/financeiro/sistema/{{ p.id }}/lancar" class="preserve-scroll"><input type="hidden" name="conta_id" value="{{ conta.id }}"><button class="btn-lancar" title="Criar lançamento manual vinculado no lado esquerdo">← Lançar</button></form>{% else %}<span class="texto-discreto">—</span>{% endif %}</td></tr>
-        {% else %}<tr><td colspan="5">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
-        </tbody>
-      </table>
-      </div>
-
-      <details class="receber-mini" open>
-        <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>
-        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-contratos-receber-scroll">
-        <table><thead><tr><th>Data</th><th>Cliente</th><th>Falta</th></tr></thead><tbody>
-        {% for r in contratos_receber %}
-          {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
-          <tr><td>{{ r.data_evento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a></td><td class="positivo">R$ {{ falta|moeda_br }}</td></tr>
-        {% else %}<tr><td colspan="3">Nenhum contrato a receber neste filtro.</td></tr>{% endfor %}
-        </tbody></table>
-        </div>
-      </details>
-
-      <details class="receber-mini">
-        <summary>A receber manual</summary>
-        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-receber-scroll">
-        <table><thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead><tbody>
-        {% for r in receber %}<tr><td>{{ r.data.strftime('%d/%m') }}</td><td>{{ r.descricao }}</td><td class="positivo">R$ {{ r.valor|moeda_br }}</td><td><form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll"><button>OK</button></form></td></tr>{% else %}<tr><td colspan="4">Nenhum valor a receber.</td></tr>{% endfor %}
-        </tbody></table>
-        </div>
-      </details>
-    </section>
-  </div>
-
-  <div class="financeiro-rodape-linha">
-    <form method="get" class="seletor-periodo seletor-semana-cards" aria-label="Selecionar semana dos cards inferiores">
-      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
-      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
-      <input type="hidden" name="data_final" value="{{ data_final }}">
-      <input type="hidden" name="categoria" value="{{ categoria }}">
-      <input type="hidden" name="busca" value="{{ busca }}">
-      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
-      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
-      <select name="semana_cards" onchange="this.form.submit()" title="Semana dos cards">
-        {% for semana in semanas_cards %}
-          <option value="{{ semana.inicio.isoformat() }}" {% if semana.inicio.isoformat() == semana_cards %}selected{% endif %}>
-            Semana {{ loop.index }} · {{ semana.inicio.strftime('%d/%m') }} a {{ semana.fim.strftime('%d/%m') }}
-          </option>
-        {% endfor %}
-      </select>
-    </form>
-
-    <div class="financeiro-rodape-cards">
-      <div class="contrato-card contrato-quantidade">
-        <span class="contrato-icone">#</span>
-        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }}</em></div>
-        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
-      </div>
-      <div class="contrato-card contrato-total">
-        <span class="contrato-icone">▣</span>
-        <div><small>Valor total</small><b>R$ {{ valor_total_contratos_semana|moeda_br }}</b><em>{{ quantidade_contratos_semana }} contratos</em></div>
-        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
-      </div>
-      <div class="contrato-card contrato-receber-semana">
-        <span class="contrato-icone">↓</span>
-        <div><small>Valor a receber</small><b>R$ {{ valor_receber_contratos_semana|moeda_br }}</b><em>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }}</em></div>
-        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
-      </div>
-      <div class="dica-card">
-        <b>💡 Dica</b>
-        <span>As semanas seguem de segunda a domingo, respeitando o início e o fim do mês.</span>
-      </div>
-    </div>
-  </div>
-</section>
-
-<script>
-(function(){
-  function salvarScrolls(){
-    document.querySelectorAll('[data-scroll-key]').forEach(function(el){ sessionStorage.setItem(el.dataset.scrollKey, el.scrollTop); });
-  }
-  document.querySelectorAll('[data-scroll-key]').forEach(function(el){
-    var key = el.dataset.scrollKey;
-    var saved = sessionStorage.getItem(key);
-    if(saved !== null){ el.scrollTop = parseInt(saved,10) || 0; }
-    el.addEventListener('scroll', function(){ sessionStorage.setItem(key, el.scrollTop); });
-  });
-  document.querySelectorAll('form.preserve-scroll').forEach(function(form){ form.addEventListener('submit', salvarScrolls); });
-  window.addEventListener('beforeunload', salvarScrolls);
-
-  document.querySelectorAll('input[data-allow-negative="1"][data-mascara="moeda"]').forEach(function(input){
-    input.addEventListener('input', function(){
-      var negativo = /^\s*-/.test(this.value) || this.value.indexOf('-') >= 0;
-      var digitos = this.value.replace(/\D/g, '');
-      if(!digitos){ this.value = negativo ? '-' : ''; return; }
-      var numero = (parseInt(digitos,10) / 100).toFixed(2);
-      var valor = numero.replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-      this.value = negativo ? '-' + valor : valor;
-    });
-  });
-
-
-  var seletorMes = document.getElementById('financeiro-mes');
-  if(seletorMes){
-    seletorMes.addEventListener('change', function(){
-      var mes = this.value;
-      var form = this.form;
-      var inicio = form.querySelector('input[name="data_inicial"]');
-      var fim = form.querySelector('input[name="data_final"]');
-      if(mes && inicio && fim){
-        var ano = (fim.value || inicio.value || new Date().toISOString().slice(0,10)).slice(0,4);
-        var ultimoDia = new Date(parseInt(ano,10), parseInt(mes,10), 0).getDate();
-        inicio.value = ano + '-' + mes + '-01';
-        fim.value = ano + '-' + mes + '-' + String(ultimoDia).padStart(2,'0');
-      }
-      salvarScrolls();
-      form.submit();
-    });
-  }
-
-  document.querySelectorAll('.combo-vinculo').forEach(function(select){
-    function atualizarTitulo(){
-      var opcao = select.options[select.selectedIndex];
-      select.title = opcao ? opcao.text : '';
-    }
-    atualizarTitulo();
-    select.addEventListener('change', atualizarTitulo);
-  });
-
-  document.querySelectorAll('.importar-topo-form input[type="file"]').forEach(function(input){
-    input.addEventListener('change', function(){
-      if(this.files && this.files.length){ salvarScrolls(); this.form.submit(); }
-    });
-  });
-})();
-</script>
-
 <style>
 :root{
   --azul:#2563eb;--azul-hover:#1d4ed8;--borda:#dbe5f1;--texto:#0f172a;--muted:#64748b;
@@ -1336,5 +934,442 @@ button{
   background:#eff6ff;
 }
 
+
+
+.indicador-card em,
+.contrato-card em{
+  display:block;
+  margin-top:3px;
+  font-size:10px;
+  font-style:normal;
+  font-weight:700;
+  color:#64748b;
+  white-space:normal;
+}
+.cliente-cell small{
+  display:block;
+  margin-top:3px;
+  color:#64748b;
+  font-size:10px;
+  line-height:1.15;
+}
+.contrato-repasse-semana{
+  border-color:#fed7aa!important;
+  background:#fff7ed!important;
+}
 </style>
+<script>document.body.classList.add("tela-financeiro-desktop");</script>
+<section class="financeiro-novo">
+  <div class="financeiro-cabecalho">
+    <div class="financeiro-titulo">
+      <a href="/painel" class="voltar-painel">← Painel</a>
+      <div>
+        <h1>Financeiro</h1>
+        <p>Visão geral das finanças</p>
+      </div>
+    </div>
+    <div class="financeiro-topo-acoes">
+      {% if conta %}
+      <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
+        <input type="hidden" name="conta_id" value="{{ conta.id }}">
+        <label class="btn-importar-topo" for="arquivo-extrato-topo">⇧ Importar</label>
+        <input id="arquivo-extrato-topo" type="file" name="arquivo" accept=".csv,.xlsx,.xls" required>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="financeiro-resumo-linha">
+    <form method="get" class="seletor-periodo seletor-mes-cards" aria-label="Selecionar mês dos cards superiores">
+      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
+      <input type="hidden" name="data_final" value="{{ data_final }}">
+      <input type="hidden" name="categoria" value="{{ categoria }}">
+      <input type="hidden" name="busca" value="{{ busca }}">
+      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
+      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
+      <select name="mes_cards" onchange="this.form.submit()" title="Mês dos cards">
+        {% for mes in meses_cards %}
+          <option value="{{ mes.strftime('%Y-%m') }}" {% if mes.strftime('%Y-%m') == mes_cards %}selected{% endif %}>
+            Mês {{ loop.index }} · {{ mes.strftime('%m/%Y') }}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+
+    <div class="financeiro-resumo" aria-label="Resumo mensal e acumulado">
+      <div class="indicador-card indicador-entrada">
+        <span class="indicador-icone">↓</span>
+        <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-saida">
+        <span class="indicador-icone">↑</span>
+        <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-saldo">
+        <span class="indicador-icone">▣</span>
+        <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-receber">
+        <span class="indicador-icone">▤</span>
+        <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-quantidade">
+        <span class="indicador-icone">#</span>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b><em>{{ quantidade_contratos_cards_proprios }} próprios · {{ quantidade_contratos_cards_transferidos }} transferidos</em></div>
+      </div>
+      <div class="indicador-card indicador-contrato">
+        <span class="indicador-icone">▣</span>
+        <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b><em>Repasse: R$ {{ total_repasse_cards|moeda_br }}</em></div>
+      </div>
+      <div class="indicador-card indicador-banco">
+        <span class="indicador-icone">▣</span>
+        <div><small>Total do banco</small><b>R$ {{ saldo_banco|moeda_br }}</b></div>
+      </div>
+      <div class="indicador-card indicador-contas">
+        <span class="indicador-icone">⌂</span>
+        <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+      </div>
+    </div>
+  </div>
+
+  <details class="relatorio-mensal-card">
+    <summary>
+      <span><b>Relatório mensal</b> · {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
+      <span class="relatorio-acoes">
+        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
+        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
+      </span>
+    </summary>
+    <div class="relatorio-semanas-grid">
+      {% for item in relatorio_semanal %}
+      <article class="relatorio-semana">
+        <header>
+          <b>Semana {{ item.numero }}</b>
+          <small>{{ item.inicio.strftime('%d/%m') }} a {{ item.fim.strftime('%d/%m') }}</small>
+        </header>
+        <dl>
+          <div><dt>Qtd.</dt><dd>{{ item.quantidade }} <small>({{ item.quantidade_proprios }} próprios · {{ item.quantidade_transferidos }} transf.)</small></dd></div>
+          <div><dt>Valor total</dt><dd>R$ {{ item.valor_total|moeda_br }}</dd></div>
+          <div><dt>Próprios</dt><dd>R$ {{ item.valor_total_proprios|moeda_br }}</dd></div>
+          <div><dt>Transferidos</dt><dd>R$ {{ item.valor_total_transferidos|moeda_br }}</dd></div>
+          <div><dt>Repasse a pagar</dt><dd class="negativo">R$ {{ item.valor_repasse|moeda_br }}</dd></div>
+          <div><dt>Recebido</dt><dd class="positivo">R$ {{ item.valor_recebido|moeda_br }}</dd></div>
+          <div><dt>A receber</dt><dd>R$ {{ item.valor_receber|moeda_br }}</dd></div>
+        </dl>
+      </article>
+      {% endfor %}
+      <article class="relatorio-semana relatorio-total">
+        <header><b>Total do mês</b><small>{{ mes_cards_inicio.strftime('%m/%Y') }}</small></header>
+        <dl>
+          <div><dt>Qtd.</dt><dd>{{ relatorio_total.quantidade }} <small>({{ relatorio_total.quantidade_proprios }} próprios · {{ relatorio_total.quantidade_transferidos }} transf.)</small></dd></div>
+          <div><dt>Valor total</dt><dd>R$ {{ relatorio_total.valor_total|moeda_br }}</dd></div>
+          <div><dt>Próprios</dt><dd>R$ {{ relatorio_total.valor_total_proprios|moeda_br }}</dd></div>
+          <div><dt>Transferidos</dt><dd>R$ {{ relatorio_total.valor_total_transferidos|moeda_br }}</dd></div>
+          <div><dt>Repasse a pagar</dt><dd class="negativo">R$ {{ relatorio_total.valor_repasse|moeda_br }}</dd></div>
+          <div><dt>Recebido</dt><dd class="positivo">R$ {{ relatorio_total.valor_recebido|moeda_br }}</dd></div>
+          <div><dt>A receber</dt><dd>R$ {{ relatorio_total.valor_receber|moeda_br }}</dd></div>
+        </dl>
+      </article>
+    </div>
+  </details>
+
+  <div class="financeiro-filtros-card">
+    <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
+      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
+      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
+      <select name="conta_id" onchange="this.form.submit()">
+        {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+      </select>
+      <select id="financeiro-mes" name="mes_ref" aria-label="Mês de referência">
+        <option value="">Todos os meses</option>
+        {% set mes_atual = data_inicial[5:7] if data_inicial else '' %}
+        <option value="01" {% if mes_atual == '01' %}selected{% endif %}>Janeiro</option>
+        <option value="02" {% if mes_atual == '02' %}selected{% endif %}>Fevereiro</option>
+        <option value="03" {% if mes_atual == '03' %}selected{% endif %}>Março</option>
+        <option value="04" {% if mes_atual == '04' %}selected{% endif %}>Abril</option>
+        <option value="05" {% if mes_atual == '05' %}selected{% endif %}>Maio</option>
+        <option value="06" {% if mes_atual == '06' %}selected{% endif %}>Junho</option>
+        <option value="07" {% if mes_atual == '07' %}selected{% endif %}>Julho</option>
+        <option value="08" {% if mes_atual == '08' %}selected{% endif %}>Agosto</option>
+        <option value="09" {% if mes_atual == '09' %}selected{% endif %}>Setembro</option>
+        <option value="10" {% if mes_atual == '10' %}selected{% endif %}>Outubro</option>
+        <option value="11" {% if mes_atual == '11' %}selected{% endif %}>Novembro</option>
+        <option value="12" {% if mes_atual == '12' %}selected{% endif %}>Dezembro</option>
+      </select>
+      <input type="date" name="data_inicial" value="{{ data_inicial }}">
+      <input type="date" name="data_final" value="{{ data_final }}">
+      <select name="categoria"><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
+      <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
+      <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
+      <button class="btn-filtrar">⌁ Filtrar</button>
+      <a class="btn-limpar-filtros" href="/painel/financeiro">⟳ Limpar</a>
+    </form>
+
+  </div>
+
+  {% if request.query_params.get('importados') is not none %}
+  <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
+  {% endif %}
+
+  <details class="financeiro-add compact-card">
+    <summary>+ Lançamentos manuais</summary>
+    <div class="forms-add">
+      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="real">
+        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="Descrição" required><input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required>
+        <select name="categoria">{% for valor, rotulo in categorias %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select><button>Salvar lançamento</button>
+      </form>
+      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="receber">
+        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="A receber" required><input name="valor" data-mascara="moeda" placeholder="Valor" required>
+        <select name="categoria"><option value="aluguel">Aluguel</option><option value="empresa">Empresa</option><option value="casa">Casa</option><option value="manutencao">Manutenção</option></select><button>Salvar a receber</button>
+      </form>
+    </div>
+  </details>
+
+  <div class="financeiro-duas-colunas">
+    <section class="box tabela-financeiro banco-box">
+      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; ⟳</span></div>
+      <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
+      <table class="tabela-banco">
+        <colgroup>
+          <col class="col-data">
+          <col class="col-historico">
+          <col class="col-valor">
+          <col class="col-tipo">
+          <col class="col-vinculo">
+          <col class="col-acoes">
+        </colgroup>
+        <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
+        <tbody>
+        {% for l in banco %}
+          <tr class="{{ 'linha-vinculada' if l.pagamento else '' }}">
+            <td>{{ l.data.strftime('%d/%m') }}</td>
+            <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
+            <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
+            <td>
+              <form id="categoria-banco-{{ l.id }}" method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll"></form>
+              <select form="categoria-banco-{{ l.id }}" name="categoria" class="select-tipo-banco">
+                {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+              </select>
+              <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
+            </td>
+            <td>
+              {% if l.pagamento %}
+                <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
+              {% elif l.categoria != 'aluguel' %}
+                <span class="texto-discreto">—</span>
+              {% elif candidatos_vinculo.get(l.id) %}
+                <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular" class="vinculo-form preserve-scroll">
+                  <select name="pagamento_id" class="combo-vinculo">
+                    {% for c in candidatos_vinculo.get(l.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
+                  </select><button>✓</button>
+                </form>
+              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
+            </td>
+            <td class="acoes-linha">
+              <button form="categoria-banco-{{ l.id }}" class="btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo">💾</button>
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
+              {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
+            </td>
+          </tr>
+        {% else %}<tr><td colspan="6">Nenhum extrato importado neste filtro.</td></tr>{% endfor %}
+        {% for m in manuais_reais %}
+          <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento else '' }}">
+            <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
+            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
+            <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
+            <td>
+              <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
+                {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if m.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+              </select>
+            </td>
+            <td>
+              {% if m.pagamento %}
+                <div class="vinculo-atual"><b>Vinculado</b> · {{ m.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ m.pagamento.solicitacao_id }}">{{ m.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ m.pagamento.valor|moeda_br }}</div>
+              {% elif m.categoria != 'aluguel' or m.valor <= 0 %}
+                <span class="texto-discreto">—</span>
+              {% elif candidatos_manual.get(m.id) %}
+                <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="vinculo-form preserve-scroll">
+                  <select name="pagamento_id" class="combo-vinculo">
+                    {% for c in candidatos_manual.get(m.id) %}{% set p = c.pagamento %}<option value="{{ p.id }}">{{ p.data_pagamento.strftime('%d/%m') }} · {{ p.solicitacao.cliente.nome }} · R$ {{ p.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}</option>{% endfor %}
+                  </select><button title="Vincular">✓</button>
+                </form>
+              {% else %}<span class="texto-discreto">Sem sugestão</span>{% endif %}
+            </td>
+            <td class="acoes-linha">
+              <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
+              <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
+              {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="box tabela-financeiro sistema-box">
+      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
+      <div class="filtro-direito">
+        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
+        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
+        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
+      </div>
+      <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
+      <table class="tabela-sistema">
+        <colgroup>
+          <col class="col-data-sistema">
+          <col class="col-cliente-sistema">
+          <col class="col-valor-sistema">
+          <col class="col-status-sistema">
+          <col class="col-acao-sistema">
+        </colgroup>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th><th>Ação</th></tr></thead>
+        <tbody>
+        {% for p in pagamentos_sistema %}
+          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>{% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}<small>Cliente: {{ p.solicitacao.cliente.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td><td>{% if not p.conciliado_em and conta %}<form method="post" action="/painel/financeiro/sistema/{{ p.id }}/lancar" class="preserve-scroll"><input type="hidden" name="conta_id" value="{{ conta.id }}"><button class="btn-lancar" title="Criar lançamento manual vinculado no lado esquerdo">← Lançar</button></form>{% else %}<span class="texto-discreto">—</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="5">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      </div>
+
+      <details class="receber-mini" open>
+        <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>
+        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-contratos-receber-scroll">
+        <table><thead><tr><th>Data</th><th>Cliente</th><th>Falta</th></tr></thead><tbody>
+        {% for r in contratos_receber %}
+          {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
+          <tr><td>{{ r.data_evento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>{% if r.empresa_transferida %}<small>Transferido → {{ r.empresa_transferida.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ falta|moeda_br }}</td></tr>
+        {% else %}<tr><td colspan="3">Nenhum contrato a receber neste filtro.</td></tr>{% endfor %}
+        </tbody></table>
+        </div>
+      </details>
+
+      <details class="receber-mini">
+        <summary>A receber manual</summary>
+        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-receber-scroll">
+        <table><thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead><tbody>
+        {% for r in receber %}<tr><td>{{ r.data.strftime('%d/%m') }}</td><td>{{ r.descricao }}</td><td class="positivo">R$ {{ r.valor|moeda_br }}</td><td><form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll"><button>OK</button></form></td></tr>{% else %}<tr><td colspan="4">Nenhum valor a receber.</td></tr>{% endfor %}
+        </tbody></table>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <div class="financeiro-rodape-linha">
+    <form method="get" class="seletor-periodo seletor-semana-cards" aria-label="Selecionar semana dos cards inferiores">
+      <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
+      <input type="hidden" name="data_final" value="{{ data_final }}">
+      <input type="hidden" name="categoria" value="{{ categoria }}">
+      <input type="hidden" name="busca" value="{{ busca }}">
+      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
+      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
+      <select name="semana_cards" onchange="this.form.submit()" title="Semana dos cards">
+        {% for semana in semanas_cards %}
+          <option value="{{ semana.inicio.isoformat() }}" {% if semana.inicio.isoformat() == semana_cards %}selected{% endif %}>
+            Semana {{ loop.index }} · {{ semana.inicio.strftime('%d/%m') }} a {{ semana.fim.strftime('%d/%m') }}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+
+    <div class="financeiro-rodape-cards">
+      <div class="contrato-card contrato-quantidade">
+        <span class="contrato-icone">#</span>
+        <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>{{ quantidade_contratos_semana_proprios }} próprios · {{ quantidade_contratos_semana_transferidos }} transferidos</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="contrato-card contrato-total">
+        <span class="contrato-icone">▣</span>
+        <div><small>Valor total</small><b>R$ {{ valor_total_contratos_semana|moeda_br }}</b><em>Próprios R$ {{ valor_total_contratos_semana_proprios|moeda_br }} · Transf. R$ {{ valor_total_contratos_semana_transferidos|moeda_br }}</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="contrato-card contrato-receber-semana">
+        <span class="contrato-icone">↓</span>
+        <div><small>Valor a receber</small><b>R$ {{ valor_receber_contratos_semana|moeda_br }}</b><em>Próprios R$ {{ valor_receber_contratos_semana_proprios|moeda_br }} · Transf. R$ {{ valor_receber_contratos_semana_transferidos|moeda_br }}</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="contrato-card contrato-repasse-semana">
+        <span class="contrato-icone">↗</span>
+        <div><small>Repasse a pagar</small><b>R$ {{ valor_repasse_semana|moeda_br }}</b><em>{{ quantidade_contratos_semana_transferidos }} contrato(s) transferido(s)</em></div>
+        <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
+      </div>
+      <div class="dica-card">
+        <b>💡 Dica</b>
+        <span>As semanas seguem de segunda a domingo, respeitando o início e o fim do mês.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  function salvarScrolls(){
+    document.querySelectorAll('[data-scroll-key]').forEach(function(el){ sessionStorage.setItem(el.dataset.scrollKey, el.scrollTop); });
+  }
+  document.querySelectorAll('[data-scroll-key]').forEach(function(el){
+    var key = el.dataset.scrollKey;
+    var saved = sessionStorage.getItem(key);
+    if(saved !== null){ el.scrollTop = parseInt(saved,10) || 0; }
+    el.addEventListener('scroll', function(){ sessionStorage.setItem(key, el.scrollTop); });
+  });
+  document.querySelectorAll('form.preserve-scroll').forEach(function(form){ form.addEventListener('submit', salvarScrolls); });
+  window.addEventListener('beforeunload', salvarScrolls);
+
+  document.querySelectorAll('input[data-allow-negative="1"][data-mascara="moeda"]').forEach(function(input){
+    input.addEventListener('input', function(){
+      var negativo = /^\s*-/.test(this.value) || this.value.indexOf('-') >= 0;
+      var digitos = this.value.replace(/\D/g, '');
+      if(!digitos){ this.value = negativo ? '-' : ''; return; }
+      var numero = (parseInt(digitos,10) / 100).toFixed(2);
+      var valor = numero.replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+      this.value = negativo ? '-' + valor : valor;
+    });
+  });
+
+
+  var seletorMes = document.getElementById('financeiro-mes');
+  if(seletorMes){
+    seletorMes.addEventListener('change', function(){
+      var mes = this.value;
+      var form = this.form;
+      var inicio = form.querySelector('input[name="data_inicial"]');
+      var fim = form.querySelector('input[name="data_final"]');
+      if(mes && inicio && fim){
+        var ano = (fim.value || inicio.value || new Date().toISOString().slice(0,10)).slice(0,4);
+        var ultimoDia = new Date(parseInt(ano,10), parseInt(mes,10), 0).getDate();
+        inicio.value = ano + '-' + mes + '-01';
+        fim.value = ano + '-' + mes + '-' + String(ultimoDia).padStart(2,'0');
+      }
+      salvarScrolls();
+      form.submit();
+    });
+  }
+
+  document.querySelectorAll('.combo-vinculo').forEach(function(select){
+    function atualizarTitulo(){
+      var opcao = select.options[select.selectedIndex];
+      select.title = opcao ? opcao.text : '';
+    }
+    atualizarTitulo();
+    select.addEventListener('change', atualizarTitulo);
+  });
+
+  document.querySelectorAll('.importar-topo-form input[type="file"]').forEach(function(input){
+    input.addEventListener('change', function(){
+      if(this.files && this.files.length){ salvarScrolls(); this.form.submit(); }
+    });
+  });
+})();
+</script>
+
+
 {% endblock %}

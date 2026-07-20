@@ -52,6 +52,35 @@
   </div>
 </section>
 
+<details class="accordion transferencia-contrato">
+  <summary>
+    <span>Transferência para outra empresa</span>
+    {% if item.empresa_transferida %}
+      <b>{{ item.empresa_transferida.nome }}</b>
+    {% else %}
+      <small>Não transferido</small>
+    {% endif %}
+  </summary>
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/transferir" class="form-grid">
+    <label>Empresa de destino
+      <select name="empresa_destino_id">
+        <option value="0">Não transferir / remover transferência</option>
+        {% for e in empresas_transferencia %}
+          <option value="{{ e.id }}" {% if item.empresa_transferida_id == e.id %}selected{% endif %}>{{ e.nome }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Valor do repasse
+      <input name="valor_repasse" data-mascara="moeda" value="{{ item.valor_repasse|moeda_br if item.valor_repasse else '' }}" placeholder="Ex.: 1.500,00">
+      <small class="texto-discreto">Valor que deverá ser pago à empresa que receber o contrato.</small>
+    </label>
+    <button type="submit" class="botao">Salvar transferência</button>
+  </form>
+  {% if item.empresa_transferida %}
+    <p class="texto-discreto">Este contrato continua no histórico desta empresa, mas será separado nos relatórios financeiros como transferido. Repasse: <b>R$ {{ item.valor_repasse|moeda_br }}</b>.</p>
+  {% endif %}
+</details>
+
 {% if not tem_itens %}
 <section class="proxima-acao">
   <small>Próxima ação</small>

@@ -82,6 +82,27 @@
 
     <details class="accordion pendencia-accordion">
         <summary>
+            <span>Pendência a receber</span>
+            <b>{{ pendencias_a_receber|length }}</b>
+        </summary>
+        <div class="lista-mobile">
+            {% for i in pendencias_a_receber %}
+            {% set falta_receber = (i.valor or 0) - (i.valor_pago or 0) %}
+            <a class="card-lista card-financeiro" href="/painel/solicitacao/{{ i.id }}">
+                <div>
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · valor ainda não recebido</small>
+                </div>
+                <strong>R$ {{ falta_receber|moeda_br }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência a receber.</p></div>
+            {% endfor %}
+        </div>
+    </details>
+
+    <details class="accordion pendencia-accordion">
+        <summary>
             <span>Pendência de Operação</span>
             <b>{{ pendencias_operacao|length }}</b>
         </summary>
@@ -102,7 +123,7 @@
 
     <details class="accordion pendencia-accordion">
         <summary>
-            <span>Pendência Financeira</span>
+            <span>Pendência de vínculo financeiro</span>
             <b>{{ pendencias_financeiras|length }}</b>
         </summary>
         <div class="lista-mobile">
@@ -115,7 +136,7 @@
                 <strong>R$ {{ p.valor|moeda_br }}</strong>
             </a>
             {% else %}
-            <div class="box pendencia-vazia"><p>Nenhuma pendência financeira.</p></div>
+            <div class="box pendencia-vazia"><p>Nenhuma pendência de vínculo financeiro.</p></div>
             {% endfor %}
         </div>
     </details>
