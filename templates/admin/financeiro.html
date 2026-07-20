@@ -359,17 +359,12 @@ body.tela-financeiro-desktop .container-app{
 .banco-box>.tabela-scroll{
   flex:1 1 auto;
 }
-.sistema-box{
-  overflow-y:auto;
-}
 .sistema-box>.sistema-scroll{
-  flex:0 0 auto;
+  flex:1 1 auto;
   max-height:none;
-  overflow:visible;
 }
 .receber-scroll{
-  max-height:none;
-  overflow:visible;
+  max-height:118px;
 }
 .tabela-financeiro table{
   width:100%;
@@ -794,7 +789,7 @@ button{
   .financeiro-novo{height:auto;min-height:100vh;overflow:visible}
   .financeiro-duas-colunas{min-height:460px}
   .banco-box>.tabela-scroll{max-height:430px}
-  .sistema-box>.sistema-scroll{max-height:none}
+  .sistema-box>.sistema-scroll{max-height:240px}
 }
 @media(max-width:1200px){
   .financeiro-resumo{grid-template-columns:repeat(3,1fr)}
@@ -1367,7 +1362,7 @@ button{
       </div>
       <div class="contrato-card contrato-repasse-semana">
         <span class="contrato-icone">↗</span>
-        <div><small>Repasse a pagar</small><b>R$ {{ valor_repasse_semana|moeda_br }}</b><em>{{ quantidade_repasses_semana_pendentes }} repasse(s) pendente(s)</em></div>
+        <div><small>Repasse a pagar</small><b>R$ {{ valor_repasse_semana|moeda_br }}</b><em>{{ quantidade_contratos_semana_transferidos }} contrato(s) transferido(s)</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="dica-card">

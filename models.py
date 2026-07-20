@@ -416,3 +416,19 @@ class LancamentoManualFinanceiro(Base):
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
+
+
+class LancamentoOrganiza(Base):
+    """Lançamento financeiro recebido do sistema Organiza."""
+    __tablename__ = "lancamentos_organiza"
+
+    id = Column(Integer, primary_key=True, index=True)
+    id_externo = Column(String(120), unique=True, nullable=False, index=True)
+    tipo = Column(String(30), nullable=False)  # venda | manutencao
+    cliente = Column(String(255), nullable=True)
+    descricao = Column(String(500), nullable=True)
+    valor = Column(Numeric(12, 2), nullable=False, default=0)
+    data_pagamento = Column(Date, nullable=False)
+    banco = Column(String(255), nullable=False)
+    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
+    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

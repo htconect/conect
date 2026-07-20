@@ -1,3 +1,5 @@
+import os
+from models import LancamentoOrganiza
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
 from pathlib import Path
@@ -1024,6 +1026,113 @@ def atualizar_mensagem_previsao_padrao():
             )
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Integração Organiza -> Financeiro
+# Um registro enviado pelo Organiza corresponde a um lançamento do Sistema.
+# id_externo é idempotente: reenvio atualiza o registro, sem duplicar.
+# ---------------------------------------------------------------------------
+@app.post("/api/integracoes/organiza/lancamentos")
+async def receber_lancamento_organiza(request: Request, db: Session = Depends(get_db)):
+    from datetime import date
+    from decimal import Decimal, InvalidOperation
+
+    # Chave opcional: se ORGANIZA_API_KEY estiver configurada, passa a ser obrigatória.
+    chave_esperada = os.getenv("ORGANIZA_API_KEY", "").strip()
+    if chave_esperada:
+        chave_recebida = (request.headers.get("X-API-Key") or "").strip()
+        if chave_recebida != chave_esperada:
+            raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+    try:
+        dados = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+
+    obrigatorios = ("id_externo", "tipo", "valor", "data_pagamento", "banco")
+    faltando = [campo for campo in obrigatorios if dados.get(campo) in (None, "")]
+    if faltando:
+        raise HTTPException(status_code=422, detail=f"Campos obrigatórios: {', '.join(faltando)}")
+
+    tipo = str(dados["tipo"]).strip().lower()
+    # Aceita também grafias comuns, mas grava de forma padronizada.
+    aliases = {
+        "venda": "venda",
+        "manutencao": "manutencao",
+        "manutenção": "manutencao",
+    }
+    if tipo not in aliases:
+        raise HTTPException(status_code=422, detail="tipo deve ser 'venda' ou 'manutencao'.")
+    tipo = aliases[tipo]
+
+    try:
+        valor = Decimal(str(dados["valor"]).replace("R$", "").replace(" ", "").replace(",", "."))
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=422, detail="valor inválido.")
+
+    if valor <= 0:
+        raise HTTPException(status_code=422, detail="valor deve ser maior que zero.")
+
+    try:
+        data_pagamento = date.fromisoformat(str(dados["data_pagamento"])[:10])
+    except ValueError:
+        raise HTTPException(status_code=422, detail="data_pagamento deve usar AAAA-MM-DD.")
+
+    id_externo = str(dados["id_externo"]).strip()
+    registro = db.query(LancamentoOrganiza).filter(
+        LancamentoOrganiza.id_externo == id_externo
+    ).first()
+
+    criado = registro is None
+    if criado:
+        registro = LancamentoOrganiza(id_externo=id_externo)
+        db.add(registro)
+
+    registro.tipo = tipo
+    registro.cliente = (str(dados.get("cliente") or "").strip() or None)
+    registro.descricao = (str(dados.get("descricao") or "").strip() or None)
+    registro.valor = valor
+    registro.data_pagamento = data_pagamento
+    registro.banco = str(dados["banco"]).strip()
+
+    db.commit()
+    db.refresh(registro)
+
+    return {
+        "ok": True,
+        "acao": "criado" if criado else "atualizado",
+        "id": registro.id,
+        "id_externo": registro.id_externo,
+        "tipo": registro.tipo,
+    }
+
+
+@app.get("/api/integracoes/organiza/lancamentos")
+def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db)):
+    """Consulta simples para conferência da integração."""
+    chave_esperada = os.getenv("ORGANIZA_API_KEY", "").strip()
+    if chave_esperada:
+        chave_recebida = (request.headers.get("X-API-Key") or "").strip()
+        if chave_recebida != chave_esperada:
+            raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+    registros = (
+        db.query(LancamentoOrganiza)
+        .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
+        .limit(500)
+        .all()
+    )
+    return [{
+        "id_externo": r.id_externo,
+        "tipo": r.tipo,
+        "cliente": r.cliente,
+        "descricao": r.descricao,
+        "valor": float(r.valor or 0),
+        "data_pagamento": r.data_pagamento.isoformat(),
+        "banco": r.banco,
+    } for r in registros]
+
 
 @app.on_event("startup")
 def startup():
@@ -4070,27 +4179,7 @@ def financeiro(
     quantidade_contratos_cards_transferidos = len(contratos_cards_transferidos)
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
-
-    # Repasse "a pagar" considera somente o saldo ainda não vinculado ao banco.
-    # Um repasse totalmente distribuído deixa de aparecer nos totais pendentes.
-    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
-        VinculoRepasseBanco.empresa_id == empresa.id
-    ).all()
-    valor_vinculado_por_repasse = {}
-    vinculos_por_banco = {}
-    for vr in vinculos_repasse_todos:
-        valor_vinculado_por_repasse[vr.solicitacao_id] = (
-            valor_vinculado_por_repasse.get(vr.solicitacao_id, 0.0) + float(vr.valor or 0)
-        )
-        vinculos_por_banco.setdefault(vr.lancamento_banco_id, []).append(vr)
-
-    def saldo_repasse(item):
-        return max(
-            float(item.valor_repasse or 0) - valor_vinculado_por_repasse.get(item.id, 0.0),
-            0.0,
-        )
-
-    total_repasse_cards = sum(saldo_repasse(c) for c in contratos_cards_transferidos)
+    total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
     # Acumulado do banco: independente do mês escolhido nos cards.
     # Considera todas as movimentações reais do ano corrente até hoje.
@@ -4198,11 +4287,7 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_proprios)
     valor_receber_contratos_semana_transferidos = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_transferidos)
-    repasses_semana_pendentes = [
-        c for c in contratos_semana_transferidos if saldo_repasse(c) > 0.01
-    ]
-    quantidade_repasses_semana_pendentes = len(repasses_semana_pendentes)
-    valor_repasse_semana = sum(saldo_repasse(c) for c in repasses_semana_pendentes)
+    valor_repasse_semana = sum(float(c.valor_repasse or 0) for c in contratos_semana_transferidos)
 
     q_repasses = db.query(Solicitacao).join(Cliente).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -4223,6 +4308,15 @@ def financeiro(
     repasses_base = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
 
     # O status do repasse é calculado pelo total efetivamente vinculado no banco.
+    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.empresa_id == empresa.id
+    ).all()
+    valor_vinculado_por_repasse = {}
+    vinculos_por_banco = {}
+    for vr in vinculos_repasse_todos:
+        valor_vinculado_por_repasse[vr.solicitacao_id] = valor_vinculado_por_repasse.get(vr.solicitacao_id, 0.0) + float(vr.valor or 0)
+        vinculos_por_banco.setdefault(vr.lancamento_banco_id, []).append(vr)
+
     def status_repasse(item):
         pago = valor_vinculado_por_repasse.get(item.id, 0.0)
         total = float(item.valor_repasse or 0)
@@ -4299,7 +4393,6 @@ def financeiro(
         "valor_receber_contratos_semana_proprios": valor_receber_contratos_semana_proprios,
         "valor_receber_contratos_semana_transferidos": valor_receber_contratos_semana_transferidos,
         "valor_repasse_semana": valor_repasse_semana,
-        "quantidade_repasses_semana_pendentes": quantidade_repasses_semana_pendentes,
         "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
