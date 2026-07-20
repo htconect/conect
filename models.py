@@ -369,6 +369,11 @@ class LancamentoBanco(Base):
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
+    vinculos_repasse = relationship(
+        "VinculoRepasseBanco",
+        back_populates="lancamento",
+        cascade="all, delete-orphan",
+    )
 
 
 
