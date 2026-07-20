@@ -23,7 +23,7 @@ from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro
+    LancamentoManualFinanceiro, VinculoRepasseBanco
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -925,11 +925,65 @@ def garantir_colunas_novas():
         if "roteirizado" not in cols_ag:
             comandos.append("ALTER TABLE agenda ADD COLUMN roteirizado BOOLEAN DEFAULT false")
 
+    if "vinculos_repasse_banco" not in tabelas:
+        comandos.append("""
+        CREATE TABLE vinculos_repasse_banco (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            lancamento_banco_id INTEGER NOT NULL,
+            solicitacao_id INTEGER NOT NULL,
+            valor FLOAT DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            criado_por VARCHAR(120),
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            FOREIGN KEY(lancamento_banco_id) REFERENCES lancamentos_banco (id),
+            FOREIGN KEY(solicitacao_id) REFERENCES solicitacoes (id),
+            CONSTRAINT uq_vinculo_repasse_banco UNIQUE (lancamento_banco_id, solicitacao_id)
+        )
+        """)
+
     if comandos:
         with engine.begin() as conn:
             for comando in comandos:
                 conn.execute(text(comando))
 
+
+
+def migrar_vinculos_repasse_legados():
+    """Converte vínculos antigos 1:1 para o novo rateio N:N sem duplicar dados."""
+    db = SessionLocal()
+    try:
+        antigos = db.query(LancamentoBanco).filter(LancamentoBanco.repasse_solicitacao_id != None).all()
+        alterou = False
+        for lanc in antigos:
+            repasse = db.get(Solicitacao, lanc.repasse_solicitacao_id)
+            if not repasse:
+                lanc.repasse_solicitacao_id = None
+                alterou = True
+                continue
+            existente = db.query(VinculoRepasseBanco).filter(
+                VinculoRepasseBanco.lancamento_banco_id == lanc.id,
+                VinculoRepasseBanco.solicitacao_id == repasse.id
+            ).first()
+            if not existente:
+                valor = min(abs(float(lanc.valor or 0)), float(repasse.valor_repasse or 0))
+                if valor > 0.01:
+                    db.add(VinculoRepasseBanco(
+                        empresa_id=lanc.empresa_id,
+                        lancamento_banco_id=lanc.id,
+                        solicitacao_id=repasse.id,
+                        valor=valor,
+                        criado_por="Migração automática"
+                    ))
+            lanc.categoria = "repasse"
+            lanc.repasse_solicitacao_id = None
+            alterou = True
+        if alterou:
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 def atualizar_mensagem_previsao_padrao():
     """Copia uma única vez para o cadastro as mensagens aprovadas que estavam fixas nos botões da operação.
@@ -975,6 +1029,7 @@ def atualizar_mensagem_previsao_padrao():
 def startup():
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
+    migrar_vinculos_repasse_legados()
     atualizar_mensagem_previsao_padrao()
     db = SessionLocal()
     try:
@@ -4141,23 +4196,56 @@ def financeiro(
         if valor_busca is not None:
             filtros_repasse.append(func.abs(Solicitacao.valor_repasse - abs(valor_busca)) < 0.01)
         q_repasses = q_repasses.filter(or_(*filtros_repasse))
-    if status_sistema == "vinculado":
-        q_repasses = q_repasses.filter(Solicitacao.repasse_pago_em != None)
-    elif status_sistema == "pendente":
-        q_repasses = q_repasses.filter(Solicitacao.repasse_pago_em == None)
-    repasses_sistema = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
+    repasses_base = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
 
-    bancos_negativos_disponiveis = [
-        l for l in banco if (l.valor or 0) < 0 and not l.pagamento_id and not getattr(l, "repasse_solicitacao_id", None)
+    # O status do repasse é calculado pelo total efetivamente vinculado no banco.
+    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.empresa_id == empresa.id
+    ).all()
+    valor_vinculado_por_repasse = {}
+    vinculos_por_banco = {}
+    for vr in vinculos_repasse_todos:
+        valor_vinculado_por_repasse[vr.solicitacao_id] = valor_vinculado_por_repasse.get(vr.solicitacao_id, 0.0) + float(vr.valor or 0)
+        vinculos_por_banco.setdefault(vr.lancamento_banco_id, []).append(vr)
+
+    def status_repasse(item):
+        pago = valor_vinculado_por_repasse.get(item.id, 0.0)
+        total = float(item.valor_repasse or 0)
+        if pago >= total - 0.01:
+            return "vinculado"
+        if pago > 0.01:
+            return "parcial"
+        return "pendente"
+
+    if status_sistema == "vinculado":
+        repasses_sistema = [r for r in repasses_base if status_repasse(r) == "vinculado"]
+    elif status_sistema == "pendente":
+        repasses_sistema = [r for r in repasses_base if status_repasse(r) != "vinculado"]
+    else:
+        repasses_sistema = repasses_base
+
+    repasses_pendentes = [
+        r for r in repasses_base
+        if valor_vinculado_por_repasse.get(r.id, 0.0) < float(r.valor_repasse or 0) - 0.01
     ]
-    candidatos_banco_repasse = {}
-    for r in repasses_sistema:
-        if r.repasse_pago_em:
+
+    # Ao marcar uma saída como "Repasse", o vínculo passa a ser feito pelo lado do Banco.
+    candidatos_repasse_por_banco = {}
+    saldo_repasse_por_banco = {}
+    for l in banco:
+        if (l.valor or 0) >= 0 or l.categoria != "repasse" or l.pagamento_id:
             continue
-        candidatos_banco_repasse[r.id] = sorted(
-            bancos_negativos_disponiveis,
-            key=lambda l: (abs(abs(float(l.valor or 0)) - float(r.valor_repasse or 0)), abs((l.data - r.data_evento).days if l.data and r.data_evento else 9999))
-        )[:8]
+        usado = sum(float(v.valor or 0) for v in vinculos_por_banco.get(l.id, []))
+        saldo_disponivel = max(abs(float(l.valor or 0)) - usado, 0)
+        saldo_repasse_por_banco[l.id] = saldo_disponivel
+        if saldo_disponivel > 0.01:
+            candidatos_repasse_por_banco[l.id] = sorted(
+                repasses_pendentes,
+                key=lambda r: (
+                    abs((float(r.valor_repasse or 0) - valor_vinculado_por_repasse.get(r.id, 0.0)) - saldo_disponivel),
+                    abs((l.data - r.data_evento).days if l.data and r.data_evento else 9999)
+                )
+            )[:20]
 
     candidatos_vinculo = {
         l.id: melhores_vinculos_para_banco(l, pagamentos_pendentes_vinculo)
@@ -4205,8 +4293,11 @@ def financeiro(
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
         "repasses_sistema": repasses_sistema,
-        "candidatos_banco_repasse": candidatos_banco_repasse,
-        "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção")]
+                "valor_vinculado_por_repasse": valor_vinculado_por_repasse,
+        "vinculos_por_banco": vinculos_por_banco,
+        "candidatos_repasse_por_banco": candidatos_repasse_por_banco,
+        "saldo_repasse_por_banco": saldo_repasse_por_banco,
+        "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 
 
@@ -4553,50 +4644,117 @@ def financeiro_categoria_banco(
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao"]:
+    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
+    if categoria != "repasse":
+        possui_rateio = db.query(VinculoRepasseBanco).filter(
+            VinculoRepasseBanco.lancamento_banco_id == lanc.id
+        ).first()
+        if possui_rateio:
+            raise HTTPException(400, "Desvincule os repasses deste lançamento antes de alterar a categoria.")
     lanc.categoria = categoria
     lanc.categoria_confirmada = confirmado == "1"
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
-@app.post("/painel/financeiro/repasse/{solicitacao_id}/vincular-banco")
+@app.post("/painel/financeiro/banco/{lancamento_id}/vincular-repasse")
 def financeiro_vincular_repasse_banco(
         request: Request,
-        solicitacao_id: int,
-        lancamento_id: int = Form(...),
+        lancamento_id: int,
+        solicitacao_id: int = Form(...),
+        modo: str = Form("total"),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    repasse = db.get(Solicitacao, solicitacao_id)
     lanc = db.get(LancamentoBanco, lancamento_id)
-    if not repasse or repasse.empresa_id != empresa.id or not repasse.empresa_transferida_id or not lanc or lanc.empresa_id != empresa.id:
+    repasse = db.get(Solicitacao, solicitacao_id)
+    if not lanc or lanc.empresa_id != empresa.id or not repasse or repasse.empresa_id != empresa.id or not repasse.empresa_transferida_id:
         raise HTTPException(404)
-    if (lanc.valor or 0) >= 0 or lanc.pagamento_id or getattr(lanc, "repasse_solicitacao_id", None):
-        raise HTTPException(400, "Lançamento bancário indisponível para repasse.")
-    lanc.repasse_solicitacao_id = repasse.id
-    lanc.categoria = "empresa"
-    repasse.repasse_pago_em = agora_utc()
-    repasse.repasse_pago_por = request.session.get("usuario_nome") or "Financeiro"
+    if (lanc.valor or 0) >= 0 or lanc.pagamento_id or lanc.categoria != "repasse":
+        raise HTTPException(400, "Marque esta saída com a categoria Repasse antes de vincular.")
+
+    usado_banco = db.query(func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)).filter(
+        VinculoRepasseBanco.lancamento_banco_id == lanc.id
+    ).scalar() or 0
+    saldo_banco = max(abs(float(lanc.valor or 0)) - float(usado_banco), 0)
+
+    ja_vinculado_repasse = db.query(func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)).filter(
+        VinculoRepasseBanco.solicitacao_id == repasse.id
+    ).scalar() or 0
+    saldo_repasse = max(float(repasse.valor_repasse or 0) - float(ja_vinculado_repasse), 0)
+
+    if saldo_banco <= 0.01:
+        raise HTTPException(400, "Este lançamento bancário não possui saldo disponível.")
+    if saldo_repasse <= 0.01:
+        raise HTTPException(400, "Este repasse já está totalmente pago.")
+
+    if modo == "total":
+        if saldo_banco + 0.01 < saldo_repasse:
+            raise HTTPException(400, "O saldo deste lançamento é menor que o total pendente do repasse. Use a opção 'Usar saldo'.")
+        valor_vinculo = saldo_repasse
+    elif modo == "saldo":
+        valor_vinculo = min(saldo_banco, saldo_repasse)
+    else:
+        raise HTTPException(400, "Modo de vínculo inválido.")
+
+    existente = db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.lancamento_banco_id == lanc.id,
+        VinculoRepasseBanco.solicitacao_id == repasse.id
+    ).first()
+    if existente:
+        existente.valor = float(existente.valor or 0) + valor_vinculo
+    else:
+        db.add(VinculoRepasseBanco(
+            empresa_id=empresa.id,
+            lancamento_banco_id=lanc.id,
+            solicitacao_id=repasse.id,
+            valor=valor_vinculo,
+            criado_por=request.session.get("usuario_nome") or "Financeiro"
+        ))
+
+    total_apos = float(ja_vinculado_repasse) + valor_vinculo
+    if total_apos >= float(repasse.valor_repasse or 0) - 0.01:
+        repasse.repasse_pago_em = agora_utc()
+        repasse.repasse_pago_por = request.session.get("usuario_nome") or "Financeiro"
+    else:
+        repasse.repasse_pago_em = None
+        repasse.repasse_pago_por = None
+
+    # Campo legado fica vazio; a partir daqui o vínculo aceita vários contratos por lançamento.
+    lanc.repasse_solicitacao_id = None
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
-@app.post("/painel/financeiro/banco/{lancamento_id}/desvincular-repasse")
+@app.post("/painel/financeiro/banco/{lancamento_id}/repasse/{solicitacao_id}/desvincular")
 def financeiro_desvincular_repasse_banco(
         request: Request,
         lancamento_id: int,
+        solicitacao_id: int,
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
-    if not lanc or lanc.empresa_id != empresa.id:
+    repasse = db.get(Solicitacao, solicitacao_id)
+    if not lanc or lanc.empresa_id != empresa.id or not repasse or repasse.empresa_id != empresa.id:
         raise HTTPException(404)
-    if getattr(lanc, "repasse_solicitacao", None):
-        lanc.repasse_solicitacao.repasse_pago_em = None
-        lanc.repasse_solicitacao.repasse_pago_por = None
-    lanc.repasse_solicitacao_id = None
+
+    vinculo = db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.lancamento_banco_id == lanc.id,
+        VinculoRepasseBanco.solicitacao_id == repasse.id,
+        VinculoRepasseBanco.empresa_id == empresa.id
+    ).first()
+    if vinculo:
+        db.delete(vinculo)
+    db.flush()
+
+    total_restante = db.query(func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)).filter(
+        VinculoRepasseBanco.solicitacao_id == repasse.id
+    ).scalar() or 0
+    if float(total_restante) < float(repasse.valor_repasse or 0) - 0.01:
+        repasse.repasse_pago_em = None
+        repasse.repasse_pago_por = None
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
@@ -4728,7 +4886,7 @@ def financeiro_lancamento_manual(
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao"]:
+    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if tipo not in ["real", "receber"]:
         raise HTTPException(400, "Tipo inválido.")
@@ -4783,7 +4941,7 @@ def financeiro_editar_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao"]:
+    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     lanc.data = datetime.strptime(data, "%Y-%m-%d").date()
     lanc.descricao = descricao.strip()

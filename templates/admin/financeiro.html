@@ -961,6 +961,11 @@ button{
 .relatorio-topo a{border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px;color:#1d4ed8;text-decoration:none;background:#eff6ff}
 .repasse-box{margin-top:10px;border-top:1px solid #edf1f7;padding-top:8px}
 .badge-repasse{display:inline-block;padding:4px 7px;border-radius:999px;background:#fff7ed;color:#c2410c;font-size:10px;font-weight:900}
+
+.inline-form{display:inline}
+.btn-link-mini{border:0;background:transparent;padding:0 4px;cursor:pointer;font-weight:900}
+.vinculo-repasse-form{margin-top:5px;flex-wrap:wrap}
+.vinculo-repasse-form button{white-space:nowrap}
 </style>
 <script>document.body.classList.add("tela-financeiro-desktop");</script>
 <section class="financeiro-novo">
@@ -1153,7 +1158,7 @@ button{
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
         <tbody>
         {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento or l.repasse_solicitacao else '' }}">
+          <tr class="{{ 'linha-vinculada' if l.pagamento or vinculos_por_banco.get(l.id) else '' }}">
             <td>{{ l.data.strftime('%d/%m') }}</td>
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
@@ -1167,8 +1172,29 @@ button{
             <td>
               {% if l.pagamento %}
                 <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
-              {% elif l.repasse_solicitacao %}
-                <div class="vinculo-atual"><span class="badge-repasse">Repasse pago</span> · <a href="/painel/solicitacao/{{ l.repasse_solicitacao.id }}">{{ l.repasse_solicitacao.cliente.nome }}</a> → {{ l.repasse_solicitacao.empresa_transferida.nome if l.repasse_solicitacao.empresa_transferida else 'Empresa' }} · R$ {{ l.repasse_solicitacao.valor_repasse|moeda_br }}</div>
+              {% elif l.categoria == 'repasse' %}
+                {% for vr in vinculos_por_banco.get(l.id, []) %}
+                  <div class="vinculo-atual"><span class="badge-repasse">Repasse</span> · <a href="/painel/solicitacao/{{ vr.solicitacao.id }}">{{ vr.solicitacao.cliente.nome }}</a> → {{ vr.solicitacao.empresa_transferida.nome if vr.solicitacao.empresa_transferida else 'Empresa' }} · R$ {{ vr.valor|moeda_br }}
+                    <form method="post" action="/painel/financeiro/banco/{{ l.id }}/repasse/{{ vr.solicitacao.id }}/desvincular" class="preserve-scroll inline-form"><button class="btn-link-mini" title="Remover este vínculo">×</button></form>
+                  </div>
+                {% endfor %}
+                {% if saldo_repasse_por_banco.get(l.id, 0) > 0.01 and candidatos_repasse_por_banco.get(l.id) %}
+                  <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-repasse" class="vinculo-form preserve-scroll vinculo-repasse-form">
+                    <select name="solicitacao_id" class="combo-vinculo">
+                      {% for r in candidatos_repasse_por_banco.get(l.id) %}
+                        {% set pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
+                        <option value="{{ r.id }}">{{ r.cliente.nome }} → {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }} · falta R$ {{ (r.valor_repasse - pago_repasse)|moeda_br }}</option>
+                      {% endfor %}
+                    </select>
+                    <button name="modo" value="total" title="Usar o valor total pendente do repasse">Total</button>
+                    <button name="modo" value="saldo" title="Usar até o saldo disponível deste lançamento">Saldo</button>
+                  </form>
+                  <small class="texto-discreto">Saldo do lançamento: R$ {{ saldo_repasse_por_banco.get(l.id, 0)|moeda_br }}</small>
+                {% elif saldo_repasse_por_banco.get(l.id, 0) <= 0.01 %}
+                  <small class="texto-discreto">Valor do lançamento totalmente distribuído.</small>
+                {% else %}
+                  <small class="texto-discreto">Nenhum repasse pendente neste filtro.</small>
+                {% endif %}
               {% elif l.categoria != 'aluguel' %}
                 <span class="texto-discreto">—</span>
               {% elif candidatos_vinculo.get(l.id) %}
@@ -1184,7 +1210,7 @@ button{
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
               {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
-              {% if l.repasse_solicitacao %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular-repasse" class="preserve-scroll"><button class="btn-secundario" title="Desvincular repasse">Desv. repasse</button></form>{% endif %}
+              
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
             </td>
           </tr>
@@ -1243,11 +1269,11 @@ button{
           <col class="col-status-sistema">
           <col class="col-acao-sistema">
         </colgroup>
-        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th><th>Ação</th></tr></thead>
+        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th></tr></thead>
         <tbody>
         {% for p in pagamentos_sistema %}
-          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>{% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}<small>Cliente: {{ p.solicitacao.cliente.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td><td>{% if not p.conciliado_em and conta %}<form method="post" action="/painel/financeiro/sistema/{{ p.id }}/lancar" class="preserve-scroll"><input type="hidden" name="conta_id" value="{{ conta.id }}"><button class="btn-lancar" title="Criar lançamento manual vinculado no lado esquerdo">← Lançar</button></form>{% else %}<span class="texto-discreto">—</span>{% endif %}</td></tr>
-        {% else %}<tr><td colspan="5">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
+          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>{% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}<small>Cliente: {{ p.solicitacao.cliente.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="4">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
         </tbody>
       </table>
       </div>
@@ -1255,26 +1281,20 @@ button{
       <details class="receber-mini repasse-box" open>
         <summary>Repasses a pagar</summary>
         <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-repasses-scroll">
-        <table><thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status / ação</th></tr></thead><tbody>
+        <table><thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status</th></tr></thead><tbody>
         {% for r in repasses_sistema %}
-          <tr class="{{ 'linha-vinculada' if r.repasse_pago_em else '' }}">
+          {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
+          <tr class="{{ 'linha-vinculada' if valor_pago_repasse >= r.valor_repasse - 0.01 else '' }}">
             <td>{{ r.data_evento.strftime('%d/%m') }}</td>
             <td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a><small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small></td>
-            <td class="negativo">R$ {{ r.valor_repasse|moeda_br }}</td>
+            <td class="negativo">R$ {{ r.valor_repasse|moeda_br }}{% if valor_pago_repasse > 0 %}<small>Vinculado: R$ {{ valor_pago_repasse|moeda_br }}</small>{% endif %}</td>
             <td>
-              {% if r.repasse_pago_em %}
+              {% if valor_pago_repasse >= r.valor_repasse - 0.01 %}
                 <span class="badge-ok">Repasse pago</span>
-              {% elif candidatos_banco_repasse.get(r.id) %}
-                <form method="post" action="/painel/financeiro/repasse/{{ r.id }}/vincular-banco" class="vinculo-form preserve-scroll">
-                  <select name="lancamento_id" class="combo-vinculo">
-                    {% for l in candidatos_banco_repasse.get(r.id) %}
-                    <option value="{{ l.id }}">{{ l.data.strftime('%d/%m') }} · {{ l.historico[:24] }} · R$ {{ (-l.valor if l.valor < 0 else l.valor)|moeda_br }}</option>
-                    {% endfor %}
-                  </select>
-                  <button title="Vincular pagamento do repasse ao banco">Pagar ✓</button>
-                </form>
+              {% elif valor_pago_repasse > 0.01 %}
+                <span class="badge-repasse">Parcial</span><small class="texto-discreto"> falta R$ {{ (r.valor_repasse - valor_pago_repasse)|moeda_br }}</small>
               {% else %}
-                <span class="badge-pendente">Pendente</span><small class="texto-discreto"> importe/localize uma saída no banco</small>
+                <span class="badge-pendente">Pendente</span>
               {% endif %}
             </td>
           </tr>

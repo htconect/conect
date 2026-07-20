@@ -371,6 +371,26 @@ class LancamentoBanco(Base):
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
 
 
+
+class VinculoRepasseBanco(Base):
+    """Rateio de um lançamento bancário entre um ou mais repasses de contratos."""
+    __tablename__ = "vinculos_repasse_banco"
+    __table_args__ = (
+        UniqueConstraint("lancamento_banco_id", "solicitacao_id", name="uq_vinculo_repasse_banco"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    lancamento_banco_id = Column(Integer, ForeignKey("lancamentos_banco.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=False, index=True)
+    valor = Column(Float, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    criado_por = Column(String(120), nullable=True)
+
+    lancamento = relationship("LancamentoBanco", back_populates="vinculos_repasse")
+    solicitacao = relationship("Solicitacao")
+
+
 class LancamentoManualFinanceiro(Base):
     __tablename__ = "lancamentos_manuais_financeiros"
 
