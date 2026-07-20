@@ -735,11 +735,11 @@ def garantir_colunas_novas():
         if "sinal_recebido" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN sinal_recebido BOOLEAN DEFAULT false")
         if "pagamento_confirmado_em" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN pagamento_confirmado_em DATETIME")
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN pagamento_confirmado_em TIMESTAMP")
         if "aprovado_em" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em DATETIME")
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em TIMESTAMP")
         if "cancelado_em" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN cancelado_em DATETIME")
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN cancelado_em TIMESTAMP")
         if "retirada_obrigatoria" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_obrigatoria BOOLEAN DEFAULT false")
         if "retirada_data" not in cols_sol:
@@ -765,7 +765,7 @@ def garantir_colunas_novas():
         if "valor_repasse" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_repasse FLOAT DEFAULT 0")
         if "transferida_em" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferida_em DATETIME")
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferida_em TIMESTAMP")
 
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
@@ -774,7 +774,7 @@ def garantir_colunas_novas():
         if "conciliado_por" not in cols_pag:
             comandos.append("ALTER TABLE pagamentos ADD COLUMN conciliado_por VARCHAR(120)")
         if "conciliado_em" not in cols_pag:
-            comandos.append("ALTER TABLE pagamentos ADD COLUMN conciliado_em DATETIME")
+            comandos.append("ALTER TABLE pagamentos ADD COLUMN conciliado_em TIMESTAMP")
 
     if "equipes" not in tabelas:
         comandos.append("""
