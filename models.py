@@ -254,6 +254,8 @@ class Solicitacao(Base):
     empresa_transferida_id = Column(Integer, ForeignKey("empresas.id"), nullable=True)
     valor_repasse = Column(Float, default=0)
     transferida_em = Column(DateTime, nullable=True)
+    repasse_pago_em = Column(DateTime, nullable=True)
+    repasse_pago_por = Column(String(120), nullable=True)
     observacoes = Column(Text)
     status = Column(String(30), default="pre_reserva")  # pre_reserva, aprovada, rejeitada, alteracao
     aceite_em = Column(DateTime, server_default=func.now())
@@ -358,6 +360,7 @@ class LancamentoBanco(Base):
     categoria = Column(String(20), default="aluguel")  # casa, empresa, aluguel, manutencao
     categoria_confirmada = Column(Boolean, default=False)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True)
+    repasse_solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True)
     hash_importacao = Column(String(64), nullable=True, index=True)
     origem_importacao = Column(String(120), nullable=True)
     ordem = Column(Integer, default=0, index=True)
@@ -365,6 +368,7 @@ class LancamentoBanco(Base):
 
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
+    repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
 
 
 class LancamentoManualFinanceiro(Base):
@@ -380,8 +384,10 @@ class LancamentoManualFinanceiro(Base):
     tipo = Column(String(20), default="real")  # real ou receber
     recebido = Column(Boolean, default=False)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True)
+    repasse_solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True)
     ordem = Column(Integer, default=0, index=True)
     criado_em = Column(DateTime, server_default=func.now())
 
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
+    repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])

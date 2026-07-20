@@ -957,6 +957,10 @@ button{
   border-color:#fed7aa!important;
   background:#fff7ed!important;
 }
+.relatorio-topo{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid #dbe4f0;border-radius:12px;padding:5px 8px;font-size:12px;font-weight:800}
+.relatorio-topo a{border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px;color:#1d4ed8;text-decoration:none;background:#eff6ff}
+.repasse-box{margin-top:10px;border-top:1px solid #edf1f7;padding-top:8px}
+.badge-repasse{display:inline-block;padding:4px 7px;border-radius:999px;background:#fff7ed;color:#c2410c;font-size:10px;font-weight:900}
 </style>
 <script>document.body.classList.add("tela-financeiro-desktop");</script>
 <section class="financeiro-novo">
@@ -969,6 +973,11 @@ button{
       </div>
     </div>
     <div class="financeiro-topo-acoes">
+      <div class="relatorio-topo">
+        <span>Relatório {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
+        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
+        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
+      </div>
       {% if conta %}
       <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
         <input type="hidden" name="conta_id" value="{{ conta.id }}">
@@ -1144,7 +1153,7 @@ button{
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
         <tbody>
         {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento else '' }}">
+          <tr class="{{ 'linha-vinculada' if l.pagamento or l.repasse_solicitacao else '' }}">
             <td>{{ l.data.strftime('%d/%m') }}</td>
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
@@ -1158,6 +1167,8 @@ button{
             <td>
               {% if l.pagamento %}
                 <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
+              {% elif l.repasse_solicitacao %}
+                <div class="vinculo-atual"><span class="badge-repasse">Repasse pago</span> · <a href="/painel/solicitacao/{{ l.repasse_solicitacao.id }}">{{ l.repasse_solicitacao.cliente.nome }}</a> → {{ l.repasse_solicitacao.empresa_transferida.nome if l.repasse_solicitacao.empresa_transferida else 'Empresa' }} · R$ {{ l.repasse_solicitacao.valor_repasse|moeda_br }}</div>
               {% elif l.categoria != 'aluguel' %}
                 <span class="texto-discreto">—</span>
               {% elif candidatos_vinculo.get(l.id) %}
@@ -1173,6 +1184,7 @@ button{
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
               {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
+              {% if l.repasse_solicitacao %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular-repasse" class="preserve-scroll"><button class="btn-secundario" title="Desvincular repasse">Desv. repasse</button></form>{% endif %}
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
             </td>
           </tr>
@@ -1239,6 +1251,37 @@ button{
         </tbody>
       </table>
       </div>
+
+      <details class="receber-mini repasse-box" open>
+        <summary>Repasses a pagar</summary>
+        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-repasses-scroll">
+        <table><thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status / ação</th></tr></thead><tbody>
+        {% for r in repasses_sistema %}
+          <tr class="{{ 'linha-vinculada' if r.repasse_pago_em else '' }}">
+            <td>{{ r.data_evento.strftime('%d/%m') }}</td>
+            <td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a><small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small></td>
+            <td class="negativo">R$ {{ r.valor_repasse|moeda_br }}</td>
+            <td>
+              {% if r.repasse_pago_em %}
+                <span class="badge-ok">Repasse pago</span>
+              {% elif candidatos_banco_repasse.get(r.id) %}
+                <form method="post" action="/painel/financeiro/repasse/{{ r.id }}/vincular-banco" class="vinculo-form preserve-scroll">
+                  <select name="lancamento_id" class="combo-vinculo">
+                    {% for l in candidatos_banco_repasse.get(r.id) %}
+                    <option value="{{ l.id }}">{{ l.data.strftime('%d/%m') }} · {{ l.historico[:24] }} · R$ {{ (-l.valor if l.valor < 0 else l.valor)|moeda_br }}</option>
+                    {% endfor %}
+                  </select>
+                  <button title="Vincular pagamento do repasse ao banco">Pagar ✓</button>
+                </form>
+              {% else %}
+                <span class="badge-pendente">Pendente</span><small class="texto-discreto"> importe/localize uma saída no banco</small>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}<tr><td colspan="4">Nenhum repasse neste filtro.</td></tr>{% endfor %}
+        </tbody></table>
+        </div>
+      </details>
 
       <details class="receber-mini" open>
         <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>

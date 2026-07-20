@@ -766,6 +766,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_repasse FLOAT DEFAULT 0")
         if "transferida_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferida_em TIMESTAMP")
+        if "repasse_pago_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN repasse_pago_em TIMESTAMP")
+        if "repasse_pago_por" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN repasse_pago_por VARCHAR(120)")
 
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
@@ -849,7 +853,8 @@ def garantir_colunas_novas():
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id),
             FOREIGN KEY(conta_id) REFERENCES contas_financeiras (id),
-            FOREIGN KEY(pagamento_id) REFERENCES pagamentos (id)
+            FOREIGN KEY(pagamento_id) REFERENCES pagamentos (id),
+            FOREIGN KEY(repasse_solicitacao_id) REFERENCES solicitacoes (id)
         )
         """)
 
@@ -861,6 +866,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN categoria_confirmada BOOLEAN DEFAULT false")
         if "ordem" not in cols_lb:
             comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN ordem INTEGER DEFAULT 0")
+        if "repasse_solicitacao_id" not in cols_lb:
+            comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN repasse_solicitacao_id INTEGER")
 
     if "lancamentos_manuais_financeiros" not in tabelas:
         comandos.append("""
@@ -875,6 +882,7 @@ def garantir_colunas_novas():
             tipo VARCHAR(20) DEFAULT 'real',
             recebido BOOLEAN DEFAULT false,
             pagamento_id INTEGER,
+            repasse_solicitacao_id INTEGER,
             ordem INTEGER DEFAULT 0,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id),
@@ -889,6 +897,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE lancamentos_manuais_financeiros ADD COLUMN pagamento_id INTEGER")
         if "ordem" not in cols_lmf:
             comandos.append("ALTER TABLE lancamentos_manuais_financeiros ADD COLUMN ordem INTEGER DEFAULT 0")
+        if "repasse_solicitacao_id" not in cols_lmf:
+            comandos.append("ALTER TABLE lancamentos_manuais_financeiros ADD COLUMN repasse_solicitacao_id INTEGER")
 
     if "app_migrations" not in tabelas:
         comandos.append("""
@@ -2318,6 +2328,10 @@ def transferir_solicitacao_empresa(
         item.empresa_transferida_id = None
         item.valor_repasse = 0
         item.transferida_em = None
+        item.repasse_pago_em = None
+        item.repasse_pago_por = None
+        db.query(LancamentoBanco).filter(LancamentoBanco.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
+        db.query(LancamentoManualFinanceiro).filter(LancamentoManualFinanceiro.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
         db.commit()
         return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -2330,9 +2344,15 @@ def transferir_solicitacao_empresa(
         # Na ausência de um valor informado, usa o valor total do contrato como base de repasse.
         repasse = max(float(item.valor or 0), 0)
 
+    mudou_destino_ou_valor = item.empresa_transferida_id != destino.id or abs(float(item.valor_repasse or 0) - repasse) > 0.009
     item.empresa_transferida_id = destino.id
     item.valor_repasse = repasse
     item.transferida_em = agora_utc()
+    if mudou_destino_ou_valor:
+        item.repasse_pago_em = None
+        item.repasse_pago_por = None
+        db.query(LancamentoBanco).filter(LancamentoBanco.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
+        db.query(LancamentoManualFinanceiro).filter(LancamentoManualFinanceiro.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -3876,7 +3896,7 @@ def financeiro(
         termo_busca = busca.strip()
         like = f"%{termo_busca}%"
         # O campo de procura aceita texto e também valor em formato brasileiro (ex.: 100,00 ou R$ 100,00).
-        if re.fullmatch(r"[Rr$\\s0-9.\\-,]+", termo_busca):
+        if re.fullmatch(r"[Rr$\s0-9.,-]+", termo_busca):
             try:
                 valor_busca = texto_para_float(termo_busca.replace("R$", "").replace("r$", "").strip())
             except Exception:
@@ -4105,6 +4125,40 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_transferidos)
     valor_repasse_semana = sum(float(c.valor_repasse or 0) for c in contratos_semana_transferidos)
 
+    q_repasses = db.query(Solicitacao).join(Cliente).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.empresa_transferida_id != None,
+        func.coalesce(Solicitacao.valor_repasse, 0) > 0
+    )
+    if data_inicial:
+        q_repasses = q_repasses.filter(Solicitacao.data_evento >= inicio)
+    if data_final:
+        q_repasses = q_repasses.filter(Solicitacao.data_evento <= fim)
+    if busca:
+        like_repasse = f"%{busca.strip()}%"
+        filtros_repasse = [Cliente.nome.ilike(like_repasse)]
+        if valor_busca is not None:
+            filtros_repasse.append(func.abs(Solicitacao.valor_repasse - abs(valor_busca)) < 0.01)
+        q_repasses = q_repasses.filter(or_(*filtros_repasse))
+    if status_sistema == "vinculado":
+        q_repasses = q_repasses.filter(Solicitacao.repasse_pago_em != None)
+    elif status_sistema == "pendente":
+        q_repasses = q_repasses.filter(Solicitacao.repasse_pago_em == None)
+    repasses_sistema = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
+
+    bancos_negativos_disponiveis = [
+        l for l in banco if (l.valor or 0) < 0 and not l.pagamento_id and not getattr(l, "repasse_solicitacao_id", None)
+    ]
+    candidatos_banco_repasse = {}
+    for r in repasses_sistema:
+        if r.repasse_pago_em:
+            continue
+        candidatos_banco_repasse[r.id] = sorted(
+            bancos_negativos_disponiveis,
+            key=lambda l: (abs(abs(float(l.valor or 0)) - float(r.valor_repasse or 0)), abs((l.data - r.data_evento).days if l.data and r.data_evento else 9999))
+        )[:8]
+
     candidatos_vinculo = {
         l.id: melhores_vinculos_para_banco(l, pagamentos_pendentes_vinculo)
         for l in banco
@@ -4150,6 +4204,8 @@ def financeiro(
         "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
+        "repasses_sistema": repasses_sistema,
+        "candidatos_banco_repasse": candidatos_banco_repasse,
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção")]
     })
 
@@ -4505,6 +4561,46 @@ def financeiro_categoria_banco(
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
+@app.post("/painel/financeiro/repasse/{solicitacao_id}/vincular-banco")
+def financeiro_vincular_repasse_banco(
+        request: Request,
+        solicitacao_id: int,
+        lancamento_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    repasse = db.get(Solicitacao, solicitacao_id)
+    lanc = db.get(LancamentoBanco, lancamento_id)
+    if not repasse or repasse.empresa_id != empresa.id or not repasse.empresa_transferida_id or not lanc or lanc.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if (lanc.valor or 0) >= 0 or lanc.pagamento_id or getattr(lanc, "repasse_solicitacao_id", None):
+        raise HTTPException(400, "Lançamento bancário indisponível para repasse.")
+    lanc.repasse_solicitacao_id = repasse.id
+    lanc.categoria = "empresa"
+    repasse.repasse_pago_em = agora_utc()
+    repasse.repasse_pago_por = request.session.get("usuario_nome") or "Financeiro"
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/banco/{lancamento_id}/desvincular-repasse")
+def financeiro_desvincular_repasse_banco(
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoBanco, lancamento_id)
+    if not lanc or lanc.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if getattr(lanc, "repasse_solicitacao", None):
+        lanc.repasse_solicitacao.repasse_pago_em = None
+        lanc.repasse_solicitacao.repasse_pago_por = None
+    lanc.repasse_solicitacao_id = None
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
 @app.post("/painel/financeiro/banco/{lancamento_id}/vincular")
 def financeiro_vincular_banco(
         request: Request,
@@ -4556,6 +4652,9 @@ def financeiro_excluir_banco(
     if lanc.pagamento:
         lanc.pagamento.conciliado_em = None
         lanc.pagamento.conciliado_por = None
+    if getattr(lanc, "repasse_solicitacao", None):
+        lanc.repasse_solicitacao.repasse_pago_em = None
+        lanc.repasse_solicitacao.repasse_pago_por = None
     db.delete(lanc)
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
