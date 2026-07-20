@@ -4070,7 +4070,27 @@ def financeiro(
     quantidade_contratos_cards_transferidos = len(contratos_cards_transferidos)
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
-    total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
+
+    # Repasse "a pagar" considera somente o saldo ainda não vinculado ao banco.
+    # Um repasse totalmente distribuído deixa de aparecer nos totais pendentes.
+    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.empresa_id == empresa.id
+    ).all()
+    valor_vinculado_por_repasse = {}
+    vinculos_por_banco = {}
+    for vr in vinculos_repasse_todos:
+        valor_vinculado_por_repasse[vr.solicitacao_id] = (
+            valor_vinculado_por_repasse.get(vr.solicitacao_id, 0.0) + float(vr.valor or 0)
+        )
+        vinculos_por_banco.setdefault(vr.lancamento_banco_id, []).append(vr)
+
+    def saldo_repasse(item):
+        return max(
+            float(item.valor_repasse or 0) - valor_vinculado_por_repasse.get(item.id, 0.0),
+            0.0,
+        )
+
+    total_repasse_cards = sum(saldo_repasse(c) for c in contratos_cards_transferidos)
 
     # Acumulado do banco: independente do mês escolhido nos cards.
     # Considera todas as movimentações reais do ano corrente até hoje.
@@ -4178,7 +4198,11 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_proprios)
     valor_receber_contratos_semana_transferidos = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_transferidos)
-    valor_repasse_semana = sum(float(c.valor_repasse or 0) for c in contratos_semana_transferidos)
+    repasses_semana_pendentes = [
+        c for c in contratos_semana_transferidos if saldo_repasse(c) > 0.01
+    ]
+    quantidade_repasses_semana_pendentes = len(repasses_semana_pendentes)
+    valor_repasse_semana = sum(saldo_repasse(c) for c in repasses_semana_pendentes)
 
     q_repasses = db.query(Solicitacao).join(Cliente).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -4199,15 +4223,6 @@ def financeiro(
     repasses_base = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
 
     # O status do repasse é calculado pelo total efetivamente vinculado no banco.
-    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
-        VinculoRepasseBanco.empresa_id == empresa.id
-    ).all()
-    valor_vinculado_por_repasse = {}
-    vinculos_por_banco = {}
-    for vr in vinculos_repasse_todos:
-        valor_vinculado_por_repasse[vr.solicitacao_id] = valor_vinculado_por_repasse.get(vr.solicitacao_id, 0.0) + float(vr.valor or 0)
-        vinculos_por_banco.setdefault(vr.lancamento_banco_id, []).append(vr)
-
     def status_repasse(item):
         pago = valor_vinculado_por_repasse.get(item.id, 0.0)
         total = float(item.valor_repasse or 0)
@@ -4284,6 +4299,7 @@ def financeiro(
         "valor_receber_contratos_semana_proprios": valor_receber_contratos_semana_proprios,
         "valor_receber_contratos_semana_transferidos": valor_receber_contratos_semana_transferidos,
         "valor_repasse_semana": valor_repasse_semana,
+        "quantidade_repasses_semana_pendentes": quantidade_repasses_semana_pendentes,
         "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
