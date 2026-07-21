@@ -946,6 +946,14 @@ def garantir_colunas_novas():
         )
         """)
 
+    if "lancamentos_manuais_financeiros" in tabelas:
+        cols_manual_fin = colunas("lancamentos_manuais_financeiros")
+        if "organiza_lancamento_id" not in cols_manual_fin:
+            comandos.append(
+                "ALTER TABLE lancamentos_manuais_financeiros "
+                "ADD COLUMN organiza_lancamento_id INTEGER"
+            )
+
     if "lancamentos_organiza" in tabelas:
         cols_org = colunas("lancamentos_organiza")
         if "falta_receber" not in cols_org:
@@ -4426,6 +4434,14 @@ def financeiro(
         ).all()
         if oid
     }
+    ids_organiza_vinculados.update({
+        oid for (oid,) in db.query(LancamentoManualFinanceiro.organiza_lancamento_id)
+        .filter(
+            LancamentoManualFinanceiro.empresa_id == empresa.id,
+            LancamentoManualFinanceiro.organiza_lancamento_id != None
+        ).all()
+        if oid
+    })
     registros_organiza_disponiveis = (
         db.query(LancamentoOrganiza)
         .filter(~LancamentoOrganiza.id.in_(ids_organiza_vinculados))
@@ -4452,11 +4468,24 @@ def financeiro(
         ).all()
         if l.organiza_lancamento_id
     }
+    for m in db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.organiza_lancamento_id != None
+    ).all():
+        bancos_por_organiza[m.organiza_lancamento_id] = m
 
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
         for m in manuais_reais
         if not getattr(m, "pagamento_id", None) and m.categoria == "aluguel" and (m.valor or 0) > 0
+    }
+    candidatos_manual_organiza = {
+        m.id: melhores_vinculos_organiza(m, registros_organiza_disponiveis, m.categoria)
+        for m in manuais_reais
+        if not getattr(m, "pagamento_id", None)
+        and not getattr(m, "organiza_lancamento_id", None)
+        and m.categoria in ("venda", "manutencao")
+        and (m.valor or 0) > 0
     }
 
     # Organiza fica separado dos lançamentos nativos do Connect.
@@ -4508,6 +4537,7 @@ def financeiro(
         "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
+        "candidatos_manual_organiza": candidatos_manual_organiza,
         "candidatos_organiza": candidatos_organiza,
         "bancos_por_organiza": bancos_por_organiza,
         "repasses_sistema": repasses_sistema,
@@ -4863,7 +4893,7 @@ def financeiro_categoria_banco(
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if categoria != "repasse":
         possui_rateio = db.query(VinculoRepasseBanco).filter(
@@ -5214,8 +5244,64 @@ def financeiro_editar_manual(
         if pagamento:
             pagamento.conciliado_em = None
         lanc.pagamento_id = None
+    if categoria not in ("venda", "manutencao") and getattr(lanc, "organiza_lancamento_id", None):
+        lanc.organiza_lancamento_id = None
     db.commit()
     return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={lanc.conta_id}")
+
+
+@app.post("/painel/financeiro/manual/{lancamento_id}/vincular-organiza")
+def financeiro_vincular_manual_organiza(
+        request: Request,
+        lancamento_id: int,
+        organiza_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
+    item = db.get(LancamentoOrganiza, organiza_id)
+    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not item:
+        raise HTTPException(404)
+    if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None):
+        raise HTTPException(400, "Este lançamento manual já está vinculado.")
+    if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
+        raise HTTPException(400, "O tipo deve corresponder ao lançamento do Organiza.")
+
+    usado_banco = db.query(LancamentoBanco).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.organiza_lancamento_id == item.id
+    ).first()
+    usado_manual = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.organiza_lancamento_id == item.id
+    ).first()
+    if usado_banco or usado_manual:
+        raise HTTPException(400, "Este lançamento do Organiza já está vinculado.")
+
+    lanc.organiza_lancamento_id = item.id
+    db.commit()
+    return RedirectResponse(
+        request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
+        status_code=303
+    )
+
+
+@app.post("/painel/financeiro/manual/{lancamento_id}/desvincular-organiza")
+def financeiro_desvincular_manual_organiza(
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
+    if not lanc or lanc.empresa_id != empresa.id:
+        raise HTTPException(404)
+    lanc.organiza_lancamento_id = None
+    db.commit()
+    return RedirectResponse(
+        request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
+        status_code=303
+    )
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/vincular")

@@ -1087,21 +1087,72 @@ button{
   <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
   {% endif %}
 
-  <details class="financeiro-add compact-card">
-    <summary>+ Lançamentos manuais</summary>
-    <div class="forms-add">
-      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="real">
-        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="Descrição" required><input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required>
-        <select name="categoria">{% for valor, rotulo in categorias %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}</select><button>Salvar lançamento</button>
-      </form>
-      <form method="post" action="/painel/financeiro/manual" class="grid-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}"><input type="hidden" name="tipo" value="receber">
-        <input type="date" name="data" value="{{ data_final }}" required><input name="descricao" placeholder="A receber" required><input name="valor" data-mascara="moeda" placeholder="Valor" required>
-        <select name="categoria"><option value="aluguel">Aluguel</option><option value="empresa">Empresa</option><option value="casa">Casa</option><option value="manutencao">Manutenção</option></select><button>Salvar a receber</button>
+  <div class="financeiro-manual-atalho">
+    <button type="button" class="btn-abrir-manual"
+            onclick="document.getElementById('dlg-lancamento-manual').showModal()">
+      + Lançamento manual
+    </button>
+  </div>
+
+  <dialog id="dlg-lancamento-manual" class="modal-manual-unico">
+    <div class="modal-vinculo-cabecalho">
+      <div>
+        <strong>Novo lançamento manual</strong>
+        <small>Use apenas quando o movimento não vier do extrato ou de outro sistema.</small>
+      </div>
+      <button type="button" class="modal-fechar"
+              onclick="document.getElementById('dlg-lancamento-manual').close()">×</button>
+    </div>
+
+    <div class="manual-modal-abas">
+      <button type="button" class="ativo" data-manual-aba="movimento">Movimento</button>
+      <button type="button" data-manual-aba="receber">A receber</button>
+    </div>
+
+    <div class="manual-modal-painel ativo" data-manual-painel="movimento">
+      <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+        <input type="hidden" name="tipo" value="real">
+        <label>Data<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label class="campo-largo">Descrição<input name="descricao" placeholder="Descrição" required></label>
+        <label>Valor<input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required></label>
+        <label>Tipo
+          <select name="categoria">
+            {% for valor, rotulo in categorias %}<option value="{{ valor }}">{{ rotulo }}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="modal-vinculo-rodape campo-largo">
+          <button type="button" class="btn-modal-cancelar"
+                  onclick="document.getElementById('dlg-lancamento-manual').close()">Cancelar</button>
+          <button type="submit" class="btn-modal-confirmar">Salvar lançamento</button>
+        </div>
       </form>
     </div>
-  </details>
+
+    <div class="manual-modal-painel" data-manual-painel="receber">
+      <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+        <input type="hidden" name="tipo" value="receber">
+        <label>Previsão<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label class="campo-largo">Descrição<input name="descricao" placeholder="A receber" required></label>
+        <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
+        <label>Tipo
+          <select name="categoria">
+            <option value="aluguel">Aluguel</option>
+            <option value="venda">Venda</option>
+            <option value="manutencao">Manutenção</option>
+            <option value="empresa">Empresa</option>
+            <option value="casa">Casa</option>
+          </select>
+        </label>
+        <div class="modal-vinculo-rodape campo-largo">
+          <button type="button" class="btn-modal-cancelar"
+                  onclick="document.getElementById('dlg-lancamento-manual').close()">Cancelar</button>
+          <button type="submit" class="btn-modal-confirmar">Salvar a receber</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
 
   <nav class="financeiro-abas-principais" role="tablist" aria-label="Áreas do financeiro">
   <button type="button" class="ativo" data-aba-fin="vincular">
@@ -1291,44 +1342,71 @@ button{
               </select>
             </td>
             <td class="vinculo-compacto">
-              {% if m.pagamento %}
+              {% if m.pagamento or m.organiza_lancamento_id %}
                 <span class="vinculo-status-ok">✓ Vinculado</span>
-              {% elif m.categoria == 'aluguel' and m.valor > 0 %}
+              {% elif m.categoria in ('aluguel', 'venda', 'manutencao') and m.valor > 0 %}
                 <button type="button" class="btn-vincular"
                         onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()">Vincular</button>
                 <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
                   <div class="modal-vinculo-cabecalho">
                     <div>
-                      <strong>Vincular aluguel</strong>
+                      <strong>Vincular {{ 'aluguel' if m.categoria == 'aluguel' else ('venda' if m.categoria == 'venda' else 'manutenção') }}</strong>
                       <small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small>
                     </div>
                     <button type="button" class="modal-fechar"
                             onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">×</button>
                   </div>
                   <div class="modal-vinculo-historico">{{ m.descricao }}</div>
-                  {% if candidatos_manual.get(m.id) %}
-                    <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="preserve-scroll">
-                      <div class="lista-vinculos-modal">
-                        {% for c in candidatos_manual.get(m.id) %}
-                          {% set p = c.pagamento %}
-                          <label class="opcao-vinculo-modal">
-                            <input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}>
-                            <span>
-                              <b>{{ p.solicitacao.cliente.nome }}</b>
-                              <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}
-                              {% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small>
-                            </span>
-                          </label>
-                        {% endfor %}
-                      </div>
-                      <div class="modal-vinculo-rodape">
-                        <button type="button" class="btn-modal-cancelar"
-                                onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">Cancelar</button>
-                        <button type="submit" class="btn-modal-confirmar">Vincular</button>
-                      </div>
-                    </form>
+
+                  {% if m.categoria == 'aluguel' %}
+                    {% if candidatos_manual.get(m.id) %}
+                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="preserve-scroll">
+                        <div class="lista-vinculos-modal">
+                          {% for c in candidatos_manual.get(m.id) %}
+                            {% set p = c.pagamento %}
+                            <label class="opcao-vinculo-modal">
+                              <input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}>
+                              <span>
+                                <b>{{ p.solicitacao.cliente.nome }}</b>
+                                <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}</small>
+                              </span>
+                            </label>
+                          {% endfor %}
+                        </div>
+                        <div class="modal-vinculo-rodape">
+                          <button type="button" class="btn-modal-cancelar"
+                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">Cancelar</button>
+                          <button type="submit" class="btn-modal-confirmar">Vincular</button>
+                        </div>
+                      </form>
+                    {% else %}
+                      <div class="modal-vazio">Nenhum aluguel disponível.</div>
+                    {% endif %}
                   {% else %}
-                    <div class="modal-vazio">Nenhum aluguel disponível para este filtro.</div>
+                    {% if candidatos_manual_organiza.get(m.id) %}
+                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular-organiza" class="preserve-scroll">
+                        <div class="lista-vinculos-modal">
+                          {% for c in candidatos_manual_organiza.get(m.id) %}
+                            {% set o = c.item %}
+                            <label class="opcao-vinculo-modal">
+                              <input type="radio" name="organiza_id" value="{{ o.id }}" {% if loop.first %}checked{% endif %}>
+                              <span>
+                                <b>{{ o.cliente or '-' }}</b>
+                                <small>{{ o.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ o.valor|moeda_br }}
+                                {% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small>
+                              </span>
+                            </label>
+                          {% endfor %}
+                        </div>
+                        <div class="modal-vinculo-rodape">
+                          <button type="button" class="btn-modal-cancelar"
+                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">Cancelar</button>
+                          <button type="submit" class="btn-modal-confirmar">Vincular</button>
+                        </div>
+                      </form>
+                    {% else %}
+                      <div class="modal-vazio">Nenhuma {{ 'venda' if m.categoria == 'venda' else 'manutenção' }} disponível no Organiza.</div>
+                    {% endif %}
                   {% endif %}
                 </dialog>
               {% else %}
@@ -1340,6 +1418,7 @@ button{
               <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
               <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
               {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
+              {% if m.organiza_lancamento_id %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular-organiza" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
               <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
             </td>
           </tr>
@@ -1931,6 +2010,157 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 
 
 
+
+<style>
+/* Ajuste final de uso real: aproveitar o topo sem empurrar os cards */
+.financeiro-resumo{
+  padding-top:0!important;
+}
+.financeiro-resumo::before,
+.financeiro-resumo .indicador-banco::before{
+  display:none!important;
+  content:none!important;
+}
+.financeiro-resumo .indicador-banco{
+  margin-left:0!important;
+}
+.financeiro-resumo-linha{
+  min-height:68px!important;
+  grid-template-columns:96px minmax(0,1fr)!important;
+  gap:7px!important;
+}
+.seletor-mes-cards select,
+.indicador-card{
+  height:68px!important;
+  min-height:68px!important;
+}
+.financeiro-resumo{
+  gap:7px!important;
+}
+.indicador-card{
+  padding:0 10px!important;
+  gap:8px!important;
+  border-radius:12px!important;
+}
+.indicador-icone{
+  width:34px!important;
+  height:34px!important;
+  font-size:18px!important;
+}
+.indicador-card small{
+  font-size:10px!important;
+  margin-bottom:2px!important;
+}
+.indicador-card b{
+  font-size:16px!important;
+}
+.indicador-card em{
+  font-size:8px!important;
+}
+
+/* Filtros menores e mais proporcionais */
+.financeiro-filtros-card{
+  padding:6px 8px!important;
+  border-radius:12px!important;
+}
+.financeiro-filtros{
+  grid-template-columns:140px 120px 118px 118px 140px 145px minmax(240px,1fr) 88px 88px!important;
+  gap:6px!important;
+}
+.financeiro-filtros input,
+.financeiro-filtros select,
+.financeiro-filtros button,
+.btn-limpar-filtros{
+  height:34px!important;
+  min-height:34px!important;
+  font-size:12px!important;
+  border-radius:8px!important;
+  padding-left:9px!important;
+  padding-right:9px!important;
+}
+
+/* Lançamento manual vira apenas um pequeno atalho */
+.financeiro-manual-atalho{
+  flex:0 0 auto;
+  display:flex;
+  justify-content:flex-start;
+  min-height:34px;
+}
+.btn-abrir-manual{
+  height:32px!important;
+  padding:0 12px!important;
+  background:#fff!important;
+  color:#0f172a!important;
+  border:1px solid #dbe5f1!important;
+  box-shadow:none!important;
+  font-size:12px!important;
+}
+.modal-manual-unico{
+  width:min(680px,94vw);
+  max-height:88vh;
+  border:0;
+  border-radius:16px;
+  padding:0;
+  box-shadow:0 24px 70px rgba(15,23,42,.28);
+}
+.modal-manual-unico::backdrop{background:rgba(15,23,42,.42)}
+.manual-modal-abas{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:0;
+  border-bottom:1px solid #e5eaf1;
+}
+.manual-modal-abas button{
+  height:42px!important;
+  border-radius:0!important;
+  background:#fff!important;
+  color:#475569!important;
+}
+.manual-modal-abas button.ativo{
+  color:#1d4ed8!important;
+  background:#eff6ff!important;
+  box-shadow:inset 0 -2px 0 #2563eb;
+}
+.manual-modal-painel{display:none;padding:16px}
+.manual-modal-painel.ativo{display:block}
+.manual-modal-form{
+  display:grid;
+  grid-template-columns:150px 1fr;
+  gap:12px;
+}
+.manual-modal-form label{
+  display:flex;
+  flex-direction:column;
+  gap:5px;
+  font-size:11px;
+  font-weight:800;
+  color:#334155;
+}
+.manual-modal-form .campo-largo{grid-column:1/-1}
+.manual-modal-form input,
+.manual-modal-form select{
+  height:38px;
+  border:1px solid #cfd9e8;
+  border-radius:9px;
+  padding:0 10px;
+  background:#fff;
+  color:#0f172a;
+}
+
+/* Sistema: mais largura útil */
+@media(min-width:1280px){
+  .financeiro-duas-colunas{
+    grid-template-columns:minmax(0,1.12fr) minmax(620px,.88fr)!important;
+  }
+}
+
+/* Evita que o rodapé cubra linhas */
+.banco-box>.tabela-scroll,
+.sistema-scroll-unico{
+  padding-bottom:8px!important;
+}
+</style>
+
 <script>
 document.addEventListener("DOMContentLoaded", function(){
   const botoes = Array.from(document.querySelectorAll(".financeiro-abas-principais [data-aba-fin]"));
@@ -1963,6 +2193,21 @@ document.addEventListener("DOMContentLoaded", function(){
       window.location.href = url.toString();
     });
   }
+});
+</script>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const botoes = document.querySelectorAll("[data-manual-aba]");
+  const paineis = document.querySelectorAll("[data-manual-painel]");
+  botoes.forEach(btn => btn.addEventListener("click", function(){
+    botoes.forEach(b => b.classList.remove("ativo"));
+    paineis.forEach(p => p.classList.remove("ativo"));
+    btn.classList.add("ativo");
+    const painel = document.querySelector('[data-manual-painel="'+btn.dataset.manualAba+'"]');
+    if(painel) painel.classList.add("ativo");
+  }));
 });
 </script>
 
