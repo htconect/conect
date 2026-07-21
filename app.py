@@ -4503,6 +4503,8 @@ def financeiro(
         "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
+        "candidatos_organiza": candidatos_organiza,
+        "bancos_por_organiza": bancos_por_organiza,
         "repasses_sistema": repasses_sistema,
                 "valor_vinculado_por_repasse": valor_vinculado_por_repasse,
         "vinculos_por_banco": vinculos_por_banco,
