@@ -411,12 +411,14 @@ class LancamentoManualFinanceiro(Base):
     tipo = Column(String(20), default="real")  # real ou receber
     recebido = Column(Boolean, default=False)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True)
+    organiza_lancamento_id = Column(Integer, ForeignKey("lancamentos_organiza.id"), nullable=True, index=True)
     repasse_solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True)
     ordem = Column(Integer, default=0, index=True)
     criado_em = Column(DateTime, server_default=func.now())
 
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
+    organiza_lancamento = relationship("LancamentoOrganiza", foreign_keys=[organiza_lancamento_id])
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
 
 
