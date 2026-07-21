@@ -1,336 +1,3 @@
-<style>
-.financeiro-abas-sistema{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  gap:6px;
-  padding:10px 12px;
-  border-bottom:1px solid #edf1f7;
-  background:#fff;
-}
-.financeiro-abas-sistema button{
-  height:34px;
-  padding:0 8px;
-  border-radius:9px;
-  border:1px solid #dbe4f0;
-  background:#f8fafc;
-  color:#334155;
-  font-size:12px;
-  font-weight:900;
-}
-.financeiro-abas-sistema button.ativo{
-  background:#2563eb;
-  border-color:#2563eb;
-  color:#fff;
-}
-.financeiro-painel-aba{display:none;min-height:0}
-.financeiro-painel-aba.ativo{display:block}
-.organiza-resumo{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:11px 12px;
-  border-bottom:1px solid #edf1f7;
-}
-.organiza-resumo span{font-size:12px;color:#64748b}
-.organiza-scroll{max-height:none}
-.tabela-organiza{width:100%;border-collapse:collapse;font-size:12px}
-.tabela-organiza th,.tabela-organiza td{
-  padding:8px 9px;
-  border-bottom:1px solid #edf1f7;
-  text-align:left;
-  vertical-align:top;
-}
-.tabela-organiza th{
-  position:sticky;top:0;background:#fbfcff;z-index:2;
-  font-size:10px;text-transform:uppercase;
-}
-.tabela-organiza small{display:block;color:#64748b;margin-top:2px}
-@media(max-width:700px){
-  .financeiro-abas-sistema{grid-template-columns:1fr 1fr}
-}
-</style>
-<script>
-document.addEventListener("DOMContentLoaded", function(){
-  const botoes = Array.from(document.querySelectorAll("[data-aba-fin]"));
-  const paineis = Array.from(document.querySelectorAll("[data-painel-fin]"));
-  const status = document.getElementById("financeiro-aba-status");
-
-  function abrir(nome){
-    botoes.forEach(b => b.classList.toggle("ativo", b.dataset.abaFin === nome));
-    paineis.forEach(p => p.classList.toggle("ativo", p.dataset.painelFin === nome));
-    if(status){
-      const rotulos = {vincular:"Vincular", receber:"A receber", pagar:"A pagar"};
-      status.textContent = rotulos[nome] || "";
-    }
-    try{ localStorage.setItem("financeiro_aba_sistema", nome); }catch(e){}
-  }
-
-  botoes.forEach(b => b.addEventListener("click", () => abrir(b.dataset.abaFin)));
-
-  let inicial = "vincular";
-  try{
-    let salvo = localStorage.getItem("financeiro_aba_sistema");
-    if(salvo === "organiza") salvo = "receber";
-    if(["vincular","receber","pagar"].includes(salvo)) inicial = salvo;
-  }catch(e){}
-  abrir(inicial);
-});
-</script>
-
-<style>
-/* =========================================================
-   Financeiro 2026 — layout estável aprovado
-   ========================================================= */
-.financeiro-abas-principais{
-  display:grid;
-  grid-template-columns:repeat(3,minmax(0,1fr));
-  margin:0 0 12px;
-  background:#fff;
-  border:1px solid #dfe7f2;
-  border-radius:14px;
-  overflow:hidden;
-}
-.financeiro-abas-principais button{
-  appearance:none;
-  border:0;
-  border-right:1px solid #e8edf5;
-  background:#fff;
-  min-height:66px;
-  padding:12px 18px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:12px;
-  color:#334155;
-  cursor:pointer;
-}
-.financeiro-abas-principais button:last-child{border-right:0}
-.financeiro-abas-principais button:hover{background:#f8fbff}
-.financeiro-abas-principais button.ativo{
-  background:#f7faff;
-  color:#1d4ed8;
-  box-shadow:inset 0 -3px 0 #2563eb;
-}
-.financeiro-abas-principais .aba-icone{font-size:20px}
-.financeiro-abas-principais span:last-child{display:flex;flex-direction:column;gap:2px;text-align:left}
-.financeiro-abas-principais b{font-size:15px}
-.financeiro-abas-principais small{font-size:10px;color:#64748b;font-weight:600}
-
-/* Duas áreas equilibradas; Sistema deixa de ser uma lateral estreita */
-.financeiro-duas-colunas{
-  display:grid!important;
-  grid-template-columns:minmax(0,1.18fr) minmax(620px,.92fr)!important;
-  gap:12px!important;
-  align-items:start!important;
-  min-height:0!important;
-}
-.banco-box,.sistema-box{min-width:0!important;height:auto!important;max-height:none!important}
-.banco-box>.tabela-scroll,
-.sistema-box .tabela-scroll,
-.sistema-box>.sistema-scroll{
-  max-height:none!important;
-  height:auto!important;
-  overflow-x:auto!important;
-  overflow-y:visible!important;
-}
-
-/* Banco volta a ser uma tabela simples, uma linha por lançamento */
-.tabela-banco{
-  width:100%!important;
-  min-width:820px!important;
-  table-layout:fixed!important;
-}
-.tabela-banco col.col-data{width:76px!important}
-.tabela-banco col.col-historico{width:auto!important}
-.tabela-banco col.col-valor{width:118px!important}
-.tabela-banco col.col-tipo{width:155px!important}
-.tabela-banco col.col-vinculo{width:110px!important}
-.tabela-banco col.col-acoes{width:112px!important}
-.tabela-banco thead tr,
-.tabela-banco tbody tr{
-  display:table-row!important;
-  height:auto!important;
-  min-height:0!important;
-}
-.tabela-banco th,.tabela-banco td{
-  display:table-cell!important;
-  padding:10px 10px!important;
-  vertical-align:middle!important;
-  border-bottom:1px solid #e8edf5!important;
-}
-.tabela-banco td::before{display:none!important;content:none!important}
-.tabela-banco .hist-cell{white-space:normal!important;line-height:1.2}
-.tabela-banco .hist-cell small{display:block;margin-top:3px}
-.select-tipo-banco,.input-tipo-mini{
-  width:100%!important;
-  min-width:0!important;
-  max-width:none!important;
-  height:38px!important;
-  border-radius:9px!important;
-}
-.vinculo-compacto{text-align:left!important;white-space:nowrap}
-.vinculo-status-ok,.btn-vinculo-ok{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  gap:5px;
-  min-height:32px;
-  padding:0 10px;
-  border-radius:9px;
-  border:1px solid #bbf7d0;
-  background:#ecfdf3;
-  color:#15803d;
-  font-size:11px;
-  font-weight:900;
-}
-.btn-vinculo-ok{cursor:pointer}
-.btn-vincular{
-  min-height:32px;
-  padding:0 12px;
-  border:1px solid #bfdbfe;
-  border-radius:9px;
-  background:#eff6ff;
-  color:#1d4ed8;
-  font-size:11px;
-  font-weight:900;
-  cursor:pointer;
-}
-.btn-vincular:hover{background:#dbeafe}
-.acoes-linha{display:flex!important;align-items:center!important;gap:6px!important;white-space:nowrap}
-.acoes-linha form{margin:0!important}
-.acoes-linha button{min-width:34px}
-
-/* Sistema: sem recortes e com tabelas legíveis */
-.sistema-box .titulo-tabela{padding:14px 16px!important}
-.financeiro-painel-aba{min-height:0!important}
-.sistema-box table{width:100%!important;min-width:0!important;table-layout:auto!important}
-.sistema-box th,.sistema-box td{padding:9px 10px!important}
-.sistema-box .cliente-cell{min-width:180px!important;white-space:normal!important}
-.sistema-box .cliente-cell small{display:block;color:#64748b;margin-top:2px}
-.filtro-direito{
-  display:flex!important;
-  gap:6px!important;
-  padding:10px 12px!important;
-  border-bottom:1px solid #e8edf5!important;
-  background:#fff!important;
-}
-.filtro-direito a{
-  border:1px solid #dbe4ef!important;
-  border-radius:999px!important;
-  background:#f8fafc!important;
-  color:#475569!important;
-  padding:6px 10px!important;
-  font-size:11px!important;
-  font-weight:800!important;
-  text-decoration:none!important;
-}
-.filtro-direito a.ativo{
-  border-color:#2563eb!important;
-  background:#2563eb!important;
-  color:#fff!important;
-}
-
-/* Popup pequeno de vínculo: nomes longos nunca quebram a tabela */
-.modal-vinculo{
-  width:min(520px,calc(100vw - 28px));
-  max-height:min(680px,calc(100vh - 40px));
-  padding:0;
-  border:0;
-  border-radius:16px;
-  box-shadow:0 28px 80px rgba(15,23,42,.25);
-  overflow:hidden;
-}
-.modal-vinculo::backdrop{background:rgba(15,23,42,.38);backdrop-filter:blur(2px)}
-.modal-vinculo-cabecalho{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:12px;
-  padding:16px 18px;
-  border-bottom:1px solid #e8edf5;
-}
-.modal-vinculo-cabecalho div{display:flex;flex-direction:column;gap:3px}
-.modal-vinculo-cabecalho strong{font-size:16px;color:#0f172a}
-.modal-vinculo-cabecalho small{font-size:11px;color:#64748b}
-.modal-fechar{
-  width:34px;height:34px;border:0;border-radius:9px;background:#f1f5f9;
-  color:#475569;font-size:20px;cursor:pointer;
-}
-.modal-vinculo-historico{
-  margin:12px 16px 0;
-  padding:10px 12px;
-  border-radius:10px;
-  background:#f8fafc;
-  color:#334155;
-  font-size:12px;
-}
-.modal-vinculo-tipo{
-  padding:14px 18px 8px;
-  font-size:11px;
-  font-weight:900;
-  color:#64748b;
-  text-transform:uppercase;
-  letter-spacing:.04em;
-}
-.lista-vinculos-modal{
-  max-height:360px;
-  overflow:auto;
-  padding:0 12px 8px;
-}
-.opcao-vinculo-modal{
-  display:flex;
-  align-items:flex-start;
-  gap:10px;
-  margin:5px 0;
-  padding:11px 12px;
-  border:1px solid #e2e8f0;
-  border-radius:11px;
-  cursor:pointer;
-}
-.opcao-vinculo-modal:hover{background:#f8fbff;border-color:#bfdbfe}
-.opcao-vinculo-modal:has(input:checked){background:#eff6ff;border-color:#60a5fa}
-.opcao-vinculo-modal input{margin-top:3px}
-.opcao-vinculo-modal span{display:flex;flex-direction:column;gap:3px;min-width:0}
-.opcao-vinculo-modal b{font-size:13px;color:#0f172a;white-space:normal}
-.opcao-vinculo-modal small{font-size:11px;color:#64748b;white-space:normal}
-.modal-vinculo-rodape{
-  display:flex;
-  justify-content:flex-end;
-  gap:8px;
-  padding:12px 16px 16px;
-  border-top:1px solid #e8edf5;
-}
-.btn-modal-confirmar,.btn-modal-secundario,.btn-modal-cancelar{
-  min-height:38px;padding:0 14px;border-radius:9px;font-weight:900;cursor:pointer
-}
-.btn-modal-confirmar{border:1px solid #2563eb;background:#2563eb;color:#fff}
-.btn-modal-secundario{border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8}
-.btn-modal-cancelar{border:1px solid #dbe4ef;background:#fff;color:#475569}
-.modal-vazio{padding:18px;color:#64748b;font-size:12px}
-.repasse-vinculado-modal{
-  display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;
-  margin:6px 14px;padding:9px 10px;border-radius:10px;background:#ecfdf3;font-size:11px;
-}
-.repasse-vinculado-modal form{margin:0}
-.btn-remover-vinculo{border:0;border-radius:7px;background:#fee2e2;color:#b91c1c;width:28px;height:28px}
-
-/* Ações e navegação responsivas */
-@media(max-width:1450px){
-  .financeiro-duas-colunas{grid-template-columns:1fr!important}
-  .tabela-banco{min-width:900px!important}
-  .sistema-box .cliente-cell{min-width:140px!important}
-}
-@media(max-width:760px){
-  .financeiro-abas-principais{grid-template-columns:1fr!important}
-  .financeiro-abas-principais button{justify-content:flex-start;border-right:0;border-bottom:1px solid #e8edf5}
-  .financeiro-abas-principais button:last-child{border-bottom:0}
-  .financeiro-duas-colunas{display:block!important}
-  .banco-box{margin-bottom:12px}
-  .modal-vinculo{width:calc(100vw - 18px)}
-}
-</style>
-
 {% extends "base.html" %}
 {% block conteudo %}
 <style>
@@ -1380,46 +1047,7 @@ button{
     </div>
   </div>
 
-  <details class="relatorio-mensal-card">
-    <summary>
-      <span><b>Relatório mensal</b> · {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
-      <span class="relatorio-acoes">
-        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
-        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
-      </span>
-    </summary>
-    <div class="relatorio-semanas-grid">
-      {% for item in relatorio_semanal %}
-      <article class="relatorio-semana">
-        <header>
-          <b>Semana {{ item.numero }}</b>
-          <small>{{ item.inicio.strftime('%d/%m') }} a {{ item.fim.strftime('%d/%m') }}</small>
-        </header>
-        <dl>
-          <div><dt>Qtd.</dt><dd>{{ item.quantidade }} <small>({{ item.quantidade_proprios }} próprios · {{ item.quantidade_transferidos }} transf.)</small></dd></div>
-          <div><dt>Valor total</dt><dd>R$ {{ item.valor_total|moeda_br }}</dd></div>
-          <div><dt>Próprios</dt><dd>R$ {{ item.valor_total_proprios|moeda_br }}</dd></div>
-          <div><dt>Transferidos</dt><dd>R$ {{ item.valor_total_transferidos|moeda_br }}</dd></div>
-          <div><dt>Repasse a pagar</dt><dd class="negativo">R$ {{ item.valor_repasse|moeda_br }}</dd></div>
-          <div><dt>Recebido</dt><dd class="positivo">R$ {{ item.valor_recebido|moeda_br }}</dd></div>
-          <div><dt>A receber</dt><dd>R$ {{ item.valor_receber|moeda_br }}</dd></div>
-        </dl>
-      </article>
-      {% endfor %}
-      <article class="relatorio-semana relatorio-total">
-        <header><b>Total do mês</b><small>{{ mes_cards_inicio.strftime('%m/%Y') }}</small></header>
-        <dl>
-          <div><dt>Qtd.</dt><dd>{{ relatorio_total.quantidade }} <small>({{ relatorio_total.quantidade_proprios }} próprios · {{ relatorio_total.quantidade_transferidos }} transf.)</small></dd></div>
-          <div><dt>Valor total</dt><dd>R$ {{ relatorio_total.valor_total|moeda_br }}</dd></div>
-          <div><dt>Próprios</dt><dd>R$ {{ relatorio_total.valor_total_proprios|moeda_br }}</dd></div>
-          <div><dt>Transferidos</dt><dd>R$ {{ relatorio_total.valor_total_transferidos|moeda_br }}</dd></div>
-          <div><dt>Repasse a pagar</dt><dd class="negativo">R$ {{ relatorio_total.valor_repasse|moeda_br }}</dd></div>
-          <div><dt>Recebido</dt><dd class="positivo">R$ {{ relatorio_total.valor_recebido|moeda_br }}</dd></div>
-          <div><dt>A receber</dt><dd>R$ {{ relatorio_total.valor_receber|moeda_br }}</dd></div>
-        </dl>
-      </article>
-    </div>
-  </details>
+  
 
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
@@ -1477,13 +1105,13 @@ button{
 
   <nav class="financeiro-abas-principais" role="tablist" aria-label="Áreas do financeiro">
   <button type="button" class="ativo" data-aba-fin="vincular">
-    <span class="aba-icone">🔗</span><span><b>Vincular</b><small>Conciliar banco e sistema</small></span>
+    <b>Vincular</b><small>Banco × sistema</small>
   </button>
   <button type="button" data-aba-fin="receber">
-    <span class="aba-icone">↓</span><span><b>A receber</b><small>Valores pendentes e informativos</small></span>
+    <b>A receber</b><small>Somente informação</small>
   </button>
   <button type="button" data-aba-fin="pagar">
-    <span class="aba-icone">↑</span><span><b>A pagar</b><small>Repasses e pagamentos pendentes</small></span>
+    <b>A pagar</b><small>Somente informação</small>
   </button>
 </nav>
 
@@ -1723,38 +1351,41 @@ button{
 
     <section class="box tabela-financeiro sistema-box">
       <div class="titulo-tabela">
-        <h2><span class="titulo-icone">▣</span> Sistema</h2>
+        <div>
+          <h2><span class="titulo-icone">▣</span> Sistema</h2>
+          <small class="titulo-sub">Informações e vínculos do Connect + Organiza</small>
+        </div>
         <span id="financeiro-aba-status">Vincular</span>
       </div>
 
-
-      <!-- VINCULAR: somente lançamentos nativos do Connect -->
+      <!-- VINCULAR -->
       <div class="financeiro-painel-aba ativo" data-painel-fin="vincular">
-        <div class="filtro-direito">
-          <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
-          <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
-          <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
+        <div class="sistema-toolbar">
+          <label>
+            <span>Status</span>
+            <select id="status-sistema-select">
+              <option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Pendentes</option>
+              <option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Vinculados</option>
+              <option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Todos</option>
+            </select>
+          </label>
+          <span class="sistema-toolbar-info">Use o tipo do banco para filtrar o vínculo correto.</span>
         </div>
 
-        <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
+        <div class="sistema-scroll-unico">
           <table class="tabela-sistema">
-            <colgroup>
-              <col class="col-data-sistema">
-              <col class="col-cliente-sistema">
-              <col class="col-valor-sistema">
-              <col class="col-status-sistema">
-            </colgroup>
-            <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th></tr></thead>
+            <thead>
+              <tr><th>Data</th><th>Origem / cliente</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
+            </thead>
             <tbody>
             {% for p in pagamentos_sistema %}
               <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}">
                 <td>{{ p.data_pagamento.strftime('%d/%m') }}</td>
                 <td class="cliente-cell">
+                  <strong>Connect</strong>
                   <a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>
-                  {% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}
-                    <small>Cliente: {{ p.solicitacao.cliente.nome }}</small>
-                  {% endif %}
                 </td>
+                <td><span class="tipo-chip aluguel">Aluguel</span></td>
                 <td class="positivo">R$ {{ p.valor|moeda_br }}</td>
                 <td>
                   {% if p.conciliado_em %}
@@ -1764,183 +1395,164 @@ button{
                   {% endif %}
                 </td>
               </tr>
-            {% else %}
-              <tr><td colspan="4">Nenhum lançamento do Connect neste filtro.</td></tr>
             {% endfor %}
+
+            {% for item in lancamentos_organiza_financeiro %}
+              {% set banco_org = bancos_por_organiza.get(item.id) %}
+              {% if status_sistema == 'todos'
+                    or (status_sistema == 'vinculado' and banco_org)
+                    or (status_sistema == 'pendente' and not banco_org) %}
+              <tr class="{{ 'linha-vinculada' if banco_org else '' }}">
+                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                <td class="cliente-cell">
+                  <strong>Organiza</strong>
+                  <span>{{ item.cliente or '-' }}</span>
+                </td>
+                <td>
+                  <span class="tipo-chip {{ item.tipo }}">
+                    {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
+                  </span>
+                </td>
+                <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
+                <td>
+                  {% if banco_org %}
+                    <span class="badge-ok">Vinculado</span>
+                  {% else %}
+                    <span class="badge-pendente">Pendente</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+
+            {% if not pagamentos_sistema and not lancamentos_organiza_financeiro %}
+              <tr><td colspan="5" class="tabela-vazia">Nenhum lançamento do sistema neste filtro.</td></tr>
+            {% endif %}
             </tbody>
           </table>
         </div>
-              <div class="vincular-origem-secao">
-          <div class="vincular-origem-cabecalho">
-            <strong>Organiza</strong>
-            <span>Vendas e manutenções para conciliação</span>
-          </div>
-          <div class="tabela-scroll">
-            <table class="tabela-organiza-vincular">
-              <thead><tr><th>Data</th><th>Tipo / cliente</th><th>Valor</th><th>Status</th></tr></thead>
-              <tbody>
-              {% for item in lancamentos_organiza_financeiro %}
-                {% set banco_org = bancos_por_organiza.get(item.id) %}
-                <tr class="{{ 'linha-vinculada' if banco_org else '' }}">
-                  <td>{{ item.data_pagamento.strftime('%d/%m') }}</td>
-                  <td class="cliente-cell">
-                    <strong>{{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}</strong>
-                    <small>{{ item.cliente or '-' }}</small>
-                  </td>
-                  <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
-                  <td>
-                    {% if banco_org %}
-                      <span class="badge-ok">Vinculado</span>
-                      <small>{{ banco_org.data.strftime('%d/%m') }} · {{ banco_org.historico }}</small>
-                    {% else %}
-                      <span class="badge-pendente">Pendente</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% else %}
-                <tr><td colspan="4">Nenhum lançamento recebido do Organiza.</td></tr>
-              {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </div>
-</div>
+      </div>
 
-      <!-- RECEBER -->
+      <!-- A RECEBER: UMA ÚNICA TABELA -->
       <div class="financeiro-painel-aba" data-painel-fin="receber">
-        <details class="receber-mini" open>
-          <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>
-          <div class="tabela-scroll" data-scroll-key="financeiro-contratos-receber-scroll">
-            <table>
-              <thead><tr><th>Data</th><th>Cliente</th><th>Falta</th></tr></thead>
-              <tbody>
+        <div class="sistema-toolbar">
+          <strong>Todos os valores a receber</strong>
+          <span class="sistema-toolbar-info">Informativo — não gera lançamento bancário.</span>
+        </div>
+
+        <div class="sistema-scroll-unico">
+          <table class="tabela-sistema tabela-receber-unificada">
+            <thead>
+              <tr><th>Data</th><th>Cliente / descrição</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
+            </thead>
+            <tbody>
               {% for r in contratos_receber %}
                 {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
+                {% if falta > 0.01 %}
                 <tr>
                   <td>{{ r.data_evento.strftime('%d/%m') }}</td>
                   <td class="cliente-cell">
                     <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
                     {% if r.empresa_transferida %}<small>Transferido → {{ r.empresa_transferida.nome }}</small>{% endif %}
                   </td>
+                  <td><span class="tipo-chip aluguel">Aluguel</span></td>
                   <td class="positivo">R$ {{ falta|moeda_br }}</td>
+                  <td><span class="badge-pendente">A receber</span></td>
                 </tr>
-              {% else %}
-                <tr><td colspan="3">Nenhum contrato a receber neste filtro.</td></tr>
+                {% endif %}
               {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </details>
 
-        <details class="receber-mini" open>
-          <summary>A receber manual</summary>
-          <div class="tabela-scroll" data-scroll-key="financeiro-receber-scroll">
-            <table>
-              <thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead>
-              <tbody>
               {% for r in receber %}
                 <tr>
                   <td>{{ r.data.strftime('%d/%m') }}</td>
-                  <td>{{ r.descricao }}</td>
-                  <td class="positivo">R$ {{ r.valor|moeda_br }}</td>
-                  <td>
-                    <form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll">
-                      <button>OK</button>
-                    </form>
+                  <td class="cliente-cell">
+                    <strong>{{ r.descricao }}</strong>
+                    <small>Manual</small>
                   </td>
+                  <td>
+                    {% if r.categoria == 'manutencao' %}
+                      <span class="tipo-chip manutencao">Manutenção</span>
+                    {% elif r.categoria == 'venda' %}
+                      <span class="tipo-chip venda">Venda</span>
+                    {% elif r.categoria == 'aluguel' %}
+                      <span class="tipo-chip aluguel">Aluguel</span>
+                    {% else %}
+                      <span class="tipo-chip">{{ r.categoria|capitalize }}</span>
+                    {% endif %}
+                  </td>
+                  <td class="positivo">R$ {{ r.valor|moeda_br }}</td>
+                  <td><span class="badge-pendente">A receber</span></td>
                 </tr>
-              {% else %}
-                <tr><td colspan="4">Nenhum valor a receber.</td></tr>
               {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </details>
-      
-        <div class="receber-origem-titulo">
-          <strong>Informações vindas do Organiza</strong>
-          <span>Saldo restante de vendas e manutenções</span>
-        </div>
-<details class="receber-mini" open>
-          <summary>A receber · Organiza</summary>
-        
 
-        <div class="tabela-scroll organiza-scroll" data-scroll-key="financeiro-organiza-scroll">
-          <table class="tabela-organiza">
+              {% for item in lancamentos_organiza_financeiro %}
+                {% if (item.falta_receber or 0) > 0.01 %}
+                <tr>
+                  <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                  <td class="cliente-cell">
+                    <strong>{{ item.cliente or '-' }}</strong>
+                    {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
+                  </td>
+                  <td>
+                    <span class="tipo-chip {{ item.tipo }}">
+                      {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
+                    </span>
+                  </td>
+                  <td class="positivo">R$ {{ item.falta_receber|moeda_br }}</td>
+                  <td><span class="badge-pendente">A receber</span></td>
+                </tr>
+                {% endif %}
+              {% endfor %}
+
+              {% if not contratos_receber and not receber and not lancamentos_organiza_financeiro %}
+                <tr><td colspan="5" class="tabela-vazia">Nenhum valor a receber neste filtro.</td></tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- A PAGAR -->
+      <div class="financeiro-painel-aba" data-painel-fin="pagar">
+        <div class="sistema-toolbar">
+          <strong>Todos os valores a pagar</strong>
+          <span class="sistema-toolbar-info">Repasses pendentes e parciais.</span>
+        </div>
+
+        <div class="sistema-scroll-unico">
+          <table class="tabela-sistema">
             <thead>
-              <tr>
-                <th>Data</th>
-                <th>Tipo / cliente</th>
-                <th>Valor</th>
-                <th>Falta</th>
-                <th>Origem</th>
-              </tr>
+              <tr><th>Data</th><th>Cliente / destino</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
             </thead>
             <tbody>
-            {% for item in lancamentos_organiza_financeiro %}
+            {% for r in repasses_sistema %}
+              {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
+              {% set falta_repasse = (r.valor_repasse or 0) - valor_pago_repasse %}
+              {% if falta_repasse > 0.01 %}
               <tr>
-                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                <td>{{ r.data_evento.strftime('%d/%m') }}</td>
                 <td class="cliente-cell">
-                  <strong>{{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}</strong>
-                  <small>{{ item.cliente or '-' }}</small>
-                  {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
+                  <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
+                  <small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small>
                 </td>
-                <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
-                <td class="{{ 'negativo' if (item.falta_receber or 0) > 0 else 'positivo' }}">
-                  R$ {{ (item.falta_receber or 0)|moeda_br }}
+                <td><span class="tipo-chip repasse">Repasse</span></td>
+                <td class="negativo">R$ {{ falta_repasse|moeda_br }}</td>
+                <td>
+                  {% if valor_pago_repasse > 0.01 %}
+                    <span class="badge-repasse">Parcial</span>
+                  {% else %}
+                    <span class="badge-pendente">A pagar</span>
+                  {% endif %}
                 </td>
-                <td>{{ item.banco or '-' }}</td>
               </tr>
+              {% endif %}
             {% else %}
-              <tr><td colspan="5">Nenhum lançamento recebido do Organiza.</td></tr>
+              <tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>
             {% endfor %}
             </tbody>
           </table>
         </div>
-      </details>
-</div>
-
-      <!-- PAGAR -->
-      <div class="financeiro-painel-aba" data-painel-fin="pagar">
-        <details class="receber-mini repasse-box" open>
-          <summary>Repasses a pagar</summary>
-          <div class="tabela-scroll" data-scroll-key="financeiro-repasses-scroll">
-            <table>
-              <thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status</th></tr></thead>
-              <tbody>
-              {% for r in repasses_sistema %}
-                {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
-                <tr class="{{ 'linha-vinculada' if valor_pago_repasse >= r.valor_repasse - 0.01 else '' }}">
-                  <td>{{ r.data_evento.strftime('%d/%m') }}</td>
-                  <td class="cliente-cell">
-                    <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
-                    <small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small>
-                  </td>
-                  <td class="negativo">
-                    R$ {{ r.valor_repasse|moeda_br }}
-                    {% if valor_pago_repasse > 0 %}<small>Vinculado: R$ {{ valor_pago_repasse|moeda_br }}</small>{% endif %}
-                  </td>
-                  <td>
-                    {% if valor_pago_repasse >= r.valor_repasse - 0.01 %}
-                      <span class="badge-ok">Repasse pago</span>
-                    {% elif valor_pago_repasse > 0.01 %}
-                      <span class="badge-repasse">Parcial</span>
-                      <small class="texto-discreto">falta R$ {{ (r.valor_repasse - valor_pago_repasse)|moeda_br }}</small>
-                    {% else %}
-                      <span class="badge-pendente">Pendente</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% else %}
-                <tr><td colspan="4">Nenhum repasse neste filtro.</td></tr>
-              {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        </details>
       </div>
-
-
     </section>
   </div>
 
@@ -1990,6 +1602,271 @@ button{
     </div>
   </div>
 </section>
+
+
+<style>
+/* ===== FINANCEIRO — LAYOUT FIXO E LIMPO ===== */
+body.tela-financeiro-desktop{overflow:hidden!important}
+.financeiro-novo{
+  height:100vh!important;
+  min-height:0!important;
+  overflow:hidden!important;
+  padding:10px 14px!important;
+  gap:8px!important;
+}
+
+/* Cabeçalho e cards nunca se sobrepõem */
+.financeiro-cabecalho{flex:0 0 48px!important;min-height:48px!important}
+.financeiro-resumo-linha{
+  flex:0 0 82px!important;
+  min-height:82px!important;
+  display:grid!important;
+  grid-template-columns:110px minmax(0,1fr)!important;
+  gap:8px!important;
+  overflow:hidden!important;
+}
+.financeiro-resumo{
+  display:grid!important;
+  grid-template-columns:repeat(8,minmax(145px,1fr))!important;
+  gap:8px!important;
+  min-width:0!important;
+}
+.seletor-mes-cards select,
+.indicador-card{height:82px!important;min-height:82px!important}
+.indicador-card{
+  padding:0 12px!important;
+  gap:10px!important;
+  overflow:hidden!important;
+}
+.indicador-card b{font-size:17px!important}
+.indicador-card small{font-size:11px!important}
+.indicador-card em{font-size:9px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+
+/* Filtros em uma linha, sem empurrar a tela */
+.financeiro-filtros-card{flex:0 0 auto!important}
+.financeiro-filtros{
+  display:grid!important;
+  grid-template-columns:150px 135px 125px 125px 145px 155px minmax(220px,1fr) 96px 96px!important;
+  gap:8px!important;
+}
+.financeiro-add{flex:0 0 auto!important}
+
+/* Abas de verdade, sem barra quebrada */
+.financeiro-abas-principais{
+  flex:0 0 50px!important;
+  height:50px!important;
+  min-height:50px!important;
+  display:grid!important;
+  grid-template-columns:repeat(3,1fr)!important;
+  margin:0!important;
+  border:1px solid #dbe5f1!important;
+  border-radius:12px!important;
+  background:#fff!important;
+  overflow:hidden!important;
+}
+.financeiro-abas-principais button{
+  height:50px!important;
+  min-height:50px!important;
+  padding:6px 14px!important;
+  border:0!important;
+  border-right:1px solid #e8edf5!important;
+  background:#fff!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:1px!important;
+  color:#334155!important;
+  cursor:pointer!important;
+}
+.financeiro-abas-principais button:last-child{border-right:0!important}
+.financeiro-abas-principais button b{font-size:14px!important}
+.financeiro-abas-principais button small{font-size:9px!important;color:#64748b!important}
+.financeiro-abas-principais button.ativo{
+  color:#1d4ed8!important;
+  background:#eff6ff!important;
+  box-shadow:inset 0 -3px 0 #2563eb!important;
+}
+
+/* Área principal fixa: cada tabela rola por dentro, sem paginação */
+.financeiro-duas-colunas{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  display:grid!important;
+  grid-template-columns:minmax(0,1.08fr) minmax(560px,.92fr)!important;
+  gap:10px!important;
+  align-items:stretch!important;
+  overflow:hidden!important;
+}
+.banco-box,.sistema-box{
+  height:100%!important;
+  min-height:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  overflow:hidden!important;
+}
+.titulo-tabela{
+  flex:0 0 54px!important;
+  min-height:54px!important;
+}
+.titulo-sub{
+  display:block;
+  margin-top:2px;
+  font-size:10px!important;
+  color:#64748b!important;
+  font-weight:500!important;
+}
+
+/* Banco: cabeçalho fixo e rolagem interna */
+.banco-box>.tabela-scroll{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  overflow:auto!important;
+}
+.tabela-banco{
+  width:100%!important;
+  min-width:760px!important;
+  table-layout:fixed!important;
+}
+.tabela-banco thead th{
+  position:sticky!important;
+  top:0!important;
+  z-index:5!important;
+  background:#f8fafc!important;
+}
+.tabela-banco col.col-data{width:82px!important}
+.tabela-banco col.col-historico{width:auto!important}
+.tabela-banco col.col-valor{width:110px!important}
+.tabela-banco col.col-tipo{width:150px!important}
+.tabela-banco col.col-vinculo{width:105px!important}
+.tabela-banco col.col-acoes{width:90px!important}
+.tabela-banco th,.tabela-banco td{
+  padding:9px 8px!important;
+  vertical-align:middle!important;
+}
+.tabela-banco .acoes-linha{
+  display:flex!important;
+  gap:5px!important;
+  flex-wrap:nowrap!important;
+}
+.tabela-banco .acoes-linha button{min-width:32px!important;height:32px!important}
+
+/* Sistema ocupa espaço de verdade e usa uma única tabela por aba */
+.financeiro-painel-aba{
+  display:none!important;
+  flex:1 1 auto!important;
+  min-height:0!important;
+  overflow:hidden!important;
+  flex-direction:column!important;
+}
+.financeiro-painel-aba.ativo{display:flex!important}
+.sistema-toolbar{
+  flex:0 0 50px!important;
+  min-height:50px!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:10px!important;
+  padding:8px 12px!important;
+  border-bottom:1px solid #e8edf5!important;
+  background:#fff!important;
+}
+.sistema-toolbar label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:11px;
+  font-weight:800;
+}
+.sistema-toolbar select{
+  height:34px;
+  border:1px solid #dbe4ef;
+  border-radius:8px;
+  background:#fff;
+  padding:0 28px 0 10px;
+  font-weight:700;
+}
+.sistema-toolbar-info{font-size:10px;color:#64748b}
+.sistema-scroll-unico{
+  flex:1 1 auto!important;
+  min-height:0!important;
+  overflow:auto!important;
+}
+.tabela-sistema{
+  width:100%!important;
+  min-width:620px!important;
+  border-collapse:collapse!important;
+  table-layout:auto!important;
+}
+.tabela-sistema thead th{
+  position:sticky!important;
+  top:0!important;
+  z-index:5!important;
+  background:#f8fafc!important;
+  border-bottom:1px solid #e8edf5!important;
+}
+.tabela-sistema th,.tabela-sistema td{
+  padding:9px 10px!important;
+  border-bottom:1px solid #edf1f7!important;
+  text-align:left!important;
+  vertical-align:middle!important;
+}
+.tabela-sistema .cliente-cell{min-width:180px!important}
+.tabela-sistema .cliente-cell strong,
+.tabela-sistema .cliente-cell span,
+.tabela-sistema .cliente-cell small{display:block!important}
+.tabela-vazia{text-align:center!important;color:#64748b!important;padding:24px!important}
+
+.tipo-chip{
+  display:inline-flex;
+  align-items:center;
+  min-height:24px;
+  padding:0 8px;
+  border-radius:999px;
+  background:#f1f5f9;
+  color:#475569;
+  font-size:10px;
+  font-weight:900;
+  white-space:nowrap;
+}
+.tipo-chip.aluguel{background:#eff6ff;color:#1d4ed8}
+.tipo-chip.manutencao{background:#f3e8ff;color:#7e22ce}
+.tipo-chip.venda{background:#ecfdf3;color:#15803d}
+.tipo-chip.repasse{background:#fff7ed;color:#c2410c}
+
+/* Rodapé continua visível, sem subir sobre as tabelas */
+.financeiro-rodape-linha{
+  flex:0 0 72px!important;
+  min-height:72px!important;
+  margin:0!important;
+}
+.financeiro-rodape-cards .contrato-card,
+.seletor-semana-cards select{height:72px!important;min-height:72px!important}
+
+/* Tablets: mantém tudo utilizável sem sobreposição */
+@media(max-width:1450px){
+  body.tela-financeiro-desktop{overflow:auto!important}
+  .financeiro-novo{height:auto!important;min-height:100vh!important;overflow:visible!important}
+  .financeiro-resumo-linha{overflow-x:auto!important}
+  .financeiro-resumo{min-width:1280px!important}
+  .financeiro-filtros-card{overflow-x:auto!important}
+  .financeiro-filtros{min-width:1250px!important}
+  .financeiro-duas-colunas{
+    grid-template-columns:1fr!important;
+    overflow:visible!important;
+  }
+  .banco-box,.sistema-box{height:560px!important}
+  .financeiro-rodape-linha{height:auto!important}
+}
+
+/* Mobile */
+@media(max-width:760px){
+  .financeiro-abas-principais{grid-template-columns:repeat(3,1fr)!important}
+  .financeiro-abas-principais button small{display:none!important}
+  .financeiro-duas-colunas{display:block!important}
+  .banco-box,.sistema-box{height:520px!important;margin-bottom:10px!important}
+}
+</style>
 
 <script>
 (function(){
@@ -2052,5 +1929,41 @@ button{
 })();
 </script>
 
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const botoes = Array.from(document.querySelectorAll(".financeiro-abas-principais [data-aba-fin]"));
+  const paineis = Array.from(document.querySelectorAll("[data-painel-fin]"));
+  const statusTopo = document.getElementById("financeiro-aba-status");
+
+  function abrirAba(nome){
+    botoes.forEach(b => b.classList.toggle("ativo", b.dataset.abaFin === nome));
+    paineis.forEach(p => p.classList.toggle("ativo", p.dataset.painelFin === nome));
+    if(statusTopo){
+      statusTopo.textContent = nome === "receber" ? "A receber" : nome === "pagar" ? "A pagar" : "Vincular";
+    }
+    try{ localStorage.setItem("financeiro_aba_principal", nome); }catch(e){}
+  }
+
+  botoes.forEach(b => b.addEventListener("click", () => abrirAba(b.dataset.abaFin)));
+
+  let inicial = "vincular";
+  try{
+    const salvo = localStorage.getItem("financeiro_aba_principal");
+    if(["vincular","receber","pagar"].includes(salvo)) inicial = salvo;
+  }catch(e){}
+  abrirAba(inicial);
+
+  const statusSelect = document.getElementById("status-sistema-select");
+  if(statusSelect){
+    statusSelect.addEventListener("change", function(){
+      const url = new URL(window.location.href);
+      url.searchParams.set("status_sistema", this.value);
+      window.location.href = url.toString();
+    });
+  }
+});
+</script>
 
 {% endblock %}
