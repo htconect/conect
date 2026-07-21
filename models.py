@@ -1,5 +1,5 @@
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text, Time,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Time,
     UniqueConstraint, func
 )
 from sqlalchemy.orm import relationship
@@ -430,5 +430,5 @@ class LancamentoOrganiza(Base):
     valor = Column(Numeric(12, 2), nullable=False, default=0)
     data_pagamento = Column(Date, nullable=False)
     banco = Column(String(255), nullable=False)
-    criado_em = Column(DateTime, default=datetime.utcnow, nullable=False)
-    atualizado_em = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
