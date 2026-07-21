@@ -4385,6 +4385,21 @@ def financeiro(
         if not getattr(m, "pagamento_id", None) and m.categoria == "aluguel" and (m.valor or 0) > 0
     }
 
+    # Organiza fica separado dos lançamentos nativos do Connect.
+    # Esses registros são apenas exibidos nesta aba; a conciliação continua no Banco.
+    try:
+        lancamentos_organiza_financeiro = (
+            db.query(LancamentoOrganiza)
+            .order_by(
+                LancamentoOrganiza.data_pagamento.desc(),
+                LancamentoOrganiza.id.desc()
+            )
+            .limit(500)
+            .all()
+        )
+    except Exception:
+        lancamentos_organiza_financeiro = []
+
     return templates.TemplateResponse("admin/financeiro.html", {
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
@@ -4424,6 +4439,7 @@ def financeiro(
         "vinculos_por_banco": vinculos_por_banco,
         "candidatos_repasse_por_banco": candidatos_repasse_por_banco,
         "saldo_repasse_por_banco": saldo_repasse_por_banco,
+        "lancamentos_organiza_financeiro": lancamentos_organiza_financeiro,
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 

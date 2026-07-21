@@ -1,3 +1,83 @@
+
+<style>
+.financeiro-abas-sistema{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  padding:10px 12px;
+  border-bottom:1px solid #edf1f7;
+  background:#fff;
+}
+.financeiro-abas-sistema button{
+  height:34px;
+  padding:0 8px;
+  border-radius:9px;
+  border:1px solid #dbe4f0;
+  background:#f8fafc;
+  color:#334155;
+  font-size:12px;
+  font-weight:900;
+}
+.financeiro-abas-sistema button.ativo{
+  background:#2563eb;
+  border-color:#2563eb;
+  color:#fff;
+}
+.financeiro-painel-aba{display:none;min-height:0}
+.financeiro-painel-aba.ativo{display:block}
+.organiza-resumo{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:11px 12px;
+  border-bottom:1px solid #edf1f7;
+}
+.organiza-resumo span{font-size:12px;color:#64748b}
+.organiza-scroll{max-height:none}
+.tabela-organiza{width:100%;border-collapse:collapse;font-size:12px}
+.tabela-organiza th,.tabela-organiza td{
+  padding:8px 9px;
+  border-bottom:1px solid #edf1f7;
+  text-align:left;
+  vertical-align:top;
+}
+.tabela-organiza th{
+  position:sticky;top:0;background:#fbfcff;z-index:2;
+  font-size:10px;text-transform:uppercase;
+}
+.tabela-organiza small{display:block;color:#64748b;margin-top:2px}
+@media(max-width:700px){
+  .financeiro-abas-sistema{grid-template-columns:1fr 1fr}
+}
+</style>
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const botoes = Array.from(document.querySelectorAll("[data-aba-fin]"));
+  const paineis = Array.from(document.querySelectorAll("[data-painel-fin]"));
+  const status = document.getElementById("financeiro-aba-status");
+
+  function abrir(nome){
+    botoes.forEach(b => b.classList.toggle("ativo", b.dataset.abaFin === nome));
+    paineis.forEach(p => p.classList.toggle("ativo", p.dataset.painelFin === nome));
+    if(status){
+      const rotulos = {vincular:"Vincular", receber:"A receber", pagar:"A pagar"};
+      status.textContent = rotulos[nome] || "";
+    }
+    try{ localStorage.setItem("financeiro_aba_sistema", nome); }catch(e){}
+  }
+
+  botoes.forEach(b => b.addEventListener("click", () => abrir(b.dataset.abaFin)));
+
+  let inicial = "vincular";
+  try{
+    let salvo = localStorage.getItem("financeiro_aba_sistema");
+    if(salvo === "organiza") salvo = "receber";
+    if(["vincular","receber","pagar"].includes(salvo)) inicial = salvo;
+  }catch(e){}
+  abrir(inicial);
+});
+</script>
 {% extends "base.html" %}
 {% block conteudo %}
 <style>
@@ -1254,75 +1334,196 @@ button{
     </section>
 
     <section class="box tabela-financeiro sistema-box">
-      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Sistema</h2><span>{{ status_sistema|capitalize }}</span></div>
-      <div class="filtro-direito">
-        <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
-        <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
-        <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
-      </div>
-      <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
-      <table class="tabela-sistema">
-        <colgroup>
-          <col class="col-data-sistema">
-          <col class="col-cliente-sistema">
-          <col class="col-valor-sistema">
-          <col class="col-status-sistema">
-          <col class="col-acao-sistema">
-        </colgroup>
-        <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for p in pagamentos_sistema %}
-          <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}"><td>{{ p.data_pagamento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>{% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}<small>Cliente: {{ p.solicitacao.cliente.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ p.valor|moeda_br }}</td><td>{% if p.conciliado_em %}<span class="badge-ok">Vinculado</span>{% else %}<span class="badge-pendente">Pendente</span>{% endif %}</td></tr>
-        {% else %}<tr><td colspan="4">Nenhum lançamento do sistema neste filtro.</td></tr>{% endfor %}
-        </tbody>
-      </table>
+      <div class="titulo-tabela">
+        <h2><span class="titulo-icone">▣</span> Sistema</h2>
+        <span id="financeiro-aba-status">Vincular</span>
       </div>
 
-      <details class="receber-mini repasse-box" open>
-        <summary>Repasses a pagar</summary>
-        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-repasses-scroll">
-        <table><thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status</th></tr></thead><tbody>
-        {% for r in repasses_sistema %}
-          {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
-          <tr class="{{ 'linha-vinculada' if valor_pago_repasse >= r.valor_repasse - 0.01 else '' }}">
-            <td>{{ r.data_evento.strftime('%d/%m') }}</td>
-            <td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a><small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small></td>
-            <td class="negativo">R$ {{ r.valor_repasse|moeda_br }}{% if valor_pago_repasse > 0 %}<small>Vinculado: R$ {{ valor_pago_repasse|moeda_br }}</small>{% endif %}</td>
-            <td>
-              {% if valor_pago_repasse >= r.valor_repasse - 0.01 %}
-                <span class="badge-ok">Repasse pago</span>
-              {% elif valor_pago_repasse > 0.01 %}
-                <span class="badge-repasse">Parcial</span><small class="texto-discreto"> falta R$ {{ (r.valor_repasse - valor_pago_repasse)|moeda_br }}</small>
+      <div class="financeiro-abas-sistema" role="tablist" aria-label="Áreas do financeiro">
+        <button type="button" class="ativo" data-aba-fin="vincular">Vincular</button>
+        <button type="button" data-aba-fin="receber">A receber</button>
+        <button type="button" data-aba-fin="pagar">A pagar</button>
+      </div>
+
+      <!-- VINCULAR: somente lançamentos nativos do Connect -->
+      <div class="financeiro-painel-aba ativo" data-painel-fin="vincular">
+        <div class="filtro-direito">
+          <a class="{{ 'ativo' if status_sistema == 'pendente' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=pendente&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Pendentes</a>
+          <a class="{{ 'ativo' if status_sistema == 'vinculado' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=vinculado&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Vinculados</a>
+          <a class="{{ 'ativo' if status_sistema == 'todos' else '' }}" href="?conta_id={{ conta.id if conta else '' }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca }}&status_sistema=todos&mes_cards={{ mes_cards }}&semana_cards={{ semana_cards }}">Todos</a>
+        </div>
+
+        <div class="tabela-scroll sistema-scroll" data-scroll-key="financeiro-sistema-scroll">
+          <table class="tabela-sistema">
+            <colgroup>
+              <col class="col-data-sistema">
+              <col class="col-cliente-sistema">
+              <col class="col-valor-sistema">
+              <col class="col-status-sistema">
+            </colgroup>
+            <thead><tr><th>Data</th><th>Cliente</th><th>Valor</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for p in pagamentos_sistema %}
+              <tr class="{{ 'linha-vinculada' if p.conciliado_em else '' }}">
+                <td>{{ p.data_pagamento.strftime('%d/%m') }}</td>
+                <td class="cliente-cell">
+                  <a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>
+                  {% if p.nome_comprovante and p.nome_comprovante != p.solicitacao.cliente.nome %}
+                    <small>Cliente: {{ p.solicitacao.cliente.nome }}</small>
+                  {% endif %}
+                </td>
+                <td class="positivo">R$ {{ p.valor|moeda_br }}</td>
+                <td>
+                  {% if p.conciliado_em %}
+                    <span class="badge-ok">Vinculado</span>
+                  {% else %}
+                    <span class="badge-pendente">Pendente</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4">Nenhum lançamento do Connect neste filtro.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- RECEBER -->
+      <div class="financeiro-painel-aba" data-painel-fin="receber">
+        <details class="receber-mini" open>
+          <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>
+          <div class="tabela-scroll" data-scroll-key="financeiro-contratos-receber-scroll">
+            <table>
+              <thead><tr><th>Data</th><th>Cliente</th><th>Falta</th></tr></thead>
+              <tbody>
+              {% for r in contratos_receber %}
+                {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
+                <tr>
+                  <td>{{ r.data_evento.strftime('%d/%m') }}</td>
+                  <td class="cliente-cell">
+                    <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
+                    {% if r.empresa_transferida %}<small>Transferido → {{ r.empresa_transferida.nome }}</small>{% endif %}
+                  </td>
+                  <td class="positivo">R$ {{ falta|moeda_br }}</td>
+                </tr>
               {% else %}
-                <span class="badge-pendente">Pendente</span>
-              {% endif %}
-            </td>
-          </tr>
-        {% else %}<tr><td colspan="4">Nenhum repasse neste filtro.</td></tr>{% endfor %}
-        </tbody></table>
-        </div>
-      </details>
+                <tr><td colspan="3">Nenhum contrato a receber neste filtro.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
 
-      <details class="receber-mini" open>
-        <summary>Contratos a receber · R$ {{ total_contratos_receber|moeda_br }}</summary>
-        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-contratos-receber-scroll">
-        <table><thead><tr><th>Data</th><th>Cliente</th><th>Falta</th></tr></thead><tbody>
-        {% for r in contratos_receber %}
-          {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
-          <tr><td>{{ r.data_evento.strftime('%d/%m') }}</td><td class="cliente-cell"><a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>{% if r.empresa_transferida %}<small>Transferido → {{ r.empresa_transferida.nome }}</small>{% endif %}</td><td class="positivo">R$ {{ falta|moeda_br }}</td></tr>
-        {% else %}<tr><td colspan="3">Nenhum contrato a receber neste filtro.</td></tr>{% endfor %}
-        </tbody></table>
+        <details class="receber-mini" open>
+          <summary>A receber manual</summary>
+          <div class="tabela-scroll" data-scroll-key="financeiro-receber-scroll">
+            <table>
+              <thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead>
+              <tbody>
+              {% for r in receber %}
+                <tr>
+                  <td>{{ r.data.strftime('%d/%m') }}</td>
+                  <td>{{ r.descricao }}</td>
+                  <td class="positivo">R$ {{ r.valor|moeda_br }}</td>
+                  <td>
+                    <form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll">
+                      <button>OK</button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4">Nenhum valor a receber.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      
+        <div class="receber-origem-titulo">
+          <strong>Informações vindas do Organiza</strong>
+          <span>Saldo restante de vendas e manutenções</span>
         </div>
-      </details>
+<details class="receber-mini" open>
+          <summary>A receber · Organiza</summary>
+        
 
-      <details class="receber-mini">
-        <summary>A receber manual</summary>
-        <div class="tabela-scroll receber-scroll" data-scroll-key="financeiro-receber-scroll">
-        <table><thead><tr><th>Previsão</th><th>Descrição</th><th>Valor</th><th>Ação</th></tr></thead><tbody>
-        {% for r in receber %}<tr><td>{{ r.data.strftime('%d/%m') }}</td><td>{{ r.descricao }}</td><td class="positivo">R$ {{ r.valor|moeda_br }}</td><td><form method="post" action="/painel/financeiro/receber/{{ r.id }}/receber" class="preserve-scroll"><button>OK</button></form></td></tr>{% else %}<tr><td colspan="4">Nenhum valor a receber.</td></tr>{% endfor %}
-        </tbody></table>
+        <div class="tabela-scroll organiza-scroll" data-scroll-key="financeiro-organiza-scroll">
+          <table class="tabela-organiza">
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Tipo / cliente</th>
+                <th>Valor</th>
+                <th>Falta</th>
+                <th>Origem</th>
+              </tr>
+            </thead>
+            <tbody>
+            {% for item in lancamentos_organiza_financeiro %}
+              <tr>
+                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                <td class="cliente-cell">
+                  <strong>{{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}</strong>
+                  <small>{{ item.cliente or '-' }}</small>
+                  {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
+                </td>
+                <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
+                <td class="{{ 'negativo' if (item.falta_receber or 0) > 0 else 'positivo' }}">
+                  R$ {{ (item.falta_receber or 0)|moeda_br }}
+                </td>
+                <td>{{ item.banco or '-' }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">Nenhum lançamento recebido do Organiza.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
         </div>
       </details>
+</div>
+
+      <!-- PAGAR -->
+      <div class="financeiro-painel-aba" data-painel-fin="pagar">
+        <details class="receber-mini repasse-box" open>
+          <summary>Repasses a pagar</summary>
+          <div class="tabela-scroll" data-scroll-key="financeiro-repasses-scroll">
+            <table>
+              <thead><tr><th>Data</th><th>Contrato / destino</th><th>Valor</th><th>Status</th></tr></thead>
+              <tbody>
+              {% for r in repasses_sistema %}
+                {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
+                <tr class="{{ 'linha-vinculada' if valor_pago_repasse >= r.valor_repasse - 0.01 else '' }}">
+                  <td>{{ r.data_evento.strftime('%d/%m') }}</td>
+                  <td class="cliente-cell">
+                    <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
+                    <small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small>
+                  </td>
+                  <td class="negativo">
+                    R$ {{ r.valor_repasse|moeda_br }}
+                    {% if valor_pago_repasse > 0 %}<small>Vinculado: R$ {{ valor_pago_repasse|moeda_br }}</small>{% endif %}
+                  </td>
+                  <td>
+                    {% if valor_pago_repasse >= r.valor_repasse - 0.01 %}
+                      <span class="badge-ok">Repasse pago</span>
+                    {% elif valor_pago_repasse > 0.01 %}
+                      <span class="badge-repasse">Parcial</span>
+                      <small class="texto-discreto">falta R$ {{ (r.valor_repasse - valor_pago_repasse)|moeda_br }}</small>
+                    {% else %}
+                      <span class="badge-pendente">Pendente</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4">Nenhum repasse neste filtro.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+
+
     </section>
   </div>
 
