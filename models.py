@@ -267,6 +267,7 @@ class Solicitacao(Base):
     empresa_transferida = relationship("Empresa", foreign_keys=[empresa_transferida_id])
     itens = relationship("ReservaItem", back_populates="solicitacao", cascade="all, delete-orphan")
     aprovado_em = Column(DateTime, nullable=True)
+    contrato_enviado_em = Column(DateTime, nullable=True)
     cancelado_em = Column(DateTime, nullable=True)
 
     agenda = relationship("Agenda", back_populates="solicitacao", uselist=False)

@@ -82,6 +82,29 @@
 
     <details class="accordion pendencia-accordion">
         <summary>
+            <span>Pendência de Envio de Contrato</span>
+            <b>{{ pendencias_envio_contrato|length }}</b>
+        </summary>
+        <div class="lista-mobile">
+            {% for i in pendencias_envio_contrato %}
+            <div class="card-lista card-contrato-envio">
+                <a class="card-contrato-info" href="/painel/solicitacao/{{ i.id }}">
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
+                </a>
+                <a class="botao-enviar-contrato" target="_blank"
+                   href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">
+                    Enviar contrato
+                </a>
+            </div>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhum contrato aguardando envio.</p></div>
+            {% endfor %}
+        </div>
+    </details>
+
+    <details class="accordion pendencia-accordion">
+        <summary>
             <span>Pendência a receber</span>
             <b>{{ pendencias_a_receber|length }}</b>
         </summary>

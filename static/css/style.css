@@ -1392,3 +1392,37 @@ button.principal{
   .status-rota-card small{display:inline;margin:0 0 0 3px;font-size:9px}
   .linha-operacao .seta-expandir{grid-column:4;grid-row:1 / span 2;align-self:center}
 }
+
+.card-contrato-envio{
+  border-color:#22c55e;
+  background:#f0fdf4;
+}
+.card-contrato-info{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  color:inherit;
+  text-decoration:none;
+}
+.botao-enviar-contrato{
+  flex:0 0 auto;
+  border-radius:12px;
+  background:#16a34a;
+  color:#fff;
+  text-decoration:none;
+  font-weight:800;
+  font-size:13px;
+  padding:10px 12px;
+  white-space:nowrap;
+}
+@media (max-width:520px){
+  .card-contrato-envio{
+    align-items:stretch;
+    flex-direction:column;
+  }
+  .botao-enviar-contrato{
+    text-align:center;
+  }
+}

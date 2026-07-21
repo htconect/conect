@@ -740,6 +740,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN pagamento_confirmado_em TIMESTAMP")
         if "aprovado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em TIMESTAMP")
+        if "contrato_enviado_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_enviado_em TIMESTAMP")
         if "cancelado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN cancelado_em TIMESTAMP")
         if "retirada_obrigatoria" not in cols_sol:
@@ -1926,6 +1928,22 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             .all()
         )
 
+    # Contratos já aprovados/aceitos que ainda precisam ser enviados ao cliente.
+    # O envio reutiliza o mesmo link e a mesma mensagem já tratados pelo fluxo do contrato.
+    pendencias_envio_contrato = (
+        db.query(Solicitacao)
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+            Solicitacao.contrato_id != None,
+            Solicitacao.contrato_enviado_em == None,
+            Solicitacao.cancelado_em == None,
+        )
+        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+        .limit(12)
+        .all()
+    )
+
     pendencias_a_receber = (
         db.query(Solicitacao)
         .filter(
@@ -1984,6 +2002,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "solicitacoes": solicitacoes,
         "pendencias_agenda": pendencias_agenda,
         "pendencias_sinal": pendencias_sinal,
+        "pendencias_envio_contrato": pendencias_envio_contrato,
         "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
@@ -2600,6 +2619,12 @@ def compartilhar_contrato_whatsapp(
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
 
     texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
+
+    # O clique no envio pelo WhatsApp conclui a pendência do painel.
+    # Mantemos o status da reserva intacto para não interferir na agenda/financeiro.
+    if not item.contrato_enviado_em:
+        item.contrato_enviado_em = agora_utc()
+        db.commit()
 
     return RedirectResponse(
         f"https://wa.me/{telefone}?text={quote(texto)}",
