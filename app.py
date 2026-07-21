@@ -3969,8 +3969,13 @@ def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 1
         return []
     historico = texto_normalizado_financeiro(lancamento.historico)
     candidatos = []
+    tipo_normalizado = (tipo or "").strip().lower().replace("ç", "c").replace("ã", "a")
+    if tipo_normalizado == "manutencao":
+        tipo_normalizado = "manutencao"
+
     for item in registros:
-        if (item.tipo or "").lower() != tipo:
+        item_tipo = (item.tipo or "").strip().lower().replace("ç", "c").replace("ã", "a")
+        if item_tipo != tipo_normalizado:
             continue
         nome = texto_normalizado_financeiro(item.cliente or "")
         descricao = texto_normalizado_financeiro(item.descricao or "")

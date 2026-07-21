@@ -1,5 +1,160 @@
 
 <style>
+/* =========================================================
+   Financeiro: banco em duas linhas + Sistema ampliado
+   ========================================================= */
+@media (min-width:1201px){
+  .financeiro-duas-colunas{
+    grid-template-columns:minmax(0,1.65fr) minmax(520px,1fr)!important;
+    gap:12px!important;
+  }
+
+  .banco-box{
+    min-width:0!important;
+  }
+
+  .sistema-box{
+    min-width:520px!important;
+  }
+
+  .tabela-banco{
+    min-width:760px!important;
+    width:100%!important;
+    table-layout:auto!important;
+  }
+
+  .tabela-banco colgroup{
+    display:none!important;
+  }
+
+  .tabela-banco thead tr,
+  .tabela-banco tbody tr{
+    display:grid!important;
+    grid-template-columns:72px minmax(260px,1fr) 125px 105px!important;
+    column-gap:10px!important;
+    align-items:center!important;
+  }
+
+  .tabela-banco thead tr{
+    grid-template-areas:"data historico valor acoes"!important;
+  }
+
+  .tabela-banco thead th:nth-child(1){grid-area:data}
+  .tabela-banco thead th:nth-child(2){grid-area:historico}
+  .tabela-banco thead th:nth-child(3){grid-area:valor}
+  .tabela-banco thead th:nth-child(6){grid-area:acoes}
+  .tabela-banco thead th:nth-child(4),
+  .tabela-banco thead th:nth-child(5){
+    display:none!important;
+  }
+
+  .tabela-banco tbody tr{
+    grid-template-areas:
+      "data historico valor acoes"
+      "tipo tipo vinculo vinculo"!important;
+    row-gap:8px!important;
+    min-height:96px!important;
+    height:auto!important;
+    padding:9px 10px!important;
+    border-bottom:1px solid #e7edf5!important;
+  }
+
+  .tabela-banco tbody td{
+    padding:0!important;
+    border-bottom:0!important;
+    min-width:0!important;
+  }
+
+  .tabela-banco tbody td:nth-child(1){grid-area:data}
+  .tabela-banco tbody td:nth-child(2){grid-area:historico}
+  .tabela-banco tbody td:nth-child(3){grid-area:valor}
+  .tabela-banco tbody td:nth-child(4){
+    grid-area:tipo;
+    display:grid!important;
+    grid-template-columns:58px minmax(160px,260px)!important;
+    align-items:center!important;
+    gap:8px!important;
+  }
+  .tabela-banco tbody td:nth-child(4)::before{
+    content:"Tipo";
+    font-size:10px;
+    font-weight:900;
+    text-transform:uppercase;
+    color:#64748b;
+  }
+
+  .tabela-banco tbody td:nth-child(5){
+    grid-area:vinculo;
+    display:grid!important;
+    grid-template-columns:62px minmax(0,1fr)!important;
+    align-items:center!important;
+    gap:8px!important;
+  }
+  .tabela-banco tbody td:nth-child(5)::before{
+    content:"Vínculo";
+    font-size:10px;
+    font-weight:900;
+    text-transform:uppercase;
+    color:#64748b;
+  }
+
+  .tabela-banco tbody td:nth-child(6){
+    grid-area:acoes;
+    justify-self:end!important;
+  }
+
+  .tabela-banco tbody td[colspan]{
+    grid-column:1/-1!important;
+  }
+
+  .select-tipo-banco,
+  .input-tipo-mini{
+    width:100%!important;
+    min-width:0!important;
+    max-width:260px!important;
+  }
+
+  .vinculo-form,
+  .vinculo-atual{
+    width:100%!important;
+    min-width:0!important;
+  }
+
+  .combo-vinculo{
+    min-width:0!important;
+    width:100%!important;
+  }
+
+  .acoes-linha{
+    justify-content:flex-end!important;
+    gap:6px!important;
+  }
+
+  /* A área Sistema passa a ter espaço real para tabelas e abas. */
+  .sistema-box .tabela-scroll,
+  .sistema-box .sistema-scroll{
+    max-height:none!important;
+    overflow:auto!important;
+  }
+
+  .sistema-box table{
+    width:100%!important;
+  }
+
+  .sistema-box .cliente-cell{
+    min-width:180px!important;
+  }
+}
+
+/* Em telas intermediárias ainda preserva Sistema maior antes de empilhar. */
+@media (min-width:1000px) and (max-width:1200px){
+  .financeiro-duas-colunas{
+    grid-template-columns:minmax(0,1.45fr) minmax(430px,1fr)!important;
+  }
+}
+</style>
+
+<style>
 .financeiro-abas-sistema{
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
