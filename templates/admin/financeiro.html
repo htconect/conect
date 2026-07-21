@@ -1238,7 +1238,7 @@ button{
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
         <tbody>
         {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento or vinculos_por_banco.get(l.id) else '' }}">
+          <tr class="{{ 'linha-vinculada' if l.pagamento or l.organiza_lancamento_id or vinculos_por_banco.get(l.id) else '' }}">
             <td>{{ l.data.strftime('%d/%m') }}</td>
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
@@ -1252,6 +1252,13 @@ button{
             <td>
               {% if l.pagamento %}
                 <div class="vinculo-atual"><b>Vinculado</b> · {{ l.pagamento.data_pagamento.strftime('%d/%m') }} · <a href="/painel/solicitacao/{{ l.pagamento.solicitacao_id }}">{{ l.pagamento.solicitacao.cliente.nome }}</a> · R$ {{ l.pagamento.valor|moeda_br }}</div>
+              {% elif l.organiza_lancamento %}
+                <div class="vinculo-atual">
+                  <b>{{ 'Venda' if l.organiza_lancamento.tipo == 'venda' else 'Manutenção' }}</b>
+                  · {{ l.organiza_lancamento.data_pagamento.strftime('%d/%m') }}
+                  · {{ l.organiza_lancamento.cliente or '-' }}
+                  · R$ {{ l.organiza_lancamento.valor|moeda_br }}
+                </div>
               {% elif l.categoria == 'repasse' %}
                 {% for vr in vinculos_por_banco.get(l.id, []) %}
                   <div class="vinculo-atual"><span class="badge-repasse">Repasse</span> · <a href="/painel/solicitacao/{{ vr.solicitacao.id }}">{{ vr.solicitacao.cliente.nome }}</a> → {{ vr.solicitacao.empresa_transferida.nome if vr.solicitacao.empresa_transferida else 'Empresa' }} · R$ {{ vr.valor|moeda_br }}
@@ -1275,6 +1282,23 @@ button{
                 {% else %}
                   <small class="texto-discreto">Nenhum repasse pendente neste filtro.</small>
                 {% endif %}
+              {% elif l.categoria in ('venda', 'manutencao') %}
+                {% if candidatos_organiza.get(l.id) %}
+                  <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-organiza" class="vinculo-form preserve-scroll">
+                    <select name="organiza_id" class="combo-vinculo">
+                      {% for c in candidatos_organiza.get(l.id) %}
+                        {% set o = c.item %}
+                        <option value="{{ o.id }}">
+                          {{ o.data_pagamento.strftime('%d/%m') }} · {{ o.cliente or '-' }} · R$ {{ o.valor|moeda_br }}
+                          {% if c.diff_valor > 0.01 %} · dif. R$ {{ c.diff_valor|moeda_br }}{% endif %}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    <button title="Vincular {{ 'venda' if l.categoria == 'venda' else 'manutenção' }} do Organiza">✓</button>
+                  </form>
+                {% else %}
+                  <span class="texto-discreto">Nenhuma {{ 'venda' if l.categoria == 'venda' else 'manutenção' }} do Organiza disponível.</span>
+                {% endif %}
               {% elif l.categoria != 'aluguel' %}
                 <span class="texto-discreto">—</span>
               {% elif candidatos_vinculo.get(l.id) %}
@@ -1287,9 +1311,8 @@ button{
             </td>
             <td class="acoes-linha">
               <button form="categoria-banco-{{ l.id }}" class="btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo">💾</button>
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
               {% if l.pagamento %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
+              {% if l.organiza_lancamento_id %}<form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular-organiza" class="preserve-scroll"><button class="btn-secundario" title="Desvincular Organiza">Desv.</button></form>{% endif %}
               
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
             </td>
@@ -1321,8 +1344,6 @@ button{
             <td class="acoes-linha">
               <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
               <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="cima"><button class="btn-mover" title="Subir">↑</button></form>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/mover" class="preserve-scroll"><input type="hidden" name="direcao" value="baixo"><button class="btn-mover" title="Descer">↓</button></form>
               {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button class="btn-secundario" title="Desvincular">Desv.</button></form>{% endif %}
               <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="btn-perigo" title="Excluir">🗑</button></form>
             </td>
@@ -1387,7 +1408,41 @@ button{
             </tbody>
           </table>
         </div>
-      </div>
+              <div class="vincular-origem-secao">
+          <div class="vincular-origem-cabecalho">
+            <strong>Organiza</strong>
+            <span>Vendas e manutenções para conciliação</span>
+          </div>
+          <div class="tabela-scroll">
+            <table class="tabela-organiza-vincular">
+              <thead><tr><th>Data</th><th>Tipo / cliente</th><th>Valor</th><th>Status</th></tr></thead>
+              <tbody>
+              {% for item in lancamentos_organiza_financeiro %}
+                {% set banco_org = bancos_por_organiza.get(item.id) %}
+                <tr class="{{ 'linha-vinculada' if banco_org else '' }}">
+                  <td>{{ item.data_pagamento.strftime('%d/%m') }}</td>
+                  <td class="cliente-cell">
+                    <strong>{{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}</strong>
+                    <small>{{ item.cliente or '-' }}</small>
+                  </td>
+                  <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
+                  <td>
+                    {% if banco_org %}
+                      <span class="badge-ok">Vinculado</span>
+                      <small>{{ banco_org.data.strftime('%d/%m') }} · {{ banco_org.historico }}</small>
+                    {% else %}
+                      <span class="badge-pendente">Pendente</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4">Nenhum lançamento recebido do Organiza.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+</div>
 
       <!-- RECEBER -->
       <div class="financeiro-painel-aba" data-painel-fin="receber">

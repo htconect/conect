@@ -870,6 +870,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN ordem INTEGER DEFAULT 0")
         if "repasse_solicitacao_id" not in cols_lb:
             comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN repasse_solicitacao_id INTEGER")
+        if "organiza_lancamento_id" not in cols_lb:
+            comandos.append("ALTER TABLE lancamentos_banco ADD COLUMN organiza_lancamento_id INTEGER")
 
     if "lancamentos_manuais_financeiros" not in tabelas:
         comandos.append("""
@@ -3961,6 +3963,36 @@ def mover_lancamento_na_lista(db: Session, modelo, lanc, direcao: str):
     db.commit()
 
 
+def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 12):
+    """Sugere lançamentos do Organiza compatíveis com o lançamento bancário."""
+    if not lancamento or (lancamento.valor or 0) <= 0:
+        return []
+    historico = texto_normalizado_financeiro(lancamento.historico)
+    candidatos = []
+    for item in registros:
+        if (item.tipo or "").lower() != tipo:
+            continue
+        nome = texto_normalizado_financeiro(item.cliente or "")
+        descricao = texto_normalizado_financeiro(item.descricao or "")
+        alvo = " ".join(x for x in [nome, descricao] if x)
+        diff_valor = abs(float(lancamento.valor or 0) - float(item.valor or 0))
+        diff_dias = abs((lancamento.data - item.data_pagamento).days) if lancamento.data and item.data_pagamento else 99
+        score_nome = max(
+            SequenceMatcher(None, historico, nome).ratio() if nome else 0,
+            SequenceMatcher(None, historico, alvo).ratio() if alvo else 0,
+        )
+        # Valor e proximidade de data têm peso maior; nome ajuda a ordenar.
+        score = (1 / (1 + diff_valor)) * 4 + (1 / (1 + diff_dias)) * 2 + score_nome
+        candidatos.append({
+            "item": item,
+            "diff_valor": diff_valor,
+            "diff_dias": diff_dias,
+            "score": score,
+        })
+    candidatos.sort(key=lambda c: (-c["score"], c["diff_valor"], c["diff_dias"]))
+    return candidatos[:limite]
+
+
 @app.get("/painel/financeiro", response_class=HTMLResponse)
 def financeiro(
         request: Request,
@@ -4377,8 +4409,45 @@ def financeiro(
     candidatos_vinculo = {
         l.id: melhores_vinculos_para_banco(l, pagamentos_pendentes_vinculo)
         for l in banco
-        if not l.pagamento_id and l.categoria == "aluguel"
+        if not l.pagamento_id and not getattr(l, "organiza_lancamento_id", None) and l.categoria == "aluguel"
     }
+
+    # Organiza: Venda e Manutenção usam o mesmo fluxo de conciliação do banco.
+    ids_organiza_vinculados = {
+        oid for (oid,) in db.query(LancamentoBanco.organiza_lancamento_id)
+        .filter(
+            LancamentoBanco.empresa_id == empresa.id,
+            LancamentoBanco.organiza_lancamento_id != None
+        ).all()
+        if oid
+    }
+    registros_organiza_disponiveis = (
+        db.query(LancamentoOrganiza)
+        .filter(~LancamentoOrganiza.id.in_(ids_organiza_vinculados))
+        .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
+        .all()
+    ) if ids_organiza_vinculados else (
+        db.query(LancamentoOrganiza)
+        .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
+        .all()
+    )
+    candidatos_organiza = {
+        l.id: melhores_vinculos_organiza(l, registros_organiza_disponiveis, l.categoria)
+        for l in banco
+        if not l.pagamento_id
+        and not getattr(l, "organiza_lancamento_id", None)
+        and l.categoria in ("venda", "manutencao")
+        and (l.valor or 0) > 0
+    }
+    bancos_por_organiza = {
+        l.organiza_lancamento_id: l
+        for l in db.query(LancamentoBanco).filter(
+            LancamentoBanco.empresa_id == empresa.id,
+            LancamentoBanco.organiza_lancamento_id != None
+        ).all()
+        if l.organiza_lancamento_id
+    }
+
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
         for m in manuais_reais
@@ -4440,7 +4509,7 @@ def financeiro(
         "candidatos_repasse_por_banco": candidatos_repasse_por_banco,
         "saldo_repasse_por_banco": saldo_repasse_por_banco,
         "lancamentos_organiza_financeiro": lancamentos_organiza_financeiro,
-        "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
+        "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("venda", "Venda"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 
 
@@ -4898,6 +4967,49 @@ def financeiro_desvincular_repasse_banco(
     if float(total_restante) < float(repasse.valor_repasse or 0) - 0.01:
         repasse.repasse_pago_em = None
         repasse.repasse_pago_por = None
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/banco/{lancamento_id}/vincular-organiza")
+def financeiro_vincular_organiza(
+        request: Request,
+        lancamento_id: int,
+        organiza_id: int = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoBanco, lancamento_id)
+    item = db.get(LancamentoOrganiza, organiza_id)
+    if not lanc or lanc.empresa_id != empresa.id or not item:
+        raise HTTPException(404)
+    if lanc.pagamento_id or lanc.organiza_lancamento_id:
+        raise HTTPException(400, "Este lançamento bancário já está vinculado.")
+    if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
+        raise HTTPException(400, "O tipo do banco deve corresponder ao lançamento do Organiza.")
+    ja_usado = db.query(LancamentoBanco).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.organiza_lancamento_id == item.id
+    ).first()
+    if ja_usado:
+        raise HTTPException(400, "Este lançamento do Organiza já está vinculado a outro movimento bancário.")
+    lanc.organiza_lancamento_id = item.id
+    lanc.categoria_confirmada = True
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/banco/{lancamento_id}/desvincular-organiza")
+def financeiro_desvincular_organiza(
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoBanco, lancamento_id)
+    if not lanc or lanc.empresa_id != empresa.id:
+        raise HTTPException(404)
+    lanc.organiza_lancamento_id = None
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 

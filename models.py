@@ -360,6 +360,7 @@ class LancamentoBanco(Base):
     categoria = Column(String(20), default="aluguel")  # casa, empresa, aluguel, manutencao
     categoria_confirmada = Column(Boolean, default=False)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True)
+    organiza_lancamento_id = Column(Integer, ForeignKey("lancamentos_organiza.id"), nullable=True)
     repasse_solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True)
     hash_importacao = Column(String(64), nullable=True, index=True)
     origem_importacao = Column(String(120), nullable=True)
@@ -368,6 +369,7 @@ class LancamentoBanco(Base):
 
     conta = relationship("ContaFinanceira")
     pagamento = relationship("Pagamento")
+    organiza_lancamento = relationship("LancamentoOrganiza", foreign_keys=[organiza_lancamento_id])
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
     vinculos_repasse = relationship(
         "VinculoRepasseBanco",
