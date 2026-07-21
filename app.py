@@ -3975,7 +3975,8 @@ def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 1
     """Sugere lançamentos do Organiza compatíveis com o lançamento bancário."""
     if not lancamento or (lancamento.valor or 0) <= 0:
         return []
-    historico = texto_normalizado_financeiro(lancamento.historico)
+    historico_origem = getattr(lancamento, "historico", None) or getattr(lancamento, "descricao", None) or ""
+    historico = texto_normalizado_financeiro(historico_origem)
     candidatos = []
     tipo_normalizado = (tipo or "").strip().lower().replace("ç", "c").replace("ã", "a")
     if tipo_normalizado == "manutencao":
