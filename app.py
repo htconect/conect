@@ -944,6 +944,14 @@ def garantir_colunas_novas():
         )
         """)
 
+    if "lancamentos_organiza" in tabelas:
+        cols_org = colunas("lancamentos_organiza")
+        if "falta_receber" not in cols_org:
+            comandos.append(
+                "ALTER TABLE lancamentos_organiza "
+                "ADD COLUMN falta_receber NUMERIC(12, 2) DEFAULT 0 NOT NULL"
+            )
+
     if comandos:
         with engine.begin() as conn:
             for comando in comandos:
@@ -1068,11 +1076,19 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
 
     try:
         valor = Decimal(str(dados["valor"]).replace("R$", "").replace(" ", "").replace(",", "."))
+        falta_receber = Decimal(
+            str(dados.get("falta_receber", 0))
+            .replace("R$", "")
+            .replace(" ", "")
+            .replace(",", ".")
+        )
     except (InvalidOperation, ValueError):
-        raise HTTPException(status_code=422, detail="valor inválido.")
+        raise HTTPException(status_code=422, detail="valor ou falta_receber inválido.")
 
     if valor <= 0:
         raise HTTPException(status_code=422, detail="valor deve ser maior que zero.")
+    if falta_receber < 0:
+        falta_receber = Decimal("0")
 
     try:
         data_pagamento = date.fromisoformat(str(dados["data_pagamento"])[:10])
@@ -1093,6 +1109,7 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     registro.cliente = (str(dados.get("cliente") or "").strip() or None)
     registro.descricao = (str(dados.get("descricao") or "").strip() or None)
     registro.valor = valor
+    registro.falta_receber = falta_receber
     registro.data_pagamento = data_pagamento
     registro.banco = str(dados["banco"]).strip()
 
@@ -1129,6 +1146,7 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
         "cliente": r.cliente,
         "descricao": r.descricao,
         "valor": float(r.valor or 0),
+        "falta_receber": float(r.falta_receber or 0),
         "data_pagamento": r.data_pagamento.isoformat(),
         "banco": r.banco,
     } for r in registros]

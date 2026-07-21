@@ -428,6 +428,7 @@ class LancamentoOrganiza(Base):
     cliente = Column(String(255), nullable=True)
     descricao = Column(String(500), nullable=True)
     valor = Column(Numeric(12, 2), nullable=False, default=0)
+    falta_receber = Column(Numeric(12, 2), nullable=False, default=0)
     data_pagamento = Column(Date, nullable=False)
     banco = Column(String(255), nullable=False)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
