@@ -5179,7 +5179,7 @@ def financeiro_lancamento_manual(
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if tipo not in ["real", "receber"]:
         raise HTTPException(400, "Tipo inválido.")
@@ -5234,7 +5234,7 @@ def financeiro_editar_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in ["casa", "empresa", "aluguel", "manutencao", "repasse"]:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     lanc.data = datetime.strptime(data, "%Y-%m-%d").date()
     lanc.descricao = descricao.strip()
