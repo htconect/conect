@@ -1013,35 +1013,35 @@ button{
 
     <div class="financeiro-resumo" aria-label="Resumo mensal e acumulado">
       <div class="indicador-card indicador-entrada">
-        <span class="indicador-icone">↓</span>
+        <span class="indicador-icone"><i class="bi bi-arrow-down" aria-hidden="true"></i></span>
         <div><small>Entradas</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
       </div>
       <div class="indicador-card indicador-saida">
-        <span class="indicador-icone">↑</span>
+        <span class="indicador-icone"><i class="bi bi-arrow-up" aria-hidden="true"></i></span>
         <div><small>Saídas</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
       </div>
       <div class="indicador-card indicador-saldo">
-        <span class="indicador-icone">▣</span>
+        <span class="indicador-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
         <div><small>Saldo</small><b>R$ {{ saldo_real|moeda_br }}</b></div>
       </div>
       <div class="indicador-card indicador-receber">
-        <span class="indicador-icone">▤</span>
+        <span class="indicador-icone"><i class="bi bi-receipt" aria-hidden="true"></i></span>
         <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
       </div>
       <div class="indicador-card indicador-quantidade">
-        <span class="indicador-icone">#</span>
+        <span class="indicador-icone"><i class="bi bi-hash" aria-hidden="true"></i></span>
         <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b><em>{{ quantidade_contratos_cards_proprios }} próprios · {{ quantidade_contratos_cards_transferidos }} transferidos</em></div>
       </div>
       <div class="indicador-card indicador-contrato">
-        <span class="indicador-icone">▣</span>
+        <span class="indicador-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
         <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b><em>Repasse: R$ {{ total_repasse_cards|moeda_br }}</em></div>
       </div>
       <div class="indicador-card indicador-banco">
-        <span class="indicador-icone">▣</span>
+        <span class="indicador-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
         <div><small>Total do banco</small><b>R$ {{ saldo_banco|moeda_br }}</b></div>
       </div>
       <div class="indicador-card indicador-contas">
-        <span class="indicador-icone">⌂</span>
+        <span class="indicador-icone"><i class="bi bi-house" aria-hidden="true"></i></span>
         <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
       </div>
     </div>
@@ -1077,8 +1077,8 @@ button{
       <select name="categoria"><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
       <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
       <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
-      <button class="botao-pequeno btn-filtrar"><span aria-hidden="true">⌕</span> Filtrar</button>
-      <a class="botao-secundario btn-limpar-filtros" href="/painel/financeiro"><span aria-hidden="true">↻</span> Limpar</a>
+      <button class="botao-pequeno btn-filtrar"><i class="bi bi-search" aria-hidden="true"></i><span>Filtrar</span></button>
+      <a class="botao-secundario btn-limpar-filtros" href="/painel/financeiro"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Limpar</span></a>
     </form>
 
   </div>
@@ -1090,21 +1090,21 @@ button{
   <div class="financeiro-acoes-faixa">
     <button type="button" class="botao-pequeno btn-abrir-manual"
             onclick="document.getElementById('dlg-lancamento-manual').showModal()">
-      <span class="icone-botao" aria-hidden="true">⊕</span>
+      <i class="bi bi-plus-circle icone-botao" aria-hidden="true"></i>
       <span>Lançamento manual</span>
     </button>
 
     <nav class="financeiro-abas-principais" role="tablist" aria-label="Áreas do financeiro">
       <button type="button" class="botao-secundario ativo" data-aba-fin="vincular">
-        <span class="icone-aba" aria-hidden="true">🔗</span>
+        <i class="bi bi-link-45deg icone-aba" aria-hidden="true"></i>
         <span><b>Vincular</b><small>Banco × sistema</small></span>
       </button>
       <button type="button" class="botao-secundario" data-aba-fin="receber">
-        <span class="icone-aba" aria-hidden="true">↓</span>
+        <i class="bi bi-arrow-down-circle icone-aba" aria-hidden="true"></i>
         <span><b>A receber</b><small>Somente informação</small></span>
       </button>
       <button type="button" class="botao-secundario" data-aba-fin="pagar">
-        <span class="icone-aba" aria-hidden="true">↑</span>
+        <i class="bi bi-wallet2 icone-aba" aria-hidden="true"></i>
         <span><b>A pagar</b><small>Somente informação</small></span>
       </button>
     </nav>
@@ -1117,12 +1117,12 @@ button{
         <small>Use apenas quando o movimento não vier do extrato ou de outro sistema.</small>
       </div>
       <button type="button" class="botao-icone modal-fechar"
-              onclick="document.getElementById('dlg-lancamento-manual').close()">×</button>
+              onclick="document.getElementById('dlg-lancamento-manual').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
     </div>
 
     <div class="manual-modal-abas">
-      <button type="button" class="botao-secundario ativo" data-manual-aba="movimento"><span aria-hidden="true">↔</span> Movimento</button>
-      <button type="button" class="botao-secundario" data-manual-aba="receber"><span aria-hidden="true">↓</span> A receber</button>
+      <button type="button" class="botao-secundario ativo" data-manual-aba="movimento"><i class="bi bi-arrow-left-right" aria-hidden="true"></i><span>Movimento</span></button>
+      <button type="button" class="botao-secundario" data-manual-aba="receber"><i class="bi bi-arrow-down-circle" aria-hidden="true"></i><span>A receber</span></button>
     </div>
 
     <div class="manual-modal-painel ativo" data-manual-painel="movimento">
@@ -1139,8 +1139,8 @@ button{
         </label>
         <div class="modal-vinculo-rodape campo-largo">
           <button type="button" class="botao-perigo btn-modal-cancelar"
-                  onclick="document.getElementById('dlg-lancamento-manual').close()">Cancelar</button>
-          <button type="submit" class="botao-pequeno btn-modal-confirmar">Salvar lançamento</button>
+                  onclick="document.getElementById('dlg-lancamento-manual').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Salvar lançamento</button>
         </div>
       </form>
     </div>
@@ -1163,8 +1163,8 @@ button{
         </label>
         <div class="modal-vinculo-rodape campo-largo">
           <button type="button" class="botao-perigo btn-modal-cancelar"
-                  onclick="document.getElementById('dlg-lancamento-manual').close()">Cancelar</button>
-          <button type="submit" class="botao-pequeno btn-modal-confirmar">Salvar a receber</button>
+                  onclick="document.getElementById('dlg-lancamento-manual').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Salvar a receber</button>
         </div>
       </form>
     </div>
@@ -1172,7 +1172,7 @@ button{
 
 <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
-      <div class="titulo-tabela"><h2><span class="titulo-icone">▣</span> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; ⟳</span></div>
+      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span></div>
       <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
       <table class="tabela-banco">
         <colgroup>
@@ -1200,11 +1200,11 @@ button{
             <td class="vinculo-compacto">
               {% if l.pagamento or l.organiza_lancamento or (l.categoria == 'repasse' and vinculos_por_banco.get(l.id)) %}
                 <button type="button" class="botao-icone btn-vinculo-ok" title="Ver vínculo"
-                        onclick="document.getElementById('dlg-vinculo-{{ l.id }}').showModal()">✓</button>
+                        onclick="document.getElementById('dlg-vinculo-{{ l.id }}').showModal()"><i class="bi bi-check-circle-fill" aria-hidden="true"></i></button>
               {% elif l.categoria in ('aluguel', 'venda', 'manutencao', 'repasse') %}
                 <button type="button" class="botao-pequeno btn-vincular"
                         onclick="document.getElementById('dlg-vinculo-{{ l.id }}').showModal()">
-                  <span aria-hidden="true">🔗</span> Vincular
+                  <i class="bi bi-link-45deg" aria-hidden="true"></i><span>Vincular</span>
                 </button>
               {% else %}
                 <span class="texto-discreto">—</span>
@@ -1218,23 +1218,23 @@ button{
                     <small>{{ l.data.strftime('%d/%m/%Y') }} · R$ {{ l.valor|moeda_br }}</small>
                   </div>
                   <button type="button" class="botao-icone modal-fechar"
-                          onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()">×</button>
+                          onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                 </div>
 
                 <div class="modal-vinculo-historico">{{ l.historico }}</div>
 
                 {% if l.pagamento %}
                   <div class="vinculo-atual-modal">
-                    <span><b>✓ Vinculado</b><small>{{ l.pagamento.solicitacao.cliente.nome }} · R$ {{ l.pagamento.valor|moeda_br }}</small></span>
+                    <span><b><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Vinculado</b><small>{{ l.pagamento.solicitacao.cliente.nome }} · R$ {{ l.pagamento.valor|moeda_br }}</small></span>
                     <form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular" class="preserve-scroll">
-                      <button type="submit" class="botao-perigo btn-desvincular-modal">Desvincular</button>
+                      <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
                     </form>
                   </div>
                 {% elif l.organiza_lancamento %}
                   <div class="vinculo-atual-modal">
-                    <span><b>✓ Vinculado</b><small>{{ l.organiza_lancamento.cliente or '-' }} · {{ 'Venda' if l.organiza_lancamento.tipo == 'venda' else 'Manutenção' }} · R$ {{ l.organiza_lancamento.valor|moeda_br }}</small></span>
+                    <span><b><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Vinculado</b><small>{{ l.organiza_lancamento.cliente or '-' }} · {{ 'Venda' if l.organiza_lancamento.tipo == 'venda' else 'Manutenção' }} · R$ {{ l.organiza_lancamento.valor|moeda_br }}</small></span>
                     <form method="post" action="/painel/financeiro/banco/{{ l.id }}/desvincular-organiza" class="preserve-scroll">
-                      <button type="submit" class="botao-perigo btn-desvincular-modal">Desvincular</button>
+                      <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
                     </form>
                   </div>
                 {% endif %}
@@ -1261,8 +1261,8 @@ button{
                       </div>
                       <div class="modal-vinculo-rodape">
                         <button type="button" class="botao-perigo btn-modal-cancelar"
-                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()">Cancelar</button>
-                        <button type="submit" class="botao-pequeno btn-modal-confirmar">Vincular</button>
+                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+                        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
                       </div>
                     </form>
                   {% else %}
@@ -1289,8 +1289,8 @@ button{
                       </div>
                       <div class="modal-vinculo-rodape">
                         <button type="button" class="botao-perigo btn-modal-cancelar"
-                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()">Cancelar</button>
-                        <button type="submit" class="botao-pequeno btn-modal-confirmar">Vincular</button>
+                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+                        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
                       </div>
                     </form>
                   {% else %}
@@ -1304,7 +1304,7 @@ button{
                       <span><b>{{ vr.solicitacao.cliente.nome }}</b> → {{ vr.solicitacao.empresa_transferida.nome if vr.solicitacao.empresa_transferida else 'Empresa' }}</span>
                       <span>R$ {{ vr.valor|moeda_br }}</span>
                       <form method="post" action="/painel/financeiro/banco/{{ l.id }}/repasse/{{ vr.solicitacao.id }}/desvincular" class="preserve-scroll">
-                        <button class="btn-remover-vinculo" title="Remover vínculo">×</button>
+                        <button class="btn-remover-vinculo" title="Remover vínculo"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
                       </form>
                     </div>
                   {% endfor %}
@@ -1326,7 +1326,7 @@ button{
                       </div>
                       <div class="modal-vinculo-rodape">
                         <button type="submit" name="modo" value="saldo" class="botao-secundario btn-modal-secundario">Usar saldo</button>
-                        <button type="submit" name="modo" value="total" class="botao-pequeno btn-modal-confirmar">Usar total</button>
+                        <button type="submit" name="modo" value="total" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Usar total</button>
                       </div>
                     </form>
                   {% elif saldo_repasse_por_banco.get(l.id, 0) <= 0.01 %}
@@ -1342,7 +1342,7 @@ button{
 <td class="acoes-linha">
               <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo">💾</button>
               
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir">🗑</button></form>
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
             </td>
           </tr>
         {% else %}<tr><td colspan="6">Nenhum extrato importado neste filtro.</td></tr>{% endfor %}
@@ -1359,7 +1359,7 @@ button{
             <td class="vinculo-compacto">
               {% if m.pagamento or m.organiza_lancamento_id %}
                 <button type="button" class="botao-icone btn-vinculo-ok" title="Ver vínculo"
-                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()">✓</button>
+                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-check-circle-fill" aria-hidden="true"></i></button>
                 <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
                   <div class="modal-vinculo-cabecalho">
                     <div>
@@ -1367,12 +1367,12 @@ button{
                       <small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small>
                     </div>
                     <button type="button" class="botao-icone modal-fechar"
-                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">×</button>
+                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                   </div>
                   <div class="modal-vinculo-historico">{{ m.descricao }}</div>
                   <div class="vinculo-atual-modal">
                     <span>
-                      <b>✓ Vinculado</b>
+                      <b><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Vinculado</b>
                       {% if m.pagamento %}
                         <small>{{ m.pagamento.solicitacao.cliente.nome }} · Aluguel · R$ {{ m.pagamento.valor|moeda_br }}</small>
                       {% elif m.organiza_lancamento %}
@@ -1381,18 +1381,18 @@ button{
                     </span>
                     {% if m.pagamento %}
                       <form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll">
-                        <button type="submit" class="botao-perigo btn-desvincular-modal">Desvincular</button>
+                        <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
                       </form>
                     {% elif m.organiza_lancamento_id %}
                       <form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular-organiza" class="preserve-scroll">
-                        <button type="submit" class="botao-perigo btn-desvincular-modal">Desvincular</button>
+                        <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
                       </form>
                     {% endif %}
                   </div>
                 </dialog>
               {% elif m.categoria in ('aluguel', 'venda', 'manutencao') and m.valor > 0 %}
                 <button type="button" class="botao-pequeno btn-vincular"
-                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><span aria-hidden="true">🔗</span> Vincular</button>
+                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-link-45deg" aria-hidden="true"></i><span>Vincular</span></button>
                 <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
                   <div class="modal-vinculo-cabecalho">
                     <div>
@@ -1400,7 +1400,7 @@ button{
                       <small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small>
                     </div>
                     <button type="button" class="botao-icone modal-fechar"
-                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">×</button>
+                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                   </div>
                   <div class="modal-vinculo-historico">{{ m.descricao }}</div>
 
@@ -1421,8 +1421,8 @@ button{
                         </div>
                         <div class="modal-vinculo-rodape">
                           <button type="button" class="botao-perigo btn-modal-cancelar"
-                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">Cancelar</button>
-                          <button type="submit" class="botao-pequeno btn-modal-confirmar">Vincular</button>
+                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+                          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
                         </div>
                       </form>
                     {% else %}
@@ -1446,8 +1446,8 @@ button{
                         </div>
                         <div class="modal-vinculo-rodape">
                           <button type="button" class="botao-perigo btn-modal-cancelar"
-                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()">Cancelar</button>
-                          <button type="submit" class="botao-pequeno btn-modal-confirmar">Vincular</button>
+                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+                          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
                         </div>
                       </form>
                     {% else %}
@@ -1463,7 +1463,7 @@ button{
 <td class="acoes-linha">
               <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
               <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir">🗑</button></form>
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
             </td>
           </tr>
         {% endfor %}
@@ -1475,7 +1475,7 @@ button{
     <section class="box tabela-financeiro sistema-box">
       <div class="titulo-tabela">
         <div>
-          <h2><span class="titulo-icone">▣</span> Sistema</h2>
+          <h2><i class="bi bi-display titulo-icone" aria-hidden="true"></i> Sistema</h2>
           <small class="titulo-sub">Informações e vínculos do Connect + Organiza</small>
         </div>
         <span id="financeiro-aba-status">Vincular</span>
@@ -1699,22 +1699,22 @@ button{
 
     <div class="financeiro-rodape-cards">
       <div class="contrato-card contrato-quantidade">
-        <span class="contrato-icone">#</span>
+        <span class="contrato-icone"><i class="bi bi-hash" aria-hidden="true"></i></span>
         <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_semana }}</b><em>{{ quantidade_contratos_semana_proprios }} próprios · {{ quantidade_contratos_semana_transferidos }} transferidos</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="contrato-card contrato-total">
-        <span class="contrato-icone">▣</span>
+        <span class="contrato-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
         <div><small>Valor total</small><b>R$ {{ valor_total_contratos_semana|moeda_br }}</b><em>Próprios R$ {{ valor_total_contratos_semana_proprios|moeda_br }} · Transf. R$ {{ valor_total_contratos_semana_transferidos|moeda_br }}</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="contrato-card contrato-receber-semana">
-        <span class="contrato-icone">↓</span>
+        <span class="contrato-icone"><i class="bi bi-arrow-down" aria-hidden="true"></i></span>
         <div><small>Valor a receber</small><b>R$ {{ valor_receber_contratos_semana|moeda_br }}</b><em>Próprios R$ {{ valor_receber_contratos_semana_proprios|moeda_br }} · Transf. R$ {{ valor_receber_contratos_semana_transferidos|moeda_br }}</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="contrato-card contrato-repasse-semana">
-        <span class="contrato-icone">↗</span>
+        <span class="contrato-icone"><i class="bi bi-arrow-up-right" aria-hidden="true"></i></span>
         <div><small>Repasse a pagar</small><b>R$ {{ valor_repasse_semana|moeda_br }}</b><em>{{ quantidade_contratos_semana_transferidos }} contrato(s) transferido(s)</em></div>
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
@@ -2496,6 +2496,67 @@ document.addEventListener("DOMContentLoaded", function(){
     min-height:0;
   }
   .btn-abrir-manual{width:100%!important}
+}
+</style>
+
+
+<style>
+/* ORION — ícones: Bootstrap Icons já carregado globalmente em base.html */
+.financeiro-novo button i.bi,
+.financeiro-novo a i.bi{
+  pointer-events:none;
+  font-size:1em;
+  line-height:1;
+  flex:0 0 auto;
+}
+.financeiro-novo .botao-pequeno,
+.financeiro-novo .botao-secundario,
+.financeiro-novo .botao-perigo,
+.financeiro-novo .btn-vincular,
+.financeiro-novo .btn-limpar-filtros,
+.financeiro-novo .btn-filtrar{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:6px!important;
+}
+.financeiro-novo .icone-aba,
+.financeiro-novo .icone-botao{
+  font-size:15px!important;
+  width:16px;
+  text-align:center;
+}
+.financeiro-novo .btn-vinculo-ok{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  padding:0!important;
+}
+.financeiro-novo .btn-vinculo-ok i{
+  font-size:16px!important;
+}
+.financeiro-novo .modal-fechar{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+}
+.financeiro-novo .modal-fechar i{
+  font-size:17px!important;
+}
+.financeiro-novo .vinculo-atual-modal b i{
+  margin-right:5px;
+  color:#16a34a;
+}
+/* Impede ícones antigos gerados por pseudo-elementos nas ações */
+.financeiro-novo .btn-filtrar::before,
+.financeiro-novo .btn-limpar-filtros::before,
+.financeiro-novo .btn-vincular::before,
+.financeiro-novo .btn-abrir-manual::before,
+.financeiro-novo .btn-modal-confirmar::before,
+.financeiro-novo .btn-modal-cancelar::before,
+.financeiro-novo .btn-vinculo-ok::before{
+  content:none!important;
+  display:none!important;
 }
 </style>
 
