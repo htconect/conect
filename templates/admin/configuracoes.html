@@ -4,6 +4,10 @@
 <h1>Configurações</h1>
 <div class="box">
   <form method="post" enctype="multipart/form-data">
+    <label>WhatsApp da empresa para receber confirmações</label>
+    <input name="whatsapp_retorno" inputmode="tel" placeholder="(21) 99999-9999" value="{{ empresa.whatsapp_retorno or '' }}">
+    <p class="texto-discreto">Após preencher o pré-contrato ou aceitar o contrato, o WhatsApp do cliente abrirá com uma confirmação pronta para este número.</p>
+
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola or '' }}</textarea>
     <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>

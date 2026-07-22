@@ -685,6 +685,8 @@ def garantir_colunas_novas():
     cols_emp = colunas("empresas")
     if "pix_copia_cola" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN pix_copia_cola TEXT")
+    if "whatsapp_retorno" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN whatsapp_retorno VARCHAR(30)")
     if "exige_sinal" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN exige_sinal BOOLEAN DEFAULT false")
     if "suporte_inicio" not in cols_emp:
@@ -1357,6 +1359,7 @@ def mensagens_empresa(empresa: Empresa) -> dict:
             "Olá!\n\n"
             "Para agilizar sua reserva, preencha este formulário:\n"
             "{{link}}\n\n"
+            "Importante: favor preencher utilizando o seu próprio WhatsApp, pois ele será usado para identificar e confirmar sua solicitação.\n\n"
             "Após o envio, nossa equipe irá preparar os equipamentos, valores e o pré-contrato.\n\n"
             "Assim que estiver tudo pronto, você receberá o contrato para análise e aceite."
         ),
@@ -1451,6 +1454,7 @@ def admin_criar_empresa(
         senha_admin: str = Form(...),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
+        whatsapp_retorno: str = Form(""),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -1478,6 +1482,7 @@ def admin_criar_empresa(
         usuario_admin=usuario_admin.strip(),
         senha_admin=senha_admin.strip(),
         pix_copia_cola=pix_copia_cola.strip(),
+        whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
         exige_sinal=bool(exige_sinal),
         suporte_inicio=suporte_inicio.strip(),
         suporte_fim=suporte_fim.strip(),
@@ -2149,6 +2154,7 @@ def configuracoes_empresa(request: Request, db: Session = Depends(get_db), empre
 async def salvar_configuracoes_empresa(
         request: Request,
         pix_copia_cola: str = Form(""),
+        whatsapp_retorno: str = Form(""),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -2169,6 +2175,7 @@ async def salvar_configuracoes_empresa(
         empresa: Empresa = Depends(empresa_logada)
 ):
     empresa.pix_copia_cola = pix_copia_cola.strip()
+    empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
@@ -5873,6 +5880,21 @@ def buscar_cliente(slug: str, identificador: str = Form(...), db: Session = Depe
     return RedirectResponse(f"/e/{slug}/cadastro?identificador={ident}", status_code=303)
 
 
+def _url_confirmacao_whatsapp(empresa: Empresa, item: Solicitacao, tipo: str) -> str | None:
+    telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
+    if not telefone:
+        return None
+    cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
+    data = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else ""
+    if tipo == "pre_contrato":
+        texto = (f"Olá, sou {cliente}. Acabei de preencher meu pré-contrato "
+                 f"para o evento do dia {data}. Solicitação #{item.id}.")
+    else:
+        texto = (f"Olá, sou {cliente}. Confirmo o aceite do contrato #{item.id} "
+                 f"referente ao evento do dia {data}.")
+    return f"https://wa.me/{telefone}?text={quote(texto)}"
+
+
 @app.get("/e/{slug}/pre-contrato", response_class=HTMLResponse)
 def pre_contrato_cliente(slug: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -6018,6 +6040,9 @@ def salvar_pre_cadastro(
     db.add(solicitacao)
     db.commit()
     db.refresh(solicitacao)
+    url_whatsapp = _url_confirmacao_whatsapp(empresa, solicitacao, "pre_contrato")
+    if url_whatsapp:
+        return RedirectResponse(f"/e/{slug}/confirmar-whatsapp/{solicitacao.id}?tipo=pre_contrato", status_code=303)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao.id}", status_code=303)
 
 
@@ -6320,7 +6345,27 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         item.hora_fim = fim_obj
         criar_eventos_operacionais(db, item)
         db.commit()
+    url_whatsapp = _url_confirmacao_whatsapp(empresa, item, "aceite") if status_reserva_confirmada(item.status) else None
+    if url_whatsapp:
+        return RedirectResponse(f"/e/{slug}/confirmar-whatsapp/{solicitacao_id}?tipo=aceite", status_code=303)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao_id}", status_code=303)
+
+
+@app.get("/e/{slug}/confirmar-whatsapp/{solicitacao_id}", response_class=HTMLResponse)
+def confirmar_whatsapp(slug: str, solicitacao_id: int, request: Request, tipo: str = "pre_contrato", db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    solicitacao = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not solicitacao or solicitacao.empresa_id != empresa.id:
+        raise HTTPException(404)
+    tipo_confirmacao = "aceite" if tipo == "aceite" else "pre_contrato"
+    url_whatsapp = _url_confirmacao_whatsapp(empresa, solicitacao, tipo_confirmacao)
+    return templates.TemplateResponse("publico/confirmar_whatsapp.html", {
+        "request": request,
+        "empresa": empresa,
+        "solicitacao": solicitacao,
+        "url_whatsapp": url_whatsapp,
+        "tipo": tipo_confirmacao,
+    })
 
 
 @app.get("/e/{slug}/obrigado/{solicitacao_id}", response_class=HTMLResponse)

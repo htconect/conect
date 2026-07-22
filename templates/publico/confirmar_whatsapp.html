@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="card card-formulario">
+  <h1>Tudo certo!</h1>
+  <p>Seus dados foram registrados com sucesso.</p>
+
+  <div class="aviso aviso-info">
+    Agora será aberta uma mensagem no WhatsApp para avisar nosso atendente.<br>
+    <strong>Por favor, clique em “Enviar” no WhatsApp para concluir a confirmação.</strong>
+  </div>
+
+  {% if url_whatsapp %}
+    <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}">Continuar para o WhatsApp</a>
+  {% else %}
+    <a class="botao largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Continuar</a>
+  {% endif %}
+</section>
+{% endblock %}
