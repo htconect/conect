@@ -1955,6 +1955,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             Solicitacao.empresa_id == empresa.id,
             Solicitacao.cancelado_em == None,
             ~Solicitacao.status.in_(["cancelada", "cancelado", "cancelado_cliente", "rejeitada"]),
+            Solicitacao.data_evento < date.today(),
             (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
         )
         .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())

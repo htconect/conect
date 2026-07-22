@@ -33,7 +33,11 @@
 
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>
-    <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required><div id="statusBuscaClientePublico" class="texto-discreto">Digite o WhatsApp para localizar seu cadastro.</div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
+    <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
+    <div class="aviso-whatsapp-proprio" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff7df;border:1px solid #f0d27a;font-weight:600;line-height:1.4;">
+      <strong>Importante:</strong> utilize o seu próprio WhatsApp. Este número será usado para identificar sua reserva e receber as confirmações do contrato. <strong>Não informe o WhatsApp de outra pessoa.</strong>
+    </div>
+    <div id="statusBuscaClientePublico" class="texto-discreto" style="margin-top:8px;">Digite o WhatsApp para localizar seu cadastro.</div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
     <div class="linha">
       <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" checked onchange="alternarPessoa()"> Pessoa física</label>
       <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" onchange="alternarPessoa()"> Pessoa jurídica</label>
