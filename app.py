@@ -722,7 +722,7 @@ def garantir_colunas_novas():
     if "humiat_saldo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_saldo INTEGER DEFAULT 0 NOT NULL")
     if "humiat_gratis_mes" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 40 NOT NULL")
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 4 NOT NULL")
     if "humiat_custo_contrato" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_custo_contrato INTEGER DEFAULT 1 NOT NULL")
 
@@ -1006,11 +1006,15 @@ def garantir_colunas_novas():
             for comando in comandos:
                 conn.execute(text(comando))
 
-    # Migração da regra antiga (4 contratos grátis / 10 H por excedente) para
-    # a nova regra 1:1 (40 H grátis / 1 H por contrato). Só converte o padrão legado.
+    # Regra Humiat 1:1: 4 contratos grátis por mês e 1 Humiat por contrato excedente.
+    # Corrige instalações que receberam temporariamente a configuração de 40 gratuitos.
     with engine.begin() as conn:
         conn.execute(text(
-            "UPDATE empresas SET humiat_gratis_mes = 40, humiat_custo_contrato = 1 "
+            "UPDATE empresas SET humiat_gratis_mes = 4, humiat_custo_contrato = 1 "
+            "WHERE humiat_gratis_mes = 40"
+        ))
+        conn.execute(text(
+            "UPDATE empresas SET humiat_custo_contrato = 1 "
             "WHERE humiat_gratis_mes = 4 AND humiat_custo_contrato = 10"
         ))
 
@@ -1502,7 +1506,7 @@ def _processar_humiat_aceite(db: Session, empresa: Empresa, item: Solicitacao):
     aceite = item.aceite_em or agora_utc()
     competencia = aceite.strftime("%Y-%m")
     # Regra 1:1: cada contrato aceito representa exatamente 1 Humiat.
-    gratis_mes = max(0, int(empresa.humiat_gratis_mes or 40))
+    gratis_mes = max(0, int(empresa.humiat_gratis_mes or 4))
     custo = 1
     usados_gratis = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -1673,7 +1677,7 @@ def admin_salvar_empresa(
         logo_arquivo: UploadFile | None = File(None),
         tema: str = Form("azul"),
         ativa: Optional[str] = Form(None),
-        humiat_gratis_mes: int = Form(40),
+        humiat_gratis_mes: int = Form(4),
         humiat_custo_contrato: int = Form(1),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
@@ -2151,7 +2155,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia_humiat,
     ).count()
-    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 40))
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
     custo_contrato_h = 1
     gratis_usados = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -2232,7 +2236,7 @@ def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empr
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia,
     ).count()
-    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 40))
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
     custo = 1
     gratis_restantes = max(0, gratis_limite - min(aceitos_mes, gratis_limite))
     return templates.TemplateResponse("admin/humiat_comprar.html", {

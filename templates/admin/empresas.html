@@ -85,7 +85,7 @@
       <div class="linha">
         <div>
           <label>Humiats grátis por mês</label>
-          <input type="number" min="0" name="humiat_gratis_mes" value="{{ empresa.humiat_gratis_mes if empresa.humiat_gratis_mes is not none else 40 }}">
+          <input type="number" min="0" name="humiat_gratis_mes" value="{{ empresa.humiat_gratis_mes if empresa.humiat_gratis_mes is not none else 4 }}">
         </div>
         <div>
           <label>Humiats por contrato aceito</label>
@@ -111,7 +111,7 @@
   <div class="grid" style="margin:12px 0 18px">
     <div class="card"><small>Saldo atual</small><h2>{{ empresa.humiat_saldo or 0 }} Humiats</h2></div>
     <div class="card"><small>Aceitos neste mês</small><h2>{{ aceitos_mes or 0 }}</h2></div>
-    <div class="card"><small>Humiats grátis usados</small><h2>{{ [aceitos_mes or 0, empresa.humiat_gratis_mes or 40]|min }} H / {{ empresa.humiat_gratis_mes or 40 }} H</h2></div>
+    <div class="card"><small>Humiats grátis usados</small><h2>{{ [aceitos_mes or 0, empresa.humiat_gratis_mes or 4]|min }} H / {{ empresa.humiat_gratis_mes or 4 }} H</h2></div>
     <div class="card"><small>Aguardando saldo</small><h2>{{ pendentes_humiat or 0 }}</h2></div>
   </div>
 
