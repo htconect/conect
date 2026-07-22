@@ -1426,3 +1426,18 @@ button.principal{
     text-align:center;
   }
 }
+
+/* Resumo compacto da carteira Humiat no painel principal */
+.humiat-resumo-home{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+  margin:0 0 12px;padding:12px 16px;background:#fff;border:1px solid var(--borda);
+  border-radius:16px;box-shadow:0 8px 22px rgba(15,23,42,.05)
+}
+.humiat-resumo-home>div{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.humiat-resumo-label{font-size:13px;color:var(--muted);font-weight:700}
+.humiat-resumo-home strong{font-size:20px;line-height:1;color:#0f172a}
+.humiat-resumo-home small{font-size:12px;color:var(--muted);text-align:right}
+@media(max-width:620px){
+  .humiat-resumo-home{align-items:flex-start;flex-direction:column;gap:5px}
+  .humiat-resumo-home small{text-align:left}
+}

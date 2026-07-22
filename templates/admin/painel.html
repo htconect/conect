@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block conteudo %}
+<div class="humiat-resumo-home" title="Saldo disponível da empresa">
+    <div>
+        <span class="humiat-resumo-label">Humiats disponíveis</span>
+        <strong>{{ empresa.humiat_saldo or 0 }} H</strong>
+    </div>
+    <small>4 contratos aceitos grátis por mês · após a franquia, {{ empresa.humiat_custo_contrato or 10 }} H por contrato</small>
+</div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
         <span>📅</span>
