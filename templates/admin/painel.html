@@ -1,11 +1,55 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="humiat-resumo-home" title="Saldo disponível da empresa">
-    <div>
-        <span class="humiat-resumo-label">Humiats disponíveis</span>
-        <strong>{{ empresa.humiat_saldo or 0 }} H</strong>
+<section class="humiat-wallet-card" aria-label="Carteira Humiat">
+    <div class="humiat-wallet-top">
+        <div class="humiat-brand-block">
+            <div class="humiat-coin" aria-hidden="true"><span>H</span></div>
+            <div class="humiat-brand-name">HUMIAT</div>
+        </div>
+        <div class="humiat-balance-block">
+            <h2>Carteira Humiat</h2>
+            <p>Seus créditos disponíveis</p>
+            <div class="humiat-balance-lines">
+                <div><span>Grátis neste mês</span><strong>{{ humiats_gratis_restantes }} H</strong></div>
+                <div><span>Comprados</span><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
+            </div>
+            <div class="humiat-wallet-actions">
+                <a href="/painel/humiats/comprar" class="humiat-btn-buy">＋ Comprar Humiats</a>
+                <a href="/painel/humiats/extrato" class="humiat-btn-statement">▣ Extrato</a>
+            </div>
+        </div>
+        <div class="humiat-wallet-symbol" aria-hidden="true">
+            <div class="wallet-shape"><i>H</i><i>H</i></div>
+        </div>
     </div>
-    <small>4 contratos aceitos grátis por mês · após a franquia, {{ empresa.humiat_custo_contrato or 10 }} H por contrato</small>
+
+    <div class="humiat-wallet-stats">
+        <div class="humiat-stat humiat-stat-free">
+            <div class="humiat-stat-icon">🎁</div>
+            <div class="humiat-stat-content">
+                <b>Contratos gratuitos</b>
+                <small>(mês atual)</small>
+                <strong>{{ humiat_gratis_usados }} / {{ humiat_gratis_limite }}</strong>
+                <span>contratos gratuitos utilizados</span>
+                <div class="humiat-progress"><i style="width: {{ ((humiat_gratis_usados / humiat_gratis_limite * 100) if humiat_gratis_limite else 100)|round(0) }}%"></i></div>
+                <em>Restam {{ humiat_gratis_restantes }} contrato{{ '' if humiat_gratis_restantes == 1 else 's' }} gratuito{{ '' if humiat_gratis_restantes == 1 else 's' }}</em>
+            </div>
+        </div>
+        <div class="humiat-stat humiat-stat-paid">
+            <div class="humiat-stat-icon">🪙</div>
+            <div class="humiat-stat-content">
+                <b>Contratos cobrados</b>
+                <small>(mês atual)</small>
+                <strong>{{ humiat_contratos_cobrados_mes }}</strong>
+                <span>contratos cobrados</span>
+                <em>Total consumido: {{ humiats_consumidos_mes }} H</em>
+            </div>
+        </div>
+    </div>
+</section>
+<div class="humiat-rule-note">
+    <span>ⓘ</span>
+    <p><b>{{ humiat_gratis_limite }} contratos aceitos grátis por mês.</b><br>Após a franquia, cada contrato aceito custa {{ empresa.humiat_custo_contrato or 10 }} Humiats.</p>
 </div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">

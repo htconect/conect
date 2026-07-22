@@ -2132,6 +2132,27 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         pix=empresa.pix_copia_cola or "",
     )
 
+    # Resumo da Carteira Humiat. Os créditos gratuitos são calculados apenas
+    # para exibição e consumo mensal; o saldo comprado continua separado.
+    competencia_humiat = agora_utc().strftime("%Y-%m")
+    aceitos_humiat_mes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia_humiat,
+    ).count()
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
+    custo_contrato_h = max(0, int(empresa.humiat_custo_contrato or 10))
+    gratis_usados = min(aceitos_humiat_mes, gratis_limite)
+    gratis_restantes = max(0, gratis_limite - gratis_usados)
+    humiats_gratis_restantes = gratis_restantes * custo_contrato_h
+    contratos_cobrados_mes = max(0, aceitos_humiat_mes - gratis_limite)
+    humiats_consumidos_mes = db.query(func.coalesce(func.sum(Solicitacao.humiat_custo), 0)).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia_humiat,
+        Solicitacao.humiat_custo > 0,
+    ).scalar() or 0
+
     return templates.TemplateResponse("admin/painel.html", {
         "request": request,
         "empresa": empresa,
@@ -2152,9 +2173,48 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "operacao_buscar_qtd": operacao_buscar_qtd,
         "inicio_semana": inicio_semana,
         "fim_semana": fim_semana,
+        "humiat_aceitos_mes": aceitos_humiat_mes,
+        "humiat_gratis_limite": gratis_limite,
+        "humiat_gratis_usados": gratis_usados,
+        "humiat_gratis_restantes": gratis_restantes,
+        "humiats_gratis_restantes": humiats_gratis_restantes,
+        "humiat_contratos_cobrados_mes": contratos_cobrados_mes,
+        "humiats_consumidos_mes": int(humiats_consumidos_mes),
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
     })
 
+
+@app.get("/painel/humiats/extrato", response_class=HTMLResponse)
+def painel_humiats_extrato(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    movimentos = db.query(HumiatMovimento).filter_by(empresa_id=empresa.id).order_by(HumiatMovimento.criado_em.desc(), HumiatMovimento.id.desc()).limit(300).all()
+    contratos_gratuitos = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_status == "gratuito",
+    ).order_by(Solicitacao.id.desc()).limit(300).all()
+    return templates.TemplateResponse("admin/humiat_extrato.html", {
+        "request": request, "empresa": empresa, "movimentos": movimentos,
+        "contratos_gratuitos": contratos_gratuitos,
+        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
+    })
+
+
+@app.get("/painel/humiats/comprar", response_class=HTMLResponse)
+def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    competencia = agora_utc().strftime("%Y-%m")
+    aceitos_mes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia,
+    ).count()
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
+    custo = max(0, int(empresa.humiat_custo_contrato or 10))
+    gratis_restantes = max(0, gratis_limite - min(aceitos_mes, gratis_limite))
+    return templates.TemplateResponse("admin/humiat_comprar.html", {
+        "request": request, "empresa": empresa,
+        "gratis_restantes": gratis_restantes, "custo": custo,
+        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
+    })
 
 
 def usuario_empresa_atual(db: Session, empresa: Empresa, request: Request):

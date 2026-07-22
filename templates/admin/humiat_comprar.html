@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="humiat-page-head">
+  <div><a href="/painel" class="humiat-back">← Voltar</a><h1>Comprar Humiats</h1><p>Adicione créditos para contratos após a franquia gratuita.</p></div>
+  <div class="humiat-page-balance"><small>Saldo comprado</small><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
+</section>
+<section class="humiat-buy-card">
+  <div class="humiat-buy-icon">H</div>
+  <h2>Créditos Humiat</h2>
+  <p>Você ainda possui <b>{{ gratis_restantes }} contrato{{ '' if gratis_restantes == 1 else 's' }} gratuito{{ '' if gratis_restantes == 1 else 's' }}</b> neste mês. Depois disso, cada contrato aceito utiliza <b>{{ custo }} Humiats</b>.</p>
+  <div class="humiat-buy-info"><b>Compra de créditos</b><span>Nesta primeira fase, os créditos são liberados pelo administrador da plataforma após a confirmação da compra.</span></div>
+  <a href="/painel/humiats/extrato" class="humiat-btn-statement humiat-buy-extrato">Ver meu extrato</a>
+</section>
+{% endblock %}

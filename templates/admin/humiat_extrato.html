@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="humiat-page-head">
+  <div><a href="/painel" class="humiat-back">← Voltar</a><h1>Extrato Humiat</h1><p>Histórico de créditos e consumo da carteira.</p></div>
+  <div class="humiat-page-balance"><small>Saldo comprado</small><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
+</section>
+<section class="humiat-extrato-list">
+  <h2>Movimentos da carteira</h2>
+  {% for m in movimentos %}
+  <article class="humiat-extrato-item">
+    <div><b>{{ m.motivo or ('Consumo de contrato' if m.tipo == 'consumo_contrato' else m.tipo|replace('_',' ')|title) }}</b><small>{{ m.criado_em.strftime('%d/%m/%Y %H:%M') if m.criado_em else '-' }}{% if m.observacao %} · {{ m.observacao }}{% endif %}</small></div>
+    <div class="humiat-extrato-value {{ 'entrada' if m.quantidade > 0 else 'saida' }}"><strong>{{ '+' if m.quantidade > 0 else '' }}{{ m.quantidade }} H</strong><small>Saldo {{ m.saldo_posterior }} H</small></div>
+  </article>
+  {% else %}<div class="humiat-empty">Nenhum movimento de créditos comprado registrado.</div>{% endfor %}
+
+  <h2 class="humiat-extrato-subtitle">Contratos gratuitos utilizados</h2>
+  {% for c in contratos_gratuitos %}
+  <article class="humiat-extrato-item">
+    <div><b>Contrato #{{ c.id }} · franquia gratuita</b><small>{{ c.cliente.nome if c.cliente else 'Cliente' }}{% if c.data_evento %} · evento {{ c.data_evento.strftime('%d/%m/%Y') }}{% endif %}</small></div>
+    <div class="humiat-extrato-value gratis"><strong>0 H</strong><small>{{ c.humiat_competencia or '-' }}</small></div>
+  </article>
+  {% else %}<div class="humiat-empty">Nenhum contrato gratuito utilizado ainda.</div>{% endfor %}
+</section>
+{% endblock %}
