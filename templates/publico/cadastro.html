@@ -28,7 +28,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}">
+<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="Salvando pré-contrato" data-loading-text="Estamos salvando seus dados. Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente."{% endif %}>
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
 
   <section class="secao-form">

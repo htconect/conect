@@ -1,24 +1,38 @@
 {% extends "base.html" %}
 {% block conteudo %}
 <section class="humiat-page-head">
-  <div><a href="/painel" class="humiat-back">← Voltar</a><h1>Extrato Humiat</h1><p>Histórico de créditos e consumo da carteira.</p></div>
+  <div><a href="/painel" class="humiat-back">← Voltar</a><h1>Extrato Humiat</h1><p>Consumo de Humiats e faturamento gerado pelos contratos aceitos.</p></div>
   <div class="humiat-page-balance"><small>Saldo comprado</small><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
 </section>
+
+<section class="humiat-extrato-resumo">
+  <div><small>Humiats consumidos</small><strong>{{ total_humiats_usados }} H</strong></div>
+  <div><small>Dos gratuitos</small><strong>{{ gratis_consumidos }} H</strong></div>
+  <div><small>Dos comprados</small><strong>{{ comprados_consumidos }} H</strong></div>
+  <div><small>Faturamento em contratos</small><strong>R$ {{ total_faturado|moeda_br }}</strong></div>
+</section>
+
 <section class="humiat-extrato-list">
-  <h2>Movimentos da carteira</h2>
+  <h2>Contratos que consumiram Humiats</h2>
+  {% for c in contratos_humiat %}
+  <article class="humiat-extrato-item">
+    <div>
+      <b>Contrato #{{ c.id }} · {{ c.cliente.nome if c.cliente else 'Cliente' }}</b>
+      <small>{{ c.aceite_em.strftime('%d/%m/%Y %H:%M') if c.aceite_em else '-' }}{% if c.data_evento %} · evento {{ c.data_evento.strftime('%d/%m/%Y') }}{% endif %} · {{ 'H grátis' if c.humiat_status == 'gratuito' else ('aguardando saldo' if c.humiat_status == 'pendente_saldo' else 'H comprado') }}</small>
+    </div>
+    <div class="humiat-extrato-value {{ 'gratis' if c.humiat_status == 'gratuito' else 'saida' }}">
+      <strong>-1 H</strong>
+      <small>Contrato R$ {{ (c.valor or 0)|moeda_br }}</small>
+    </div>
+  </article>
+  {% else %}<div class="humiat-empty">Nenhum contrato aceito consumiu Humiats ainda.</div>{% endfor %}
+
+  <h2 class="humiat-extrato-subtitle">Créditos e ajustes da carteira</h2>
   {% for m in movimentos %}
   <article class="humiat-extrato-item">
     <div><b>{{ m.motivo or ('Consumo de contrato' if m.tipo == 'consumo_contrato' else m.tipo|replace('_',' ')|title) }}</b><small>{{ m.criado_em.strftime('%d/%m/%Y %H:%M') if m.criado_em else '-' }}{% if m.observacao %} · {{ m.observacao }}{% endif %}</small></div>
     <div class="humiat-extrato-value {{ 'entrada' if m.quantidade > 0 else 'saida' }}"><strong>{{ '+' if m.quantidade > 0 else '' }}{{ m.quantidade }} H</strong><small>Saldo {{ m.saldo_posterior }} H</small></div>
   </article>
-  {% else %}<div class="humiat-empty">Nenhum movimento de créditos comprado registrado.</div>{% endfor %}
-
-  <h2 class="humiat-extrato-subtitle">Contratos gratuitos utilizados</h2>
-  {% for c in contratos_gratuitos %}
-  <article class="humiat-extrato-item">
-    <div><b>Contrato #{{ c.id }} · franquia gratuita</b><small>{{ c.cliente.nome if c.cliente else 'Cliente' }}{% if c.data_evento %} · evento {{ c.data_evento.strftime('%d/%m/%Y') }}{% endif %}</small></div>
-    <div class="humiat-extrato-value gratis"><strong>0 H</strong><small>{{ c.humiat_competencia or '-' }}</small></div>
-  </article>
-  {% else %}<div class="humiat-empty">Nenhum contrato gratuito utilizado ainda.</div>{% endfor %}
+  {% else %}<div class="humiat-empty">Nenhum crédito ou ajuste registrado.</div>{% endfor %}
 </section>
 {% endblock %}

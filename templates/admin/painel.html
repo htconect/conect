@@ -10,7 +10,7 @@
             <h2>Carteira Humiat</h2>
             <p>Seus créditos disponíveis</p>
             <div class="humiat-balance-lines">
-                <div><span>Grátis neste mês</span><strong>{{ humiats_gratis_restantes }} H</strong></div>
+                <div><span>Grátis restantes no mês</span><strong>{{ humiats_gratis_restantes }} H</strong></div>
                 <div><span>Comprados</span><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
             </div>
             <div class="humiat-wallet-actions">
@@ -27,12 +27,12 @@
         <div class="humiat-stat humiat-stat-free">
             <div class="humiat-stat-icon">🎁</div>
             <div class="humiat-stat-content">
-                <b>Contratos gratuitos</b>
+                <b>Humiats gratuitos</b>
                 <small>(mês atual)</small>
-                <strong>{{ humiat_gratis_usados }} / {{ humiat_gratis_limite }}</strong>
-                <span>contratos gratuitos utilizados</span>
+                <strong>{{ humiat_gratis_usados }} / {{ humiat_gratis_limite }} H</strong>
+                <span>Humiats gratuitos utilizados</span>
                 <div class="humiat-progress"><i style="width: {{ ((humiat_gratis_usados / humiat_gratis_limite * 100) if humiat_gratis_limite else 100)|round(0) }}%"></i></div>
-                <em>Restam {{ humiat_gratis_restantes }} contrato{{ '' if humiat_gratis_restantes == 1 else 's' }} gratuito{{ '' if humiat_gratis_restantes == 1 else 's' }}</em>
+                <em>Restam {{ humiat_gratis_restantes }} H grátis</em>
             </div>
         </div>
         <div class="humiat-stat humiat-stat-paid">
@@ -49,7 +49,7 @@
 </section>
 <div class="humiat-rule-note">
     <span>ⓘ</span>
-    <p><b>{{ humiat_gratis_limite }} contratos aceitos grátis por mês.</b><br>Após a franquia, cada contrato aceito custa {{ empresa.humiat_custo_contrato or 10 }} Humiats.</p>
+    <p><b>{{ humiat_gratis_limite }} Humiats grátis por mês.</b><br>Cada contrato aceito consome 1 Humiat; depois dos gratuitos, o consumo passa para os Humiats comprados.</p>
 </div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">

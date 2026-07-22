@@ -722,9 +722,9 @@ def garantir_colunas_novas():
     if "humiat_saldo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_saldo INTEGER DEFAULT 0 NOT NULL")
     if "humiat_gratis_mes" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 4 NOT NULL")
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 40 NOT NULL")
     if "humiat_custo_contrato" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_custo_contrato INTEGER DEFAULT 10 NOT NULL")
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_custo_contrato INTEGER DEFAULT 1 NOT NULL")
 
     if "clientes" in tabelas:
         cols_cli = colunas("clientes")
@@ -1005,6 +1005,14 @@ def garantir_colunas_novas():
         with engine.begin() as conn:
             for comando in comandos:
                 conn.execute(text(comando))
+
+    # Migração da regra antiga (4 contratos grátis / 10 H por excedente) para
+    # a nova regra 1:1 (40 H grátis / 1 H por contrato). Só converte o padrão legado.
+    with engine.begin() as conn:
+        conn.execute(text(
+            "UPDATE empresas SET humiat_gratis_mes = 40, humiat_custo_contrato = 1 "
+            "WHERE humiat_gratis_mes = 4 AND humiat_custo_contrato = 10"
+        ))
 
 
 
@@ -1488,31 +1496,34 @@ def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, 
 
 
 def _processar_humiat_aceite(db: Session, empresa: Empresa, item: Solicitacao):
-    """Classifica/cobra uma única vez, exclusivamente no primeiro aceite do contrato."""
+    """Consome 1 Humiat por contrato aceito, usando primeiro a franquia mensal gratuita."""
     if item.humiat_processado:
         return
     aceite = item.aceite_em or agora_utc()
     competencia = aceite.strftime("%Y-%m")
-    usados = db.query(Solicitacao).filter(
+    # Regra 1:1: cada contrato aceito representa exatamente 1 Humiat.
+    gratis_mes = max(0, int(empresa.humiat_gratis_mes or 40))
+    custo = 1
+    usados_gratis = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia,
+        Solicitacao.humiat_status == "gratuito",
     ).count()
-    gratis = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo = max(0, int(empresa.humiat_custo_contrato or 10))
     item.humiat_processado = True
     item.humiat_competencia = competencia
-    if usados < gratis:
-        item.humiat_custo = 0
+    item.humiat_custo = custo
+    if usados_gratis < gratis_mes:
         item.humiat_status = "gratuito"
         return
-    item.humiat_custo = custo
     if int(empresa.humiat_saldo or 0) >= custo:
-        _registrar_movimento_humiat(db, empresa, -custo, "consumo_contrato", f"Contrato #{item.id} aceito", solicitacao_id=item.id)
+        _registrar_movimento_humiat(
+            db, empresa, -custo, "consumo_contrato",
+            f"Contrato #{item.id} aceito", solicitacao_id=item.id
+        )
         item.humiat_status = "debitado"
     else:
         item.humiat_status = "pendente_saldo"
-
 
 def _quitar_humiats_pendentes(db: Session, empresa: Empresa):
     pendentes = db.query(Solicitacao).filter(
@@ -1662,8 +1673,8 @@ def admin_salvar_empresa(
         logo_arquivo: UploadFile | None = File(None),
         tema: str = Form("azul"),
         ativa: Optional[str] = Form(None),
-        humiat_gratis_mes: int = Form(4),
-        humiat_custo_contrato: int = Form(10),
+        humiat_gratis_mes: int = Form(40),
+        humiat_custo_contrato: int = Form(1),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
@@ -2140,18 +2151,23 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia_humiat,
     ).count()
-    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo_contrato_h = max(0, int(empresa.humiat_custo_contrato or 10))
-    gratis_usados = min(aceitos_humiat_mes, gratis_limite)
-    gratis_restantes = max(0, gratis_limite - gratis_usados)
-    humiats_gratis_restantes = gratis_restantes * custo_contrato_h
-    contratos_cobrados_mes = max(0, aceitos_humiat_mes - gratis_limite)
-    humiats_consumidos_mes = db.query(func.coalesce(func.sum(Solicitacao.humiat_custo), 0)).filter(
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 40))
+    custo_contrato_h = 1
+    gratis_usados = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia_humiat,
-        Solicitacao.humiat_custo > 0,
-    ).scalar() or 0
+        Solicitacao.humiat_status == "gratuito",
+    ).count()
+    gratis_restantes = max(0, gratis_limite - gratis_usados)
+    humiats_gratis_restantes = gratis_restantes
+    contratos_cobrados_mes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia_humiat,
+        Solicitacao.humiat_status.in_(["debitado", "pendente_saldo"]),
+    ).count()
+    humiats_consumidos_mes = aceitos_humiat_mes
 
     return templates.TemplateResponse("admin/painel.html", {
         "request": request,
@@ -2186,15 +2202,24 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
 
 @app.get("/painel/humiats/extrato", response_class=HTMLResponse)
 def painel_humiats_extrato(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    movimentos = db.query(HumiatMovimento).filter_by(empresa_id=empresa.id).order_by(HumiatMovimento.criado_em.desc(), HumiatMovimento.id.desc()).limit(300).all()
-    contratos_gratuitos = db.query(Solicitacao).filter(
+    movimentos = db.query(HumiatMovimento).filter_by(empresa_id=empresa.id).order_by(
+        HumiatMovimento.criado_em.desc(), HumiatMovimento.id.desc()
+    ).limit(300).all()
+    contratos_humiat = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_status == "gratuito",
-    ).order_by(Solicitacao.id.desc()).limit(300).all()
+    ).order_by(Solicitacao.aceite_em.desc(), Solicitacao.id.desc()).limit(500).all()
+    total_humiats_usados = len(contratos_humiat)
+    total_faturado = sum(float(c.valor or 0) for c in contratos_humiat)
+    comprados_consumidos = sum(1 for c in contratos_humiat if c.humiat_status in ("debitado", "pendente_saldo"))
+    gratis_consumidos = sum(1 for c in contratos_humiat if c.humiat_status == "gratuito")
     return templates.TemplateResponse("admin/humiat_extrato.html", {
         "request": request, "empresa": empresa, "movimentos": movimentos,
-        "contratos_gratuitos": contratos_gratuitos,
+        "contratos_humiat": contratos_humiat,
+        "total_humiats_usados": total_humiats_usados,
+        "total_faturado": total_faturado,
+        "comprados_consumidos": comprados_consumidos,
+        "gratis_consumidos": gratis_consumidos,
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
     })
 
@@ -2207,8 +2232,8 @@ def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empr
         Solicitacao.humiat_processado == True,
         Solicitacao.humiat_competencia == competencia,
     ).count()
-    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo = max(0, int(empresa.humiat_custo_contrato or 10))
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 40))
+    custo = 1
     gratis_restantes = max(0, gratis_limite - min(aceitos_mes, gratis_limite))
     return templates.TemplateResponse("admin/humiat_comprar.html", {
         "request": request, "empresa": empresa,
@@ -6238,7 +6263,7 @@ def salvar_pre_cadastro(
     db.refresh(solicitacao)
     url_whatsapp = _url_confirmacao_whatsapp(empresa, solicitacao, "pre_contrato")
     if url_whatsapp:
-        return RedirectResponse(f"/e/{slug}/confirmar-whatsapp/{solicitacao.id}?tipo=pre_contrato", status_code=303)
+        return RedirectResponse(url_whatsapp, status_code=303)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao.id}", status_code=303)
 
 
@@ -6532,7 +6557,9 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count()
+    aceite_registrado_agora = False
     if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
+        aceite_registrado_agora = True
         item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
         item.aceite_em = agora_utc()
         item.aprovado_em = item.aceite_em
@@ -6542,9 +6569,10 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         criar_eventos_operacionais(db, item)
         _processar_humiat_aceite(db, empresa, item)
         db.commit()
-    url_whatsapp = _url_confirmacao_whatsapp(empresa, item, "aceite") if status_reserva_confirmada(item.status) else None
+    # Todo aceite gravado deve abrir o WhatsApp, independentemente de sinal/pagamento pendente.
+    url_whatsapp = _url_confirmacao_whatsapp(empresa, item, "aceite") if aceite_registrado_agora else None
     if url_whatsapp:
-        return RedirectResponse(f"/e/{slug}/confirmar-whatsapp/{solicitacao_id}?tipo=aceite", status_code=303)
+        return RedirectResponse(url_whatsapp, status_code=303)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao_id}", status_code=303)
 
 

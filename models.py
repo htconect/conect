@@ -37,8 +37,8 @@ class Empresa(Base):
     logo_idb_url = Column(String(300), nullable=True)
     # Carteira Humiat da empresa. A franquia mensal reinicia por competência; o saldo não vence.
     humiat_saldo = Column(Integer, nullable=False, default=0)
-    humiat_gratis_mes = Column(Integer, nullable=False, default=4)
-    humiat_custo_contrato = Column(Integer, nullable=False, default=10)
+    humiat_gratis_mes = Column(Integer, nullable=False, default=40)
+    humiat_custo_contrato = Column(Integer, nullable=False, default=1)
 
     clientes = relationship("Cliente", back_populates="empresa")
     produtos = relationship("ProdutoServico", back_populates="empresa")

@@ -1453,3 +1453,9 @@ button.principal{
 }
 @media(max-width:390px){.humiat-wallet-top{grid-template-columns:66px 1fr;padding:16px 10px}.humiat-coin{width:56px;height:56px}.humiat-coin span{font-size:30px}.humiat-brand-name{font-size:11px}.humiat-balance-block h2{font-size:17px}.humiat-wallet-actions{flex-direction:column}.humiat-btn-buy,.humiat-btn-statement{width:100%;box-sizing:border-box}.humiat-wallet-stats{grid-template-columns:1fr}.humiat-stat+.humiat-stat{border-left:0;border-top:1px solid #e9eef5}}
 
+
+/* Resumo do extrato Humiat — regra 1 H = 1 contrato */
+.humiat-extrato-resumo{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}
+.humiat-extrato-resumo>div{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:14px;box-shadow:0 6px 18px rgba(15,23,42,.04);display:flex;flex-direction:column;gap:5px}
+.humiat-extrato-resumo small{color:#64748b;font-size:12px}.humiat-extrato-resumo strong{font-size:20px;color:#0f172a}
+@media(max-width:700px){.humiat-extrato-resumo{grid-template-columns:1fr 1fr}.humiat-extrato-resumo>div{padding:12px}.humiat-extrato-resumo strong{font-size:17px}}

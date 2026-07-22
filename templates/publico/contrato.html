@@ -107,7 +107,7 @@
     {% if contrato_pronto %}
       <div class="acoes-contrato-publico">
         <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar">✏️ Editar meus dados</a>
-        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}">
+        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.">
           <label class="check"><input type="checkbox" name="aceite" value="sim" required> Li, conferi os dados e aceito o contrato.</label>
           <button>Aceitar</button>
         </form>
