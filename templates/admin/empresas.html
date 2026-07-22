@@ -78,6 +78,21 @@
 
     {% if empresa %}
     <label class="check"><input type="checkbox" name="ativa" value="1" {% if empresa.ativa %}checked{% endif %}> Empresa ativa</label>
+
+    <div class="box-mini" style="margin-top:18px">
+      <h3>Regras Humiat</h3>
+      <p class="texto-discreto">A cobrança ocorre somente quando o contrato é aceito. O saldo comprado não vence; apenas a franquia gratuita reinicia a cada mês.</p>
+      <div class="linha">
+        <div>
+          <label>Contratos aceitos grátis por mês</label>
+          <input type="number" min="0" name="humiat_gratis_mes" value="{{ empresa.humiat_gratis_mes if empresa.humiat_gratis_mes is not none else 4 }}">
+        </div>
+        <div>
+          <label>Custo por contrato excedente</label>
+          <input type="number" min="0" name="humiat_custo_contrato" value="{{ empresa.humiat_custo_contrato if empresa.humiat_custo_contrato is not none else 10 }}">
+        </div>
+      </div>
+    </div>
     {% endif %}
 
     <button>{% if empresa %}Salvar empresa{% else %}Criar empresa{% endif %}</button>
@@ -85,6 +100,47 @@
 </div>
 
 
+
+{% if empresa %}
+<div class="box usuarios-empresa-box">
+  <div class="cabecalho-secao-usuarios">
+    <div><p class="mini">Moeda do sistema</p><h2>Carteira Humiat</h2></div>
+  </div>
+  {% if request.query_params.get('erro') %}<p class="alerta erro">{{ request.query_params.get('erro') }}</p>{% endif %}
+  {% if request.query_params.get('humiat') %}<p class="alerta">Movimento registrado com sucesso.</p>{% endif %}
+  <div class="grid" style="margin:12px 0 18px">
+    <div class="card"><small>Saldo atual</small><h2>{{ empresa.humiat_saldo or 0 }} Humiats</h2></div>
+    <div class="card"><small>Aceitos neste mês</small><h2>{{ aceitos_mes or 0 }}</h2></div>
+    <div class="card"><small>Franquia gratuita</small><h2>{{ [aceitos_mes or 0, empresa.humiat_gratis_mes or 4]|min }} / {{ empresa.humiat_gratis_mes or 4 }}</h2></div>
+    <div class="card"><small>Aguardando saldo</small><h2>{{ pendentes_humiat or 0 }}</h2></div>
+  </div>
+
+  <form method="post" action="/admin/empresa/{{ empresa.id }}/humiats" class="form-usuario-organizado">
+    <div class="linha">
+      <div><label>Operação</label><select name="tipo"><option value="credito">Adicionar créditos</option><option value="remover">Remover / ajustar créditos</option></select></div>
+      <div><label>Quantidade de Humiats</label><input type="number" min="1" name="quantidade" required placeholder="100"></div>
+    </div>
+    <label>Motivo</label>
+    <input name="motivo" required placeholder="Ex.: Compra de pacote via PIX">
+    <label>Observação</label>
+    <textarea name="observacao" placeholder="Opcional"></textarea>
+    <button type="submit">Registrar movimento</button>
+  </form>
+
+  <div class="separador-usuarios"></div>
+  <h3>Extrato recente</h3>
+  <div class="lista-mobile lista-usuarios-organizada">
+    {% for m in movimentos_humiat or [] %}
+      <div class="card-lista">
+        <div>
+          <b>{{ '+' if m.quantidade > 0 else '' }}{{ m.quantidade }} Humiats · {{ m.motivo or m.tipo }}</b>
+          <small>{{ m.criado_em.strftime('%d/%m/%Y %H:%M') if m.criado_em else '' }} · Saldo {{ m.saldo_anterior }} → {{ m.saldo_posterior }}{% if m.solicitacao_id %} · Contrato #{{ m.solicitacao_id }}{% endif %}{% if m.usuario %} · {{ m.usuario }}{% endif %}</small>
+        </div>
+      </div>
+    {% else %}<p class="texto-discreto">Nenhum movimento de Humiats registrado.</p>{% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {% if empresa %}
 <div class="box usuarios-empresa-box">
@@ -215,6 +271,7 @@
     <p><b>Usuário:</b> {{ e.usuario_admin or '-' }}</p>
     <p><b>Link público:</b> <a href="/e/{{ e.slug }}">/e/{{ e.slug }}</a></p>
     <p><b>Status:</b> {{ "Ativa" if e.ativa else "Inativa" }}</p>
+    <p><b>Humiats:</b> {{ e.humiat_saldo or 0 }}</p>
     <a href="/admin/empresa/{{ e.id }}">Editar</a>
   </div>
 {% endfor %}

@@ -35,6 +35,10 @@ class Empresa(Base):
     mensagem_hora_fim = Column(Text, nullable=True)
     mostrar_mensagem_hora_fim = Column(Boolean, default=True)
     logo_idb_url = Column(String(300), nullable=True)
+    # Carteira Humiat da empresa. A franquia mensal reinicia por competência; o saldo não vence.
+    humiat_saldo = Column(Integer, nullable=False, default=0)
+    humiat_gratis_mes = Column(Integer, nullable=False, default=4)
+    humiat_custo_contrato = Column(Integer, nullable=False, default=10)
 
     clientes = relationship("Cliente", back_populates="empresa")
     produtos = relationship("ProdutoServico", back_populates="empresa")
@@ -270,9 +274,33 @@ class Solicitacao(Base):
     aprovado_em = Column(DateTime, nullable=True)
     contrato_enviado_em = Column(DateTime, nullable=True)
     cancelado_em = Column(DateTime, nullable=True)
+    # Controle de cobrança Humiat: somente definido quando o contrato é aceito.
+    humiat_processado = Column(Boolean, nullable=False, default=False)
+    humiat_competencia = Column(String(7), nullable=True)  # AAAA-MM do aceite
+    humiat_custo = Column(Integer, nullable=False, default=0)
+    humiat_status = Column(String(30), nullable=True)  # gratuito, debitado, pendente_saldo
 
     agenda = relationship("Agenda", back_populates="solicitacao", uselist=False)
     pagamentos = relationship("Pagamento", back_populates="solicitacao", cascade="all, delete-orphan")
+
+
+class HumiatMovimento(Base):
+    __tablename__ = "humiat_movimentos"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True, index=True)
+    tipo = Column(String(30), nullable=False)  # credito, consumo_contrato, ajuste, estorno
+    quantidade = Column(Integer, nullable=False)  # positivo=entrada, negativo=saída
+    saldo_anterior = Column(Integer, nullable=False, default=0)
+    saldo_posterior = Column(Integer, nullable=False, default=0)
+    motivo = Column(String(200), nullable=True)
+    observacao = Column(Text, nullable=True)
+    usuario = Column(String(120), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+    solicitacao = relationship("Solicitacao")
 
 
 class ReservaItem(Base):

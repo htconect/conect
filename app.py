@@ -25,7 +25,7 @@ from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -719,6 +719,12 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_pagamento TEXT")
     if "mensagem_confirmacao" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_confirmacao TEXT")
+    if "humiat_saldo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_saldo INTEGER DEFAULT 0 NOT NULL")
+    if "humiat_gratis_mes" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 4 NOT NULL")
+    if "humiat_custo_contrato" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_custo_contrato INTEGER DEFAULT 10 NOT NULL")
 
     if "clientes" in tabelas:
         cols_cli = colunas("clientes")
@@ -776,6 +782,35 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN repasse_pago_em TIMESTAMP")
         if "repasse_pago_por" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN repasse_pago_por VARCHAR(120)")
+        if "humiat_processado" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_processado BOOLEAN DEFAULT false NOT NULL")
+        if "humiat_competencia" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_competencia VARCHAR(7)")
+        if "humiat_custo" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_custo INTEGER DEFAULT 0 NOT NULL")
+        if "humiat_status" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_status VARCHAR(30)")
+
+    if "humiat_movimentos" not in tabelas:
+        comandos.append("""
+        CREATE TABLE humiat_movimentos (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            solicitacao_id INTEGER,
+            tipo VARCHAR(30) NOT NULL,
+            quantidade INTEGER NOT NULL,
+            saldo_anterior INTEGER DEFAULT 0 NOT NULL,
+            saldo_posterior INTEGER DEFAULT 0 NOT NULL,
+            motivo VARCHAR(200),
+            observacao TEXT,
+            usuario VARCHAR(120),
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            FOREIGN KEY(solicitacao_id) REFERENCES solicitacoes (id)
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_humiat_movimentos_empresa_id ON humiat_movimentos (empresa_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_humiat_movimentos_solicitacao_id ON humiat_movimentos (solicitacao_id)")
 
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
@@ -1439,6 +1474,64 @@ def admin_sair(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
+def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, tipo: str, motivo: str = "", observacao: str = "", usuario: str = "", solicitacao_id: int | None = None):
+    anterior = int(empresa.humiat_saldo or 0)
+    posterior = anterior + int(quantidade)
+    empresa.humiat_saldo = posterior
+    mov = HumiatMovimento(
+        empresa_id=empresa.id, solicitacao_id=solicitacao_id, tipo=tipo, quantidade=int(quantidade),
+        saldo_anterior=anterior, saldo_posterior=posterior, motivo=(motivo or "")[:200],
+        observacao=observacao or None, usuario=(usuario or "")[:120]
+    )
+    db.add(mov)
+    return mov
+
+
+def _processar_humiat_aceite(db: Session, empresa: Empresa, item: Solicitacao):
+    """Classifica/cobra uma única vez, exclusivamente no primeiro aceite do contrato."""
+    if item.humiat_processado:
+        return
+    aceite = item.aceite_em or agora_utc()
+    competencia = aceite.strftime("%Y-%m")
+    usados = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia,
+    ).count()
+    gratis = max(0, int(empresa.humiat_gratis_mes or 4))
+    custo = max(0, int(empresa.humiat_custo_contrato or 10))
+    item.humiat_processado = True
+    item.humiat_competencia = competencia
+    if usados < gratis:
+        item.humiat_custo = 0
+        item.humiat_status = "gratuito"
+        return
+    item.humiat_custo = custo
+    if int(empresa.humiat_saldo or 0) >= custo:
+        _registrar_movimento_humiat(db, empresa, -custo, "consumo_contrato", f"Contrato #{item.id} aceito", solicitacao_id=item.id)
+        item.humiat_status = "debitado"
+    else:
+        item.humiat_status = "pendente_saldo"
+
+
+def _quitar_humiats_pendentes(db: Session, empresa: Empresa):
+    pendentes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_status == "pendente_saldo",
+        Solicitacao.humiat_custo > 0,
+    ).order_by(Solicitacao.aceite_em.asc(), Solicitacao.id.asc()).all()
+    quitados = 0
+    for item in pendentes:
+        custo = int(item.humiat_custo or 0)
+        if int(empresa.humiat_saldo or 0) < custo:
+            break
+        _registrar_movimento_humiat(db, empresa, -custo, "consumo_contrato", f"Contrato #{item.id} aceito - quitação automática", solicitacao_id=item.id)
+        item.humiat_status = "debitado"
+        quitados += 1
+    return quitados
+
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_geral(request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
@@ -1537,10 +1630,18 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
     usuarios_empresa = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id).order_by(UsuarioEmpresa.nome).all()
     equipes = db.query(Equipe).filter_by(empresa_id=empresa.id).order_by(Equipe.nome).all()
     equipes_usuario = {u.id: [e.id for e in u.equipes] for u in usuarios_empresa}
+    competencia_atual = agora_utc().strftime("%Y-%m")
+    aceitos_mes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id, Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia_atual
+    ).count()
+    pendentes_humiat = db.query(Solicitacao).filter_by(empresa_id=empresa.id, humiat_status="pendente_saldo").count()
+    movimentos_humiat = db.query(HumiatMovimento).filter_by(empresa_id=empresa.id).order_by(HumiatMovimento.id.desc()).limit(50).all()
     return templates.TemplateResponse("admin/empresas.html",
                                       {"request": request, "empresas": empresas, "empresa": empresa,
                                        "usuarios_empresa": usuarios_empresa, "equipes": equipes,
-                                       "equipes_usuario": equipes_usuario})
+                                       "equipes_usuario": equipes_usuario, "aceitos_mes": aceitos_mes,
+                                       "pendentes_humiat": pendentes_humiat, "movimentos_humiat": movimentos_humiat})
 
 
 @app.post("/admin/empresa/{empresa_id}")
@@ -1561,6 +1662,8 @@ def admin_salvar_empresa(
         logo_arquivo: UploadFile | None = File(None),
         tema: str = Form("azul"),
         ativa: Optional[str] = Form(None),
+        humiat_gratis_mes: int = Form(4),
+        humiat_custo_contrato: int = Form(10),
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
@@ -1597,8 +1700,36 @@ def admin_salvar_empresa(
         empresa.logo_url = ""
     empresa.tema = tema
     empresa.ativa = bool(ativa)
+    empresa.humiat_gratis_mes = max(0, int(humiat_gratis_mes or 0))
+    empresa.humiat_custo_contrato = max(0, int(humiat_custo_contrato or 0))
     db.commit()
     return RedirectResponse("/admin", status_code=303)
+
+
+@app.post("/admin/empresa/{empresa_id}/humiats")
+def admin_movimentar_humiats(
+        empresa_id: int, request: Request, quantidade: int = Form(...), tipo: str = Form("credito"),
+        motivo: str = Form(...), observacao: str = Form(""),
+        db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+    empresa = db.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(404)
+    qtd = abs(int(quantidade or 0))
+    if qtd <= 0:
+        return RedirectResponse(f"/admin/empresa/{empresa_id}?erro=Informe uma quantidade maior que zero", status_code=303)
+    if tipo == "remover":
+        qtd = -qtd
+        if int(empresa.humiat_saldo or 0) + qtd < 0:
+            return RedirectResponse(f"/admin/empresa/{empresa_id}?erro=O ajuste não pode deixar o saldo negativo", status_code=303)
+        mov_tipo = "ajuste"
+    else:
+        mov_tipo = "credito"
+    usuario = (request.session.get("usuario_nome") if request else None) or ADMIN_NOME or "Administrador"
+    _registrar_movimento_humiat(db, empresa, qtd, mov_tipo, motivo.strip(), observacao.strip(), usuario)
+    quitados = _quitar_humiats_pendentes(db, empresa) if qtd > 0 else 0
+    db.commit()
+    sufixo = f"&ok={quitados} contrato(s) pendente(s) quitado(s) automaticamente" if quitados else ""
+    return RedirectResponse(f"/admin/empresa/{empresa_id}?humiat=ok{sufixo}", status_code=303)
 
 
 @app.post("/admin/empresa/{empresa_id}/usuarios")
@@ -3024,6 +3155,7 @@ def aceite_manual_solicitacao(
     if item.hora_inicio and not item.hora_fim and item.produto and item.produto.duracao_minutos:
         item.hora_fim = somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
     criar_eventos_operacionais(db, item)
+    _processar_humiat_aceite(db, empresa, item)
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -3337,6 +3469,9 @@ def contrato_novo_salvar(
             valor_unitario=valor_float,
             valor_total=valor_float
         ))
+
+    if manual:
+        _processar_humiat_aceite(db, empresa, item)
 
     if manual and sinal_float > 0:
         db.add(Pagamento(
@@ -6345,6 +6480,7 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
                                                   item.produto.duracao_minutos) if item.produto and item.produto.duracao_minutos else None)
         item.hora_fim = fim_obj
         criar_eventos_operacionais(db, item)
+        _processar_humiat_aceite(db, empresa, item)
         db.commit()
     url_whatsapp = _url_confirmacao_whatsapp(empresa, item, "aceite") if status_reserva_confirmada(item.status) else None
     if url_whatsapp:
