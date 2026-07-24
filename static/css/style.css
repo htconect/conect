@@ -1462,3 +1462,15 @@ button.principal{
 
 /* Responsável de atendimento: informação compacta, sem aumentar o card */
 .responsavel-card-mini{font-size:11px!important;color:#475569!important;font-weight:800;line-height:1.15!important;margin-top:3px!important}
+
+/* CONECT 2026-07-24: linguagem visual unificada de ícones */
+.bi{font-style:normal;line-height:1;vertical-align:-.08em}
+.menu-topo summary .bi{font-size:24px}
+.menu-topo-card a,.menu-topo-card button{display:flex;align-items:center;gap:10px}
+.menu-topo-card .bi{width:18px;text-align:center;font-size:17px;color:#2563eb}
+.nav-inferior .nav-item>.bi{font-size:21px;line-height:1;color:#334155}
+.nav-inferior .nav-item.ativo>.bi{color:#2563eb}
+.card-atalho>span .bi,.atalho-card>span .bi{font-size:24px;color:#2563eb}
+.humiat-stat-icon .bi{font-size:22px}
+.status-disponivel{color:#16a34a}.status-atencao{color:#d97706}.status-conflito,.status-indisponivel{color:#dc2626}
+.acao-icone .bi,.botao-icone .bi{font-size:16px}

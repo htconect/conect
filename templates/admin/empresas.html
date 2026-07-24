@@ -156,7 +156,7 @@
   <div class="lista-mobile lista-usuarios-organizada">
   {% for e in equipes or [] %}
     <div class="card-lista"><div><b>{{ e.nome }}</b><small>{{ 'Ativa' if e.ativa else 'Inativa' }}</small></div>
-      <div class="acoes-usuario"><button type="button" class="acao-icone" onclick='editarEquipe({{ {"id":e.id,"nome":e.nome,"ativa":e.ativa}|tojson }})'>✏️</button><a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/equipe/{{ e.id }}/excluir" onclick="return confirm('Excluir ou desativar esta equipe?')">🗑</a></div>
+      <div class="acoes-usuario"><button type="button" class="acao-icone" onclick='editarEquipe({{ {"id":e.id,"nome":e.nome,"ativa":e.ativa}|tojson }})'><i class="bi bi-pencil-square"></i></button><a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/equipe/{{ e.id }}/excluir" onclick="return confirm('Excluir ou desativar esta equipe?')"><i class="bi bi-trash3"></i></a></div>
     </div>
   {% else %}<p class="texto-discreto">Nenhuma equipe cadastrada.</p>{% endfor %}
   </div>
@@ -252,8 +252,8 @@
             "acesso_cadastros": u.acesso_cadastros,
             "acesso_relatorios": u.acesso_relatorios,
             "equipes": equipes_usuario.get(u.id, [])
-          }|tojson }})'>✏️</button>
-        <a class="acao-icone" title="Excluir usuário" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')">🗑</a>
+          }|tojson }})'><i class="bi bi-pencil-square"></i></button>
+        <a class="acao-icone" title="Excluir usuário" href="/admin/empresa/{{ empresa.id }}/usuario/{{ u.id }}/excluir" onclick="return confirm('Remover este usuário?')"><i class="bi bi-trash3"></i></a>
       </div>
     </div>
   {% else %}

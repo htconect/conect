@@ -26,7 +26,7 @@
     <summary>Onde está nessa data</summary>
     {% if produto_selecionado.conflito %}
       <div class="alerta-conflito-disponibilidade">
-        ⚠️ Conflito identificado: {{ produto_selecionado.alugados }} locação(ões) para {{ produto_selecionado.total }} equipamento(s).
+        <i class="bi bi-exclamation-triangle"></i> Conflito identificado: {{ produto_selecionado.alugados }} locação(ões) para {{ produto_selecionado.total }} equipamento(s).
       </div>
     {% endif %}
     {% if produto_selecionado.locais %}
@@ -67,7 +67,7 @@
       <b>{{ item.produto.nome }}</b>
       <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
     </div>
-    <strong>{% if item.status == 'disponivel' %}🟢{% elif item.status == 'atencao' %}🟡{% elif item.status == 'conflito' %}⚠️{% else %}🔴{% endif %}</strong>
+    <strong>{% if item.status == 'disponivel' %}<i class="bi bi-check-circle status-disponivel"></i>{% elif item.status == 'atencao' %}<i class="bi bi-exclamation-circle status-atencao"></i>{% elif item.status == 'conflito' %}<i class="bi bi-exclamation-triangle status-conflito"></i>{% else %}<i class="bi bi-x-circle status-indisponivel"></i>{% endif %}</strong>
   </a>
 {% else %}
   <div class="box"><p>Nenhum item cadastrado.</p></div>

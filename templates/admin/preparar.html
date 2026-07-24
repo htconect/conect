@@ -22,11 +22,11 @@
     <label><span>Situação</span><select name="situacao_rota" onchange="this.form.submit()"><option value="todos" {% if situacao_rota == 'todos' %}selected{% endif %}>Todos</option><option value="nao_roteirizado" {% if situacao_rota == 'nao_roteirizado' %}selected{% endif %}>Não roteirizados</option><option value="roteirizado" {% if situacao_rota == 'roteirizado' %}selected{% endif %}>Roteirizados</option></select></label>
     <div class="filtros-operacao filtros-operacao-compactos">
         <label><input type="checkbox" name="mostrar_entregas" value="1" {% if mostrar_entregas %}checked{% endif %}
-                      onchange="this.form.submit()"> 🔵 Entregar</label>
+                      onchange="this.form.submit()"> <i class="bi bi-truck"></i> Entregar</label>
         <label><input type="checkbox" name="mostrar_retiradas" value="1" {% if mostrar_retiradas %}checked{% endif %}
-                      onchange="this.form.submit()"> 🔴 Retirar</label>
+                      onchange="this.form.submit()"> <i class="bi bi-arrow-return-left"></i> Retirar</label>
         <label><input type="checkbox" name="mostrar_concluidas" value="1" {% if mostrar_concluidas %}checked{% endif %}
-                      onchange="this.form.submit()"> 🟢 Encerrado</label>
+                      onchange="this.form.submit()"> <i class="bi bi-check-circle"></i> Encerrado</label>
     </div>
 </form>
 

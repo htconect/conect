@@ -20,19 +20,19 @@
     <div class="usuario-topo">
       <span>{{ request.session.get('usuario_nome') or request.session.get('usuario') or 'Usuário' }}</span>
       <details class="menu-topo">
-        <summary aria-label="Abrir menu">☰</summary>
+        <summary aria-label="Abrir menu"><i class="bi bi-list"></i></summary>
         <div class="menu-topo-card">
           <strong>Cadastros</strong>
-          <a href="/painel/contratos">📄 Política / modelos</a>
-          <a href="/painel/produtos">📦 Itens de locação</a>
-          <a href="/painel/configuracoes">🏢 Empresa e campos</a>
+          <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
+          <a href="/painel/produtos"><i class="bi bi-box-seam"></i> Itens de locação</a>
+          <a href="/painel/configuracoes"><i class="bi bi-building"></i> Empresa e campos</a>
           <strong>Consultas</strong>
-          <a href="/painel/relatorios">📊 Relatórios</a>
+          <a href="/painel/relatorios"><i class="bi bi-bar-chart-line"></i> Relatórios</a>
           <strong>Conta</strong>
-          <a href="/painel/perfil">👤 Meu perfil</a>
-          <a href="/painel/alterar-senha">🔒 Alterar senha</a>
-          <button type="button" id="instalar-conect" class="menu-instalar" hidden>📲 Instalar Conect</button>
-          <a class="menu-sair" href="/empresa/sair">🚪 Sair</a>
+          <a href="/painel/perfil"><i class="bi bi-person"></i> Meu perfil</a>
+          <a href="/painel/alterar-senha"><i class="bi bi-shield-lock"></i> Alterar senha</a>
+          <button type="button" id="instalar-conect" class="menu-instalar" hidden><i class="bi bi-phone"></i> Instalar Conect</button>
+          <a class="menu-sair" href="/empresa/sair"><i class="bi bi-box-arrow-right"></i> Sair</a>
         </div>
       </details>
     </div>
@@ -119,10 +119,10 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
 
 {% if request.session.get('empresa_id') %}
 <nav class="nav-inferior" aria-label="Navegação principal">
-  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel">🏠<span>Início</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">📅<span>Agenda</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">📦<span>Disponível</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro">💰<span>Financeiro</span></a>
+  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-house"></i><span>Início</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3"></i><span>Agenda</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-box-seam"></i><span>Disponível</span></a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
   <a class="nav-item nav-principal {% if request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/contrato-novo"><span style="max-width:52px;font-size:10px;line-height:1.05;text-align:center;">Contrato<br>Manual</span></a>
 </nav>
 {% endif %}

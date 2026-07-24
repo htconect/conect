@@ -1340,7 +1340,7 @@ button{
             </td>
 
 <td class="acoes-linha">
-              <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo">💾</button>
+              <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo"><i class="bi bi-check2"></i></button>
               
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
             </td>
@@ -1462,7 +1462,7 @@ button{
 
 <td class="acoes-linha">
               <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
-              <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição">💾</button>
+              <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição"><i class="bi bi-check2"></i></button>
               <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
             </td>
           </tr>
@@ -1719,7 +1719,7 @@ button{
         <a href="/painel/agenda?data_inicial={{ semana_cards_inicio.isoformat() }}&data_final={{ semana_cards_fim.isoformat() }}&ativos=1">Ver agenda</a>
       </div>
       <div class="dica-card">
-        <b>💡 Dica</b>
+        <b><i class="bi bi-lightbulb"></i> Dica</b>
         <span>As semanas seguem de segunda a domingo, respeitando o início e o fim do mês.</span>
       </div>
     </div>

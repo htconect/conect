@@ -25,7 +25,7 @@
 
     <div class="humiat-wallet-stats">
         <div class="humiat-stat humiat-stat-free">
-            <div class="humiat-stat-icon">🎁</div>
+            <div class="humiat-stat-icon"><i class="bi bi-gift"></i></div>
             <div class="humiat-stat-content">
                 <b>Humiats gratuitos</b>
                 <small>(mês atual)</small>
@@ -36,7 +36,7 @@
             </div>
         </div>
         <div class="humiat-stat humiat-stat-paid">
-            <div class="humiat-stat-icon">🪙</div>
+            <div class="humiat-stat-icon"><i class="bi bi-coin"></i></div>
             <div class="humiat-stat-content">
                 <b>Contratos cobrados</b>
                 <small>(mês atual)</small>
@@ -53,25 +53,25 @@
 </div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
-        <span>📅</span>
+        <span><i class="bi bi-calendar3"></i></span>
         <div>
             <b>Agenda</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ agenda_periodo_qtd }} evento(s)</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/reservas">
-        <span>📦</span>
+        <span><i class="bi bi-box-seam"></i></span>
         <div>
             <b>Operação</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ operacao_entregar_qtd }} entregar · {{ operacao_buscar_qtd }} buscar</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/disponibilidade">
-        <span>📦</span>
+        <span><i class="bi bi-box-seam"></i></span>
         <div><b>Disponibilidade</b><small>Consultar por data</small></div>
     </a>
     <a class="cartao-acao" href="/painel/clientes">
-        <span>👤</span>
+        <span><i class="bi bi-person"></i></span>
         <div><b>Buscar cliente</b><small>CPF ou telefone</small></div>
     </a>
 </div>
