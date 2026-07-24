@@ -1,11 +1,98 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<section class="hero">
-  <h1>Portal Conect</h1>
-  <p>Pré-cadastro, contratos e agenda em um só lugar.</p>
-  <div class="acoes">
-    <a class="botao" href="/empresa/login">Entrar</a>
-  </div>
-  <p class="texto-discreto">Acesso administrativo geral: /admin/login</p>
-</section>
+<div class="conect-landing">
+  <section class="landing-hero">
+    <div class="landing-copy">
+      <span class="landing-kicker">HUMIAT CONECT</span>
+      <h1>Do primeiro contato ao último recebimento. <span>Tudo conectado.</span></h1>
+      <p>Clientes, contratos, agenda, operação e financeiro trabalhando no mesmo fluxo — sem depender de planilhas espalhadas e mensagens perdidas.</p>
+      <div class="landing-actions">
+        <a href="#como-funciona" class="landing-btn primary">Conhecer o Conect</a>
+        <a href="/empresa/login" class="landing-btn secondary">Entrar no sistema</a>
+      </div>
+      <div class="landing-proof">
+        <span>✓ Contratos e aceite</span><span>✓ Agenda e operação</span><span>✓ Financeiro integrado</span>
+      </div>
+    </div>
+
+    <div class="product-window" aria-label="Exemplo do painel Conect">
+      <div class="product-top"><b>Conect</b><span>Visão da semana</span></div>
+      <div class="product-grid">
+        <div class="product-metric"><i class="bi bi-calendar3"></i><small>Agenda</small><b>8 eventos</b><span>Esta semana</span></div>
+        <div class="product-metric"><i class="bi bi-truck"></i><small>Operação</small><b>4 entregas</b><span>2 retiradas</span></div>
+        <div class="product-metric"><i class="bi bi-box-seam"></i><small>Disponibilidade</small><b>Consultar</b><span>Antes de fechar</span></div>
+        <div class="product-metric"><i class="bi bi-wallet2"></i><small>A receber</small><b>R$ 4.350</b><span>4 contratos</span></div>
+      </div>
+      <div class="product-pendencies">
+        <div class="product-section-title">O que precisa da sua atenção</div>
+        <div class="pendency-row"><span><i class="bi bi-file-earmark-check"></i> Envio de contrato</span><b>3</b></div>
+        <div class="pendency-row"><span><i class="bi bi-cash-coin"></i> A receber</span><b>4</b></div>
+        <div class="pendency-row"><span><i class="bi bi-truck"></i> Operação</span><b>1</b></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="landing-section" id="como-funciona">
+    <div class="section-heading"><span>UM ÚNICO FLUXO</span><h2>O Conect sabe o que precisa acontecer depois.</h2><p>Uma informação entra uma vez e acompanha o atendimento até o fim.</p></div>
+    <div class="flow-line">
+      <div><i class="bi bi-person"></i><b>Cliente</b></div><span>→</span>
+      <div><i class="bi bi-file-earmark-text"></i><b>Pré-contrato</b></div><span>→</span>
+      <div><i class="bi bi-check2-circle"></i><b>Aceite</b></div><span>→</span>
+      <div><i class="bi bi-calendar-check"></i><b>Agenda</b></div><span>→</span>
+      <div><i class="bi bi-truck"></i><b>Operação</b></div><span>→</span>
+      <div><i class="bi bi-bank"></i><b>Financeiro</b></div>
+    </div>
+  </section>
+
+  <section class="feature-layout">
+    <div class="feature-copy">
+      <span class="landing-kicker dark">CONTRATO E ATENDIMENTO</span>
+      <h2>Do pedido ao contrato aceito, sem perder o controle.</h2>
+      <p>Compartilhe o pré-contrato pelo WhatsApp, acompanhe o aceite, os valores e saiba quem está responsável pelo atendimento.</p>
+      <ul><li>Pré-contrato compartilhável</li><li>Aceite digital</li><li>Pagamentos vinculados ao contrato</li><li>Pendências visíveis no painel</li></ul>
+    </div>
+    <div class="demo-card contract-demo">
+      <div class="demo-head"><span>Contrato #1842</span><b class="status-ok">Aceito</b></div>
+      <h3>Juliana Silva da Silveira</h3><p>26/07/2026 · São Cristóvão</p>
+      <div class="money-row"><div><small>Valor</small><b>R$ 850,00</b></div><div><small>Pago</small><b>R$ 300,00</b></div><div><small>Falta</small><b>R$ 550,00</b></div></div>
+      <div class="responsible-demo"><i class="bi bi-person-check"></i> Resp.: Débora</div>
+      <button type="button" tabindex="-1">Enviar contrato</button>
+    </div>
+  </section>
+
+  <section class="feature-layout reverse">
+    <div class="feature-copy">
+      <span class="landing-kicker dark">AGENDA E OPERAÇÃO</span>
+      <h2>Fechou o contrato? A operação já sabe o que fazer.</h2>
+      <p>Entregas, retiradas, horários, equipes e comunicação operacional ficam conectados ao mesmo contrato.</p>
+    </div>
+    <div class="operation-board">
+      <div class="operation-item"><time>09:00</time><div><b>ENTREGA · Karaokê Jukebox</b><span>Juliana Silva · São Cristóvão</span><small>Contrato: Débora · Operação: Junior</small></div><i class="bi bi-chevron-right"></i></div>
+      <div class="operation-item"><time>14:00</time><div><b>ENTREGA · Fliperama</b><span>Marcelo Souza · Tijuca</span><small>Contrato: Junior · Operação: —</small></div><i class="bi bi-chevron-right"></i></div>
+      <div class="operation-item muted"><time>23:00</time><div><b>RETIRADA · Karaokê Jukebox</b><span>Juliana Silva · São Cristóvão</span><small>Roteirizado · Equipe 1</small></div><i class="bi bi-chevron-right"></i></div>
+    </div>
+  </section>
+
+  <section class="landing-section soft">
+    <div class="section-heading"><span>ANTES, DURANTE E DEPOIS</span><h2>Controle o que realmente movimenta sua empresa.</h2></div>
+    <div class="three-features">
+      <article><i class="bi bi-box-seam"></i><h3>Disponibilidade</h3><p>Consulte os equipamentos disponíveis antes de fechar uma nova data.</p><div class="mini-ui"><span>Karaokê Jukebox</span><b>2 disponíveis</b></div></article>
+      <article><i class="bi bi-exclamation-circle"></i><h3>Pendências</h3><p>Veja rapidamente o que ainda precisa de contrato, recebimento ou ação operacional.</p><div class="mini-ui"><span>A receber</span><b>4 pendências</b></div></article>
+      <article><i class="bi bi-cash-stack"></i><h3>Financeiro</h3><p>Registre pagamentos e acompanhe o que entrou, o que falta e o que precisa ser conciliado.</p><div class="mini-ui"><span>Não conciliado</span><b>3 lançamentos</b></div></article>
+    </div>
+  </section>
+
+  <section class="humiat-banner">
+    <div><span class="landing-kicker">CARTEIRA HUMIAT</span><h2>Comece pequeno. Cresça conforme sua operação crescer.</h2><p>Os primeiros 4 contratos do mês são gratuitos. Depois, cada contrato aceito utiliza 1 Humiat.</p></div>
+    <div class="wallet-card"><div><small>Grátis no mês</small><b>3 H</b></div><div><small>Comprados</small><b>25 H</b></div><span>Carteira Humiat</span></div>
+  </section>
+
+  <section class="landing-cta"><h2>Sua empresa pode funcionar de forma mais simples.</h2><p>Centralize cada etapa do atendimento e saiba exatamente o que precisa acontecer agora.</p><div class="landing-actions center"><a href="/empresa/login" class="landing-btn primary">Entrar no Conect</a></div></section>
+</div>
+
+<style>
+body{padding-bottom:0;background:#f8fafc}.container-app{max-width:none;padding:0}.conect-landing{--navy:#071426;--blue:#1f6feb;--cyan:#38bdf8;--text:#142033;--muted:#64748b;color:var(--text);overflow:hidden}.topo-app{position:relative;background:#071426}.landing-hero{min-height:620px;background:radial-gradient(circle at 75% 18%,rgba(31,111,235,.32),transparent 35%),linear-gradient(135deg,#06111f 0%,#0b1e38 58%,#102b50 100%);display:grid;grid-template-columns:minmax(0,1fr) minmax(430px,620px);gap:58px;align-items:center;padding:80px max(28px,calc((100vw - 1180px)/2));color:#fff}.landing-copy{max-width:600px}.landing-kicker{display:inline-block;font-size:12px;font-weight:900;letter-spacing:.15em;color:#7dd3fc;margin-bottom:18px}.landing-kicker.dark{color:#1d4ed8}.landing-copy h1{font-size:clamp(42px,5vw,68px);line-height:1.02;letter-spacing:-.045em;margin:0 0 24px}.landing-copy h1 span{color:#60a5fa}.landing-copy>p{font-size:19px;line-height:1.65;color:#cbd5e1;margin:0 0 28px}.landing-actions{display:flex;gap:12px;flex-wrap:wrap}.landing-btn{min-height:50px;padding:14px 22px;border-radius:13px;text-decoration:none!important;font-weight:900;display:inline-flex;align-items:center;justify-content:center}.landing-btn.primary{background:#2563eb;color:#fff;box-shadow:0 14px 30px rgba(37,99,235,.28)}.landing-btn.secondary{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff}.landing-proof{display:flex;gap:18px;flex-wrap:wrap;margin-top:26px;color:#94a3b8;font-size:13px}.product-window{background:#f8fafc;color:#172033;border:1px solid rgba(255,255,255,.15);border-radius:24px;padding:18px;box-shadow:0 30px 80px rgba(0,0,0,.35);transform:perspective(1000px) rotateY(-2deg)}.product-top{display:flex;justify-content:space-between;align-items:center;padding:5px 4px 16px}.product-top b{font-size:20px}.product-top span{font-size:12px;color:#64748b}.product-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.product-metric{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:14px;display:grid;grid-template-columns:30px 1fr;gap:2px 8px}.product-metric i{grid-row:1/4;font-size:22px;color:#2563eb;align-self:center}.product-metric small,.product-metric span{font-size:11px;color:#64748b}.product-metric b{font-size:16px}.product-pendencies{margin-top:12px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:14px}.product-section-title{font-weight:900;font-size:13px;margin-bottom:8px}.pendency-row{display:flex;justify-content:space-between;border-top:1px solid #eef2f7;padding:10px 2px;font-size:13px}.pendency-row i{color:#2563eb;margin-right:7px}.pendency-row b{background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:2px 8px}.landing-section{padding:90px max(28px,calc((100vw - 1180px)/2));background:#fff}.landing-section.soft{background:#f1f5f9}.section-heading{text-align:center;max-width:760px;margin:0 auto 42px}.section-heading>span{font-size:12px;color:#2563eb;font-weight:900;letter-spacing:.14em}.section-heading h2,.feature-copy h2,.humiat-banner h2,.landing-cta h2{font-size:clamp(32px,4vw,48px);line-height:1.08;letter-spacing:-.035em;margin:12px 0}.section-heading p,.feature-copy p,.humiat-banner p,.landing-cta p{color:#64748b;font-size:17px;line-height:1.6}.flow-line{max-width:1040px;margin:auto;display:flex;align-items:center;justify-content:center;gap:10px}.flow-line div{min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:18px 12px;text-align:center}.flow-line i{display:block;color:#2563eb;font-size:25px;margin-bottom:8px}.flow-line b{font-size:13px}.flow-line>span{color:#94a3b8;font-size:22px}.feature-layout{padding:90px max(28px,calc((100vw - 1120px)/2));display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;background:#f8fafc}.feature-layout.reverse{background:#fff}.feature-layout.reverse .feature-copy{order:2}.feature-copy ul{padding-left:20px;color:#475569;line-height:2}.demo-card,.operation-board{background:#fff;border:1px solid #dfe7f1;border-radius:22px;box-shadow:0 22px 55px rgba(15,23,42,.12);padding:22px}.demo-head{display:flex;justify-content:space-between;color:#64748b;font-size:12px}.status-ok{color:#15803d;background:#dcfce7;padding:5px 9px;border-radius:999px}.demo-card h3{margin:24px 0 4px;font-size:21px}.demo-card p{color:#64748b;margin:0}.money-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:22px 0}.money-row div{background:#f8fafc;border-radius:12px;padding:12px}.money-row small{display:block;color:#64748b;font-size:11px}.money-row b{font-size:14px}.responsible-demo{font-size:12px;font-weight:800;color:#475569;margin:10px 0 16px}.demo-card button{width:100%!important;background:#16a34a!important;color:#fff!important;border:0!important}.operation-board{padding:10px}.operation-item{display:grid;grid-template-columns:64px 1fr 18px;gap:12px;align-items:center;padding:16px 12px;border-bottom:1px solid #eef2f7}.operation-item:last-child{border-bottom:0}.operation-item time{font-weight:900;font-size:18px}.operation-item div{min-width:0}.operation-item b,.operation-item span,.operation-item small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.operation-item b{font-size:13px}.operation-item span{font-size:12px;color:#64748b;margin-top:3px}.operation-item small{font-size:10px;color:#475569;margin-top:5px;font-weight:700}.operation-item i{color:#94a3b8}.operation-item.muted{opacity:.68}.three-features{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:1100px;margin:auto}.three-features article{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:25px}.three-features article>i{font-size:28px;color:#2563eb}.three-features h3{font-size:20px;margin:16px 0 8px}.three-features p{color:#64748b;line-height:1.55;min-height:75px}.mini-ui{display:flex;justify-content:space-between;gap:8px;padding-top:14px;border-top:1px solid #eef2f7;font-size:12px}.mini-ui b{color:#1d4ed8}.humiat-banner{margin:70px auto;max-width:1120px;border-radius:26px;background:linear-gradient(135deg,#071426,#13345e);color:#fff;padding:50px;display:grid;grid-template-columns:1fr 320px;gap:50px;align-items:center}.humiat-banner p{color:#cbd5e1}.wallet-card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:20px;padding:20px;display:grid;grid-template-columns:1fr 1fr;gap:12px}.wallet-card div{background:rgba(255,255,255,.08);border-radius:13px;padding:14px}.wallet-card small{display:block;color:#cbd5e1}.wallet-card b{display:block;font-size:24px;margin-top:5px}.wallet-card>span{grid-column:1/3;color:#7dd3fc;font-size:12px;font-weight:900}.landing-cta{text-align:center;padding:80px 24px 110px;background:#fff}.landing-cta p{max-width:650px;margin:0 auto 28px}.landing-actions.center{justify-content:center}
+@media(max-width:900px){.landing-hero{grid-template-columns:1fr;padding-top:55px}.product-window{transform:none;max-width:650px;width:100%}.flow-line{flex-wrap:wrap}.flow-line>span{display:none}.feature-layout,.humiat-banner{grid-template-columns:1fr;gap:38px}.feature-layout.reverse .feature-copy{order:0}.three-features{grid-template-columns:1fr}.humiat-banner{margin:40px 18px}.wallet-card{max-width:420px}}
+@media(max-width:560px){.landing-hero{padding:44px 18px 50px}.landing-copy h1{font-size:39px}.landing-copy>p{font-size:16px}.landing-actions{display:grid}.landing-btn{width:100%}.landing-proof{display:grid;gap:7px}.product-grid{grid-template-columns:1fr}.landing-section,.feature-layout{padding:62px 18px}.flow-line{display:grid;grid-template-columns:1fr 1fr}.flow-line div{min-width:0}.section-heading{text-align:left}.money-row{grid-template-columns:1fr}.operation-item{grid-template-columns:52px 1fr 12px;padding:14px 6px}.humiat-banner{padding:30px 22px}.wallet-card{grid-template-columns:1fr}.wallet-card>span{grid-column:1}.topo-app{padding-left:18px;padding-right:18px}}
+</style>
 {% endblock %}

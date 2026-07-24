@@ -100,6 +100,7 @@
                 <div>
                     <b>{{ i.cliente.nome }}</b>
                     <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
+                    {% if i.responsavel_contrato_exibicao %}<small class="responsavel-card-mini">Resp.: {{ i.responsavel_contrato_exibicao }}</small>{% endif %}
                 </div>
                 <strong>R$ {{ i.valor|moeda_br }}</strong>
             </a>

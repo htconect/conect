@@ -273,6 +273,9 @@ class Solicitacao(Base):
     itens = relationship("ReservaItem", back_populates="solicitacao", cascade="all, delete-orphan")
     aprovado_em = Column(DateTime, nullable=True)
     contrato_enviado_em = Column(DateTime, nullable=True)
+    # Responsáveis de comunicação: contrato/comercial e operação/logística.
+    responsavel_contrato = Column(String(120), nullable=True)
+    responsavel_operacao = Column(String(120), nullable=True)
     cancelado_em = Column(DateTime, nullable=True)
     # Controle de cobrança Humiat: somente definido quando o contrato é aceito.
     humiat_processado = Column(Boolean, nullable=False, default=False)

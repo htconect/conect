@@ -102,6 +102,9 @@
                 <b>{{ item_nome }}</b>
                 <small>{{ a.solicitacao.cliente.nome }}</small>
                 <small>{{ a.bairro or a.solicitacao.bairro or '-' }}</small>
+                {% set resp_contrato = a.solicitacao.responsavel_contrato or '' %}
+                {% if not resp_contrato and a.solicitacao.pagamentos %}{% set resp_contrato = (a.solicitacao.pagamentos|sort(attribute='id')|first).usuario_registro or '' %}{% endif %}
+                {% if resp_contrato or a.solicitacao.responsavel_operacao %}<small class="responsaveis-operacao-mini">Contrato: {{ resp_contrato or '-' }} · Operação: {{ a.solicitacao.responsavel_operacao or '-' }}</small>{% endif %}
                 <em>{{ 'RETIRADA' if tipo == 'retirada' else 'ENTREGA' }}</em>
             </div>
             <div class="status-rota-card {% if concluido %}status-encerrado{% elif roteirizado %}status-roteirizado{% else %}status-nao-roteirizado{% endif %}">
@@ -168,7 +171,7 @@
                    data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
                    data-retirada-nome="{{ a.solicitacao.retirada_responsavel_nome or '' }}"
                    data-retirada-tel="{{ (a.solicitacao.retirada_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
-                   data-tipo="{{ tipo }}">Previsão</button>
+                   data-tipo="{{ tipo }}" data-agenda-id="{{ a.id }}">Previsão</button>
                 {% if data_entrega and hora_entrega != '--' %}
                 <button type="button" class="botao-mini botao-whats-btn botao-a-caminho escolher-contato-whatsapp"
                    data-msg="{{ msg_caminho|urlencode }}"
@@ -288,7 +291,7 @@
 
 
 <script>
-document.addEventListener('click', function(e){
+document.addEventListener('click', async function(e){
   const b=e.target.closest('.escolher-contato-whatsapp'); if(!b)return;
   e.preventDefault();
   e.stopPropagation();
@@ -319,6 +322,12 @@ Digite o número da opção:`, '1');
       /Nossa equipe já está a caminho\./i,
       `Estamos a caminho da entrega do equipamento de ${nomeContrato}.`
     );
+  }
+  // O primeiro aviso operacional (Previsão ou A caminho) fixa o responsável.
+  if(b.dataset.agendaId){
+    try {
+      await fetch(`/painel/agenda/${b.dataset.agendaId}/assumir-comunicacao-operacao`, {method:'POST'});
+    } catch (_) { /* não impede o WhatsApp caso a rede oscile */ }
   }
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem)}`,'_blank');
 });

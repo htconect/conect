@@ -1459,3 +1459,6 @@ button.principal{
 .humiat-extrato-resumo>div{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:14px;box-shadow:0 6px 18px rgba(15,23,42,.04);display:flex;flex-direction:column;gap:5px}
 .humiat-extrato-resumo small{color:#64748b;font-size:12px}.humiat-extrato-resumo strong{font-size:20px;color:#0f172a}
 @media(max-width:700px){.humiat-extrato-resumo{grid-template-columns:1fr 1fr}.humiat-extrato-resumo>div{padding:12px}.humiat-extrato-resumo strong{font-size:17px}}
+
+/* Responsável de atendimento: informação compacta, sem aumentar o card */
+.responsavel-card-mini{font-size:11px!important;color:#475569!important;font-weight:800;line-height:1.15!important;margin-top:3px!important}

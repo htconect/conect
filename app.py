@@ -750,6 +750,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em TIMESTAMP")
         if "contrato_enviado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_enviado_em TIMESTAMP")
+        if "responsavel_contrato" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_contrato VARCHAR(120)")
+        if "responsavel_operacao" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_operacao VARCHAR(120)")
         if "cancelado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN cancelado_em TIMESTAMP")
         if "retirada_obrigatoria" not in cols_sol:
@@ -2137,6 +2141,10 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         .all()
     )
 
+    # Responsável compacto usado nos cards da Agenda/Pendências.
+    _anexar_responsaveis_exibicao(solicitacoes)
+    _anexar_responsaveis_exibicao(pendencias_agenda)
+
     link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
     mensagem_pre_contrato = aplicar_variaveis_mensagem(
         mensagens_empresa(empresa).get("reserva", ""),
@@ -2812,8 +2820,23 @@ def compartilhar_aceite_whatsapp(
     if not telefone:
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
 
+    alterou = False
     if item.status == "pre_reserva" and item.contrato_id and len(item.itens) > 0:
         item.status = "contrato_enviado"
+        alterou = True
+
+    # Para os novos contratos, quem fizer o primeiro envio para aceite passa a
+    # ser o responsável pela comunicação comercial daquele contrato. Edições
+    # posteriores não trocam o responsável.
+    if not item.responsavel_contrato:
+        item.responsavel_contrato = (
+            request.session.get("usuario_nome")
+            or request.session.get("usuario_sistema")
+            or request.session.get("usuario")
+            or "Usuário"
+        )
+        alterou = True
+    if alterou:
         db.commit()
 
     texto = montar_mensagem_whatsapp_aceite(request, empresa, item, db)
@@ -5872,6 +5895,30 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
     )
 
 
+def _responsavel_contrato_exibicao(item: Solicitacao) -> str:
+    """Responsável comercial sem criar histórico visual novo.
+
+    Novos contratos usam o primeiro envio para aceite. Para contratos antigos,
+    preserva a regra validada: o usuário do primeiro pagamento/sinal registrado.
+    """
+    if getattr(item, "responsavel_contrato", None):
+        return item.responsavel_contrato
+    pagamentos = sorted(
+        list(getattr(item, "pagamentos", []) or []),
+        key=lambda p: (p.criado_em or datetime.min, p.id or 0),
+    )
+    for pagamento in pagamentos:
+        if pagamento.usuario_registro:
+            return pagamento.usuario_registro
+    return ""
+
+
+def _anexar_responsaveis_exibicao(itens):
+    for item in itens or []:
+        item.responsavel_contrato_exibicao = _responsavel_contrato_exibicao(item)
+    return itens
+
+
 @app.get("/painel/agenda", response_class=HTMLResponse)
 def agenda(
         request: Request,
@@ -5963,6 +6010,7 @@ def agenda(
                 eh_cancelado and "cancelados" in filtros_status):
             itens.append(s)
 
+    _anexar_responsaveis_exibicao(itens)
     mensagens = mensagens_empresa(empresa)
     return templates.TemplateResponse("admin/agenda.html", {
         "request": request,
@@ -6086,6 +6134,28 @@ def atualizar_roteiro(
     db.commit()
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
+
+
+@app.post("/painel/agenda/{agenda_id}/assumir-comunicacao-operacao")
+def assumir_comunicacao_operacao(
+    agenda_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    agenda_item = db.query(Agenda).filter_by(id=agenda_id, empresa_id=empresa.id).first()
+    if not agenda_item or not agenda_item.solicitacao:
+        raise HTTPException(404)
+    solicitacao = agenda_item.solicitacao
+    if not solicitacao.responsavel_operacao:
+        solicitacao.responsavel_operacao = (
+            request.session.get("usuario_nome")
+            or request.session.get("usuario_sistema")
+            or request.session.get("usuario")
+            or "Usuário"
+        )
+        db.commit()
+    return {"ok": True, "responsavel": solicitacao.responsavel_operacao}
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)
