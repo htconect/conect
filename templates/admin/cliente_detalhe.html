@@ -26,9 +26,9 @@
     </a>
     <div class="acoes linha-acoes acoes-cliente-reserva">
       {% if contrato_aceito %}
-        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">WhatsApp contrato</a>
+        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
       {% else %}
-        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp">WhatsApp aceite</a>
+        <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp aceite</a>
       {% endif %}
       <a class="botao secundario" href="/painel/solicitacao/{{ i.id }}/editar-completo">Editar</a>
       <a class="botao secundario" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>

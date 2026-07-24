@@ -53,21 +53,21 @@
 </div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
-        <span><i class="bi bi-calendar3"></i></span>
+        <span><i class="bi bi-file-earmark-text"></i></span>
         <div>
-            <b>Agenda</b>
+            <b>Contratos</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ agenda_periodo_qtd }} evento(s)</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/reservas">
-        <span><i class="bi bi-box-seam"></i></span>
+        <span><i class="bi bi-truck"></i></span>
         <div>
             <b>Operação</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ operacao_entregar_qtd }} entregar · {{ operacao_buscar_qtd }} buscar</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/disponibilidade">
-        <span><i class="bi bi-box-seam"></i></span>
+        <span><i class="bi bi-calendar3"></i></span>
         <div><b>Disponibilidade</b><small>Consultar por data</small></div>
     </a>
     <a class="cartao-acao" href="/painel/clientes">
@@ -83,137 +83,137 @@
         <a class="botao-whats" target="_blank"
            href="https://wa.me/?text={{ mensagem_pre_contrato|urlencode }}">
             
-            Compartilhar Pré-Contrato
+            <i class="bi bi-whatsapp" aria-hidden="true"></i> Compartilhar Pré-Contrato
         </a>
     </div>
 </section>
-<h2 class="titulo-secao atencao-titulo">O que precisa de atenção</h2>
-{% set qtd_contratos = (pendencias_agenda|length) + (pendencias_envio_contrato|length) + ((pendencias_sinal|length) if empresa.exige_sinal else 0) %}
-{% set qtd_operacao = pendencias_operacao|length %}
-{% set qtd_financeiro = (pendencias_a_receber|length) + (pendencias_financeiras|length) %}
-<div class="pendencias-home pendencias-agrupadas">
-    {% if qtd_contratos > 0 %}
-    <details class="accordion pendencia-grupo">
+<h2 class="titulo-secao">Pendências</h2>
+<div class="pendencias-home">
+    <details class="accordion pendencia-accordion">
         <summary>
-            <span class="pendencia-grupo-icone"><i class="bi bi-file-earmark-text"></i></span>
-            <span class="pendencia-grupo-texto">
-                <b>Contratos</b>
-                <small>
-                    {% if empresa.exige_sinal and pendencias_sinal|length %}{{ pendencias_sinal|length }} sinal{% if pendencias_sinal|length != 1 %}is{% endif %}{% endif %}
-                    {% if pendencias_agenda|length %}{% if empresa.exige_sinal and pendencias_sinal|length %} · {% endif %}{{ pendencias_agenda|length }} de agenda{% endif %}
-                    {% if pendencias_envio_contrato|length %}{% if (empresa.exige_sinal and pendencias_sinal|length) or pendencias_agenda|length %} · {% endif %}{{ pendencias_envio_contrato|length }} aguardando envio{% endif %}
-                </small>
-            </span>
-            <b class="pendencia-grupo-contador">{{ qtd_contratos }}</b>
+            <span>Pendência de Agenda</span>
+            <b>{{ pendencias_agenda|length }}</b>
         </summary>
-        <div class="pendencia-grupo-conteudo">
-            {% if empresa.exige_sinal and pendencias_sinal|length %}
-            <h3>Sinal pendente</h3>
-            <div class="lista-mobile">
-                {% for i in pendencias_sinal %}
-                <a class="card-lista card-sinal" href="/painel/solicitacao/{{ i.id }}">
-                    <div><b>{{ i.cliente.nome }}</b><small>Aceito · {{ i.data_evento.strftime('%d/%m/%Y') }} · sem pagamento recebido</small></div>
-                    <strong>R$ {{ i.valor|moeda_br }}</strong>
-                </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-            {% if pendencias_agenda|length %}
-            <h3>Contrato / agenda</h3>
-            <div class="lista-mobile">
-                {% for i in pendencias_agenda %}
-                <a class="card-lista {{ classe_alerta_contrato(i.status) }}" href="/painel/solicitacao/{{ i.id }}">
-                    <div>
-                        <b>{{ i.cliente.nome }}</b>
-                        <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
-                        {% if i.responsavel_contrato_exibicao %}<small class="responsavel-card-mini">Resp.: {{ i.responsavel_contrato_exibicao }}</small>{% endif %}
-                    </div>
-                    <strong>R$ {{ i.valor|moeda_br }}</strong>
-                </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-            {% if pendencias_envio_contrato|length %}
-            <h3>Aguardando envio</h3>
-            <div class="lista-mobile">
-                {% for i in pendencias_envio_contrato %}
-                <div class="card-lista card-contrato-envio">
-                    <a class="card-contrato-info" href="/painel/solicitacao/{{ i.id }}">
-                        <b>{{ i.cliente.nome }}</b>
-                        <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
-                    </a>
-                    <a class="botao-enviar-contrato" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">Enviar contrato</a>
+        <div class="lista-mobile">
+            {% for i in pendencias_agenda %}
+            <a class="card-lista {{ classe_alerta_contrato(i.status) }}" href="/painel/solicitacao/{{ i.id }}">
+                <div>
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
+                    {% if i.responsavel_contrato_exibicao %}<small class="responsavel-card-mini">Resp.: {{ i.responsavel_contrato_exibicao }}</small>{% endif %}
                 </div>
-                {% endfor %}
-            </div>
-            {% endif %}
+                <strong>R$ {{ i.valor|moeda_br }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência de agenda.</p></div>
+            {% endfor %}
         </div>
     </details>
-    {% endif %}
 
-    {% if qtd_operacao > 0 %}
-    <details class="accordion pendencia-grupo">
+    {% if empresa.exige_sinal %}
+    <details class="accordion pendencia-accordion">
         <summary>
-            <span class="pendencia-grupo-icone"><i class="bi bi-truck"></i></span>
-            <span class="pendencia-grupo-texto"><b>Operação</b><small>{{ qtd_operacao }} ação{% if qtd_operacao != 1 %}ões{% endif %} pendente{% if qtd_operacao != 1 %}s{% endif %}</small></span>
-            <b class="pendencia-grupo-contador">{{ qtd_operacao }}</b>
+            <span>Pendência de Sinal</span>
+            <b>{{ pendencias_sinal|length }}</b>
         </summary>
-        <div class="pendencia-grupo-conteudo">
-            <div class="lista-mobile">
-                {% for a in pendencias_operacao %}
-                <a class="card-lista card-operacao" href="/painel/reservas?data_inicio={{ a.data.isoformat() }}&data_fim={{ a.data.isoformat() }}">
-                    <div><b>{{ a.titulo }}</b><small>{{ 'Entrega' if a.tipo_evento == 'entrega' else 'Busca' }} atrasada · {{ a.data.strftime('%d/%m/%Y') }} · {{ a.bairro or '-' }}</small></div>
-                    <strong>{{ a.hora_inicio.strftime('%H:%M') }}</strong>
-                </a>
-                {% endfor %}
-            </div>
+        <div class="lista-mobile">
+            {% for i in pendencias_sinal %}
+            <a class="card-lista card-sinal" href="/painel/solicitacao/{{ i.id }}">
+                <div>
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>Aceito · {{ i.data_evento.strftime('%d/%m/%Y') }} · sem pagamento recebido</small>
+                </div>
+                <strong>R$ {{ i.valor|moeda_br }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência de sinal.</p></div>
+            {% endfor %}
         </div>
     </details>
     {% endif %}
 
-    {% if qtd_financeiro > 0 %}
-    <details class="accordion pendencia-grupo">
+    <details class="accordion pendencia-accordion">
         <summary>
-            <span class="pendencia-grupo-icone"><i class="bi bi-bank"></i></span>
-            <span class="pendencia-grupo-texto">
-                <b>Financeiro</b>
-                <small>{% if pendencias_a_receber|length %}{{ pendencias_a_receber|length }} a receber{% endif %}{% if pendencias_financeiras|length %}{% if pendencias_a_receber|length %} · {% endif %}{{ pendencias_financeiras|length }} vínculo{% if pendencias_financeiras|length != 1 %}s{% endif %}{% endif %}</small>
-            </span>
-            <b class="pendencia-grupo-contador">{{ qtd_financeiro }}</b>
+            <span>Pendência de Envio de Contrato</span>
+            <b>{{ pendencias_envio_contrato|length }}</b>
         </summary>
-        <div class="pendencia-grupo-conteudo">
-            {% if pendencias_a_receber|length %}
-            <h3>A receber</h3>
-            <div class="lista-mobile">
-                {% for i in pendencias_a_receber %}
-                {% set falta_receber = (i.valor or 0) - (i.valor_pago or 0) %}
-                <a class="card-lista card-financeiro" href="/painel/solicitacao/{{ i.id }}">
-                    <div><b>{{ i.cliente.nome }}</b><small>{{ i.data_evento.strftime('%d/%m/%Y') }} · valor ainda não recebido</small></div>
-                    <strong>R$ {{ falta_receber|moeda_br }}</strong>
+        <div class="lista-mobile">
+            {% for i in pendencias_envio_contrato %}
+            <div class="card-lista card-contrato-envio">
+                <a class="card-contrato-info" href="/painel/solicitacao/{{ i.id }}">
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or i.cliente.bairro or '-' }}</small>
                 </a>
-                {% endfor %}
-            </div>
-            {% endif %}
-            {% if pendencias_financeiras|length %}
-            <h3>Vínculo financeiro</h3>
-            <div class="lista-mobile">
-                {% for p in pendencias_financeiras %}
-                <a class="card-lista card-financeiro" href="/painel/financeiro?status_sistema=pendente">
-                    <div><b>{{ p.solicitacao.cliente.nome }}</b><small>Não conciliado · {{ p.data_pagamento.strftime('%d/%m/%Y') }} · {{ p.forma_pagamento or '-' }}</small></div>
-                    <strong>R$ {{ p.valor|moeda_br }}</strong>
+                <a class="botao-enviar-contrato" target="_blank"
+                   href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">
+                    <i class="bi bi-whatsapp" aria-hidden="true"></i> Enviar contrato
                 </a>
-                {% endfor %}
             </div>
-            {% endif %}
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhum contrato aguardando envio.</p></div>
+            {% endfor %}
         </div>
     </details>
-    {% endif %}
 
-    {% if qtd_contratos == 0 and qtd_operacao == 0 and qtd_financeiro == 0 %}
-    <div class="pendencias-tudo-certo">
-        <i class="bi bi-check-circle"></i>
-        <div><b>Tudo em dia</b><small>Nenhuma pendência no momento.</small></div>
-    </div>
-    {% endif %}
+    <details class="accordion pendencia-accordion">
+        <summary>
+            <span>Pendência a receber</span>
+            <b>{{ pendencias_a_receber|length }}</b>
+        </summary>
+        <div class="lista-mobile">
+            {% for i in pendencias_a_receber %}
+            {% set falta_receber = (i.valor or 0) - (i.valor_pago or 0) %}
+            <a class="card-lista card-financeiro" href="/painel/solicitacao/{{ i.id }}">
+                <div>
+                    <b>{{ i.cliente.nome }}</b>
+                    <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · valor ainda não recebido</small>
+                </div>
+                <strong>R$ {{ falta_receber|moeda_br }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência a receber.</p></div>
+            {% endfor %}
+        </div>
+    </details>
+
+    <details class="accordion pendencia-accordion">
+        <summary>
+            <span>Pendência de Operação</span>
+            <b>{{ pendencias_operacao|length }}</b>
+        </summary>
+        <div class="lista-mobile">
+            {% for a in pendencias_operacao %}
+            <a class="card-lista card-operacao" href="/painel/reservas?data_inicio={{ a.data.isoformat() }}&data_fim={{ a.data.isoformat() }}">
+                <div>
+                    <b>{{ a.titulo }}</b>
+                    <small>{{ 'Entrega' if a.tipo_evento == 'entrega' else 'Busca' }} atrasada · {{ a.data.strftime('%d/%m/%Y') }} · {{ a.bairro or '-' }}</small>
+                </div>
+                <strong>{{ a.hora_inicio.strftime('%H:%M') }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência de operação.</p></div>
+            {% endfor %}
+        </div>
+    </details>
+
+    <details class="accordion pendencia-accordion">
+        <summary>
+            <span>Pendência de vínculo financeiro</span>
+            <b>{{ pendencias_financeiras|length }}</b>
+        </summary>
+        <div class="lista-mobile">
+            {% for p in pendencias_financeiras %}
+            <a class="card-lista card-financeiro" href="/painel/financeiro?status_sistema=pendente">
+                <div>
+                    <b>{{ p.solicitacao.cliente.nome }}</b>
+                    <small>Não conciliado · {{ p.data_pagamento.strftime('%d/%m/%Y') }} · {{ p.forma_pagamento or '-' }}</small>
+                </div>
+                <strong>R$ {{ p.valor|moeda_br }}</strong>
+            </a>
+            {% else %}
+            <div class="box pendencia-vazia"><p>Nenhuma pendência de vínculo financeiro.</p></div>
+            {% endfor %}
+        </div>
+    </details>
 </div>
 {% endblock %}
