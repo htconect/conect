@@ -53,21 +53,21 @@
 </div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
-        <span><i class="bi bi-calendar3"></i></span>
+        <span><i class="bi bi-file-earmark-text"></i></span>
         <div>
-            <b>Agenda</b>
+            <b>Contratos</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ agenda_periodo_qtd }} evento(s)</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/reservas">
-        <span><i class="bi bi-box-seam"></i></span>
+        <span><i class="bi bi-truck"></i></span>
         <div>
             <b>Operação</b>
             <small>{{ inicio_semana.strftime('%d/%m') }} até {{ fim_semana.strftime('%d/%m') }} · {{ operacao_entregar_qtd }} entregar · {{ operacao_buscar_qtd }} buscar</small>
         </div>
     </a>
     <a class="cartao-acao" href="/painel/disponibilidade">
-        <span><i class="bi bi-box-seam"></i></span>
+        <span><i class="bi bi-calendar3"></i></span>
         <div><b>Disponibilidade</b><small>Consultar por data</small></div>
     </a>
     <a class="cartao-acao" href="/painel/clientes">
@@ -83,7 +83,7 @@
         <a class="botao-whats" target="_blank"
            href="https://wa.me/?text={{ mensagem_pre_contrato|urlencode }}">
             
-            Compartilhar Pré-Contrato
+            <i class="bi bi-whatsapp" aria-hidden="true"></i> Compartilhar Pré-Contrato
         </a>
     </div>
 </section>
@@ -146,7 +146,7 @@
                 </a>
                 <a class="botao-enviar-contrato" target="_blank"
                    href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">
-                    Enviar contrato
+                    <i class="bi bi-whatsapp" aria-hidden="true"></i> Enviar contrato
                 </a>
             </div>
             {% else %}

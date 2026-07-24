@@ -10,7 +10,7 @@
   </div>
 
   {% if url_whatsapp %}
-    <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}">Continuar para o WhatsApp</a>
+    <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Continuar para o WhatsApp</a>
   {% else %}
     <a class="botao largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Continuar</a>
   {% endif %}

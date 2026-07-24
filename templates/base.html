@@ -7,7 +7,7 @@
   <link rel="manifest" href="/static/manifest.webmanifest">
   <meta name="theme-color" content="#0f172a">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <link rel="stylesheet" href="/static/css/style.css?v=20260720-2">
+  <link rel="stylesheet" href="/static/css/style.css?v=20260724-3">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>
 <body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %}">
@@ -118,12 +118,25 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
 
 
 {% if request.session.get('empresa_id') %}
-<nav class="nav-inferior" aria-label="Navegação principal">
-  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-house"></i><span>Início</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3"></i><span>Agenda</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-box-seam"></i><span>Disponível</span></a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
-  <a class="nav-item nav-principal {% if request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/contrato-novo"><span style="max-width:52px;font-size:10px;line-height:1.05;text-align:center;">Contrato<br>Manual</span></a>
+<nav class="nav-inferior nav-fluxo" aria-label="Navegação principal">
+  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel">
+    <i class="bi bi-house"></i><span>Início</span>
+  </a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">
+    <i class="bi bi-calendar3"></i><span>Disponibilidade</span>
+  </a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">
+    <i class="bi bi-file-earmark-text"></i><span>Contratos</span>
+  </a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas">
+    <i class="bi bi-truck"></i><span>Operação</span>
+  </a>
+  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro">
+    <i class="bi bi-bank"></i><span>Financeiro</span>
+  </a>
+  <a class="nav-item nav-principal {% if request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/contrato-novo">
+    <i class="bi bi-file-earmark-plus"></i><span>Contrato Manual</span>
+  </a>
 </nav>
 {% endif %}
 

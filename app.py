@@ -551,21 +551,21 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
     return [
         f"*{empresa.nome or 'Karaokê RJ'}*",
         "",
-        f"Cliente: {item.cliente.nome if item.cliente else '-'}",
+        f"*Cliente:* {item.cliente.nome if item.cliente else '-'}",
         "",
-        "📅 Entrega",
+        "*📅 Entrega*",
         f"{data_txt} às {hora_txt}",
         "",
-        "📍 Local",
+        "*📍 Local*",
         endereco_texto or "-",
         "",
-        "🎤 Equipamentos",
+        "*🎤 Equipamentos*",
         *equipamentos,
         "",
-        "💰 Financeiro",
-        f"Total: R$ {moeda_br(total)}",
-        f"Pago: R$ {moeda_br(pago)}",
-        f"Saldo: R$ {moeda_br(falta)}",
+        "*💰 Financeiro*",
+        f"*Total:* R$ {moeda_br(total)}",
+        f"*Pago:* R$ {moeda_br(pago)}",
+        f"*Saldo:* R$ {moeda_br(falta)}",
     ]
 
 
@@ -590,7 +590,7 @@ def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: So
             "",
             "Para concluir a confirmação, realize o PIX do sinal para a chave abaixo e envie o comprovante.",
             "",
-            f"PIX: {empresa.pix_copia_cola or '-'}",
+            f"*PIX:* {empresa.pix_copia_cola or '-'}",
             "",
             "Assim que o aceite do pré-contrato e a confirmação do pagamento do sinal forem concluídos, sua reserva será efetivada.",
         ])
@@ -620,10 +620,10 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
     linhas.extend([
         "",
-        "📄 Contrato final:",
+        "*📄 Contrato final:*",
         link_contrato,
         "",
-        "📄 Cláusulas do contrato:",
+        "*📄 Cláusulas do contrato:*",
         link_clausulas,
         "",
     ])
