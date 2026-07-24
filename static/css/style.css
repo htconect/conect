@@ -1572,3 +1572,74 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
   .nav-inferior.nav-fluxo .nav-item>.bi{font-size:18px !important;}
   .nav-inferior.nav-fluxo .nav-item>span{font-size:8px !important;}
 }
+
+
+/* CONECT 2026-07-24 — pendências agrupadas por etapa */
+.atencao-titulo{margin-bottom:10px}
+.pendencias-agrupadas{display:grid;gap:10px}
+.pendencia-grupo{
+  margin:0!important;
+  border:1px solid #e2e8f0!important;
+  border-radius:18px!important;
+  background:#fff!important;
+  overflow:hidden;
+  box-shadow:0 8px 22px rgba(15,23,42,.05)
+}
+.pendencia-grupo>summary{
+  display:grid!important;
+  grid-template-columns:42px minmax(0,1fr) auto auto;
+  align-items:center;
+  gap:12px;
+  min-height:72px;
+  padding:12px 16px!important;
+  cursor:pointer;
+  list-style:none
+}
+.pendencia-grupo>summary::-webkit-details-marker{display:none}
+.pendencia-grupo-icone{
+  width:42px;height:42px;border-radius:12px;
+  background:#eff6ff;display:flex;align-items:center;justify-content:center;
+  color:#2563eb;font-size:21px
+}
+.pendencia-grupo-texto{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pendencia-grupo-texto>b{font-size:16px;color:#0f172a}
+.pendencia-grupo-texto>small{font-size:12px;color:#64748b;white-space:normal}
+.pendencia-grupo-contador{
+  min-width:30px;height:30px;padding:0 8px;border-radius:999px;
+  background:#eff6ff;color:#1d4ed8;
+  display:flex;align-items:center;justify-content:center;font-size:13px
+}
+.pendencia-grupo>summary:after{
+  content:"\F282";
+  font-family:"bootstrap-icons";
+  font-size:13px;color:#64748b;margin-left:2px
+}
+.pendencia-grupo[open]>summary:after{transform:rotate(180deg)}
+.pendencia-grupo-conteudo{padding:0 14px 14px;border-top:1px solid #f1f5f9}
+.pendencia-grupo-conteudo h3{
+  font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+  color:#64748b;margin:14px 2px 7px
+}
+.pendencias-tudo-certo{
+  display:flex;align-items:center;gap:12px;padding:16px;
+  border:1px solid #dcfce7;border-radius:16px;background:#f0fdf4;color:#166534
+}
+.pendencias-tudo-certo>.bi{font-size:24px}
+.pendencias-tudo-certo div{display:flex;flex-direction:column}
+.pendencias-tudo-certo small{color:#4b5563;margin-top:2px}
+
+@media(min-width:769px){
+  .pendencias-agrupadas{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .pendencia-grupo[open]{grid-column:1/-1}
+  .pendencias-tudo-certo{grid-column:1/-1}
+}
+@media(max-width:768px){
+  .pendencia-grupo>summary{
+    min-height:68px;padding:11px 13px!important;
+    grid-template-columns:38px minmax(0,1fr) auto auto;gap:9px
+  }
+  .pendencia-grupo-icone{width:38px;height:38px;font-size:19px}
+  .pendencia-grupo-texto>b{font-size:15px}
+  .pendencia-grupo-texto>small{font-size:11px}
+  .pendencia-grupo-conteudo{padding:0 10px 10px}
+}
