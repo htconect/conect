@@ -9,6 +9,8 @@ import csv
 import uuid
 import hashlib
 import re
+import math
+import json
 import zipfile
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
@@ -25,7 +27,7 @@ from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -56,6 +58,8 @@ class ControleAcessoMiddleware:
         if path == "/painel/agenda" or path.startswith("/painel/agenda/"):
             return "agenda"
         if path == "/painel/reservas" or path.startswith("/painel/reservas/"):
+            return "operacao"
+        if path == "/painel/inteligencia-logistica" or path.startswith("/painel/inteligencia-logistica/"):
             return "operacao"
         if path == "/painel/clientes" or path.startswith("/painel/cliente/"):
             return "buscar_cliente"
@@ -6673,3 +6677,291 @@ def obrigado(slug: str, solicitacao_id: int, request: Request, db: Session = Dep
     solicitacao = db.get(Solicitacao, solicitacao_id)
     return templates.TemplateResponse("publico/obrigado.html",
                                       {"request": request, "empresa": empresa, "solicitacao": solicitacao})
+
+# ============================================================
+# CENTRAL DE INTELIGÊNCIA LOGÍSTICA (módulo premium independente)
+# ============================================================
+
+def _coord_de_link(link: str | None):
+    if not link:
+        return (None, None)
+    texto = str(link)
+    padroes = [r'@(-?\d+\.\d+),(-?\d+\.\d+)', r'query=(-?\d+\.\d+),(-?\d+\.\d+)', r'q=(-?\d+\.\d+),(-?\d+\.\d+)']
+    for padrao in padroes:
+        achou = re.search(padrao, texto)
+        if achou:
+            try:
+                return float(achou.group(1)), float(achou.group(2))
+            except Exception:
+                pass
+    return (None, None)
+
+
+def _distancia_km(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    raio = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return raio * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+
+def _config_rota(db: Session, empresa_id: int):
+    cfg = db.query(ConfiguracaoRotaInteligente).filter_by(empresa_id=empresa_id).first()
+    if not cfg:
+        cfg = ConfiguracaoRotaInteligente(empresa_id=empresa_id)
+        db.add(cfg)
+        db.flush()
+    return cfg
+
+
+def _endereco_operacao(agenda: Agenda):
+    sol = agenda.solicitacao
+    if not sol:
+        return agenda.bairro or "Endereço não informado"
+    partes = [sol.local, sol.bairro]
+    return " - ".join([str(x).strip() for x in partes if x and str(x).strip()]) or agenda.bairro or "Endereço não informado"
+
+
+def _limite_operacao(agenda: Agenda, cfg: ConfiguracaoRotaInteligente):
+    sol = agenda.solicitacao
+    if agenda.tipo_evento == "retirada":
+        return (sol.retirada_hora if sol and sol.retirada_hora else agenda.hora_inicio)
+    inicio = sol.hora_inicio if sol and sol.hora_inicio else agenda.hora_inicio
+    base = datetime.combine(date.today(), inicio)
+    return (base - timedelta(minutes=max(0, int(cfg.antecedencia_entrega or 60)))).time()
+
+
+def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, equipe_id: int | None, cfg):
+    q = db.query(Agenda).filter(
+        Agenda.empresa_id == empresa.id,
+        Agenda.status_operacional != "concluido",
+    )
+    # Entregas usam a data operacional; retiradas podem vir da data própria da Agenda.
+    q = q.filter(Agenda.data == data_operacao)
+    if equipe_id:
+        q = q.filter(Agenda.equipe_id == equipe_id)
+    itens = q.order_by(Agenda.hora_inicio.asc(), Agenda.id.asc()).all()
+    candidatos = []
+    for ag in itens:
+        lat, lon = _coord_de_link(ag.link_localizacao)
+        limite = _limite_operacao(ag, cfg)
+        servico = int(cfg.minutos_desmontagem if ag.tipo_evento == "retirada" else cfg.minutos_montagem)
+        candidatos.append({
+            "agenda": ag,
+            "tipo": ag.tipo_evento if ag.tipo_evento in ("entrega", "retirada") else "entrega",
+            "titulo": ag.titulo,
+            "endereco": _endereco_operacao(ag),
+            "lat": lat, "lon": lon, "limite": limite, "servico": max(0, servico),
+        })
+    return candidatos
+
+
+def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None):
+    restantes = list(candidatos)
+    resultado = []
+    atual = datetime.combine(data_operacao, hora_saida)
+    lat_atual, lon_atual = origem_lat, origem_lon
+    velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
+    while restantes:
+        melhor = None
+        melhor_chave = None
+        for c in restantes:
+            distancia = _distancia_km(lat_atual, lon_atual, c["lat"], c["lon"])
+            desloc = int(round((distancia / velocidade) * 60)) if distancia is not None else 20
+            chegada = atual + timedelta(minutes=desloc)
+            limite_dt = datetime.combine(data_operacao, c["limite"])
+            atraso = (chegada - limite_dt).total_seconds() / 60
+            folga = (limite_dt - chegada).total_seconds() / 60
+            # Prioridade absoluta: atraso/horário; em seguida proximidade. Retirada ganha pequeno bônus quando já liberada.
+            liberada = c["tipo"] == "retirada" and chegada.time() >= c["limite"]
+            chave = (
+                0 if atraso > 0 else 1,
+                -atraso if atraso > 0 else folga,
+                0 if liberada else 1,
+                distancia if distancia is not None else 9999,
+                c["agenda"].id,
+            )
+            if melhor_chave is None or chave < melhor_chave:
+                melhor_chave = chave
+                melhor = (c, distancia, desloc, chegada, limite_dt)
+        c, distancia, desloc, chegada, limite_dt = melhor
+        atraso_min = int((chegada - limite_dt).total_seconds() / 60)
+        folga_min = int((limite_dt - chegada).total_seconds() / 60)
+        risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
+        motivo = []
+        if risco == "atrasado": motivo.append(f"Atraso previsto de {atraso_min} min")
+        elif risco == "atencao": motivo.append(f"Folga de apenas {max(0, folga_min)} min")
+        else: motivo.append("Operação dentro do prazo")
+        if distancia is not None: motivo.append(f"Próxima parada a {distancia:.1f} km")
+        else: motivo.append("Distância aproximada: localização sem coordenadas")
+        if c["tipo"] == "retirada": motivo.append("Retirada pode liberar espaço no veículo")
+        saida = chegada + timedelta(minutes=c["servico"])
+        resultado.append({**c, "distancia": float(distancia or 0), "desloc": desloc, "chegada": chegada,
+                          "saida": saida, "risco": risco, "motivo": " • ".join(motivo)})
+        atual = saida
+        if c["lat"] is not None:
+            lat_atual, lon_atual = c["lat"], c["lon"]
+        restantes.remove(c)
+    return resultado
+
+
+def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
+    cfg = _config_rota(db, rota.empresa_id)
+    paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(RotaInteligenteParada.ordem).all()
+    if not paradas:
+        return
+    atual = datetime.combine(rota.data_operacao, rota.horario_saida)
+    lat_atual, lon_atual = cfg.latitude_loja, cfg.longitude_loja
+    distancia_total = 0.0
+    retornos = 0
+    velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
+    for idx, p in enumerate(paradas, 1):
+        p.ordem = idx
+        if p.status == "concluido" and p.chegada_real:
+            atual = p.chegada_real + timedelta(minutes=p.servico_min or 0)
+            if p.latitude is not None: lat_atual, lon_atual = p.latitude, p.longitude
+            continue
+        distancia = _distancia_km(lat_atual, lon_atual, p.latitude, p.longitude)
+        desloc = int(round(((distancia or 0) / velocidade) * 60)) if distancia is not None else 20
+        p.distancia_anterior_km = float(distancia or 0)
+        p.deslocamento_anterior_min = desloc
+        p.chegada_prevista = atual + timedelta(minutes=desloc)
+        p.saida_prevista = p.chegada_prevista + timedelta(minutes=p.servico_min or 0)
+        if p.horario_limite:
+            limite = datetime.combine(rota.data_operacao, p.horario_limite)
+            folga = int((limite - p.chegada_prevista).total_seconds() / 60)
+            p.risco = "atrasado" if folga < 0 else ("atencao" if folga <= 20 else "normal")
+        else:
+            p.risco = "normal"
+        atual = p.saida_prevista
+        distancia_total += float(distancia or 0)
+        if p.tipo == "loja": retornos += 1
+        if p.latitude is not None: lat_atual, lon_atual = p.latitude, p.longitude
+    rota.distancia_total_km = round(distancia_total, 1)
+    rota.duracao_total_min = max(0, int((atual - datetime.combine(rota.data_operacao, rota.horario_saida)).total_seconds() / 60))
+    rota.retornos_loja = retornos
+    rota.versao_calculo = int(rota.versao_calculo or 0) + 1
+
+
+@app.get("/painel/inteligencia-logistica", response_class=HTMLResponse)
+def inteligencia_logistica(request: Request, data: str = "", equipe_id: int = 0, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    try: data_filtro = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
+    except Exception: data_filtro = date.today()
+    cfg = _config_rota(db, empresa.id)
+    equipes = equipes_visiveis_usuario(request, db, empresa.id)
+    veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()
+    rotas = db.query(RotaInteligente).filter_by(empresa_id=empresa.id).order_by(RotaInteligente.data_operacao.desc(), RotaInteligente.id.desc()).limit(30).all()
+    candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg)
+    return templates.TemplateResponse("admin/inteligencia_logistica.html", {
+        "request": request, "empresa": empresa, "config": cfg, "equipes": equipes, "veiculos": veiculos,
+        "rotas": rotas, "data_filtro": data_filtro, "equipe_id": equipe_id, "candidatos": candidatos,
+        "erro": request.query_params.get("erro"), "sucesso": request.query_params.get("sucesso")
+    })
+
+
+@app.post("/painel/inteligencia-logistica/configuracao")
+def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    cfg = _config_rota(db, empresa.id)
+    cfg.endereco_loja = endereco_loja.strip() or None
+    try: cfg.latitude_loja = float(latitude_loja.replace(",", ".")) if latitude_loja.strip() else None
+    except Exception: cfg.latitude_loja = None
+    try: cfg.longitude_loja = float(longitude_loja.replace(",", ".")) if longitude_loja.strip() else None
+    except Exception: cfg.longitude_loja = None
+    cfg.minutos_montagem = max(0, minutos_montagem); cfg.minutos_desmontagem = max(0, minutos_desmontagem)
+    cfg.antecedencia_entrega = max(0, antecedencia_entrega); cfg.minutos_parada_loja = max(0, minutos_parada_loja)
+    try: cfg.velocidade_media_kmh = max(5, float(velocidade_media_kmh.replace(",", ".")))
+    except Exception: cfg.velocidade_media_kmh = 30
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica?sucesso=Configuração salva", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/veiculos")
+def criar_veiculo_logistico(nome: str = Form(...), capacidade_pontos: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    nome = nome.strip()
+    if nome and not db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, nome=nome).first():
+        cap = int(capacidade_pontos) if capacidade_pontos.strip().isdigit() else None
+        db.add(VeiculoLogistico(empresa_id=empresa.id, nome=nome, capacidade_pontos=cap))
+        db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/gerar")
+def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), horario_saida: str = Form(...), equipe_id: int = Form(0), veiculo_id: int = Form(0), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    try:
+        data_op = datetime.strptime(data_operacao, "%Y-%m-%d").date(); hora = datetime.strptime(horario_saida, "%H:%M").time()
+    except Exception:
+        return RedirectResponse("/painel/inteligencia-logistica?erro=Data ou horário inválido", status_code=303)
+    chave = f"{empresa.id}:{data_op.isoformat()}:{equipe_id or 0}"
+    existente = db.query(RotaInteligente).filter_by(empresa_id=empresa.id, chave_consumo=chave).first()
+    if existente:
+        return RedirectResponse(f"/painel/inteligencia-logistica/rota/{existente.id}", status_code=303)
+    if int(empresa.humiat_saldo or 0) < 1:
+        return RedirectResponse("/painel/inteligencia-logistica?erro=Saldo Humiat insuficiente para gerar a rota", status_code=303)
+    cfg = _config_rota(db, empresa.id)
+    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg)
+    if not candidatos:
+        return RedirectResponse("/painel/inteligencia-logistica?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
+    ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
+    codigo = f"IL-{data_op.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
+    rota = RotaInteligente(empresa_id=empresa.id, equipe_id=equipe_id or None, veiculo_id=veiculo_id or None,
+        codigo=codigo, chave_consumo=chave, data_operacao=data_op, horario_saida=hora, humiat_consumido=True,
+        custo_humiat=1, criado_por=request.session.get("usuario_nome") or "Usuário")
+    db.add(rota); db.flush()
+    for ordem, c in enumerate(ordenados, 1):
+        db.add(RotaInteligenteParada(rota_id=rota.id, agenda_id=c["agenda"].id, solicitacao_id=c["agenda"].solicitacao_id,
+            ordem=ordem, tipo=c["tipo"], titulo=c["titulo"], endereco=c["endereco"], latitude=c["lat"], longitude=c["lon"],
+            horario_limite=c["limite"], chegada_prevista=c["chegada"], saida_prevista=c["saida"],
+            distancia_anterior_km=c["distancia"], deslocamento_anterior_min=c["desloc"], servico_min=c["servico"],
+            risco=c["risco"], motivo_prioridade=c["motivo"]))
+    _registrar_movimento_humiat(db, empresa, -1, "consumo_rota_inteligente", f"Rota Inteligente {codigo}",
+        observacao=f"Data {data_op.strftime('%d/%m/%Y')} | Equipe {equipe_id or 'não definida'}", usuario=rota.criado_por)
+    db.flush(); _recalcular_rota_salva(db, rota); db.commit()
+    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Rota gerada com 1 Humiat", status_code=303)
+
+
+@app.get("/painel/inteligencia-logistica/rota/{rota_id}", response_class=HTMLResponse)
+def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    if not rota: raise HTTPException(status_code=404)
+    paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(RotaInteligenteParada.ordem).all()
+    return templates.TemplateResponse("admin/inteligencia_rota.html", {"request": request, "empresa": empresa, "rota": rota, "paradas": paradas, "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")})
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/recalcular")
+def recalcular_rota_inteligente(rota_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    if not rota: raise HTTPException(status_code=404)
+    _recalcular_rota_salva(db, rota); db.commit()
+    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Rota recalculada sem novo consumo", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/carro-cheio/{parada_id}")
+def carro_cheio_rota(rota_id: int, parada_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
+    if not rota or not parada: raise HTTPException(status_code=404)
+    cfg = _config_rota(db, empresa.id)
+    posteriores = db.query(RotaInteligenteParada).filter(RotaInteligenteParada.rota_id == rota.id, RotaInteligenteParada.ordem > parada.ordem).all()
+    for p in posteriores: p.ordem += 1
+    db.add(RotaInteligenteParada(rota_id=rota.id, ordem=parada.ordem + 1, tipo="loja", titulo="Retorno à loja — carro cheio",
+        endereco=cfg.endereco_loja or "Loja", latitude=cfg.latitude_loja, longitude=cfg.longitude_loja,
+        servico_min=max(0, int(cfg.minutos_parada_loja or 20)), retorno_loja=True, motivo_prioridade="Retorno inserido manualmente porque o veículo atingiu a capacidade"))
+    db.flush(); _recalcular_rota_salva(db, rota); db.commit()
+    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Retorno à loja inserido e rota recalculada", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/concluir/{parada_id}")
+def concluir_parada_inteligente(rota_id: int, parada_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
+    if not rota or not parada: raise HTTPException(status_code=404)
+    parada.status = "concluido"; parada.chegada_real = agora_utc()
+    if parada.agenda: parada.agenda.status_operacional = "concluido"
+    db.flush(); _recalcular_rota_salva(db, rota)
+    if all(p.status == "concluido" for p in rota.paradas): rota.status = "concluida"
+    else: rota.status = "em_execucao"
+    db.commit()
+    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Parada concluída e próximas recalculadas", status_code=303)

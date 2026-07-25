@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container inteligencia-wrap">
+  <div class="intel-hero">
+    <div><span class="intel-kicker">Módulo premium</span><h1><i class="bi bi-stars"></i> Central de Inteligência Logística</h1><p>Gere a melhor sequência para entregas e retiradas sem alterar a roteirização manual.</p></div>
+    <div class="intel-saldo"><small>Saldo disponível</small><strong>{{ empresa.humiat_saldo or 0 }}</strong><span>Humiats</span></div>
+  </div>
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}{% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+
+  <div class="intel-grid">
+    <section class="intel-card destaque">
+      <div class="intel-card-title"><i class="bi bi-magic"></i><div><h2>Gerar nova rota</h2><p>1 Humiat por data e equipe. Todos os recálculos ficam incluídos.</p></div></div>
+      <form method="post" action="/painel/inteligencia-logistica/gerar" class="intel-form">
+        <label>Data<input type="date" name="data_operacao" value="{{ data_filtro.isoformat() }}" required></label>
+        <label>Horário de saída<input type="time" name="horario_saida" value="07:00" required></label>
+        <label>Equipe<select name="equipe_id"><option value="0">Todas / não definida</option>{% for e in equipes %}<option value="{{ e.id }}" {% if equipe_id==e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></label>
+        <label>Veículo<select name="veiculo_id"><option value="0">Não informado</option>{% for v in veiculos %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></label>
+        <div class="intel-preview"><strong>{{ candidatos|length }}</strong><span>operações encontradas</span></div>
+        <button class="botao btn-krj-primary" type="submit" onclick="return confirm('Gerar esta rota consumirá 1 Humiat. Continuar?')"><i class="bi bi-stars"></i> Gerar inteligência — 1 Humiat</button>
+      </form>
+    </section>
+
+    <section class="intel-card">
+      <details><summary><i class="bi bi-gear"></i> Configuração operacional</summary>
+      <form method="post" action="/painel/inteligencia-logistica/configuracao" class="intel-form duas-colunas">
+        <label class="span2">Endereço da loja<input name="endereco_loja" value="{{ config.endereco_loja or '' }}" placeholder="Endereço completo da base"></label>
+        <label>Latitude da loja<input name="latitude_loja" value="{{ config.latitude_loja if config.latitude_loja is not none else '' }}" placeholder="-22.000000"></label>
+        <label>Longitude da loja<input name="longitude_loja" value="{{ config.longitude_loja if config.longitude_loja is not none else '' }}" placeholder="-43.000000"></label>
+        <label>Montagem (min)<input type="number" name="minutos_montagem" value="{{ config.minutos_montagem }}" min="0"></label>
+        <label>Desmontagem (min)<input type="number" name="minutos_desmontagem" value="{{ config.minutos_desmontagem }}" min="0"></label>
+        <label>Antecedência (min)<input type="number" name="antecedencia_entrega" value="{{ config.antecedencia_entrega }}" min="0"></label>
+        <label>Parada na loja (min)<input type="number" name="minutos_parada_loja" value="{{ config.minutos_parada_loja }}" min="0"></label>
+        <label>Velocidade média (km/h)<input name="velocidade_media_kmh" value="{{ config.velocidade_media_kmh }}"></label>
+        <button class="botao btn-krj-outline span2" type="submit">Salvar configuração</button>
+      </form></details>
+      <details><summary><i class="bi bi-truck"></i> Veículos</summary>
+        <form method="post" action="/painel/inteligencia-logistica/veiculos" class="intel-form linha"><input name="nome" placeholder="Nome do veículo" required><input type="number" name="capacidade_pontos" placeholder="Capacidade futura"><button class="botao btn-krj-outline">Adicionar</button></form>
+        <div class="chips">{% for v in veiculos %}<span>{{ v.nome }}{% if v.capacidade_pontos %} · {{ v.capacidade_pontos }} pts{% endif %}</span>{% else %}<small>Nenhum veículo cadastrado.</small>{% endfor %}</div>
+      </details>
+    </section>
+  </div>
+
+  <section class="intel-card historico"><div class="intel-card-title"><i class="bi bi-clock-history"></i><div><h2>Histórico</h2><p>Reabrir uma rota existente não gera novo consumo.</p></div></div>
+    <div class="table-responsive"><table><thead><tr><th>Código</th><th>Data</th><th>Equipe</th><th>Status</th><th>Distância</th><th>Retornos</th><th></th></tr></thead><tbody>
+      {% for r in rotas %}<tr><td><strong>{{ r.codigo }}</strong></td><td>{{ r.data_operacao.strftime('%d/%m/%Y') }}</td><td>{{ r.equipe.nome if r.equipe else 'Todas' }}</td><td><span class="status-pill {{ r.status }}">{{ r.status|replace('_',' ') }}</span></td><td>{{ '%.1f'|format(r.distancia_total_km or 0) }} km</td><td>{{ r.retornos_loja or 0 }}</td><td><a class="botao btn-krj-outline btn-krj-compact" href="/painel/inteligencia-logistica/rota/{{ r.id }}">Abrir</a></td></tr>{% else %}<tr><td colspan="7">Nenhuma inteligência gerada.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% endblock %}
