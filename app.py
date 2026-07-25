@@ -2608,6 +2608,8 @@ def preparar_reservas(
         request: Request,
         data_inicial: str = "",
         data_final: str = "",
+        data_inicio: str = "",
+        data_fim: str = "",
         mostrar_entregas: str = "",
         mostrar_retiradas: str = "",
         mostrar_concluidas: str = "",
@@ -2617,8 +2619,24 @@ def preparar_reservas(
         empresa: Empresa = Depends(empresa_logada)
 ):
     inicio, fim = periodo_semana_atual()
-    data_inicial = data_inicial or inicio.isoformat()
-    data_final = data_final or fim.isoformat()
+
+    # Compatibilidade com links antigos que usam data_inicio/data_fim.
+    # A tela oficial continua trabalhando com data_inicial/data_final.
+    data_inicial = data_inicial or data_inicio or inicio.isoformat()
+    data_final = data_final or data_fim or fim.isoformat()
+
+    # Nunca executar uma consulta com o período invertido. Ao trocar apenas
+    # uma das datas no filtro, ajusta a outra para o mesmo dia.
+    try:
+        inicio_filtro = datetime.strptime(data_inicial, "%Y-%m-%d").date()
+        fim_filtro = datetime.strptime(data_final, "%Y-%m-%d").date()
+    except ValueError:
+        inicio_filtro, fim_filtro = inicio, fim
+        data_inicial, data_final = inicio.isoformat(), fim.isoformat()
+    if fim_filtro < inicio_filtro:
+        fim_filtro = inicio_filtro
+        data_final = data_inicial
+
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     ids_equipes = {e.id for e in equipes}
     filtro_salvo = request.session.get("operacao_equipe_id", 0)
@@ -2662,9 +2680,9 @@ def preparar_reservas(
     elif situacao_rota == "nao_roteirizado":
         q = q.filter((Agenda.roteirizado == False) | (Agenda.roteirizado == None))
     if data_inicial:
-        q = q.filter(Agenda.data >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
+        q = q.filter(Agenda.data >= inicio_filtro)
     if data_final:
-        q = q.filter(Agenda.data <= datetime.strptime(data_final, "%Y-%m-%d").date())
+        q = q.filter(Agenda.data <= fim_filtro)
 
     tipos = []
     if mostrar_entregas:

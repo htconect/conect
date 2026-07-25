@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block content %}
+{% block conteudo %}
 <div class="container inteligencia-wrap">
   <div class="intel-hero compacto"><div><a href="/painel/inteligencia-logistica" class="voltar">← Central de Inteligência</a><h1>{{ rota.codigo }}</h1><p>{{ rota.data_operacao.strftime('%d/%m/%Y') }} · Saída {{ rota.horario_saida.strftime('%H:%M') }} · {{ rota.equipe.nome if rota.equipe else 'Todas as equipes' }}</p></div><div class="intel-saldo"><small>Custo desta análise</small><strong>1</strong><span>Humiat</span></div></div>
   {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}

@@ -74,6 +74,10 @@
         <span><i class="bi bi-person"></i></span>
         <div><b>Buscar cliente</b><small>CPF ou telefone</small></div>
     </a>
+    <a class="cartao-acao" href="/painel/contrato-novo">
+        <span><i class="bi bi-file-earmark-plus"></i></span>
+        <div><b>Contrato manual</b><small>Criar contrato completo diretamente</small></div>
+    </a>
 </div>
 
 <section class="accordion">
@@ -175,7 +179,7 @@
         <div class="pendencia-grupo-conteudo">
             <div class="lista-mobile">
                 {% for a in pendencias_operacao %}
-                <a class="card-lista card-operacao" href="/painel/reservas?data_inicio={{ a.data.isoformat() }}&data_fim={{ a.data.isoformat() }}">
+                <a class="card-lista card-operacao" href="/painel/reservas?data_inicial={{ a.data.isoformat() }}&data_final={{ a.data.isoformat() }}">
                     <div>
                         <b>{{ a.titulo }}</b>
                         <small>{{ 'Entrega' if a.tipo_evento == 'entrega' else 'Busca' }} atrasada · {{ a.data.strftime('%d/%m/%Y') }} · {{ a.bairro or '-' }}</small>
