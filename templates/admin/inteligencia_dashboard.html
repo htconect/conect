@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="inteligencia-wrap intel-page">
+  <section class="intel-hero">
+    <div><span class="intel-kicker">Central premium</span><h1><i class="bi bi-stars"></i> Inteligência Logística</h1><p>Planeje entregas, retiradas e retornos à loja sem alterar a roteirização manual.</p></div>
+    <div class="intel-saldo"><small>Carteira Humiat</small><strong>{{ empresa.humiat_saldo or 0 }}</strong><span>disponíveis</span></div>
+  </section>
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}{% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+
+  <section class="intel-actions-grid">
+    <a class="intel-action principal" href="/painel/inteligencia-logistica/nova"><i class="bi bi-magic"></i><div><strong>Nova inteligência</strong><span>Gerar uma nova análise por 1 Humiat</span></div><i class="bi bi-chevron-right"></i></a>
+    <a class="intel-action" href="/painel/inteligencia-logistica/historico"><i class="bi bi-clock-history"></i><div><strong>Histórico</strong><span>Reabrir análises sem novo consumo</span></div><i class="bi bi-chevron-right"></i></a>
+    <a class="intel-action" href="/painel/inteligencia-logistica/configuracoes"><i class="bi bi-gear"></i><div><strong>Configurações</strong><span>Loja, tempos, velocidade e veículos</span></div><i class="bi bi-chevron-right"></i></a>
+  </section>
+
+  <section class="intel-metrics">
+    <article><i class="bi bi-signpost-split"></i><span>Rotas geradas</span><strong>{{ total_rotas }}</strong></article>
+    <article><i class="bi bi-map"></i><span>Km planejados</span><strong>{{ '%.1f'|format(distancia_total) }}</strong></article>
+    <article><i class="bi bi-house-arrow-left"></i><span>Retornos à loja</span><strong>{{ retornos_total }}</strong></article>
+    <article class="{% if riscos_abertos %}metric-alert{% endif %}"><i class="bi bi-exclamation-triangle"></i><span>Riscos em aberto</span><strong>{{ riscos_abertos }}</strong></article>
+  </section>
+
+  {% if not configurada %}<section class="intel-notice"><i class="bi bi-geo-alt"></i><div><strong>Conclua a configuração da loja</strong><p>Informe endereço e coordenadas para melhorar o cálculo de distância.</p></div><a class="botao btn-krj-outline" href="/painel/inteligencia-logistica/configuracoes">Configurar</a></section>{% endif %}
+
+  <section class="intel-card">
+    <div class="intel-section-head"><div><h2>Últimas análises</h2><p>Recálculos da mesma rota continuam incluídos.</p></div><a href="/painel/inteligencia-logistica/historico">Ver todas</a></div>
+    <div class="intel-route-list">
+      {% for r in rotas %}<a href="/painel/inteligencia-logistica/rota/{{ r.id }}" class="intel-route-row"><div><strong>{{ r.codigo }}</strong><span>{{ r.data_operacao.strftime('%d/%m/%Y') }} · {{ r.equipe.nome if r.equipe else 'Todas as equipes' }}</span></div><div><span class="status-pill {{ r.status }}">{{ r.status|replace('_',' ') }}</span><i class="bi bi-chevron-right"></i></div></a>{% else %}<div class="intel-empty"><i class="bi bi-stars"></i><strong>Nenhuma inteligência gerada</strong><span>Crie a primeira análise usando entregas e retiradas da operação.</span></div>{% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="inteligencia-wrap intel-page">
+  <a class="intel-back" href="/painel/inteligencia-logistica"><i class="bi bi-arrow-left"></i> Central de Inteligência</a>
+  <section class="intel-page-title"><div><span class="intel-kicker">Assistente</span><h1>Nova inteligência</h1><p>Escolha o dia e a equipe. O sistema reúne entregas e retiradas disponíveis.</p></div><div class="intel-cost"><small>Custo</small><strong>1</strong><span>Humiat</span></div></section>
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  <section class="intel-card">
+    <form method="get" action="/painel/inteligencia-logistica/nova" class="intel-form intel-filter-form">
+      <label>Data<input type="date" name="data" value="{{ data_filtro.isoformat() }}" required></label>
+      <label>Equipe<select name="equipe_id"><option value="0">Todas / não definida</option>{% for e in equipes %}<option value="{{ e.id }}" {% if equipe_id==e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></label>
+      <button class="botao btn-krj-outline" type="submit"><i class="bi bi-search"></i> Consultar operação</button>
+    </form>
+  </section>
+  <section class="intel-card">
+    <div class="intel-section-head"><div><h2>Operações encontradas</h2><p>Entregas e retiradas que participarão do cálculo.</p></div><strong class="intel-count">{{ candidatos|length }}</strong></div>
+    <div class="intel-candidate-list">{% for c in candidatos %}<div class="intel-candidate"><i class="bi {% if c.tipo=='entrega' %}bi-truck{% else %}bi-arrow-return-left{% endif %}"></i><div><strong>{{ c.titulo }}</strong><span>{{ c.tipo|title }} · {{ c.endereco or 'Endereço não informado' }}</span></div><span>{{ c.limite.strftime('%H:%M') if c.limite else '--:--' }}</span></div>{% else %}<div class="intel-empty"><i class="bi bi-calendar-x"></i><strong>Nenhuma operação disponível</strong><span>Confira a data, a equipe e a programação operacional.</span></div>{% endfor %}</div>
+  </section>
+  {% if existente %}<section class="intel-notice"><i class="bi bi-check-circle"></i><div><strong>Já existe uma inteligência para essa data e equipe</strong><p>Abrir a rota existente não consome outro Humiat.</p></div><a class="botao btn-krj-primary" href="/painel/inteligencia-logistica/rota/{{ existente.id }}">Abrir rota</a></section>{% elif candidatos %}
+  <section class="intel-card destaque"><form method="post" action="/painel/inteligencia-logistica/gerar" class="intel-form duas-colunas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><label>Horário de saída<input type="time" name="horario_saida" value="07:00" required></label><label>Veículo<select name="veiculo_id"><option value="0">Não informado</option>{% for v in veiculos %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></label><div class="intel-confirm span2"><div><strong>Saldo atual: {{ empresa.humiat_saldo or 0 }}</strong><span>Saldo depois da geração: {{ (empresa.humiat_saldo or 0) - 1 }}</span></div><button class="botao btn-krj-primary" type="submit" onclick="return confirm('Gerar esta inteligência consumirá 1 Humiat. Continuar?')"><i class="bi bi-stars"></i> Gerar inteligência</button></div></form></section>{% endif %}
+</div>
+{% endblock %}
