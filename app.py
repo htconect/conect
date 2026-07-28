@@ -12,12 +12,13 @@ import re
 import math
 import json
 import zipfile
+import base64
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
 
 from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session
@@ -84,6 +85,45 @@ templates = Jinja2Templates(directory="templates")
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
+
+
+@app.get("/e/{slug}/logo", name="logo_publica_empresa")
+def logo_publica_empresa(slug: str, db: Session = Depends(get_db)):
+    """Entrega sempre a identidade visual da empresa indicada no link público.
+
+    O endpoint evita que previews do WhatsApp, favicon e páginas públicas usem
+    a marca de outra empresa ou os ícones globais do sistema.
+    """
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+
+    logo = (empresa.logo_url or empresa.logo_idb_url or "").strip()
+    if not logo:
+        raise HTTPException(404)
+
+    if logo.startswith("data:"):
+        try:
+            cabecalho, conteudo = logo.split(",", 1)
+            mime = cabecalho[5:].split(";", 1)[0] or "image/png"
+            dados = base64.b64decode(conteudo) if ";base64" in cabecalho else conteudo.encode("utf-8")
+            return Response(content=dados, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
+        except Exception:
+            raise HTTPException(404)
+
+    if logo.startswith("http://") or logo.startswith("https://"):
+        return RedirectResponse(logo, status_code=307)
+
+    caminho_relativo = logo.lstrip("/")
+    caminho = Path(caminho_relativo).resolve()
+    raiz_uploads = Path("static/uploads/logos").resolve()
+    try:
+        caminho.relative_to(raiz_uploads)
+    except ValueError:
+        raise HTTPException(404)
+    if not caminho.is_file():
+        raise HTTPException(404)
+    return FileResponse(caminho, headers={"Cache-Control": "public, max-age=3600"})
 
 
 def agora_utc() -> datetime:
