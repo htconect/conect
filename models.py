@@ -460,6 +460,7 @@ class LancamentoOrganiza(Base):
     __tablename__ = "lancamentos_organiza"
 
     id = Column(Integer, primary_key=True, index=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=True, index=True)
     id_externo = Column(String(120), unique=True, nullable=False, index=True)
     tipo = Column(String(30), nullable=False)  # venda | manutencao
     cliente = Column(String(255), nullable=True)

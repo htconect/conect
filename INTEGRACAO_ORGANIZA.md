@@ -26,7 +26,8 @@ Se a variável não estiver configurada, a API aceita chamadas sem chave (útil 
   "descricao": "Venda OS 1548",
   "valor": 500.00,
   "data_pagamento": "2026-07-20",
-  "banco": "Banco Principal"
+  "banco": "Banco Principal",
+  "empresa_slug": "karaokerj"
 }
 ```
 
@@ -40,6 +41,8 @@ Se a variável não estiver configurada, a API aceita chamadas sem chave (útil 
 ### Campos opcionais
 - `cliente`
 - `descricao`
+- `empresa_slug`: empresa que receberá o lançamento no Connect. Quando omitido, usa `karaokerj`.
+- `empresa_id`: alternativa ao `empresa_slug`.
 
 ## Regra de duplicidade
 

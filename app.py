@@ -1008,11 +1008,36 @@ def garantir_colunas_novas():
                 "ALTER TABLE lancamentos_organiza "
                 "ADD COLUMN falta_receber NUMERIC(12, 2) DEFAULT 0 NOT NULL"
             )
+        if "empresa_id" not in cols_org:
+            comandos.append(
+                "ALTER TABLE lancamentos_organiza "
+                "ADD COLUMN empresa_id INTEGER"
+            )
+            comandos.append(
+                "CREATE INDEX IF NOT EXISTS ix_lancamentos_organiza_empresa_id "
+                "ON lancamentos_organiza (empresa_id)"
+            )
 
     if comandos:
         with engine.begin() as conn:
             for comando in comandos:
                 conn.execute(text(comando))
+
+    # Lançamentos antigos do Organiza pertencem à empresa Karaoke RJ.
+    # O preenchimento é idempotente e evita que apareçam em outras empresas.
+    if "lancamentos_organiza" in tabelas:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE lancamentos_organiza
+                   SET empresa_id = (
+                       SELECT id FROM empresas
+                        WHERE lower(slug) IN ('karaokerj', 'karaoke-rj')
+                           OR lower(nome) = 'karaoke rj'
+                        ORDER BY CASE WHEN lower(slug) = 'karaokerj' THEN 0 ELSE 1 END
+                        LIMIT 1
+                   )
+                 WHERE empresa_id IS NULL
+            """))
 
     # Regra Humiat 1:1: 4 contratos grátis por mês e 1 Humiat por contrato excedente.
     # Corrige instalações que receberam temporariamente a configuração de 40 gratuitos.
@@ -1165,6 +1190,23 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         raise HTTPException(status_code=422, detail="data_pagamento deve usar AAAA-MM-DD.")
 
     id_externo = str(dados["id_externo"]).strip()
+
+    # A integração do Organiza é vinculada à empresa de destino.
+    # Por compatibilidade, quando o Organiza não envia a empresa, usa Karaoke RJ.
+    empresa_slug = str(dados.get("empresa_slug") or "karaokerj").strip().lower()
+    empresa_destino = None
+    if dados.get("empresa_id") not in (None, ""):
+        try:
+            empresa_destino = db.get(Empresa, int(dados["empresa_id"]))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="empresa_id inválido.")
+    if not empresa_destino:
+        empresa_destino = db.query(Empresa).filter(func.lower(Empresa.slug) == empresa_slug).first()
+    if not empresa_destino and empresa_slug in ("karaokerj", "karaoke-rj"):
+        empresa_destino = db.query(Empresa).filter(func.lower(Empresa.nome) == "karaoke rj").first()
+    if not empresa_destino:
+        raise HTTPException(status_code=422, detail="Empresa de destino da integração não encontrada.")
+
     registro = db.query(LancamentoOrganiza).filter(
         LancamentoOrganiza.id_externo == id_externo
     ).first()
@@ -1174,6 +1216,7 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         registro = LancamentoOrganiza(id_externo=id_externo)
         db.add(registro)
 
+    registro.empresa_id = empresa_destino.id
     registro.tipo = tipo
     registro.cliente = (str(dados.get("cliente") or "").strip() or None)
     registro.descricao = (str(dados.get("descricao") or "").strip() or None)
@@ -1203,13 +1246,19 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
         if chave_recebida != chave_esperada:
             raise HTTPException(status_code=401, detail="Chave de integração inválida.")
 
+    empresa_slug = (request.query_params.get("empresa_slug") or "karaokerj").strip().lower()
+    empresa_destino = db.query(Empresa).filter(func.lower(Empresa.slug) == empresa_slug).first()
+    consulta = db.query(LancamentoOrganiza)
+    if empresa_destino:
+        consulta = consulta.filter(LancamentoOrganiza.empresa_id == empresa_destino.id)
     registros = (
-        db.query(LancamentoOrganiza)
+        consulta
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .limit(500)
         .all()
     )
     return [{
+        "empresa_id": r.empresa_id,
         "id_externo": r.id_externo,
         "tipo": r.tipo,
         "cliente": r.cliente,
@@ -4747,11 +4796,15 @@ def financeiro(
     })
     registros_organiza_disponiveis = (
         db.query(LancamentoOrganiza)
-        .filter(~LancamentoOrganiza.id.in_(ids_organiza_vinculados))
+        .filter(
+            LancamentoOrganiza.empresa_id == empresa.id,
+            ~LancamentoOrganiza.id.in_(ids_organiza_vinculados)
+        )
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .all()
     ) if ids_organiza_vinculados else (
         db.query(LancamentoOrganiza)
+        .filter(LancamentoOrganiza.empresa_id == empresa.id)
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .all()
     )
@@ -4796,6 +4849,7 @@ def financeiro(
     try:
         lancamentos_organiza_financeiro = (
             db.query(LancamentoOrganiza)
+            .filter(LancamentoOrganiza.empresa_id == empresa.id)
             .order_by(
                 LancamentoOrganiza.data_pagamento.desc(),
                 LancamentoOrganiza.id.desc()
@@ -5321,7 +5375,7 @@ def financeiro_vincular_organiza(
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
     item = db.get(LancamentoOrganiza, organiza_id)
-    if not lanc or lanc.empresa_id != empresa.id or not item:
+    if not lanc or lanc.empresa_id != empresa.id or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if lanc.pagamento_id or lanc.organiza_lancamento_id:
         raise HTTPException(400, "Este lançamento bancário já está vinculado.")
@@ -5563,7 +5617,7 @@ def financeiro_vincular_manual_organiza(
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     item = db.get(LancamentoOrganiza, organiza_id)
-    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not item:
+    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None):
         raise HTTPException(400, "Este lançamento manual já está vinculado.")
