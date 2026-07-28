@@ -1651,3 +1651,45 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
 .intel-page{display:block!important;visibility:visible!important;opacity:1!important;min-height:400px}.intel-actions-grid{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:14px;margin:16px 0}.intel-action{display:flex;align-items:center;gap:13px;background:#fff;border:1px solid #dbe3ef;border-radius:18px;padding:18px;color:#0f172a;text-decoration:none;box-shadow:0 7px 24px rgba(15,23,42,.06)}.intel-action>i:first-child{font-size:25px;color:#2563eb}.intel-action>div{flex:1;display:grid;gap:4px}.intel-action strong{font-size:16px}.intel-action span{font-size:12px;color:#64748b}.intel-action.principal{background:linear-gradient(135deg,#eff6ff,#fff);border-color:#93c5fd}.intel-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}.intel-metrics article{background:#fff;border:1px solid #e2e8f0;border-radius:18px;padding:16px;display:grid;gap:5px}.intel-metrics i{font-size:21px;color:#2563eb}.intel-metrics span{font-size:12px;color:#64748b}.intel-metrics strong{font-size:25px}.intel-metrics .metric-alert{border-color:#fecaca;background:#fff7f7}.intel-metrics .metric-alert i,.intel-metrics .metric-alert strong{color:#dc2626}.intel-notice{display:flex;align-items:center;gap:14px;background:#fffbeb;border:1px solid #fde68a;border-radius:18px;padding:16px;margin:16px 0}.intel-notice>i{font-size:25px;color:#d97706}.intel-notice>div{flex:1}.intel-notice p{margin:3px 0 0;color:#78716c}.intel-section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.intel-section-head h2{margin:0}.intel-section-head p{margin:4px 0 0;color:#64748b}.intel-section-head>a{font-weight:800;color:#2563eb;text-decoration:none}.intel-route-list{display:grid}.intel-route-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 4px;border-bottom:1px solid #e2e8f0;text-decoration:none;color:#0f172a}.intel-route-row:last-child{border-bottom:0}.intel-route-row>div{display:grid;gap:5px}.intel-route-row>div:last-child{display:flex;align-items:center;gap:10px}.intel-route-row span{font-size:12px;color:#64748b}.intel-empty{display:grid;place-items:center;text-align:center;gap:7px;padding:35px;color:#64748b}.intel-empty i{font-size:30px}.intel-back{display:inline-flex;gap:7px;align-items:center;margin:4px 0 15px;color:#2563eb;text-decoration:none;font-weight:800}.intel-page-title{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:18px}.intel-page-title h1{margin:4px 0}.intel-page-title p{margin:0;color:#64748b}.intel-cost{background:#eff6ff;border:1px solid #bfdbfe;border-radius:17px;padding:11px 20px;text-align:center}.intel-cost small,.intel-cost span{display:block}.intel-cost strong{font-size:28px;color:#1d4ed8}.intel-filter-form{grid-template-columns:1fr 1fr auto;align-items:end}.intel-count{font-size:28px;color:#2563eb}.intel-candidate-list{display:grid;gap:8px}.intel-candidate{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;padding:11px;border:1px solid #e2e8f0;border-radius:13px}.intel-candidate>i{font-size:20px;color:#2563eb}.intel-candidate>div{display:grid;gap:3px}.intel-candidate span{font-size:12px;color:#64748b}.intel-confirm{display:flex;justify-content:space-between;align-items:center;gap:15px;padding:14px;background:#f8fafc;border-radius:14px}.intel-confirm>div{display:grid}.intel-confirm span{font-size:12px;color:#64748b}.intel-config-grid{display:grid;grid-template-columns:1.3fr .7fr;gap:16px}.intel-vehicle-list{display:grid;gap:8px;margin-top:16px}.intel-vehicle-list>div{display:grid;grid-template-columns:30px 1fr auto;align-items:center;padding:11px;border:1px solid #e2e8f0;border-radius:12px}.intel-vehicle-list span{font-size:12px;color:#64748b}.intel-history-metrics{display:flex!important;flex-direction:row!important;align-items:center;gap:14px}.intel-history-metrics>span:not(.status-pill){font-weight:700;color:#334155}
 @media(max-width:850px){.intel-actions-grid,.intel-metrics,.intel-config-grid{grid-template-columns:1fr 1fr}.intel-actions-grid .principal{grid-column:1/-1}.intel-filter-form{grid-template-columns:1fr 1fr}.intel-filter-form button{grid-column:1/-1}.intel-history-row{align-items:flex-start}.intel-history-metrics{flex-wrap:wrap;justify-content:flex-end}}
 @media(max-width:560px){.inteligencia-wrap{padding:14px 12px 100px}.intel-hero{align-items:flex-start;padding:20px}.intel-hero .intel-saldo{min-width:96px}.intel-actions-grid,.intel-metrics,.intel-config-grid{grid-template-columns:1fr}.intel-actions-grid .principal{grid-column:auto}.intel-metrics{grid-template-columns:1fr 1fr}.intel-page-title{align-items:flex-start}.intel-filter-form,.intel-form.duas-colunas{grid-template-columns:1fr}.intel-form .span2{grid-column:auto}.intel-confirm{align-items:stretch;flex-direction:column}.intel-confirm button{width:100%}.intel-route-row,.intel-history-row{align-items:flex-start}.intel-history-metrics{display:grid!important;justify-items:end}.intel-notice{align-items:flex-start;flex-wrap:wrap}.intel-notice .botao{width:100%}}
+
+
+/* Reserva: indicadores legíveis e contrato automático pelo equipamento */
+.reserva-mobile-topo .status-grid-mobile{
+  align-items:stretch;
+}
+.reserva-mobile-topo .status-pill{
+  min-width:0;
+  min-height:60px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  line-height:1.15;
+}
+.reserva-mobile-topo .status-pill small,
+.reserva-mobile-topo .status-pill b{
+  display:block;
+  width:100%;
+  margin:0;
+  overflow-wrap:normal;
+  word-break:normal;
+  white-space:nowrap;
+}
+.reserva-mobile-topo .status-pill small{font-size:11px;}
+.reserva-mobile-topo .status-pill b{margin-top:5px;font-size:13px;}
+.contrato-automatico-campo{margin-top:12px;}
+.contrato-automatico-campo select:disabled{
+  opacity:1;
+  cursor:default;
+  background:#f8fafc;
+  color:#0f172a;
+  border-color:#cbd5e1;
+}
+.contrato-automatico-campo .texto-discreto{display:block;margin-top:5px;}
+@media(max-width:360px){
+  .reserva-mobile-topo .status-grid-mobile{gap:5px;}
+  .reserva-mobile-topo .status-pill{padding:9px 4px;}
+  .reserva-mobile-topo .status-pill small{font-size:10px;}
+  .reserva-mobile-topo .status-pill b{font-size:12px;}
+}

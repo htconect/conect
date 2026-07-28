@@ -190,14 +190,6 @@
     <input type="hidden" name="local" value="{{ item.local or item.cliente.endereco or '' }}">
     <input type="hidden" name="acesso_local" value="{{ item.acesso_local or '' }}">
 
-    <label>Modelo de contrato</label>
-    <select name="contrato_id" required>
-      <option value="">Selecione</option>
-      {% for c in contratos %}
-        <option value="{{ c.id }}" {% if item.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
-      {% endfor %}
-    </select>
-
     <div id="itensReserva">
       {% set linhas = item.itens if item.itens else [None] %}
       {% for linha in linhas %}
@@ -222,6 +214,18 @@
     </div>
 
     <button type="button" class="secundario largura-total" onclick="adicionarItem()">+ Adicionar outro item</button>
+
+    <div class="contrato-automatico-campo">
+      <label for="contratoAutomaticoVisual">Modelo de contrato</label>
+      <input type="hidden" id="contratoAutomatico" name="contrato_id" value="{{ item.contrato_id or '' }}" required>
+      <select id="contratoAutomaticoVisual" disabled aria-label="Contrato definido automaticamente pelo equipamento">
+        <option value="">Selecione primeiro o equipamento</option>
+        {% for c in contratos %}
+          <option value="{{ c.id }}" {% if item.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+        {% endfor %}
+      </select>
+      <small class="texto-discreto">Definido automaticamente conforme o equipamento selecionado.</small>
+    </div>
 
     <label>Observações do contrato</label>
     <textarea name="observacoes" placeholder="Opcional">{{ item.observacoes or '' }}</textarea>
@@ -345,9 +349,13 @@
 <script>
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
-  const contrato = document.querySelector('select[name="contrato_id"]');
-  if(contratoId && contrato){
+  const contrato = document.getElementById('contratoAutomatico');
+  const contratoVisual = document.getElementById('contratoAutomaticoVisual');
+  if(contrato){
     contrato.value = contratoId;
+  }
+  if(contratoVisual){
+    contratoVisual.value = contratoId;
   }
 }
 document.addEventListener('change', function(ev){
