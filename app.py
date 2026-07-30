@@ -7052,6 +7052,26 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             ] if c["tipo"] == "retirada" else []
             libera_entrega = bool(entregas_dependentes and c.get("retirada_obrigatoria"))
 
+            # Restrição absoluta: uma escolha não pode tornar uma entrega futura atrasada.
+            # Avalia, de forma conservadora, se cada entrega restante ainda seria alcançável
+            # imediatamente após esta parada. Retiradas que criam atraso ficam inviáveis.
+            saida_candidata = chegada + timedelta(minutes=c["servico"])
+            inviabiliza_entrega = False
+            maior_atraso_futuro = 0
+            for futura in restantes:
+                if futura is c or futura["tipo"] != "entrega":
+                    continue
+                dist_futura = _distancia_km(c.get("lat"), c.get("lon"), futura.get("lat"), futura.get("lon"))
+                desloc_futuro = (max(1, int(round((dist_futura / velocidade) * 60)))
+                                  if dist_futura is not None else
+                                  _deslocamento_estimado_sem_coordenadas(c.get("bairro"), futura.get("bairro")))
+                chegada_futura = saida_candidata + timedelta(minutes=desloc_futuro)
+                limite_futuro = datetime.combine(data_operacao, futura["limite"])
+                atraso_futuro = int((chegada_futura - limite_futuro).total_seconds() / 60)
+                if atraso_futuro > 0:
+                    inviabiliza_entrega = True
+                    maior_atraso_futuro = max(maior_atraso_futuro, atraso_futuro)
+
             # Menor chave vence. Atraso de entrega domina qualquer economia.
             if c["tipo"] == "entrega":
                 score_tipo = 0
@@ -7073,8 +7093,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 score_tipo += entregas_criticas * 5000
 
             score_dist = desloc * 25
+            penalidade_inviavel = (1_000_000 + maior_atraso_futuro * 100_000) if inviabiliza_entrega else 0
             chave = (
-                score_prazo + score_tipo + score_dist + bonus_reuso,
+                penalidade_inviavel + score_prazo + score_tipo + score_dist + bonus_reuso,
                 0 if c["tipo"] == "entrega" else 1,
                 limite_dt,
                 c["agenda"].id if c.get("agenda") else 0,
@@ -7173,6 +7194,38 @@ def _inserir_retornos_capacidade(ordenados, capacidade: int | None, cfg):
         resultado.append(c)
     return resultado
 
+def _simular_sequencia_rota(ordenados, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None):
+    """Recalcula a linha do tempo e informa se alguma entrega chega após o limite."""
+    atual = datetime.combine(data_operacao, hora_saida)
+    lat_atual, lon_atual = origem_lat, origem_lon
+    bairro_atual = ""
+    velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
+    atrasos = []
+    for c in ordenados:
+        distancia = _distancia_km(lat_atual, lon_atual, c.get("lat"), c.get("lon"))
+        desloc = (max(1, int(round((distancia / velocidade) * 60)))
+                   if distancia is not None else
+                   _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro")))
+        chegada = atual + timedelta(minutes=desloc)
+        saida = chegada + timedelta(minutes=max(0, int(c.get("servico") or 0)))
+        c["distancia"] = float(distancia or 0)
+        c["desloc"] = desloc
+        c["chegada"] = chegada
+        c["saida"] = saida
+        if c.get("tipo") == "entrega" and c.get("limite"):
+            limite_dt = datetime.combine(data_operacao, c["limite"])
+            folga = int((limite_dt - chegada).total_seconds() / 60)
+            c["folga_min"] = folga
+            c["risco"] = "atrasado" if folga < 0 else ("atencao" if folga <= 20 else "normal")
+            if folga < 0:
+                atrasos.append({"titulo": c.get("titulo") or "Entrega", "minutos": -folga})
+        atual = saida
+        bairro_atual = c.get("bairro") or bairro_atual
+        if c.get("lat") is not None and c.get("lon") is not None:
+            lat_atual, lon_atual = c["lat"], c["lon"]
+    return atrasos
+
+
 def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     cfg = _config_rota(db, rota.empresa_id)
     paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(RotaInteligenteParada.ordem).all()
@@ -7213,6 +7266,8 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     rota.distancia_total_km = round(distancia_total, 1); rota.duracao_total_min = duracao
     rota.retornos_loja = retornos; rota.carga_maxima_pontos = carga_max
     rota.custo_estimado = round(distancia_total * float(cfg.custo_km or 0) + (duracao / 60) * float(cfg.custo_hora_equipe or 0), 2)
+    entregas_atrasadas = [p for p in paradas if p.tipo == "entrega" and p.risco == "atrasado"]
+    rota.status = "invalida_atraso" if entregas_atrasadas else ("concluida" if paradas and all(p.status == "concluido" for p in paradas) else "planejada")
     rota.versao_calculo = int(rota.versao_calculo or 0) + 1
 
 
@@ -7477,6 +7532,15 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), hor
     ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
     veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first() if veiculo_id else None
     ordenados = _inserir_retornos_capacidade(ordenados, veiculo.capacidade_pontos if veiculo else None, cfg)
+    atrasos = _simular_sequencia_rota(ordenados, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
+    if atrasos:
+        resumo = ", ".join(f"{a['titulo']} ({a['minutos']} min)" for a in atrasos[:3])
+        return RedirectResponse(
+            "/painel/inteligencia-logistica/nova?erro=" + quote(
+                f"Rota inválida: há entrega(s) após o limite: {resumo}. Antecipe a saída, redistribua a equipe/veículo ou faça entrega no dia anterior. Nenhum Humiat foi consumido."
+            ),
+            status_code=303
+        )
     codigo = f"IL-{data_op.strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
     rota = RotaInteligente(empresa_id=empresa.id, equipe_id=equipe_id or None, veiculo_id=veiculo_id or None,
         codigo=codigo, chave_consumo=chave, data_operacao=data_op, horario_saida=hora, humiat_consumido=True,

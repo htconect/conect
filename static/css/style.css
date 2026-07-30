@@ -1693,3 +1693,9 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
   .reserva-mobile-topo .status-pill small{font-size:10px;}
   .reserva-mobile-topo .status-pill b{font-size:12px;}
 }
+
+/* Inteligência Logística: nenhuma entrega pode chegar após o limite */
+.rota-invalida{border-left:6px solid #b42318;background:#fff1f0;color:#7a271a;padding:16px;margin:14px 0}
+.rota-valida{border-left:6px solid #067647;padding:14px;margin:14px 0}
+.parada-rota.atrasado{border:2px solid #d92d20;background:#fff7f6}
+.parada-rota.atrasado .horario strong,.folga-atraso{color:#b42318;font-weight:800}
