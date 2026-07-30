@@ -7234,6 +7234,45 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             if retirada["retirada_obrigatoria"]:
                 break
 
+    # Inteligência independente da Agenda: contratos aceitos também geram operações
+    # previstas mesmo quando os cards operacionais ainda não existem. Isso permite
+    # antecipar retiradas futuras e enxergar o ciclo físico completo do equipamento.
+    solicitacoes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.status.notin_(["rejeitada", "cancelada", "aguardando_nova_data"]),
+    ).all()
+    candidatos_chaves = {(c["agenda"].solicitacao_id if c.get("agenda") else None, c["tipo"]) for c in candidatos}
+
+    def agenda_virtual(sol, tipo, data_ref, hora_ref):
+        ag = Agenda(
+            empresa_id=empresa.id, solicitacao_id=sol.id, data=data_ref,
+            hora_inicio=hora_ref or time(8, 0), hora_fim=sol.hora_fim,
+            titulo=f"{('Retirada - ' if tipo == 'retirada' else '')}{(sol.produto.nome if sol.produto else 'Equipamento')} - {sol.cliente.nome if sol.cliente else 'Cliente'}",
+            bairro=sol.bairro, tipo_evento=tipo, status_operacional="previsto",
+        )
+        ag.solicitacao = sol
+        return ag
+
+    for sol in solicitacoes:
+        # Entrega prevista do dia, mesmo sem card Entregar.
+        if sol.data_evento == data_operacao and (sol.id, "entrega") not in candidatos_chaves:
+            ag = agenda_virtual(sol, "entrega", sol.data_evento, sol.hora_inicio)
+            adicionar(ag, "entrega", sintetica=True)
+            candidatos[-1]["origem_operacao"] = "prevista_pelo_contrato"
+            candidatos_chaves.add((sol.id, "entrega"))
+            entregas_do_dia.append(candidatos[-1])
+
+        # Toda entrega anterior ainda não retirada deve aparecer como previsão de retirada.
+        # Usa retirada_data/hora quando informada; caso contrário calcula a partir do fim
+        # do evento e do tempo de desmontagem.
+        data_prevista = sol.retirada_data or sol.data_evento
+        if data_prevista <= data_operacao and (sol.id, "retirada") not in candidatos_chaves:
+            ag = agenda_virtual(sol, "retirada", data_prevista, sol.retirada_hora or sol.hora_fim or sol.hora_inicio)
+            adicionar(ag, "retirada", sintetica=True, data_retirada=data_prevista)
+            candidatos[-1]["origem_operacao"] = "retirada_prevista_pela_inteligencia"
+            candidatos[-1]["retirada_prevista_sem_card"] = True
+            candidatos_chaves.add((sol.id, "retirada"))
+
     return candidatos
 
 
@@ -7709,6 +7748,27 @@ def configuracoes_inteligencia(request: Request, db: Session = Depends(get_db), 
     })
 
 
+@app.post("/painel/inteligencia-logistica/zerar")
+def zerar_inteligencia_logistica(request: Request, confirmar: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if confirmar.strip().upper() != "ZERAR":
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Digite ZERAR para confirmar", status_code=303)
+    rota_ids = [r[0] for r in db.query(RotaInteligente.id).filter_by(empresa_id=empresa.id).all()]
+    if rota_ids:
+        db.query(RotaInteligenteParada).filter(RotaInteligenteParada.rota_id.in_(rota_ids)).delete(synchronize_session=False)
+        db.query(RotaInteligente).filter(RotaInteligente.id.in_(rota_ids)).delete(synchronize_session=False)
+    veiculo_ids = [v[0] for v in db.query(VeiculoLogistico.id).filter_by(empresa_id=empresa.id).all()]
+    if veiculo_ids:
+        db.query(VeiculoPerfilCarga).filter(VeiculoPerfilCarga.veiculo_id.in_(veiculo_ids)).delete(synchronize_session=False)
+        db.query(VeiculoLogistico).filter(VeiculoLogistico.id.in_(veiculo_ids)).delete(synchronize_session=False)
+    db.query(ConfiguracaoRotaInteligente).filter_by(empresa_id=empresa.id).delete(synchronize_session=False)
+    db.query(Solicitacao).filter_by(empresa_id=empresa.id).update({
+        Solicitacao.latitude: None, Solicitacao.longitude: None,
+        Solicitacao.status_geocodificacao: "pendente", Solicitacao.data_geocodificacao: None
+    }, synchronize_session=False)
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Inteligência zerada. Contratos, agenda, operação e financeiro não foram alterados.", status_code=303)
+
+
 @app.get("/painel/inteligencia-logistica/historico", response_class=HTMLResponse)
 def historico_inteligencia(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     rotas = db.query(RotaInteligente).filter_by(empresa_id=empresa.id).order_by(
@@ -7826,6 +7886,16 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora_provisoria)
     if not candidatos:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
+    if cfg.latitude_loja is None or cfg.longitude_loja is None:
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Informe latitude e longitude da loja antes de calcular", status_code=303)
+    sem_geo = [c for c in candidatos if c.get("lat") is None or c.get("lon") is None]
+    if sem_geo:
+        return RedirectResponse(
+            "/painel/inteligencia-logistica/nova?data=" + data_op.isoformat() +
+            "&equipe_id=" + str(equipe_id or 0) + "&abrir_geo=1&erro=" +
+            quote(f"Não é possível gerar uma rota real: {len(sem_geo)} endereço(s) ainda estão sem coordenadas."),
+            status_code=303
+        )
     ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja)
     try:
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
