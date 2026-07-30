@@ -220,6 +220,7 @@ class ProdutoServico(Base):
     valor_base = Column(Float, default=0)
     duracao_minutos = Column(Integer, default=240)
     prazo_retirada_dias = Column(Integer, default=1)
+    carga_pontos = Column(Integer, nullable=False, default=1)
     ativo = Column(Boolean, default=True)
 
     empresa = relationship("Empresa", back_populates="produtos")
@@ -495,6 +496,8 @@ class ConfiguracaoRotaInteligente(Base):
     antecedencia_entrega = Column(Integer, nullable=False, default=60)
     minutos_parada_loja = Column(Integer, nullable=False, default=20)
     velocidade_media_kmh = Column(Float, nullable=False, default=30)
+    custo_km = Column(Float, nullable=False, default=0)
+    custo_hora_equipe = Column(Float, nullable=False, default=0)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 class RotaInteligente(Base):
@@ -516,6 +519,8 @@ class RotaInteligente(Base):
     distancia_total_km = Column(Float, nullable=False, default=0)
     duracao_total_min = Column(Integer, nullable=False, default=0)
     retornos_loja = Column(Integer, nullable=False, default=0)
+    carga_maxima_pontos = Column(Integer, nullable=False, default=0)
+    custo_estimado = Column(Float, nullable=False, default=0)
     versao_calculo = Column(Integer, nullable=False, default=1)
     criado_por = Column(String(120), nullable=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
@@ -548,6 +553,8 @@ class RotaInteligenteParada(Base):
     motivo_prioridade = Column(Text, nullable=True)
     fixada = Column(Boolean, nullable=False, default=False)
     retorno_loja = Column(Boolean, nullable=False, default=False)
+    carga_movimento = Column(Integer, nullable=False, default=0)
+    carga_apos_parada = Column(Integer, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
     rota = relationship("RotaInteligente", back_populates="paradas")
     agenda = relationship("Agenda")

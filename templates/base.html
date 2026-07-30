@@ -3,26 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  {% set nome_marca = empresa.nome if empresa is defined and empresa else "HUMIAT Conect" %}
-  {% set titulo_pagina = titulo or nome_marca %}
-  <title>{{ titulo_pagina }}</title>
-  <meta name="description" content="{{ nome_marca }} — contratos, reservas e confirmações.">
-  <meta property="og:type" content="website">
-  <meta property="og:site_name" content="{{ nome_marca }}">
-  <meta property="og:title" content="{{ titulo_pagina }}">
-  <meta property="og:description" content="Acesse para conferir e confirmar as informações com {{ nome_marca }}.">
-  <meta property="og:url" content="{{ request.url }}">
-  {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}
-  <meta property="og:image" content="{{ request.url_for('logo_publica_empresa', slug=empresa.slug) }}">
-  <meta property="og:image:alt" content="Logo {{ nome_marca }}">
-  <link rel="icon" href="{{ request.url_for('logo_publica_empresa', slug=empresa.slug) }}">
-  <link rel="apple-touch-icon" href="{{ request.url_for('logo_publica_empresa', slug=empresa.slug) }}">
-  {% else %}
-  <link rel="icon" href="/static/icon-192.png">
-  <link rel="apple-touch-icon" href="/static/icon-192.png">
-  {% endif %}
+  <title>{{ titulo or "HUMIAT Conect" }}</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
   <meta name="theme-color" content="#0f172a">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="stylesheet" href="/static/css/style.css?v=20260725-intel2">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 </head>

@@ -51,6 +51,9 @@
     <div>
       <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
     </div>
+    <div>
+      <label>Pontos de carga no veículo</label><input name="carga_pontos" type="number" min="1" value="{{ produto.carga_pontos if produto else 1 }}">
+    </div>
   </div>
   <button>{% if produto %}Atualizar{% else %}Salvar{% endif %}</button>
 </form>
@@ -62,7 +65,7 @@
   <h3>{{ p.nome }}</h3>
   <p>{{ p.descricao }}</p>
   <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
-  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
+  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Carga logística: {{ p.carga_pontos or 1 }} ponto(s)</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
   <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
 </div>
 {% endfor %}
