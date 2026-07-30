@@ -1070,6 +1070,31 @@ def garantir_colunas_novas():
             for comando in comandos:
                 conn.execute(text(comando))
 
+    # As paradas inteligentes preservam o histórico da rota mesmo quando um
+    # registro operacional da Agenda é limpo ou recriado. No PostgreSQL, a FK
+    # antiga usava RESTRICT/NO ACTION e impedia o startup ao excluir duplicatas.
+    # ON DELETE SET NULL mantém a parada salva e apenas remove o vínculo obsoleto.
+    if engine.dialect.name == "postgresql" and "rotas_inteligentes_paradas" in tabelas:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'rotas_inteligentes_paradas_agenda_id_fkey'
+                           AND confdeltype <> 'n'
+                    ) THEN
+                        ALTER TABLE rotas_inteligentes_paradas
+                            DROP CONSTRAINT rotas_inteligentes_paradas_agenda_id_fkey;
+                        ALTER TABLE rotas_inteligentes_paradas
+                            ADD CONSTRAINT rotas_inteligentes_paradas_agenda_id_fkey
+                            FOREIGN KEY (agenda_id) REFERENCES agenda(id)
+                            ON DELETE SET NULL;
+                    END IF;
+                END $$;
+            """))
+
     # Lançamentos antigos do Organiza pertencem à empresa Karaoke RJ.
     # O preenchimento é idempotente e evita que apareçam em outras empresas.
     if "lancamentos_organiza" in tabelas:
