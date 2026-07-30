@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="container inteligencia-wrap">
+<div class="inteligencia-wrap intel-page">
   <div class="intel-hero compacto"><div><a href="/painel/inteligencia-logistica" class="voltar">← Central de Inteligência</a><h1>{{ rota.codigo }}</h1><p>{{ rota.data_operacao.strftime('%d/%m/%Y') }} · Saída {{ rota.horario_saida.strftime('%H:%M') }} · {{ rota.equipe.nome if rota.equipe else 'Todas as equipes' }}</p></div><div class="intel-saldo"><small>Custo desta análise</small><strong>1</strong><span>Humiat</span></div></div>
   {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
   <div class="metricas-rota"><div><span>Distância prevista</span><strong>{{ '%.1f'|format(rota.distancia_total_km or 0) }} km</strong></div><div><span>Duração prevista</span><strong>{{ (rota.duracao_total_min or 0)//60 }}h {{ (rota.duracao_total_min or 0)%60 }}min</strong></div><div><span>Retornos à loja</span><strong>{{ rota.retornos_loja or 0 }}</strong></div><div><span>Carga máxima</span><strong>{{ rota.carga_maxima_pontos or 0 }} pts</strong></div><div><span>Custo estimado</span><strong>R$ {{ '%.2f'|format(rota.custo_estimado or 0) }}</strong></div><div><span>Versão do cálculo</span><strong>{{ rota.versao_calculo }}</strong></div></div>

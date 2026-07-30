@@ -87,7 +87,8 @@
     (', ' ~ c.estado if c.estado else '') ~
     (', CEP ' ~ c.cep if c.cep else '')
     %}
-    {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) %}
+    {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
+    {% set url_waze_app = 'waze://?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
     {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
     <details
             class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
@@ -182,14 +183,15 @@
                    data-local-tel="{{ (a.solicitacao.local_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
                    data-retirada-nome="{{ a.solicitacao.retirada_responsavel_nome or '' }}"
                    data-retirada-tel="{{ (a.solicitacao.retirada_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
-                   data-tipo="{{ tipo }}" data-agenda-id="{{ a.id }}">A caminho</button>
+                   data-tipo="{{ tipo }}" data-agenda-id="{{ a.id }}"
+                   data-abrir-rota="1" data-waze="{{ url_waze }}" data-waze-app="{{ url_waze_app }}" data-maps="{{ url_maps }}">A caminho</button>
                 {% else %}
                 <span class="botao-mini botao-whats-btn desabilitado"
                       title="Salve a data e a hora para liberar o aviso ao cliente.">A caminho</span>
                 {% endif %}
 
                 {% if endereco_rota|trim %}
-                <a class="botao-mini botao-rota btn-krj-route" href="{{ url_maps }}" target="_blank" rel="noopener" data-waze="{{ url_waze }}"
+                <a class="botao-mini botao-rota btn-krj-route" href="{{ url_maps }}" target="_blank" rel="noopener" data-waze="{{ url_waze }}" data-waze-app="{{ url_waze_app }}"
                    data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}"
                    title="Iniciar rota">Iniciar rota</a>
                 {% else %}
@@ -330,19 +332,45 @@ Digite o número da opção:`, '1');
     } catch (_) { /* não impede o WhatsApp caso a rede oscile */ }
   }
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem)}`,'_blank');
+
+  // Ao avisar "A caminho", inicia a navegação sem perguntar.
+  // Waze é prioritário; em celular, se o aplicativo não abrir, usa o Google Maps.
+  if(b.dataset.abrirRota === '1'){
+    abrirNavegacaoPreferida(b);
+  }
 });
+
+function abrirNavegacaoPreferida(elemento){
+  const wazeWeb = elemento.dataset.waze;
+  const wazeApp = elemento.dataset.wazeApp;
+  const maps = elemento.dataset.maps || elemento.href;
+  if(!maps && !wazeWeb && !wazeApp) return;
+
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if(!mobile){
+    window.open(wazeWeb || maps, '_blank', 'noopener');
+    return;
+  }
+
+  let saiuDaPagina = false;
+  const marcarSaida = () => { if(document.hidden) saiuDaPagina = true; };
+  document.addEventListener('visibilitychange', marcarSaida, {once:true});
+
+  // Tenta abrir o aplicativo Waze na mesma aba. Caso não esteja instalado,
+  // o navegador permanece visível e o fallback abre o Google Maps.
+  window.location.href = wazeApp || wazeWeb;
+  window.setTimeout(() => {
+    if(!saiuDaPagina && !document.hidden && maps){
+      window.location.href = maps;
+    }
+  }, 1600);
+}
 
 document.addEventListener('click', function(e){
   const botao = e.target.closest('a.botao-rota');
   if(!botao) return;
-  // O href já aponta para o Google Maps. Em celulares com Waze disponível,
-  // oferece escolha sem bloquear a abertura da rota.
-  const waze = botao.dataset.waze;
-  const maps = botao.dataset.maps || botao.href;
-  if(waze && maps && window.confirm('Abrir a rota no Waze?\n\nOK = Waze\nCancelar = Google Maps')){
-    e.preventDefault();
-    window.open(waze, '_blank', 'noopener');
-  }
+  e.preventDefault();
+  abrirNavegacaoPreferida(botao);
 });
 </script>
 
