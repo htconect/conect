@@ -1585,41 +1585,69 @@ def garantir_agenda_reservas(db: Session, empresa_id: int | None = None):
         db.commit()
 
 
+def _previsao_retirada_operacional(reserva: Solicitacao, entrega: Agenda | None = None) -> tuple[date, time]:
+    """Calcula a busca prevista mesmo antes de a entrega ser concluída.
+
+    A Operação continua sendo a fonte da verdade: se a entrega foi movida manualmente,
+    a previsão parte da data/hora operacional. Retirada obrigatória mantém exatamente
+    a data/hora contratada.
+    """
+    if retirada_obrigatoria_ativa(reserva):
+        data_prevista = reserva.retirada_data or reserva.data_evento
+        hora_prevista = reserva.retirada_hora or reserva.hora_fim or reserva.hora_inicio
+        return data_prevista, hora_prevista
+
+    prazo_dias = 1
+    if reserva.produto and reserva.produto.prazo_retirada_dias is not None:
+        prazo_dias = max(0, int(reserva.produto.prazo_retirada_dias or 0))
+
+    data_entrega = (entrega.data if entrega and entrega.data else reserva.data_evento)
+    hora_entrega = (
+        (entrega.hora_fim or entrega.hora_inicio) if entrega
+        else (reserva.hora_fim or reserva.hora_inicio)
+    )
+    return data_entrega + timedelta(days=prazo_dias), hora_entrega
+
+
+def _criar_ou_obter_retirada_prevista(db: Session, reserva: Solicitacao, entrega: Agenda | None = None) -> Agenda:
+    """Materializa na Operação a busca que a Inteligência já conseguia prever."""
+    retirada = (
+        db.query(Agenda)
+        .filter_by(empresa_id=reserva.empresa_id, solicitacao_id=reserva.id, tipo_evento="retirada")
+        .first()
+    )
+    if retirada:
+        return retirada
+
+    data_prevista, hora_prevista = _previsao_retirada_operacional(reserva, entrega)
+    titulo = entrega.titulo if entrega else f"{nome_item_reserva(reserva)} - {reserva.cliente.nome if reserva.cliente else 'Cliente'}"
+    retirada = Agenda(
+        empresa_id=reserva.empresa_id,
+        solicitacao_id=reserva.id,
+        tipo_evento="retirada",
+        status_operacional="pendente",
+        data=data_prevista,
+        hora_inicio=hora_prevista,
+        hora_fim=None,
+        titulo=titulo,
+        bairro=(entrega.bairro if entrega else reserva.bairro),
+    )
+    db.add(retirada)
+    db.flush()
+    return retirada
+
+
 def criar_retirada_apos_entrega(db: Session, entrega: Agenda):
-    """Ao concluir uma entrega, cria a retirada sugerida uma única vez."""
+    """Ao concluir uma entrega, transforma a previsão da Inteligência em Operação real."""
     reserva = entrega.solicitacao
     if not reserva:
         return
 
-    # Se o cliente já exigiu retirada obrigatória, o card de busca já existe
-    # e a entrega concluída não deve criar outro card vermelho de busca.
     if retirada_obrigatoria_ativa(reserva):
         criar_ou_atualizar_retirada_obrigatoria(db, reserva)
         return
 
-    retirada_existente = (
-        db.query(Agenda)
-        .filter_by(empresa_id=entrega.empresa_id, solicitacao_id=entrega.solicitacao_id, tipo_evento="retirada")
-        .first()
-    )
-    if retirada_existente:
-        return
-
-    prazo_dias = 1
-    if reserva.produto and reserva.produto.prazo_retirada_dias is not None:
-        prazo_dias = reserva.produto.prazo_retirada_dias
-
-    db.add(Agenda(
-        empresa_id=entrega.empresa_id,
-        solicitacao_id=entrega.solicitacao_id,
-        tipo_evento="retirada",
-        status_operacional="pendente",
-        data=(entrega.data or reserva.data_evento) + timedelta(days=prazo_dias),
-        hora_inicio=entrega.hora_fim or entrega.hora_inicio,
-        hora_fim=None,
-        titulo=entrega.titulo,
-        bairro=entrega.bairro,
-    ))
+    _criar_ou_obter_retirada_prevista(db, reserva, entrega)
 
 
 def mensagens_empresa(empresa: Empresa) -> dict:
@@ -6437,6 +6465,10 @@ def atualizar_roteiro(
     if item.tipo_evento == "entrega" and status_anterior != "concluido" and item.status_operacional == "concluido":
         criar_retirada_apos_entrega(db, item)
 
+    # A Operação é a fonte da verdade. Qualquer entrega/retirada encerrada ou
+    # remanejada precisa ser lida pelas rotas inteligentes ainda abertas.
+    db.flush()
+    _sincronizar_rotas_inteligentes_ativas(db, empresa.id)
     db.commit()
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
@@ -7269,7 +7301,9 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
         if tipo == "retirada" and not str(titulo_base).lower().startswith("retirada"):
             titulo_base = f"Retirada - {titulo_base}"
         candidatos.append({
-            "agenda": ag, "tipo": tipo, "titulo": titulo_base,
+            "agenda": ag, "agenda_id": None if sintetica else ag.id,
+            "solicitacao_id": ag.solicitacao_id,
+            "tipo": tipo, "titulo": titulo_base,
             "endereco": _endereco_operacao(ag), "lat": lat, "lon": lon,
             "limite": limite, "servico": max(0, servico), "pontos": pontos,
             "sem_coordenadas": lat is None or lon is None,
@@ -7297,20 +7331,30 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             adicionar(ag, "retirada", data_retirada=ag.data)
             retiradas_existentes.add(ag.solicitacao_id)
 
-    # Retiradas previstas no contrato que ainda não ganharam card próprio na Agenda.
-    for ag in agendas:
-        sol = ag.solicitacao
-        if not sol or sol.id in retiradas_existentes or not sol.retirada_data:
+    # Retiradas previstas, inclusive antes de a entrega ser concluída.
+    # A Agenda tradicional só cria o card de busca após encerrar a entrega, mas a
+    # Inteligência precisa enxergar essa operação futura para planejar a semana.
+    entregas_por_solicitacao = {
+        ag.solicitacao_id: ag for ag in agendas if ag.tipo_evento == "entrega"
+    }
+    for solicitacao_id, entrega in entregas_por_solicitacao.items():
+        sol = entrega.solicitacao
+        if not sol or solicitacao_id in retiradas_existentes:
             continue
-        if sol.retirada_data <= data_operacao:
-            # Não cria retirada de contrato cuja própria retirada já foi concluída em outro card.
-            retirada_concluida = any(
-                outro.solicitacao_id == sol.id and outro.tipo_evento == "retirada" and outro.status_operacional == "concluido"
-                for outro in agendas
-            )
-            if not retirada_concluida:
-                adicionar(ag, "retirada", sintetica=True, data_retirada=sol.retirada_data)
-                retiradas_existentes.add(sol.id)
+
+        retirada_concluida = any(
+            outro.solicitacao_id == solicitacao_id
+            and outro.tipo_evento == "retirada"
+            and outro.status_operacional == "concluido"
+            for outro in agendas
+        )
+        if retirada_concluida:
+            continue
+
+        data_prevista, _ = _previsao_retirada_operacional(sol, entrega)
+        if data_prevista <= data_operacao:
+            adicionar(entrega, "retirada", sintetica=True, data_retirada=data_prevista)
+            retiradas_existentes.add(solicitacao_id)
 
     # Cruza a disponibilidade cadastrada com as entregas. Quando faltar unidade,
     # promove apenas as retiradas necessárias. As demais continuam opcionais, mas
@@ -7672,8 +7716,8 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     adicionadas = 0
     for c in ordenados:
         ag = c.get("agenda")
-        agenda_id = ag.id if ag else None
-        solicitacao_id = ag.solicitacao_id if ag else None
+        agenda_id = c.get("agenda_id")
+        solicitacao_id = c.get("solicitacao_id") or (ag.solicitacao_id if ag else None)
         chave = (agenda_id, solicitacao_id, c["tipo"])
         if c["tipo"] != "loja" and chave in chaves_concluidas:
             continue
@@ -7695,6 +7739,23 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     db.flush()
     _recalcular_rota_salva(db, rota)
     return adicionadas
+
+
+def _sincronizar_rotas_inteligentes_ativas(db: Session, empresa_id: int, ignorar_rota_id: int | None = None) -> int:
+    """Relê a Operação e reconstrói rotas ainda abertas sem consumir Humiat."""
+    q = db.query(RotaInteligente).filter(
+        RotaInteligente.empresa_id == empresa_id,
+        RotaInteligente.status != "concluida",
+    )
+    if ignorar_rota_id:
+        q = q.filter(RotaInteligente.id != ignorar_rota_id)
+
+    atualizadas = 0
+    for rota_ativa in q.order_by(RotaInteligente.data_operacao.asc()).all():
+        _reconstruir_rota_salva(db, rota_ativa)
+        atualizadas += 1
+    return atualizadas
+
 
 def _normalizar_endereco_geocodificacao(valor: str) -> str:
     texto = unicodedata.normalize("NFKC", str(valor or ""))
@@ -8295,7 +8356,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     db.add(rota); db.flush()
     for ordem, c in enumerate(ordenados, 1):
         ag = c.get("agenda")
-        db.add(RotaInteligenteParada(rota_id=rota.id, agenda_id=ag.id if ag else None, solicitacao_id=ag.solicitacao_id if ag else None,
+        db.add(RotaInteligenteParada(rota_id=rota.id, agenda_id=c.get("agenda_id"), solicitacao_id=c.get("solicitacao_id") or (ag.solicitacao_id if ag else None),
             ordem=ordem, tipo=c["tipo"], titulo=c["titulo"], endereco=c["endereco"], latitude=c.get("lat"), longitude=c.get("lon"),
             horario_limite=c.get("limite"), chegada_prevista=c.get("chegada"), saida_prevista=c.get("saida"),
             distancia_anterior_km=c.get("distancia", 0), deslocamento_anterior_min=c.get("desloc", 0), servico_min=c["servico"],
@@ -8513,11 +8574,39 @@ def carro_cheio_rota(rota_id: int, parada_id: int, db: Session = Depends(get_db)
 def concluir_parada_inteligente(rota_id: int, parada_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
     parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
-    if not rota or not parada: raise HTTPException(status_code=404)
-    parada.status = "concluido"; parada.chegada_real = agora_utc()
-    if parada.agenda: parada.agenda.status_operacional = "concluido"
-    db.flush(); _recalcular_rota_salva(db, rota)
-    if all(p.status == "concluido" for p in rota.paradas): rota.status = "concluida"
-    else: rota.status = "em_execucao"
+    if not rota or not parada:
+        raise HTTPException(status_code=404)
+
+    parada.status = "concluido"
+    parada.chegada_real = agora_utc()
+
+    # Sincroniza o encerramento com a Operação. Retirada prevista não usa o card
+    # da entrega; ela é materializada como BUSCAR e então marcada como concluída.
+    if parada.tipo == "entrega" and parada.agenda:
+        parada.agenda.status_operacional = "concluido"
+        criar_retirada_apos_entrega(db, parada.agenda)
+    elif parada.tipo == "retirada" and parada.solicitacao:
+        entrega = (
+            db.query(Agenda)
+            .filter_by(
+                empresa_id=empresa.id,
+                solicitacao_id=parada.solicitacao_id,
+                tipo_evento="entrega",
+            )
+            .first()
+        )
+        retirada = _criar_ou_obter_retirada_prevista(db, parada.solicitacao, entrega)
+        retirada.status_operacional = "concluido"
+        parada.agenda_id = retirada.id
+    elif parada.agenda:
+        parada.agenda.status_operacional = "concluido"
+
+    db.flush()
+    _recalcular_rota_salva(db, rota)
+    _sincronizar_rotas_inteligentes_ativas(db, empresa.id, ignorar_rota_id=rota.id)
+    if all(p.status == "concluido" for p in rota.paradas):
+        rota.status = "concluida"
+    else:
+        rota.status = "em_execucao"
     db.commit()
-    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Parada concluída e próximas recalculadas", status_code=303)
+    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Parada concluída, Operação atualizada e próximas recalculadas", status_code=303)
