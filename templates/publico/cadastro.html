@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block conteudo %}
+<style>
+.aviso-horario-contrato{margin-top:10px;border:2px solid currentColor;padding:14px 16px;border-radius:12px}
+.aviso-horario-contrato strong{display:block;font-size:1.08rem;margin-bottom:6px}
+.aviso-horario-contrato p{margin:0;line-height:1.45}
+</style>
+
 <h1>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Editar dados do contrato{% else %}Pré-contrato{% endif %} - {{ empresa.nome }}</h1>
 <p class="texto-discreto">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Corrija seus dados e salve. Depois confira novamente o contrato para aceitar.{% else %}Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.{% endif %}</p>
 
@@ -84,11 +90,14 @@
     <h2>3. Evento</h2>
     <div class="grid duas">
       <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required></div>
-      <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio if form is defined else '' }}" required></div>
+      <div><label>Hora de início *</label><input id="horaInicioPreContrato" name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio if form is defined else '' }}" required></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
     {% if empresa.mostrar_mensagem_hora_fim %}
-      <p class="box aviso">{{ empresa.mensagem_hora_fim or 'Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber.' }}</p>
+      <div id="avisoHorarioContrato" class="box aviso aviso-horario-contrato" hidden>
+        <strong>Horário padrão do contrato: <span id="horaFimCalculada">--:--</span></strong>
+        <p>{{ empresa.mensagem_hora_fim or 'A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico.' }}</p>
+      </div>
     {% endif %}
     <label>Nome do local</label><input name="local_nome" value="{{ form.local_nome if form is defined else '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
     <input type="hidden" name="local" value="{{ form.endereco if form is defined else cliente.endereco if cliente else '' }}">
@@ -121,7 +130,20 @@ function preencherEnderecoPublico(e){const m={cep:'cep',endereco:'endereco',nume
 function alternarCamposEnderecoPublico(mostrar){const area=document.getElementById('camposNovoEnderecoPublico');if(area)area.hidden=!mostrar;}
 function mostrarEnderecosPublico(lista){const box=document.getElementById('enderecosEncontradosPublico');if(!box)return;box.innerHTML='';if(!lista||!lista.length){box.hidden=true;alternarCamposEnderecoPublico(true);return;}box.hidden=false;const label=document.createElement('label');label.textContent='Endereço salvo';box.appendChild(label);const select=document.createElement('select');select.className='endereco-select';lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=`Endereço ${i+1} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});select.onchange=()=>{preencherEnderecoPublico(lista[Number(select.value)]);alternarCamposEnderecoPublico(false);};box.appendChild(select);const n=document.createElement('button');n.type='button';n.className='botao-novo-endereco';n.textContent='+ Usar novo endereço';n.onclick=()=>{preencherEnderecoPublico({});alternarCamposEnderecoPublico(true);document.getElementById('cep')?.focus();};box.appendChild(n);select.dispatchEvent(new Event('change'));}
 async function consultarClientePublico(){let tel=(document.getElementById('telefoneClientePublico').value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length!==11||tel[2]!=='9')return;const st=document.getElementById('statusBuscaClientePublico');st.textContent='Consultando cadastro...';if(window.mostrarCarregando)mostrarCarregando('Consultando cadastro','Localizando seus dados e endereços já utilizados.');try{const r=await fetch(`/e/{{ empresa.slug }}/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();if(d.encontrado){const c=d.cliente;[['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj],['emailClientePublico',c.email]].forEach(([id,v])=>{const el=document.getElementById(id);if(el){el.value=v||'';el.readOnly=true;el.classList.add('campo-travado');}});mostrarEnderecosPublico(d.enderecos);st.textContent='Cadastro encontrado. Escolha o endereço do evento.';}else{st.textContent='Novo cadastro. Complete seus dados.';}}catch(e){st.textContent='Não foi possível consultar agora. Continue preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}}
-document.addEventListener('DOMContentLoaded',()=>{const t=document.getElementById('telefoneClientePublico');if(t)t.addEventListener('input',()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);});});
+document.addEventListener('DOMContentLoaded',()=>{const t=document.getElementById('telefoneClientePublico');if(t)t.addEventListener('input',()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);});const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}});
+function atualizarHoraFimPreContrato(){
+  const inicio=document.getElementById('horaInicioPreContrato');
+  const aviso=document.getElementById('avisoHorarioContrato');
+  const saida=document.getElementById('horaFimCalculada');
+  if(!inicio||!aviso||!saida)return;
+  const valor=inicio.value||'';
+  if(!/^\d{2}:\d{2}$/.test(valor)){aviso.hidden=true;saida.textContent='--:--';return;}
+  const [h,m]=valor.split(':').map(Number);
+  const total=(h*60+m+240)%(24*60);
+  saida.textContent=String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
+  aviso.hidden=false;
+}
+
 
 function alternarPessoa(){
   const tipo = document.querySelector('input[name=tipo_pessoa]:checked').value;

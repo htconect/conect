@@ -1501,7 +1501,7 @@ def mensagens_empresa(empresa: Empresa) -> dict:
             "Obrigado pela confiança!"
         ),
         "hora_fim": empresa.mensagem_hora_fim or (
-            "Seu fim de contrato é calculado automaticamente. Leia o contrato quando receber."
+            "A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico."
         ),
         "preparacao": empresa.mensagem_preparacao or MENSAGEM_OPERACAO_PREPARACAO_APROVADA,
         "a_caminho": empresa.mensagem_a_caminho or MENSAGEM_OPERACAO_A_CAMINHO_APROVADA,
@@ -6423,7 +6423,8 @@ def salvar_pre_cadastro(
     if rascunho_existente:
         return render_erro("rascunho_duplicado")
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
-    fim_obj = None
+    # O pré-contrato público usa a duração padrão de 4 horas até que os itens sejam definidos.
+    fim_obj = somar_minutos(inicio_obj, 240)
     solicitacao = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=data_obj, hora_inicio=inicio_obj,
         hora_fim=fim_obj, bairro=bairro, local=endereco.strip(), local_nome=local_nome,
