@@ -1,4 +1,5 @@
 import os
+import logging
 from models import LancamentoOrganiza
 from datetime import datetime, date, time, timedelta, timezone
 from typing import Optional
@@ -19,6 +20,9 @@ from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 import time as time_module
+
+logger = logging.getLogger("conect")
+geo_logger = logging.getLogger("conect.geocodificacao")
 
 from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
@@ -7635,61 +7639,189 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     return adicionadas
 
 def _normalizar_endereco_geocodificacao(valor: str) -> str:
-    texto = re.sub(r"\s+", " ", (valor or "").strip(" ,.-"))
+    texto = unicodedata.normalize("NFKC", str(valor or ""))
+    texto = re.sub(r"\bCEP\s*[:\-]?\s*", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(r"\s+", " ", texto).strip(" ,.-")
     return texto
 
 
-def _geocodificar_endereco_nominatim(endereco: str, bairro: str = ""):
-    """Localiza um endereço pelo Nominatim/OSM. Retorna (lat, lon, descricao) ou (None, None, motivo)."""
-    partes = [endereco, bairro, "Rio de Janeiro", "RJ", "Brasil"]
-    consulta = ", ".join(dict.fromkeys([_normalizar_endereco_geocodificacao(p) for p in partes if _normalizar_endereco_geocodificacao(p)]))
-    if len(consulta) < 8:
-        return None, None, "endereço insuficiente"
-    params = urlencode({"q": consulta, "format": "jsonv2", "limit": 1, "countrycodes": "br", "addressdetails": 1})
+def _partes_unicas_endereco(*partes: str) -> str:
+    """Monta uma consulta sem repetir bairro, cidade ou estado já presentes."""
+    resultado = []
+    vistos = set()
+    for parte in partes:
+        valor = _normalizar_endereco_geocodificacao(parte)
+        if not valor:
+            continue
+        chave = unicodedata.normalize("NFKD", valor).encode("ascii", "ignore").decode().casefold()
+        if chave in vistos:
+            continue
+        # Evita acrescentar uma parte simples que já aparece inteira em outra parte.
+        if any(chave == existente or chave in existente for existente in vistos):
+            continue
+        vistos.add(chave)
+        resultado.append(valor)
+    return ", ".join(resultado)
+
+
+def _consultar_nominatim(consulta: str):
+    params = urlencode({
+        "q": consulta,
+        "format": "jsonv2",
+        "limit": 1,
+        "countrycodes": "br",
+        "addressdetails": 1,
+    })
     req = UrlRequest(
         "https://nominatim.openstreetmap.org/search?" + params,
-        headers={"User-Agent": "Conect-Humiat-Inteligencia-Logistica/1.0 (contato: suporte@humiat.com.br)", "Accept-Language": "pt-BR"},
+        headers={
+            "User-Agent": "Conect-Humiat/1.0 (geocodificacao operacional; contato: suporte@humiat.com.br)",
+            "Accept-Language": "pt-BR,pt;q=0.9",
+            "Referer": "https://humiat.com.br/",
+        },
     )
-    try:
-        with urlopen(req, timeout=12) as resp:
-            dados = json.loads(resp.read().decode("utf-8"))
-        if not dados:
-            return None, None, "não encontrado"
-        lat = float(dados[0]["lat"]); lon = float(dados[0]["lon"])
-        if not (-34.0 <= lat <= 6.0 and -74.0 <= lon <= -32.0):
-            return None, None, "resultado fora do Brasil"
-        return lat, lon, dados[0].get("display_name") or consulta
-    except (HTTPError, URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError) as exc:
-        return None, None, f"falha na consulta: {type(exc).__name__}"
+    with urlopen(req, timeout=15) as resp:
+        status = getattr(resp, "status", 200)
+        corpo = resp.read().decode("utf-8", errors="replace")
+    dados = json.loads(corpo)
+    if not dados:
+        return None, None, "ZERO_RESULTS"
+    lat = float(dados[0]["lat"])
+    lon = float(dados[0]["lon"])
+    return lat, lon, dados[0].get("display_name") or consulta
+
+
+def _consultar_photon(consulta: str):
+    """Segundo provedor sem chave, usado somente quando o Nominatim não encontra."""
+    params = urlencode({"q": consulta, "limit": 1, "lang": "pt"})
+    req = UrlRequest(
+        "https://photon.komoot.io/api/?" + params,
+        headers={"User-Agent": "Conect-Humiat/1.0", "Accept-Language": "pt-BR,pt;q=0.9"},
+    )
+    with urlopen(req, timeout=15) as resp:
+        corpo = resp.read().decode("utf-8", errors="replace")
+    dados = json.loads(corpo)
+    features = dados.get("features") or []
+    if not features:
+        return None, None, "ZERO_RESULTS"
+    coords = (features[0].get("geometry") or {}).get("coordinates") or []
+    if len(coords) < 2:
+        return None, None, "RESPOSTA_SEM_COORDENADAS"
+    lon, lat = float(coords[0]), float(coords[1])
+    props = features[0].get("properties") or {}
+    descricao = ", ".join(str(props.get(k)) for k in ("name", "street", "district", "city", "state", "country") if props.get(k))
+    return lat, lon, descricao or consulta
+
+
+def _coordenadas_validas_brasil(lat, lon) -> bool:
+    return lat is not None and lon is not None and -34.0 <= float(lat) <= 6.0 and -74.0 <= float(lon) <= -32.0
+
+
+def _geocodificar_consultas(consultas, identificador="endereco"):
+    """Tenta variações e dois provedores, registrando no Render o motivo real."""
+    unicas = []
+    vistos = set()
+    for consulta in consultas:
+        consulta = _normalizar_endereco_geocodificacao(consulta)
+        if len(consulta) < 8:
+            continue
+        chave = consulta.casefold()
+        if chave not in vistos:
+            vistos.add(chave)
+            unicas.append(consulta)
+
+    if not unicas:
+        geo_logger.warning("[GEO] id=%s endereco insuficiente", identificador)
+        return None, None, "endereço insuficiente"
+
+    ultimo_motivo = "não encontrado"
+    for indice, consulta in enumerate(unicas, 1):
+        for provedor, funcao in (("nominatim", _consultar_nominatim), ("photon", _consultar_photon)):
+            geo_logger.info("[GEO] id=%s tentativa=%s provedor=%s consulta=%r", identificador, indice, provedor, consulta)
+            try:
+                lat, lon, detalhe = funcao(consulta)
+                if _coordenadas_validas_brasil(lat, lon):
+                    geo_logger.info("[GEO] id=%s localizado provedor=%s lat=%.7f lon=%.7f resultado=%r", identificador, provedor, lat, lon, detalhe)
+                    return lat, lon, detalhe
+                ultimo_motivo = detalhe or "resultado inválido"
+                geo_logger.warning("[GEO] id=%s sem resultado provedor=%s motivo=%s", identificador, provedor, ultimo_motivo)
+            except HTTPError as exc:
+                corpo = ""
+                try:
+                    corpo = exc.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                ultimo_motivo = f"HTTP {exc.code}"
+                geo_logger.warning("[GEO] id=%s provedor=%s erro_http=%s resposta=%r", identificador, provedor, exc.code, corpo)
+            except (URLError, TimeoutError) as exc:
+                ultimo_motivo = type(exc).__name__
+                geo_logger.warning("[GEO] id=%s provedor=%s falha_rede=%r", identificador, provedor, exc)
+            except Exception as exc:
+                ultimo_motivo = type(exc).__name__
+                geo_logger.exception("[GEO] id=%s provedor=%s erro inesperado", identificador, provedor)
+            time_module.sleep(1.05 if provedor == "nominatim" else 0.25)
+    return None, None, ultimo_motivo
+
+
+def _variacoes_endereco_solicitacao(sol: Solicitacao):
+    cliente = sol.cliente
+    if not cliente:
+        base = _partes_unicas_endereco(sol.local, sol.bairro, "Rio de Janeiro", "RJ", "Brasil")
+        return [base]
+
+    rua = cliente.endereco or ""
+    numero = cliente.numero or ""
+    complemento = cliente.complemento or ""
+    bairro = sol.bairro or cliente.bairro or ""
+    cidade = cliente.cidade or "Rio de Janeiro"
+    estado = cliente.estado or "RJ"
+    cep = re.sub(r"\D", "", cliente.cep or "")
+
+    consultas = [
+        _partes_unicas_endereco(rua, numero, bairro, cidade, estado, cep, "Brasil"),
+        _partes_unicas_endereco(rua, numero, complemento, bairro, cidade, estado, "Brasil"),
+        _partes_unicas_endereco(rua, numero, cidade, estado, cep, "Brasil"),
+        _partes_unicas_endereco(cep, numero, cidade, estado, "Brasil") if cep else "",
+        _partes_unicas_endereco(rua, numero, bairro, cidade, "Brasil"),
+    ]
+    return consultas
+
+
+def _geocodificar_endereco_nominatim(endereco: str, bairro: str = ""):
+    """Compatibilidade com chamadas antigas; agora possui variações e provedor alternativo."""
+    consulta = _partes_unicas_endereco(endereco, bairro, "Brasil")
+    return _geocodificar_consultas([consulta], identificador="endereco-avulso")
+
+
+def _geocodificar_solicitacao(sol: Solicitacao):
+    return _geocodificar_consultas(_variacoes_endereco_solicitacao(sol), identificador=f"solicitacao-{sol.id}")
 
 
 def _geocodificar_solicitacoes_automaticamente(db: Session, empresa_id: int, solicitacoes):
-    """Geocodifica em lote, com cache por endereço e intervalo respeitoso entre consultas."""
+    """Geocodifica em lote, reutilizando coordenadas para endereços iguais."""
     resultado = {"localizados": 0, "ja_prontos": 0, "pendentes": 0, "erros": []}
     cache = {}
-    usados = set()
     for sol, endereco, bairro in solicitacoes:
         if sol.latitude is not None and sol.longitude is not None and sol.status_geocodificacao == "localizado":
             resultado["ja_prontos"] += 1
             continue
-        chave = (_normalizar_endereco_geocodificacao(endereco).lower(), _normalizar_endereco_geocodificacao(bairro).lower())
+        consultas = _variacoes_endereco_solicitacao(sol)
+        chave = tuple(_normalizar_endereco_geocodificacao(q).casefold() for q in consultas if q)
         if chave in cache:
             lat, lon, detalhe = cache[chave]
         else:
-            lat, lon, detalhe = _geocodificar_endereco_nominatim(endereco, bairro)
+            lat, lon, detalhe = _geocodificar_solicitacao(sol)
             cache[chave] = (lat, lon, detalhe)
-            time_module.sleep(1.05)
+        sol.data_geocodificacao = agora_utc()
         if lat is None or lon is None:
             sol.status_geocodificacao = "revisar"
-            sol.data_geocodificacao = agora_utc()
             resultado["pendentes"] += 1
-            resultado["erros"].append(f"{getattr(sol.cliente, 'nome', None) or 'Contrato ' + str(sol.id)}: {detalhe}")
+            nome = getattr(sol.cliente, "nome", None) or f"Contrato {sol.id}"
+            resultado["erros"].append(f"{nome}: {detalhe}")
+            geo_logger.error("[GEO] solicitacao=%s cliente=%r falhou motivo=%s", sol.id, nome, detalhe)
             continue
-        par = (round(lat, 6), round(lon, 6))
-        usados.add(par)
-        sol.latitude = lat; sol.longitude = lon
+        sol.latitude, sol.longitude = lat, lon
         sol.status_geocodificacao = "localizado"
-        sol.data_geocodificacao = agora_utc()
         resultado["localizados"] += 1
     db.commit()
     return resultado
@@ -7705,37 +7837,44 @@ def _invalidar_geocodificacao(item: Solicitacao):
 def _tentar_geocodificar_solicitacao(db: Session, item: Solicitacao, *, commit: bool = True) -> bool:
     """Tenta localizar sem nunca impedir o salvamento do contrato."""
     try:
-        endereco = endereco_rota_solicitacao(item)
-        if not endereco:
-            item.status_geocodificacao = "revisar"
-            if commit: db.commit()
-            return False
-        lat, lon, _ = _geocodificar_endereco_nominatim(endereco, item.bairro or "")
+        lat, lon, detalhe = _geocodificar_solicitacao(item)
         item.data_geocodificacao = agora_utc()
         if lat is None or lon is None:
             item.status_geocodificacao = "revisar"
-            if commit: db.commit()
+            geo_logger.warning("[GEO] solicitacao=%s pendente motivo=%s", item.id, detalhe)
+            if commit:
+                db.commit()
             return False
         item.latitude, item.longitude = lat, lon
         item.status_geocodificacao = "localizado"
-        if commit: db.commit()
+        if commit:
+            db.commit()
         return True
     except Exception:
-        # Geocodificação é auxiliar; nunca derruba cadastro, edição ou operação.
+        geo_logger.exception("[GEO] solicitacao=%s falha inesperada", getattr(item, "id", None))
         item.status_geocodificacao = "revisar"
         if commit:
-            try: db.commit()
-            except Exception: db.rollback()
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
         return False
 
 
 def _garantir_localizacao_loja(db: Session, cfg) -> bool:
     if cfg.latitude_loja is not None and cfg.longitude_loja is not None:
         return True
-    if not (cfg.endereco_loja or "").strip():
+    endereco = (cfg.endereco_loja or "").strip()
+    if not endereco:
+        geo_logger.warning("[GEO] loja sem endereço configurado")
         return False
-    lat, lon, _ = _geocodificar_endereco_nominatim(cfg.endereco_loja, "")
+    consultas = [
+        _partes_unicas_endereco(endereco, "Brasil"),
+        _partes_unicas_endereco(endereco, "Rio de Janeiro", "RJ", "Brasil"),
+    ]
+    lat, lon, detalhe = _geocodificar_consultas(consultas, identificador="loja")
     if lat is None or lon is None:
+        geo_logger.error("[GEO] loja não localizada motivo=%s endereco=%r", detalhe, endereco)
         return False
     cfg.latitude_loja, cfg.longitude_loja = lat, lon
     db.commit()
