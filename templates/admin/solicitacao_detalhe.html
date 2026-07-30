@@ -165,9 +165,9 @@
       <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
     {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
       <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>
-      <button type="submit" name="status" value="aguardando_nova_data" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
+      <button type="submit" formaction="/painel/solicitacao/{{ item.id }}/credito" formmethod="post" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
     {% else %}
-      <button type="submit" name="status" value="aguardando_nova_data" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
+      <button type="submit" formaction="/painel/solicitacao/{{ item.id }}/credito" formmethod="post" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
       <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
     {% endif %}
   </form>

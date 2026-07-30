@@ -3218,6 +3218,38 @@ def salvar_edicao_solicitacao(
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
+@app.post("/painel/solicitacao/{solicitacao_id}/credito")
+def colocar_solicitacao_em_credito(
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Coloca o contrato em crédito e remove definitivamente os cards operacionais.
+
+    Endpoint dedicado para não depender do valor enviado por um botão de status.
+    Preserva contrato, itens e pagamentos para reutilização em uma nova data.
+    """
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    item.status = "aguardando_nova_data"
+    retirar_solicitacao_da_operacao(db, item)
+    db.flush()
+
+    # Garantia adicional: nenhum registro de Entregar/Retirar pode permanecer.
+    db.query(Agenda).filter_by(
+        empresa_id=item.empresa_id,
+        solicitacao_id=item.id,
+    ).delete(synchronize_session=False)
+
+    db.commit()
+    return RedirectResponse(
+        f"/painel/solicitacao/{solicitacao_id}?credito=ok",
+        status_code=303,
+    )
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/status")
 def atualizar_status_solicitacao(
         solicitacao_id: int,
