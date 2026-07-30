@@ -6918,7 +6918,10 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             "retirada_obrigatoria": obrigatoria,
             "sintetica": sintetica,
             "produtos": produtos,
-            "prioridade_grupo": 0 if obrigatoria else (1 if tipo == "entrega" else 2),
+            "bairro": ((sol.bairro if sol else None) or ag.bairro or "").strip(),
+            "hora_evento_inicio": sol.hora_inicio if sol else ag.hora_inicio,
+            "hora_evento_fim": sol.hora_fim if sol else ag.hora_fim,
+            "prioridade_grupo": 1 if tipo == "entrega" else 2,
             "reaproveitamento": False,
             "reaproveita_para": None,
         })
@@ -6973,7 +6976,8 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             for produto_id in comuns:
                 if deficit.get(produto_id, 0) > 0:
                     retirada["retirada_obrigatoria"] = True
-                    retirada["prioridade_grupo"] = 0
+                    # A retirada é necessária para liberar equipamento, mas não ganha
+                    # prioridade fixa. O otimizador decide sua posição sem atrasar entregas.
                     deficit[produto_id] = max(0, deficit[produto_id] - retirada["produtos"].get(produto_id, 1))
                     break
             if retirada["retirada_obrigatoria"]:
@@ -6982,64 +6986,132 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
     return candidatos
 
 
+def _normalizar_localidade(valor: str | None) -> str:
+    texto = unidecode(str(valor or "")).lower().strip()
+    return re.sub(r"[^a-z0-9]+", " ", texto).strip()
+
+
+def _deslocamento_estimado_sem_coordenadas(origem_bairro: str | None, destino_bairro: str | None) -> int:
+    origem = _normalizar_localidade(origem_bairro)
+    destino = _normalizar_localidade(destino_bairro)
+    if origem and destino and origem == destino:
+        return 10
+    if origem and destino and (origem in destino or destino in origem):
+        return 15
+    return 30
+
+
 def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None):
+    """Ordena por compromisso de entrega, deslocamento e reaproveitamento real.
+
+    Retirada vencida não é colocada automaticamente em primeiro lugar. Ela sobe
+    somente quando libera produto para uma entrega e pode ser encaixada sem criar
+    atraso relevante. Após uma retirada, entregas do mesmo produto recebem forte
+    vantagem para permitir retirada -> entrega direta, sem retorno à loja.
+    """
     restantes = list(candidatos)
     resultado = []
     atual = datetime.combine(data_operacao, hora_saida)
     lat_atual, lon_atual = origem_lat, origem_lon
+    bairro_atual = ""
     velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
+    produtos_recolhidos: dict[int, int] = {}
+
     while restantes:
         melhor = None
         melhor_chave = None
         for c in restantes:
             distancia = _distancia_km(lat_atual, lon_atual, c["lat"], c["lon"])
-            desloc = max(1, int(round((distancia / velocidade) * 60))) if distancia is not None else 20
+            desloc = (max(1, int(round((distancia / velocidade) * 60)))
+                       if distancia is not None else
+                       _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro")))
             chegada = atual + timedelta(minutes=desloc)
             limite_dt = datetime.combine(data_operacao, c["limite"])
             atraso = (chegada - limite_dt).total_seconds() / 60
             folga = (limite_dt - chegada).total_seconds() / 60
 
-            # Regra dominante: retirada obrigatória -> entrega -> retirada opcional.
-            # Dentro do grupo, prazo e proximidade decidem. Retirada com reaproveitamento
-            # recebe vantagem para ficar imediatamente antes da entrega relacionada.
-            grupo = int(c.get("prioridade_grupo", 2))
-            reaproveita = 0 if c.get("reaproveitamento") else 1
+            comuns_recolhidos = sum(
+                min(qtd, produtos_recolhidos.get(pid, 0))
+                for pid, qtd in c.get("produtos", {}).items()
+            ) if c["tipo"] == "entrega" else 0
+            entregas_dependentes = [
+                e for e in restantes
+                if e is not c and e["tipo"] == "entrega"
+                and set(e.get("produtos", {})) & set(c.get("produtos", {}))
+            ] if c["tipo"] == "retirada" else []
+            libera_entrega = bool(entregas_dependentes and c.get("retirada_obrigatoria"))
+
+            # Menor chave vence. Atraso de entrega domina qualquer economia.
+            if c["tipo"] == "entrega":
+                score_tipo = 0
+                score_prazo = max(0, atraso) * 10000 + max(0, 90 - folga) * 40
+                bonus_reuso = -2500 * comuns_recolhidos
+            else:
+                # Retirada é estratégica, não prioridade absoluta.
+                score_tipo = 3500
+                score_prazo = max(0, atraso) * 80
+                bonus_reuso = -2200 if libera_entrega else (-700 if c.get("reaproveitamento") else 0)
+                # Se há entrega que já ficaria apertada, não desvia para retirada agora.
+                entregas_criticas = 0
+                for e in restantes:
+                    if e["tipo"] != "entrega":
+                        continue
+                    lim_e = datetime.combine(data_operacao, e["limite"])
+                    if (lim_e - atual).total_seconds() / 60 <= desloc + c["servico"] + 45:
+                        entregas_criticas += 1
+                score_tipo += entregas_criticas * 5000
+
+            score_dist = desloc * 25
             chave = (
-                grupo,
-                reaproveita,
-                0 if atraso > 0 else 1,
-                -atraso if atraso > 0 else folga,
-                distancia if distancia is not None else 9999,
+                score_prazo + score_tipo + score_dist + bonus_reuso,
+                0 if c["tipo"] == "entrega" else 1,
+                limite_dt,
                 c["agenda"].id if c.get("agenda") else 0,
             )
             if melhor_chave is None or chave < melhor_chave:
                 melhor_chave = chave
-                melhor = (c, distancia, desloc, chegada, limite_dt)
-        c, distancia, desloc, chegada, limite_dt = melhor
+                melhor = (c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos)
+
+        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos = melhor
         atraso_min = int((chegada - limite_dt).total_seconds() / 60)
         folga_min = int((limite_dt - chegada).total_seconds() / 60)
         risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
         motivo = []
-        if c.get("retirada_vencida"):
-            motivo.append("Retirada pendente de dia anterior: prioridade máxima")
-        elif c.get("retirada_obrigatoria"):
-            motivo.append("Retirada obrigatória antes das entregas")
-        elif c["tipo"] == "entrega":
-            motivo.append("Entrega priorizada pelo horário do contrato")
+        if c["tipo"] == "entrega":
+            motivo.append("Entrega priorizada pelo horário de início e pela menor folga")
+            if comuns_recolhidos:
+                motivo.append("Usa equipamento recolhido anteriormente, sem retorno à loja")
+        elif libera_entrega:
+            motivo.append("Retirada estratégica: libera equipamento para entrega seguinte")
+        elif c.get("reaproveitamento"):
+            motivo.append("Retirada encaixada por oportunidade de reaproveitamento")
         else:
-            motivo.append("Retirada encaixada após as entregas prioritárias")
+            motivo.append("Retirada encaixada sem comprometer as entregas")
+        if c.get("retirada_vencida"):
+            motivo.append("Retirada pendente de dia anterior")
         if c.get("horario_calculado"):
-            motivo.append(f"Horário de retirada calculado automaticamente: {c['limite'].strftime('%H:%M')}")
+            motivo.append(f"Horário de retirada sugerido: {c['limite'].strftime('%H:%M')}")
         if c.get("reaproveitamento"):
-            motivo.append(f"Equipamento pode seguir para {c.get('reaproveita_para')}")
+            motivo.append(f"Pode atender {c.get('reaproveita_para')}")
         motivo.append(f"Atraso previsto de {atraso_min} min" if risco == "atrasado" else
-                      f"Folga de apenas {max(0, folga_min)} min" if risco == "atencao" else "Operação dentro do prazo")
-        motivo.append(f"Próxima parada a {distancia:.1f} km" if distancia is not None else "Localização sem coordenadas: usado deslocamento estimado de 20 min")
+                      f"Folga de {max(0, folga_min)} min")
+        motivo.append(f"Trecho de {distancia:.1f} km" if distancia is not None else
+                      f"Sem coordenadas: deslocamento estimado em {desloc} min")
         motivo.append(f"Carga: {c['pontos']} ponto(s)")
         saida = chegada + timedelta(minutes=c["servico"])
         resultado.append({**c, "distancia": float(distancia or 0), "desloc": desloc, "chegada": chegada,
-                          "saida": saida, "risco": risco, "motivo": " • ".join(motivo)})
+                          "saida": saida, "risco": risco, "motivo": " • ".join(motivo),
+                          "folga_min": folga_min})
+
+        if c["tipo"] == "retirada":
+            for pid, qtd in c.get("produtos", {}).items():
+                produtos_recolhidos[pid] = produtos_recolhidos.get(pid, 0) + qtd
+        else:
+            for pid, qtd in c.get("produtos", {}).items():
+                produtos_recolhidos[pid] = max(0, produtos_recolhidos.get(pid, 0) - qtd)
+
         atual = saida
+        bairro_atual = c.get("bairro") or bairro_atual
         if c["lat"] is not None:
             lat_atual, lon_atual = c["lat"], c["lon"]
         restantes.remove(c)
@@ -7351,6 +7423,15 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
     rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
     if not rota: raise HTTPException(status_code=404)
     paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(RotaInteligenteParada.ordem).all()
+    for p in paradas:
+        sol = p.solicitacao
+        p.hora_inicio_evento_view = sol.hora_inicio if sol else None
+        p.hora_fim_evento_view = sol.hora_fim if sol else None
+        p.retirada_hora_view = sol.retirada_hora if sol else None
+        p.folga_min_view = None
+        if p.chegada_prevista and p.horario_limite:
+            limite_dt = datetime.combine(rota.data_operacao, p.horario_limite)
+            p.folga_min_view = int((limite_dt - p.chegada_prevista).total_seconds() / 60)
     return templates.TemplateResponse("admin/inteligencia_rota.html", {"request": request, "empresa": empresa, "rota": rota, "paradas": paradas, "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")})
 
 
