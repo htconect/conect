@@ -494,6 +494,22 @@ class VeiculoLogistico(Base):
     capacidade_teto = Column(Integer, nullable=False, default=3)
     ativo = Column(Boolean, nullable=False, default=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    perfis_carga = relationship("VeiculoPerfilCarga", back_populates="veiculo", cascade="all, delete-orphan")
+
+class VeiculoPerfilCarga(Base):
+    __tablename__ = "veiculos_perfis_carga"
+    __table_args__ = (UniqueConstraint("veiculo_id", "produto_id", name="uq_veiculo_produto_carga"),)
+    id = Column(Integer, primary_key=True)
+    veiculo_id = Column(Integer, ForeignKey("veiculos_logisticos.id", ondelete="CASCADE"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    volumes = Column(Integer, nullable=False, default=1)
+    permite_interno = Column(Boolean, nullable=False, default=True)
+    permite_mala = Column(Boolean, nullable=False, default=False)
+    permite_teto = Column(Boolean, nullable=False, default=False)  # teto / outros suportes externos
+    ativo = Column(Boolean, nullable=False, default=True)
+    veiculo = relationship("VeiculoLogistico", back_populates="perfis_carga")
+    produto = relationship("ProdutoServico")
+
 
 class ConfiguracaoRotaInteligente(Base):
     __tablename__ = "configuracoes_rota_inteligente"

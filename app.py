@@ -28,7 +28,7 @@ from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -761,6 +761,19 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE veiculos_logisticos ADD COLUMN capacidade_mala INTEGER DEFAULT 1 NOT NULL")
         if "capacidade_teto" not in cols_vei:
             comandos.append("ALTER TABLE veiculos_logisticos ADD COLUMN capacidade_teto INTEGER DEFAULT 3 NOT NULL")
+
+    if "veiculos_perfis_carga" not in tabelas:
+        comandos.append("""CREATE TABLE veiculos_perfis_carga (
+            id INTEGER PRIMARY KEY,
+            veiculo_id INTEGER NOT NULL REFERENCES veiculos_logisticos(id) ON DELETE CASCADE,
+            produto_id INTEGER NOT NULL REFERENCES produtos_servicos(id) ON DELETE CASCADE,
+            volumes INTEGER DEFAULT 1 NOT NULL,
+            permite_interno BOOLEAN DEFAULT true NOT NULL,
+            permite_mala BOOLEAN DEFAULT false NOT NULL,
+            permite_teto BOOLEAN DEFAULT false NOT NULL,
+            ativo BOOLEAN DEFAULT true NOT NULL,
+            CONSTRAINT uq_veiculo_produto_carga UNIQUE (veiculo_id, produto_id)
+        )""")
 
     if "solicitacoes" in tabelas:
         cols_sol = colunas("solicitacoes")
@@ -7018,30 +7031,22 @@ def _pontos_carga_solicitacao(sol: Solicitacao | None) -> int:
     return max(1, total)
 
 
-def _unidades_carga_solicitacao(sol: Solicitacao | None):
+def _unidades_carga_por_veiculo(produtos_quantidades: dict[int, int], veiculo: VeiculoLogistico | None):
+    """Cria unidades usando exclusivamente o perfil do veículo, nunca o cadastro do item."""
     unidades = []
-    if not sol:
-        return [{"nome": "Equipamento", "locais": ("interno",), "produto_id": None}]
-    itens = list(sol.itens or [])
-    if not itens and sol.produto:
-        itens = [type("ItemCarga", (), {"produto": sol.produto, "quantidade": 1})()]
-    for item in itens:
-        produto = item.produto
-        if not produto:
-            continue
+    perfis = {p.produto_id: p for p in (veiculo.perfis_carga if veiculo else []) if p.ativo}
+    for produto_id, quantidade in (produtos_quantidades or {}).items():
+        perfil = perfis.get(int(produto_id))
+        if not perfil:
+            return None, f"Produto {produto_id} sem perfil de carga para o veículo selecionado"
         locais = tuple(local for local, permitido in (
-            ("interno", getattr(produto, "permite_interno", True)),
-            ("mala", getattr(produto, "permite_mala", True)),
-            ("teto", getattr(produto, "permite_teto", False)),
+            ("interno", perfil.permite_interno), ("mala", perfil.permite_mala), ("teto", perfil.permite_teto)
         ) if permitido)
         if not locais:
-            locais = ("interno",)
-        qtd = max(1, int(item.quantidade or 1))
-        volumes = max(1, int(getattr(produto, "volume_logistico", 1) or 1))
-        for equipamento in range(qtd):
-            for volume in range(volumes):
-                unidades.append({"nome": produto.nome, "locais": locais, "produto_id": produto.id})
-    return unidades or [{"nome": "Equipamento", "locais": ("interno",), "produto_id": None}]
+            return None, f"Produto {produto_id} não possui compartimento permitido neste veículo"
+        for _ in range(max(1, int(quantidade or 1)) * max(1, int(perfil.volumes or 1))):
+            unidades.append({"produto_id": int(produto_id), "locais": locais})
+    return unidades, None
 
 
 def _acomodar_unidades(unidades, capacidades):
@@ -7063,8 +7068,13 @@ def _acomodar_unidades(unidades, capacidades):
 
 def _inserir_retornos_por_compartimento(ordenados, veiculo, cfg):
     if not veiculo:
-        return _inserir_retornos_capacidade(ordenados, None, cfg)
+        raise ValueError("Selecione um veículo para a Inteligência calcular a carga")
     capacidades = {"interno": int(veiculo.capacidade_interno or 0), "mala": int(veiculo.capacidade_mala or 0), "teto": int(veiculo.capacidade_teto or 0)}
+    for c in ordenados:
+        unidades, erro = _unidades_carga_por_veiculo(c.get("produtos") or {}, veiculo)
+        if erro:
+            raise ValueError(erro)
+        c["unidades_carga"] = unidades or []
     resultado, carga = [], []
     entregas_pendentes = [c for c in ordenados if c["tipo"] == "entrega"]
     carregadas = set()
@@ -7144,7 +7154,6 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
         servico = int(cfg.minutos_desmontagem if tipo == "retirada" else cfg.minutos_montagem)
         pontos = _pontos_carga_solicitacao(sol)
         produtos = _produtos_quantidades(sol)
-        unidades_carga = _unidades_carga_solicitacao(sol)
         vencida = bool(tipo == "retirada" and (data_retirada or (sol.retirada_data if sol else None) or ag.data) < data_operacao)
         obrigatoria = bool(tipo == "retirada" and (vencida or (sol and sol.retirada_obrigatoria)))
         titulo_base = ag.titulo
@@ -7674,9 +7683,11 @@ def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: 
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()
     candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg, time(7, 0))
-    existente = db.query(RotaInteligente).filter_by(
-        empresa_id=empresa.id, chave_consumo=f"{empresa.id}:{data_filtro.isoformat()}:{equipe_id or 0}"
-    ).first()
+    existente = db.query(RotaInteligente).filter(
+        RotaInteligente.empresa_id == empresa.id,
+        RotaInteligente.data_operacao == data_filtro,
+        RotaInteligente.equipe_id == (equipe_id or None),
+    ).order_by(RotaInteligente.id.desc()).first()
     localizacoes_pendentes = _solicitacoes_sem_coordenadas(candidatos)
     return templates.TemplateResponse("admin/inteligencia_nova.html", {
         "request": request, "empresa": empresa, "config": cfg, "equipes": equipes,
@@ -7691,8 +7702,9 @@ def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: 
 def configuracoes_inteligencia(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
     veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()
+    produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     return templates.TemplateResponse("admin/inteligencia_configuracoes.html", {
-        "request": request, "empresa": empresa, "config": cfg, "veiculos": veiculos,
+        "request": request, "empresa": empresa, "config": cfg, "veiculos": veiculos, "produtos": produtos,
         "erro": request.query_params.get("erro"), "sucesso": request.query_params.get("sucesso")
     })
 
@@ -7740,13 +7752,66 @@ def criar_veiculo_logistico(nome: str = Form(...), capacidade_interno: int = For
     return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Veículo adicionado", status_code=303)
 
 
+def _calcular_horario_saida_ideal(ordenados, data_operacao, cfg, origem_lat=None, origem_lon=None):
+    """Calcula o horário mais tarde possível para sair da loja sem violar prazos."""
+    acumulado = 0
+    lat_atual, lon_atual = origem_lat, origem_lon
+    bairro_atual = ""
+    velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
+    limites = []
+    for c in ordenados:
+        distancia = _distancia_km(lat_atual, lon_atual, c.get("lat"), c.get("lon"))
+        desloc = max(1, int(round((distancia / velocidade) * 60))) if distancia is not None else _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
+        acumulado += desloc
+        if c.get("limite") and (c.get("tipo") == "entrega" or c.get("retirada_obrigatoria")):
+            limite_dt = datetime.combine(data_operacao, c["limite"])
+            limites.append(limite_dt - timedelta(minutes=acumulado))
+        acumulado += max(0, int(c.get("servico") or 0))
+        if c.get("lat") is not None and c.get("lon") is not None:
+            lat_atual, lon_atual = c["lat"], c["lon"]
+        bairro_atual = c.get("bairro") or bairro_atual
+    if not limites:
+        return time(8, 0)
+    saida = min(limites)
+    # margem operacional de 10 minutos e arredondamento para 5 minutos
+    saida -= timedelta(minutes=10)
+    minutos = max(0, saida.hour * 60 + saida.minute)
+    minutos = (minutos // 5) * 5
+    return time(minutos // 60, minutos % 60)
+
+
+
+@app.post("/painel/inteligencia-logistica/veiculos/{veiculo_id}/perfil")
+def salvar_perfil_carga_veiculo(veiculo_id: int, produto_id: int = Form(...), volumes: int = Form(1),
+                                permite_interno: bool = Form(False), permite_mala: bool = Form(False),
+                                permite_teto: bool = Form(False), db: Session = Depends(get_db),
+                                empresa: Empresa = Depends(empresa_logada)):
+    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id).first()
+    produto = db.query(ProdutoServico).filter_by(id=produto_id, empresa_id=empresa.id).first()
+    if not veiculo or not produto:
+        raise HTTPException(status_code=404)
+    if not (permite_interno or permite_mala or permite_teto):
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Selecione ao menos um compartimento", status_code=303)
+    perfil = db.query(VeiculoPerfilCarga).filter_by(veiculo_id=veiculo.id, produto_id=produto.id).first()
+    if not perfil:
+        perfil = VeiculoPerfilCarga(veiculo_id=veiculo.id, produto_id=produto.id)
+        db.add(perfil)
+    perfil.volumes = max(1, int(volumes or 1)); perfil.permite_interno = bool(permite_interno)
+    perfil.permite_mala = bool(permite_mala); perfil.permite_teto = bool(permite_teto); perfil.ativo = True
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Perfil de carga salvo", status_code=303)
+
 @app.post("/painel/inteligencia-logistica/gerar")
-def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), horario_saida: str = Form(...), equipe_id: int = Form(0), veiculo_id: int = Form(0), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equipe_id: int = Form(0), veiculo_id: int = Form(0), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     try:
-        data_op = datetime.strptime(data_operacao, "%Y-%m-%d").date(); hora = datetime.strptime(horario_saida, "%H:%M").time()
+        data_op = datetime.strptime(data_operacao, "%Y-%m-%d").date()
     except Exception:
-        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Data ou horário inválido", status_code=303)
-    chave = f"{empresa.id}:{data_op.isoformat()}:{equipe_id or 0}"
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Data inválida", status_code=303)
+    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first() if veiculo_id else None
+    if not veiculo:
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Selecione um veículo configurado", status_code=303)
+    hora_provisoria = time(8, 0)
+    chave = f"{empresa.id}:{data_op.isoformat()}:{equipe_id or 0}:{veiculo_id or 0}"
     existente = db.query(RotaInteligente).filter_by(empresa_id=empresa.id, chave_consumo=chave).first()
     if existente:
         _reconstruir_rota_salva(db, existente)
@@ -7758,11 +7823,18 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), hor
     if int(empresa.humiat_saldo or 0) < 1:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Saldo Humiat insuficiente para gerar a rota", status_code=303)
     cfg = _config_rota(db, empresa.id)
-    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora)
+    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora_provisoria)
     if not candidatos:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
+    ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja)
+    try:
+        ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
+    except ValueError as exc:
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote(str(exc)), status_code=303)
+    hora = _calcular_horario_saida_ideal(ordenados, data_op, cfg, cfg.latitude_loja, cfg.longitude_loja)
+    # Reordena com o horário calculado e recalcula a carga/retornos.
+    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora)
     ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
-    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first() if veiculo_id else None
     ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
     atrasos = _simular_sequencia_rota(ordenados, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
     if atrasos:

@@ -51,15 +51,9 @@
     <div>
       <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
     </div>
-    <div>
-      <label>Volumes logísticos</label><input name="volume_logistico" type="number" min="1" value="{{ produto.volume_logistico if produto else 1 }}">
-    </div>
   </div>
-  <div class="linha">
-    <div><label><input type="checkbox" name="permite_interno" value="true" {% if not produto or produto.permite_interno %}checked{% endif %}> Pode ir no interno</label></div>
-    <div><label><input type="checkbox" name="permite_mala" value="true" {% if not produto or produto.permite_mala %}checked{% endif %}> Pode ir na mala</label></div>
-    <div><label><input type="checkbox" name="permite_teto" value="true" {% if produto and produto.permite_teto %}checked{% endif %}> Pode ir no teto</label></div>
-    <input type="hidden" name="carga_pontos" value="{{ produto.carga_pontos if produto else 1 }}">
+  <input type="hidden" name="volume_logistico" value="1">
+  <input type="hidden" name="carga_pontos" value="1">
   </div>
   <button>{% if produto %}Atualizar{% else %}Salvar{% endif %}</button>
 </form>
@@ -71,7 +65,7 @@
   <h3>{{ p.nome }}</h3>
   <p>{{ p.descricao }}</p>
   <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
-  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Carga logística: {{ p.volume_logistico or 1 }} volume(s) · {% if p.permite_interno %}Interno {% endif %}{% if p.permite_mala %}Mala {% endif %}{% if p.permite_teto %}Teto{% endif %}</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
+  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Perfil de transporte definido na Inteligência Logística por veículo.</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
   <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
 </div>
 {% endfor %}
