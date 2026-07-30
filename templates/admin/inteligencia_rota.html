@@ -7,11 +7,32 @@
       <h1>{{ rota.codigo }}</h1>
       <p>{{ rota.data_operacao.strftime('%d/%m/%Y') }} · {{ rota.equipe.nome if rota.equipe else 'Todas as equipes' }} · {{ rota.veiculo.nome if rota.veiculo else 'Veículo não informado' }}</p>
     </div>
-    <div class="intel-saldo"><small>Plano do dia</small><strong>{{ resumos_rotas|length }}</strong><span>rota(s)</span></div>
+    <div class="intel-saldo"><small>Semana operacional</small><strong>{{ inicio_semana.strftime('%d/%m') }}</strong><span>até {{ fim_semana.strftime('%d/%m') }}</span></div>
   </div>
 
   {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
   {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+
+  <section class="intel-week-nav">
+    <div class="intel-section-head">
+      <div>
+        <h2>Planejamento da semana</h2>
+        <p>As operações concluídas somem da visão ativa. O histórico permanece salvo.</p>
+      </div>
+    </div>
+    <div class="intel-week-days">
+      {% for r in rotas_semana %}
+      <a href="/painel/inteligencia-logistica/rota/{{ r.id }}" class="{% if r.id == rota.id %}ativo{% endif %}">
+        <small>{{ ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'][r.data_operacao.weekday()] }}</small>
+        <strong>{{ r.data_operacao.strftime('%d/%m') }}</strong>
+        <span>{{ r.status|replace('_', ' ') }}</span>
+      </a>
+      {% else %}
+      <span class="intel-empty-week">Nenhuma rota ativa nesta semana.</span>
+      {% endfor %}
+    </div>
+  </section>
 
   <section class="intel-card">
     <div class="intel-section-head">
@@ -95,10 +116,23 @@
             <span class="tipo {{ p.tipo }}">{% if p.tipo=='loja' %}loja{% else %}{{ p.tipo }}{% endif %}</span>
             <h3>{{ p.titulo }}</h3>
           </div>
-          <div class="horario"><small>Chegada prevista</small><strong>{{ p.chegada_prevista.strftime('%H:%M') if p.chegada_prevista else '--:--' }}</strong></div>
+          <div class="horario">
+            <small>{% if em_execucao %}Chegada prevista{% else %}Horário recomendado{% endif %}</small>
+            <strong>{{ p.chegada_prevista.strftime('%H:%M') if p.chegada_prevista else '--:--' }}</strong>
+          </div>
         </div>
 
+        <div class="parada-data">
+          <i class="bi bi-calendar3"></i>
+          <strong>{{ p.dia_semana_view }} • {{ p.data_operacao_view.strftime('%d/%m/%Y') }}</strong>
+          {% if p.aguardando_entrega_view %}<span>Aguardando entrega</span>{% endif %}
+        </div>
         {% if p.endereco %}<p class="endereco"><i class="bi bi-geo-alt"></i> {{ p.endereco }}</p>{% endif %}
+        {% if p.contrato_url_view %}
+        <a class="botao btn-krj-outline btn-krj-compact ver-contrato" href="{{ p.contrato_url_view }}" target="_blank" rel="noopener">
+          <i class="bi bi-file-earmark-text"></i> Ver contrato
+        </a>
+        {% endif %}
         <div class="dados-parada">
           {% if p.deslocamento_anterior_min is not none %}<span><strong>Deslocamento {{ p.deslocamento_anterior_min }} min</strong></span>{% endif %}
           {% if p.distancia_anterior_km is not none %}<span>{{ '%.1f'|format(p.distancia_anterior_km) }} km no trecho</span>{% endif %}
@@ -113,8 +147,8 @@
         {% if p.motivo_prioridade %}<p class="motivo">{{ p.motivo_prioridade }}</p>{% endif %}
 
         <div class="acoes-parada">
-          {% if p.status == 'concluido' %}
-            <span class="concluido-ok"><i class="bi bi-check-circle"></i> Concluída</span>
+          {% if p.aguardando_entrega_view %}
+            <span class="intel-waiting"><i class="bi bi-hourglass-split"></i> Previsão semanal — libera após concluir a entrega</span>
           {% else %}
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/iniciar/{{ p.id }}">
               <button class="botao {% if p.status=='em_andamento' %}btn-krj-primary{% else %}btn-krj-outline{% endif %} btn-krj-compact" type="submit">
@@ -134,5 +168,6 @@
 
 <style>
 .intel-inline-time{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}.intel-inline-time label{font-weight:700}.intel-inline-time input{display:block;margin-top:.35rem;padding:.65rem;border:1px solid #d7dce2;border-radius:.65rem}.intel-day-summary{display:grid;gap:1rem;margin:1rem 0}.intel-route-summary{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;box-shadow:0 8px 22px rgba(0,0,0,.04)}.intel-route-summary.ativa{border-color:#6c63ff}.intel-route-summary.concluida{opacity:.78}.intel-route-summary header{display:flex;justify-content:space-between;gap:1rem;align-items:center;border-bottom:1px solid #edf0f4;padding-bottom:.75rem}.intel-route-summary h2{margin:.15rem 0 0}.intel-summary-block{margin-top:.85rem}.intel-summary-block h3{font-size:1rem;margin:0 0 .45rem}.intel-summary-block ul{margin:0;padding-left:1.15rem}.destaque-reuso{background:#f4fbf7;border-radius:.75rem;padding:.75rem}.intel-return-row{display:flex;align-items:center;gap:.65rem;margin-top:.85rem;padding:.75rem;background:#f7f8fa;border-radius:.75rem}.intel-return-row span{flex:1}.parada-rota.em-andamento{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}@media(max-width:720px){.intel-route-summary header{align-items:flex-start}.intel-section-head{align-items:flex-start}.intel-inline-time{width:100%}.intel-inline-time label{flex:1}.intel-inline-time input{width:100%}}
+.intel-week-nav{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;margin:1rem 0}.intel-week-days{display:flex;gap:.65rem;overflow-x:auto;padding-bottom:.15rem}.intel-week-days a{min-width:92px;text-decoration:none;color:inherit;border:1px solid #e2e6eb;border-radius:.8rem;padding:.7rem;display:flex;flex-direction:column;gap:.2rem}.intel-week-days a.ativo{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}.intel-week-days small,.intel-week-days span{font-size:.78rem;color:#667085}.parada-data{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.45rem 0 .6rem}.parada-data span,.intel-waiting{background:#fff4d6;color:#805b00;border-radius:999px;padding:.32rem .6rem;font-size:.82rem;font-weight:700}.ver-contrato{display:inline-flex;margin:0 0 .7rem}.intel-empty-week{color:#667085}.intel-waiting{display:inline-flex;align-items:center;gap:.35rem}
 </style>
 {% endblock %}

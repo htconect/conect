@@ -8460,20 +8460,73 @@ def _resumo_rotas_do_dia(paradas: list[RotaInteligenteParada]):
 def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
     if not rota: raise HTTPException(status_code=404)
-    paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(RotaInteligenteParada.ordem).all()
+    # Paradas concluídas permanecem no histórico do banco, mas somem da operação ativa.
+    paradas = (
+        db.query(RotaInteligenteParada)
+        .filter(
+            RotaInteligenteParada.rota_id == rota.id,
+            RotaInteligenteParada.status != "concluido",
+        )
+        .order_by(RotaInteligenteParada.ordem)
+        .all()
+    )
+
+    em_execucao = rota.status == "em_execucao" or any(p.status == "em_andamento" for p in paradas)
+    nomes_dias = ("Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo")
+
     for p in paradas:
         sol = p.solicitacao
         p.hora_inicio_evento_view = sol.hora_inicio if sol else None
         p.hora_fim_evento_view = sol.hora_fim if sol else None
         p.retirada_hora_view = sol.retirada_hora if sol else None
+        p.data_operacao_view = p.agenda.data if p.agenda and p.agenda.data else rota.data_operacao
+        p.dia_semana_view = nomes_dias[p.data_operacao_view.weekday()]
+        p.contrato_url_view = f"/painel/solicitacao/{p.solicitacao_id}" if p.solicitacao_id else None
+
+        # Uma retirada sintética pode participar do planejamento semanal antes da
+        # entrega, mas não pode ser iniciada nem concluída.
+        p.aguardando_entrega_view = False
+        if p.tipo == "retirada" and p.solicitacao_id:
+            entrega = (
+                db.query(Agenda)
+                .filter_by(
+                    empresa_id=empresa.id,
+                    solicitacao_id=p.solicitacao_id,
+                    tipo_evento="entrega",
+                )
+                .first()
+            )
+            p.aguardando_entrega_view = bool(
+                entrega and entrega.status_operacional != "concluido"
+            )
+
         p.folga_min_view = None
-        if p.chegada_prevista and p.horario_limite:
+        # Atraso só existe durante a execução. No planejamento mostramos apenas
+        # o horário recomendado.
+        if em_execucao and p.chegada_prevista and p.horario_limite:
             limite_dt = datetime.combine(rota.data_operacao, p.horario_limite)
             p.folga_min_view = int((limite_dt - p.chegada_prevista).total_seconds() / 60)
+
+    inicio_semana = rota.data_operacao - timedelta(days=rota.data_operacao.weekday())
+    fim_semana = inicio_semana + timedelta(days=6)
+    rotas_semana = (
+        db.query(RotaInteligente)
+        .filter(
+            RotaInteligente.empresa_id == empresa.id,
+            RotaInteligente.data_operacao >= inicio_semana,
+            RotaInteligente.data_operacao <= fim_semana,
+            RotaInteligente.status != "concluida",
+        )
+        .order_by(RotaInteligente.data_operacao, RotaInteligente.horario_saida)
+        .all()
+    )
+
     resumos_rotas = _resumo_rotas_do_dia(paradas)
     return templates.TemplateResponse("admin/inteligencia_rota.html", {
         "request": request, "empresa": empresa, "rota": rota, "paradas": paradas,
-        "resumos_rotas": resumos_rotas,
+        "resumos_rotas": resumos_rotas, "em_execucao": em_execucao,
+        "inicio_semana": inicio_semana, "fim_semana": fim_semana,
+        "rotas_semana": rotas_semana,
         "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")
     })
 
@@ -8511,6 +8564,18 @@ def iniciar_parada_inteligente(
         raise HTTPException(status_code=404)
     if parada.status == "concluido":
         return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?erro=Esta parada já foi concluída", status_code=303)
+
+    if parada.tipo == "retirada" and parada.solicitacao_id:
+        entrega = db.query(Agenda).filter_by(
+            empresa_id=empresa.id,
+            solicitacao_id=parada.solicitacao_id,
+            tipo_evento="entrega",
+        ).first()
+        if entrega and entrega.status_operacional != "concluido":
+            return RedirectResponse(
+                f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Esta retirada ainda aguarda a conclusão da entrega.')}",
+                status_code=303,
+            )
 
     # O operador pode iniciar qualquer pedido. Ele vira a próxima parada, sem apagar
     # o plano anterior nem as conclusões já registradas.
@@ -8576,6 +8641,18 @@ def concluir_parada_inteligente(rota_id: int, parada_id: int, db: Session = Depe
     parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
     if not rota or not parada:
         raise HTTPException(status_code=404)
+
+    if parada.tipo == "retirada" and parada.solicitacao_id:
+        entrega = db.query(Agenda).filter_by(
+            empresa_id=empresa.id,
+            solicitacao_id=parada.solicitacao_id,
+            tipo_evento="entrega",
+        ).first()
+        if entrega and entrega.status_operacional != "concluido":
+            return RedirectResponse(
+                f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Não é possível concluir a retirada antes da entrega.')}",
+                status_code=303,
+            )
 
     parada.status = "concluido"
     parada.chegada_real = agora_utc()
