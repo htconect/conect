@@ -12,6 +12,7 @@ import re
 import math
 import json
 import zipfile
+import unicodedata
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
@@ -800,6 +801,14 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_custo INTEGER DEFAULT 0 NOT NULL")
         if "humiat_status" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN humiat_status VARCHAR(30)")
+        if "latitude" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN latitude FLOAT")
+        if "longitude" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN longitude FLOAT")
+        if "status_geocodificacao" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN status_geocodificacao VARCHAR(20) DEFAULT 'pendente'")
+        if "data_geocodificacao" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN data_geocodificacao TIMESTAMP")
 
     if "humiat_movimentos" not in tabelas:
         comandos.append("""
@@ -6898,7 +6907,9 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
 
     def adicionar(ag: Agenda, tipo: str, *, sintetica: bool = False, data_retirada: date | None = None):
         sol = ag.solicitacao
-        lat, lon = _coord_de_link(ag.link_localizacao)
+        lat_link, lon_link = _coord_de_link(ag.link_localizacao)
+        lat = sol.latitude if sol and sol.latitude is not None else lat_link
+        lon = sol.longitude if sol and sol.longitude is not None else lon_link
         limite, horario_calculado = _limite_operacao(ag, cfg, tipo, data_operacao, hora_saida)
         servico = int(cfg.minutos_desmontagem if tipo == "retirada" else cfg.minutos_montagem)
         pontos = _pontos_carga_solicitacao(sol)
@@ -6987,7 +6998,7 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
 
 
 def _normalizar_localidade(valor: str | None) -> str:
-    texto = unidecode(str(valor or "")).lower().strip()
+    texto = unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii").lower().strip()
     return re.sub(r"[^a-z0-9]+", " ", texto).strip()
 
 
@@ -7277,6 +7288,71 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     _recalcular_rota_salva(db, rota)
     return adicionadas
 
+def _solicitacoes_sem_coordenadas(candidatos):
+    """Deduplica contratos sem coordenadas que participam da operação consultada."""
+    pendentes = []
+    vistos = set()
+    for c in candidatos:
+        ag = c.get("agenda")
+        sol = ag.solicitacao if ag else None
+        if not sol or sol.id in vistos:
+            continue
+        if sol.latitude is None or sol.longitude is None:
+            vistos.add(sol.id)
+            pendentes.append({
+                "id": sol.id,
+                "cliente": sol.cliente.nome if sol.cliente else c.get("titulo") or f"Contrato {sol.id}",
+                "endereco": c.get("endereco") or sol.local or "Endereço não informado",
+                "bairro": sol.bairro or "",
+                "latitude": sol.latitude,
+                "longitude": sol.longitude,
+            })
+    return pendentes
+
+
+@app.post("/painel/inteligencia-logistica/localizacao/{solicitacao_id}")
+def salvar_localizacao_inteligencia(
+    solicitacao_id: int, request: Request, latitude: str = Form(""), longitude: str = Form(""),
+    retorno: str = Form("/painel/inteligencia-logistica/nova"),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+):
+    sol = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not sol:
+        raise HTTPException(status_code=404)
+    try:
+        lat = float(str(latitude).replace(",", ".").strip())
+        lon = float(str(longitude).replace(",", ".").strip())
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError
+    except Exception:
+        sep = "&" if "?" in retorno else "?"
+        return RedirectResponse(f"{retorno}{sep}erro=Latitude ou longitude inválida", status_code=303)
+    sol.latitude = lat
+    sol.longitude = lon
+    sol.status_geocodificacao = "localizado"
+    sol.data_geocodificacao = agora_utc()
+    db.commit()
+    sep = "&" if "?" in retorno else "?"
+    return RedirectResponse(f"{retorno}{sep}sucesso=Localização atualizada", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/localizacao/{solicitacao_id}/limpar")
+def limpar_localizacao_inteligencia(
+    solicitacao_id: int, retorno: str = Form("/painel/inteligencia-logistica/nova"),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+):
+    sol = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not sol:
+        raise HTTPException(status_code=404)
+    sol.latitude = None
+    sol.longitude = None
+    sol.status_geocodificacao = "pendente"
+    sol.data_geocodificacao = None
+    db.commit()
+    sep = "&" if "?" in retorno else "?"
+    return RedirectResponse(f"{retorno}{sep}sucesso=Localização marcada como pendente", status_code=303)
+
+
 @app.get("/painel/inteligencia-logistica", response_class=HTMLResponse)
 def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
@@ -7317,10 +7393,12 @@ def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: 
     existente = db.query(RotaInteligente).filter_by(
         empresa_id=empresa.id, chave_consumo=f"{empresa.id}:{data_filtro.isoformat()}:{equipe_id or 0}"
     ).first()
+    localizacoes_pendentes = _solicitacoes_sem_coordenadas(candidatos)
     return templates.TemplateResponse("admin/inteligencia_nova.html", {
         "request": request, "empresa": empresa, "config": cfg, "equipes": equipes,
         "veiculos": veiculos, "data_filtro": data_filtro, "equipe_id": equipe_id,
         "candidatos": candidatos, "existente": existente,
+        "localizacoes_pendentes": localizacoes_pendentes,
         "erro": request.query_params.get("erro"), "sucesso": request.query_params.get("sucesso")
     })
 

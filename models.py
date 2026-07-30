@@ -283,6 +283,11 @@ class Solicitacao(Base):
     humiat_competencia = Column(String(7), nullable=True)  # AAAA-MM do aceite
     humiat_custo = Column(Integer, nullable=False, default=0)
     humiat_status = Column(String(30), nullable=True)  # gratuito, debitado, pendente_saldo
+    # Coordenadas internas usadas somente pela Inteligência Logística.
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    status_geocodificacao = Column(String(20), nullable=True, default="pendente")
+    data_geocodificacao = Column(DateTime, nullable=True)
 
     agenda = relationship("Agenda", back_populates="solicitacao", uselist=False)
     pagamentos = relationship("Pagamento", back_populates="solicitacao", cascade="all, delete-orphan")
