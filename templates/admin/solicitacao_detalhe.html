@@ -99,6 +99,18 @@
   <b>Aguardando aceite do cliente</b>
   <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
 </section>
+{% elif item.status == "aguardando_nova_data" %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Contrato em crédito</b>
+  <p>Sem entrega ou retirada programada. O valor pago permanece disponível para uma nova data.</p>
+  <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Ver pagamentos e crédito</button>
+</section>
+{% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Contrato cancelado</b>
+</section>
 {% else %}
 <section class="proxima-acao ok-acao">
   <small>Status</small>

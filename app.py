@@ -2864,8 +2864,13 @@ def preparar_reservas(
     if not mostrar_concluidas:
         q = q.filter(Agenda.status_operacional != "concluido")
 
-    itens = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).join(Cliente,
-                                                                              Solicitacao.cliente_id == Cliente.id).all()
+    # Segurança adicional: contratos em crédito/cancelados nunca aparecem na operação,
+    # mesmo se existir algum card antigo no banco.
+    status_fora_operacao = ["aguardando_nova_data", "cancelada", "cancelado", "cancelado_cliente", "rejeitada"]
+    q = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
+        ~Solicitacao.status.in_(status_fora_operacao)
+    )
+    itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).all()
     sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
 
     def hora_roteirizada(a: Agenda):
@@ -3986,7 +3991,10 @@ def salvar_solicitacao_completa(
         item_principal.valor_unitario = valor_float
         item_principal.valor_total = valor_float
 
-    criar_eventos_operacionais(db, item)
+    if item.status == "aguardando_nova_data":
+        retirar_solicitacao_da_operacao(db, item)
+    else:
+        criar_eventos_operacionais(db, item)
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{item.id}", status_code=303)
 
@@ -6132,6 +6140,13 @@ def agenda(
     if equipe_id and equipe_id not in ids_equipes:
         equipe_id = 0
     inicio, fim = periodo_semana_atual()
+
+    # Checkbox desmarcado não é enviado no GET. Quando existe query string,
+    # usa exatamente os filtros presentes para permitir visualizar somente crédito.
+    if request.query_params:
+        ativos = "1" if "ativos" in request.query_params else ""
+        credito = "1" if "credito" in request.query_params else ""
+        cancelados = "1" if "cancelados" in request.query_params else ""
 
     # Mantém o último filtro usado na agenda para a equipe não precisar refazer a busca.
     filtro_salvo = request.session.get("agenda_filtro", {}) if not request.query_params else {}
