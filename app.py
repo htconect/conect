@@ -16,6 +16,9 @@ import unicodedata
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
+from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import URLError, HTTPError
+import time as time_module
 
 from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
@@ -7234,45 +7237,6 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             if retirada["retirada_obrigatoria"]:
                 break
 
-    # Inteligência independente da Agenda: contratos aceitos também geram operações
-    # previstas mesmo quando os cards operacionais ainda não existem. Isso permite
-    # antecipar retiradas futuras e enxergar o ciclo físico completo do equipamento.
-    solicitacoes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.status.notin_(["rejeitada", "cancelada", "aguardando_nova_data"]),
-    ).all()
-    candidatos_chaves = {(c["agenda"].solicitacao_id if c.get("agenda") else None, c["tipo"]) for c in candidatos}
-
-    def agenda_virtual(sol, tipo, data_ref, hora_ref):
-        ag = Agenda(
-            empresa_id=empresa.id, solicitacao_id=sol.id, data=data_ref,
-            hora_inicio=hora_ref or time(8, 0), hora_fim=sol.hora_fim,
-            titulo=f"{('Retirada - ' if tipo == 'retirada' else '')}{(sol.produto.nome if sol.produto else 'Equipamento')} - {sol.cliente.nome if sol.cliente else 'Cliente'}",
-            bairro=sol.bairro, tipo_evento=tipo, status_operacional="previsto",
-        )
-        ag.solicitacao = sol
-        return ag
-
-    for sol in solicitacoes:
-        # Entrega prevista do dia, mesmo sem card Entregar.
-        if sol.data_evento == data_operacao and (sol.id, "entrega") not in candidatos_chaves:
-            ag = agenda_virtual(sol, "entrega", sol.data_evento, sol.hora_inicio)
-            adicionar(ag, "entrega", sintetica=True)
-            candidatos[-1]["origem_operacao"] = "prevista_pelo_contrato"
-            candidatos_chaves.add((sol.id, "entrega"))
-            entregas_do_dia.append(candidatos[-1])
-
-        # Toda entrega anterior ainda não retirada deve aparecer como previsão de retirada.
-        # Usa retirada_data/hora quando informada; caso contrário calcula a partir do fim
-        # do evento e do tempo de desmontagem.
-        data_prevista = sol.retirada_data or sol.data_evento
-        if data_prevista <= data_operacao and (sol.id, "retirada") not in candidatos_chaves:
-            ag = agenda_virtual(sol, "retirada", data_prevista, sol.retirada_hora or sol.hora_fim or sol.hora_inicio)
-            adicionar(ag, "retirada", sintetica=True, data_retirada=data_prevista)
-            candidatos[-1]["origem_operacao"] = "retirada_prevista_pela_inteligencia"
-            candidatos[-1]["retirada_prevista_sem_card"] = True
-            candidatos_chaves.add((sol.id, "retirada"))
-
     return candidatos
 
 
@@ -7620,6 +7584,67 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     _recalcular_rota_salva(db, rota)
     return adicionadas
 
+def _normalizar_endereco_geocodificacao(valor: str) -> str:
+    texto = re.sub(r"\s+", " ", (valor or "").strip(" ,.-"))
+    return texto
+
+
+def _geocodificar_endereco_nominatim(endereco: str, bairro: str = ""):
+    """Localiza um endereço pelo Nominatim/OSM. Retorna (lat, lon, descricao) ou (None, None, motivo)."""
+    partes = [endereco, bairro, "Rio de Janeiro", "RJ", "Brasil"]
+    consulta = ", ".join(dict.fromkeys([_normalizar_endereco_geocodificacao(p) for p in partes if _normalizar_endereco_geocodificacao(p)]))
+    if len(consulta) < 8:
+        return None, None, "endereço insuficiente"
+    params = urlencode({"q": consulta, "format": "jsonv2", "limit": 1, "countrycodes": "br", "addressdetails": 1})
+    req = UrlRequest(
+        "https://nominatim.openstreetmap.org/search?" + params,
+        headers={"User-Agent": "Conect-Humiat-Inteligencia-Logistica/1.0 (contato: suporte@humiat.com.br)", "Accept-Language": "pt-BR"},
+    )
+    try:
+        with urlopen(req, timeout=12) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+        if not dados:
+            return None, None, "não encontrado"
+        lat = float(dados[0]["lat"]); lon = float(dados[0]["lon"])
+        if not (-34.0 <= lat <= 6.0 and -74.0 <= lon <= -32.0):
+            return None, None, "resultado fora do Brasil"
+        return lat, lon, dados[0].get("display_name") or consulta
+    except (HTTPError, URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        return None, None, f"falha na consulta: {type(exc).__name__}"
+
+
+def _geocodificar_solicitacoes_automaticamente(db: Session, empresa_id: int, solicitacoes):
+    """Geocodifica em lote, com cache por endereço e intervalo respeitoso entre consultas."""
+    resultado = {"localizados": 0, "ja_prontos": 0, "pendentes": 0, "erros": []}
+    cache = {}
+    usados = set()
+    for sol, endereco, bairro in solicitacoes:
+        if sol.latitude is not None and sol.longitude is not None and sol.status_geocodificacao == "localizado":
+            resultado["ja_prontos"] += 1
+            continue
+        chave = (_normalizar_endereco_geocodificacao(endereco).lower(), _normalizar_endereco_geocodificacao(bairro).lower())
+        if chave in cache:
+            lat, lon, detalhe = cache[chave]
+        else:
+            lat, lon, detalhe = _geocodificar_endereco_nominatim(endereco, bairro)
+            cache[chave] = (lat, lon, detalhe)
+            time_module.sleep(1.05)
+        if lat is None or lon is None:
+            sol.status_geocodificacao = "revisar"
+            sol.data_geocodificacao = agora_utc()
+            resultado["pendentes"] += 1
+            resultado["erros"].append(f"{getattr(sol.cliente, 'nome', None) or 'Contrato ' + str(sol.id)}: {detalhe}")
+            continue
+        par = (round(lat, 6), round(lon, 6))
+        usados.add(par)
+        sol.latitude = lat; sol.longitude = lon
+        sol.status_geocodificacao = "localizado"
+        sol.data_geocodificacao = agora_utc()
+        resultado["localizados"] += 1
+    db.commit()
+    return resultado
+
+
 def _solicitacoes_sem_coordenadas(candidatos):
     """Deduplica contratos sem coordenadas que participam da operação consultada."""
     pendentes = []
@@ -7640,6 +7665,42 @@ def _solicitacoes_sem_coordenadas(candidatos):
                 "longitude": sol.longitude,
             })
     return pendentes
+
+
+@app.post("/painel/inteligencia-logistica/localizacoes/automaticas")
+def calcular_localizacoes_automaticas(
+    data_operacao: str = Form(""), equipe_id: int = Form(0),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+):
+    try:
+        data_filtro = datetime.strptime(data_operacao, "%Y-%m-%d").date() if data_operacao else date.today()
+    except Exception:
+        data_filtro = date.today()
+    cfg = _config_rota(db, empresa.id)
+    candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg, time(7, 0))
+    itens = []
+    vistos = set()
+    for c in candidatos:
+        ag = c.get("agenda")
+        sol = ag.solicitacao if ag else None
+        if not sol or sol.id in vistos:
+            continue
+        vistos.add(sol.id)
+        endereco = c.get("endereco") or sol.local or ""
+        itens.append((sol, endereco, sol.bairro or c.get("bairro") or ""))
+    if not itens:
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/nova?data={data_filtro.isoformat()}&equipe_id={equipe_id}&erro=" + quote("Nenhum endereço disponível para calcular"),
+            status_code=303,
+        )
+    resultado = _geocodificar_solicitacoes_automaticamente(db, empresa.id, itens)
+    msg = f"Localizações: {resultado['localizados']} calculadas, {resultado['ja_prontos']} já prontas"
+    if resultado["pendentes"]:
+        msg += f", {resultado['pendentes']} precisam de revisão"
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/nova?data={data_filtro.isoformat()}&equipe_id={equipe_id}&sucesso=" + quote(msg) + ("&abrir_geo=1" if resultado["pendentes"] else ""),
+        status_code=303,
+    )
 
 
 @app.post("/painel/inteligencia-logistica/localizacao/{solicitacao_id}")
@@ -7746,27 +7807,6 @@ def configuracoes_inteligencia(request: Request, db: Session = Depends(get_db), 
         "request": request, "empresa": empresa, "config": cfg, "veiculos": veiculos, "produtos": produtos,
         "erro": request.query_params.get("erro"), "sucesso": request.query_params.get("sucesso")
     })
-
-
-@app.post("/painel/inteligencia-logistica/zerar")
-def zerar_inteligencia_logistica(request: Request, confirmar: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    if confirmar.strip().upper() != "ZERAR":
-        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Digite ZERAR para confirmar", status_code=303)
-    rota_ids = [r[0] for r in db.query(RotaInteligente.id).filter_by(empresa_id=empresa.id).all()]
-    if rota_ids:
-        db.query(RotaInteligenteParada).filter(RotaInteligenteParada.rota_id.in_(rota_ids)).delete(synchronize_session=False)
-        db.query(RotaInteligente).filter(RotaInteligente.id.in_(rota_ids)).delete(synchronize_session=False)
-    veiculo_ids = [v[0] for v in db.query(VeiculoLogistico.id).filter_by(empresa_id=empresa.id).all()]
-    if veiculo_ids:
-        db.query(VeiculoPerfilCarga).filter(VeiculoPerfilCarga.veiculo_id.in_(veiculo_ids)).delete(synchronize_session=False)
-        db.query(VeiculoLogistico).filter(VeiculoLogistico.id.in_(veiculo_ids)).delete(synchronize_session=False)
-    db.query(ConfiguracaoRotaInteligente).filter_by(empresa_id=empresa.id).delete(synchronize_session=False)
-    db.query(Solicitacao).filter_by(empresa_id=empresa.id).update({
-        Solicitacao.latitude: None, Solicitacao.longitude: None,
-        Solicitacao.status_geocodificacao: "pendente", Solicitacao.data_geocodificacao: None
-    }, synchronize_session=False)
-    db.commit()
-    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Inteligência zerada. Contratos, agenda, operação e financeiro não foram alterados.", status_code=303)
 
 
 @app.get("/painel/inteligencia-logistica/historico", response_class=HTMLResponse)
@@ -7886,16 +7926,6 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora_provisoria)
     if not candidatos:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
-    if cfg.latitude_loja is None or cfg.longitude_loja is None:
-        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Informe latitude e longitude da loja antes de calcular", status_code=303)
-    sem_geo = [c for c in candidatos if c.get("lat") is None or c.get("lon") is None]
-    if sem_geo:
-        return RedirectResponse(
-            "/painel/inteligencia-logistica/nova?data=" + data_op.isoformat() +
-            "&equipe_id=" + str(equipe_id or 0) + "&abrir_geo=1&erro=" +
-            quote(f"Não é possível gerar uma rota real: {len(sem_geo)} endereço(s) ainda estão sem coordenadas."),
-            status_code=303
-        )
     ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja)
     try:
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)

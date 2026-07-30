@@ -26,8 +26,13 @@
     {% if localizacoes_pendentes %}
       <div class="intel-notice intel-geo-warning">
         <i class="bi bi-geo-alt"></i>
-        <div><strong>{{ localizacoes_pendentes|length }} endereço(s) sem coordenadas</strong><p>A rota real só poderá ser calculada depois que todos os endereços tiverem latitude e longitude.</p></div>
-        <button class="botao btn-krj-primary" type="button" onclick="abrirGeoModal()"><i class="bi bi-pin-map"></i> Atualizar localizações</button>
+        <div><strong>{{ localizacoes_pendentes|length }} endereço(s) sem coordenadas</strong><p>A Inteligência calcula automaticamente pelo endereço. A edição manual fica disponível somente quando algum endereço não for encontrado.</p></div>
+        <form method="post" action="/painel/inteligencia-logistica/localizacoes/automaticas" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='<i class=&quot;bi bi-hourglass-split&quot;></i> Calculando...';">
+          <input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}">
+          <input type="hidden" name="equipe_id" value="{{ equipe_id }}">
+          <button class="botao btn-krj-primary" type="submit"><i class="bi bi-geo-alt-fill"></i> Calcular automaticamente</button>
+        </form>
+        <button class="botao btn-krj-outline" type="button" onclick="abrirGeoModal()"><i class="bi bi-pencil-square"></i> Revisar manualmente</button>
       </div>
     {% else %}
       <div class="intel-notice"><i class="bi bi-check-circle"></i><div><strong>Localizações prontas</strong><p>Todos os contratos desta operação possuem latitude e longitude.</p></div></div>
@@ -46,7 +51,7 @@
           <span>
             {% if c.retirada_vencida %}<b>RETIRADA VENCIDA</b> · {% elif c.retirada_obrigatoria %}<b>RETIRADA OBRIGATÓRIA</b> · {% endif %}
             {{ c.tipo|title }} · {{ c.endereco or 'Endereço não informado' }}{% if c.lat is not none and c.lon is not none %} · GPS {{ '%.6f'|format(c.lat) }}, {{ '%.6f'|format(c.lon) }}{% endif %}
-            {% if c.horario_calculado %} · horário calculado{% endif %}{% if c.retirada_prevista_sem_card %} · prevista pela Inteligência mesmo sem card Retirar{% endif %}
+            {% if c.horario_calculado %} · horário calculado{% endif %}
             {% if c.reaproveitamento %} · reaproveitamento para {{ c.reaproveita_para }}{% endif %}
             {% if c.sem_coordenadas %} · sem coordenadas{% endif %}
           </span>
@@ -59,14 +64,14 @@
     </div>
   </section>
   {% if existente %}<section class="intel-notice"><i class="bi bi-check-circle"></i><div><strong>Já existe uma inteligência para essa data e equipe</strong><p>Abrir a rota existente não consome outro Humiat.</p></div><a class="botao btn-krj-primary" href="/painel/inteligencia-logistica/rota/{{ existente.id }}">Abrir rota</a></section>{% elif candidatos %}
-  <section class="intel-card destaque"><form method="post" action="/painel/inteligencia-logistica/gerar" class="intel-form duas-colunas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><div class="intel-notice"><i class="bi bi-clock-history"></i><div><strong>Horário calculado automaticamente</strong><p>A Inteligência encontrará o horário mais tarde possível para sair da loja sem atrasar entregas ou retiradas obrigatórias.</p></div></div><label>Veículo<select name="veiculo_id" required><option value="">Selecione o veículo</option>{% for v in veiculos %}<option value="{{ v.id }}">{{ v.nome }} · Interno {{ v.capacidade_interno or 0 }} / Mala {{ v.capacidade_mala or 0 }} / Teto-outros {{ v.capacidade_teto or 0 }}</option>{% endfor %}</select></label><div class="intel-confirm span2"><div><strong>Saldo atual: {{ empresa.humiat_saldo or 0 }}</strong><span>Saldo depois da geração: {{ (empresa.humiat_saldo or 0) - 1 }}</span></div>{% if localizacoes_pendentes %}<button class="botao btn-krj-primary" type="button" disabled title="Preencha todas as coordenadas"><i class="bi bi-geo-alt"></i> Falta calcular localizações</button>{% else %}<button class="botao btn-krj-primary" type="submit" onclick="return confirm('Gerar esta inteligência consumirá 1 Humiat. Continuar?')"><i class="bi bi-stars"></i> Calcular rota completa</button>{% endif %}</div></form></section>{% endif %}
+  <section class="intel-card destaque"><form method="post" action="/painel/inteligencia-logistica/gerar" class="intel-form duas-colunas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><div class="intel-notice"><i class="bi bi-clock-history"></i><div><strong>Horário calculado automaticamente</strong><p>A Inteligência encontrará o horário mais tarde possível para sair da loja sem atrasar entregas ou retiradas obrigatórias.</p></div></div><label>Veículo<select name="veiculo_id" required><option value="">Selecione o veículo</option>{% for v in veiculos %}<option value="{{ v.id }}">{{ v.nome }} · Interno {{ v.capacidade_interno or 0 }} / Mala {{ v.capacidade_mala or 0 }} / Teto-outros {{ v.capacidade_teto or 0 }}</option>{% endfor %}</select></label><div class="intel-confirm span2"><div><strong>Saldo atual: {{ empresa.humiat_saldo or 0 }}</strong><span>Saldo depois da geração: {{ (empresa.humiat_saldo or 0) - 1 }}</span></div><button class="botao btn-krj-primary" type="submit" onclick="return confirm('Gerar esta inteligência consumirá 1 Humiat. Continuar?')"><i class="bi bi-stars"></i> Calcular rota completa</button></div></form></section>{% endif %}
 
 {% if localizacoes_pendentes %}
 <div id="geoModal" class="intel-geo-modal" aria-hidden="true">
   <div class="intel-geo-backdrop" onclick="fecharGeoModal()"></div>
   <div class="intel-geo-dialog" role="dialog" aria-modal="true" aria-labelledby="geoTitle">
     <div class="intel-geo-head">
-      <div><span class="intel-kicker">Inteligência Logística</span><h2 id="geoTitle">Atualizar localizações</h2><p>Preencha somente aqui. Esses campos não aparecem no contrato.</p></div>
+      <div><span class="intel-kicker">Inteligência Logística</span><h2 id="geoTitle">Revisar localizações pendentes</h2><p>Use esta tela apenas quando o cálculo automático não encontrar o endereço corretamente.</p></div>
       <button type="button" class="intel-geo-close" onclick="fecharGeoModal()" aria-label="Fechar">×</button>
     </div>
     <div class="intel-geo-list">
@@ -84,7 +89,7 @@
       </form>
       {% endfor %}
     </div>
-    <div class="intel-geo-footer"><button class="botao btn-krj-outline" type="button" onclick="fecharGeoModal()">Fechar</button></div>
+    <div class="intel-geo-footer"><form method="post" action="/painel/inteligencia-logistica/localizacoes/automaticas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><button class="botao btn-krj-primary" type="submit"><i class="bi bi-arrow-repeat"></i> Tentar novamente automaticamente</button></form><button class="botao btn-krj-outline" type="button" onclick="fecharGeoModal()">Fechar</button></div>
   </div>
 </div>
 <script>
