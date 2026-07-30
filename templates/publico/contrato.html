@@ -37,8 +37,10 @@
 
   <div class="card">
     <h2>Local do evento</h2>
-    <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
-    <p><b>Endereço do evento:</b> {{ item.local or item.cliente.endereco or '-' }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}</p>
+    {% set referencia_evento = endereco_referencia_solicitacao(item) %}
+    <p><b>Local:</b> {{ item.local_nome or referencia_evento or '-' }}</p>
+    <p><b>Endereço do evento:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
+    {% if referencia_evento and referencia_evento != item.local_nome %}<p><b>Ponto de referência:</b> {{ referencia_evento }}</p>{% endif %}
     <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
     <p><b>Bairro:</b> {{ item.bairro or item.cliente.bairro or '-' }}</p>
     <p><b>Acesso:</b> {{ item.acesso_local or '-' }}</p>

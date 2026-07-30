@@ -26,8 +26,9 @@
     <p class="mini">Reserva #{{ item.id }}</p>
     <h1>{{ item.cliente.nome or "Cliente sem nome" }}</h1>
     <p>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else "-" }} · {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else "-" }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
-    <p>{{ item.local or item.cliente.endereco or "-" }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}</p>
-    <p>{{ item.bairro or item.cliente.bairro or "-" }}</p>
+    <p>{{ endereco_rota_solicitacao(item) or "-" }}</p>
+    {% set referencia_topo = endereco_referencia_solicitacao(item) %}
+    {% if referencia_topo %}<p>Referência: {{ referencia_topo }}</p>{% endif %}
     {% if item.acesso_local %}<p>Acesso: {{ item.acesso_local }}</p>{% endif %}
     <p>{{ item.cliente.telefone or item.cliente.identificador or "-" }}</p>
     {% if item.retirada_obrigatoria %}
@@ -132,8 +133,10 @@
     {% if empresa.mostrar_mensagem_hora_fim and (empresa.mensagem_hora_fim or mensagens.hora_fim) %}
       <p class="box aviso">{{ empresa.mensagem_hora_fim or mensagens.hora_fim }}</p>
     {% endif %}
-    <p><small>Local</small><b>{{ item.local_nome or item.local or item.cliente.endereco or '-' }}</b></p>
-    <p><small>Endereço do evento</small><b>{{ item.local or item.cliente.endereco or '-' }}{% if item.cliente.numero %}, {{ item.cliente.numero }}{% endif %}{% if item.bairro or item.cliente.bairro %} · {{ item.bairro or item.cliente.bairro }}{% endif %}</b></p>
+    {% set referencia_evento = endereco_referencia_solicitacao(item) %}
+    <p><small>Local / referência</small><b>{{ item.local_nome or referencia_evento or '-' }}</b></p>
+    <p><small>Endereço do evento</small><b>{{ endereco_rota_solicitacao(item) or '-' }}</b></p>
+    {% if referencia_evento and referencia_evento != item.local_nome %}<p><small>Ponto de referência</small><b>{{ referencia_evento }}</b></p>{% endif %}
     {% if item.acesso_local %}<p><small>Acesso ao local</small><b>{{ item.acesso_local }}</b></p>{% endif %}
     {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
       <p><small>Responsável no local</small><b>{{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</b></p>

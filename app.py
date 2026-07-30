@@ -410,6 +410,8 @@ templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
 templates.env.globals["status_em_contrato"] = status_em_contrato
 templates.env.globals["janela_uma_hora"] = janela_uma_hora
 templates.env.globals["ajustar_hora_texto"] = ajustar_hora_texto
+templates.env.globals["endereco_rota_solicitacao"] = endereco_rota_solicitacao
+templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
 def _limpar_tel_whatsapp(valor: str) -> str:
@@ -423,6 +425,37 @@ def _limpar_tel_whatsapp(valor: str) -> str:
 
 def _link_absoluto(request: Request, nome_rota: str, **params) -> str:
     return str(request.url_for(nome_rota, **params))
+
+
+def endereco_rota_solicitacao(item: Solicitacao) -> str:
+    """Monta o endereço operacional usando a mesma fonte confiável do botão Iniciar rota.
+
+    O campo ``item.local`` pode conter nome do local ou ponto de referência e, por isso,
+    nunca deve substituir o logradouro cadastrado no cliente quando este existir.
+    """
+    cliente = item.cliente
+    if cliente:
+        partes = [
+            cliente.endereco,
+            cliente.numero,
+            cliente.complemento,
+            item.bairro or cliente.bairro,
+            cliente.cidade,
+            cliente.estado,
+            f"CEP {cliente.cep}" if cliente.cep else "",
+        ]
+    else:
+        partes = [item.local, item.bairro]
+    return ", ".join(str(valor).strip() for valor in partes if valor and str(valor).strip())
+
+
+def endereco_referencia_solicitacao(item: Solicitacao) -> str:
+    """Retorna nome do local/ponto de referência sem confundi-lo com o endereço."""
+    endereco_principal = (getattr(item.cliente, "endereco", "") or "").strip() if item.cliente else ""
+    local = (item.local or "").strip()
+    if local and local.casefold() != endereco_principal.casefold():
+        return local
+    return (item.local_nome or "").strip()
 
 
 def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
@@ -6972,14 +7005,11 @@ def _config_rota(db: Session, empresa_id: int):
 
 
 def _endereco_operacao(agenda: Agenda):
+    """Usa exatamente a mesma origem de endereço do botão Iniciar rota."""
     sol = agenda.solicitacao
     if not sol:
         return agenda.bairro or "Endereço não informado"
-    cliente = sol.cliente
-    partes = [sol.local, sol.bairro]
-    if cliente and not sol.local:
-        partes = [cliente.endereco, cliente.numero, cliente.complemento, cliente.bairro, cliente.cidade]
-    return ", ".join([str(x).strip() for x in partes if x and str(x).strip()]) or agenda.bairro or "Endereço não informado"
+    return endereco_rota_solicitacao(sol) or agenda.bairro or "Endereço não informado"
 
 
 def _hora_somar(hora_base: time | None, minutos: int, padrao: time = time(8, 0)) -> time:
