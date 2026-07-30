@@ -410,8 +410,6 @@ templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
 templates.env.globals["status_em_contrato"] = status_em_contrato
 templates.env.globals["janela_uma_hora"] = janela_uma_hora
 templates.env.globals["ajustar_hora_texto"] = ajustar_hora_texto
-templates.env.globals["endereco_rota_solicitacao"] = endereco_rota_solicitacao
-templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
 def _limpar_tel_whatsapp(valor: str) -> str:
@@ -456,6 +454,10 @@ def endereco_referencia_solicitacao(item: Solicitacao) -> str:
     if local and local.casefold() != endereco_principal.casefold():
         return local
     return (item.local_nome or "").strip()
+
+
+templates.env.globals["endereco_rota_solicitacao"] = endereco_rota_solicitacao
+templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
 def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
