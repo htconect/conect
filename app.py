@@ -7011,6 +7011,66 @@ def _distancia_km(lat1, lon1, lat2, lon2):
     return raio * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
 
 
+_CACHE_TRECHOS_RODOVIARIOS: dict[tuple, tuple[float, int, str]] = {}
+
+
+def _trecho_rodoviario(lat1, lon1, lat2, lon2, cfg=None):
+    """Retorna distância por ruas e duração operacional do trecho.
+
+    Usa OSRM para calcular a rota viária real. Como o serviço público não fornece
+    trânsito em tempo real, aplica uma margem urbana configurável. Se o provedor
+    estiver indisponível, usa uma estimativa conservadora, nunca linha reta pura.
+    """
+    if None in (lat1, lon1, lat2, lon2):
+        return None, None, "sem_coordenadas"
+
+    try:
+        chave = tuple(round(float(v), 5) for v in (lat1, lon1, lat2, lon2))
+    except Exception:
+        return None, None, "coordenadas_invalidas"
+    if chave in _CACHE_TRECHOS_RODOVIARIOS:
+        return _CACHE_TRECHOS_RODOVIARIOS[chave]
+
+    fator_trafego = max(1.0, min(2.5, float(os.getenv("ROTA_FATOR_TRAFICO", "1.35") or 1.35)))
+    margem_urbana = max(0, min(20, int(os.getenv("ROTA_MARGEM_URBANA_MIN", "3") or 3)))
+    url = (
+        "https://router.project-osrm.org/route/v1/driving/"
+        f"{float(lon1):.6f},{float(lat1):.6f};{float(lon2):.6f},{float(lat2):.6f}"
+        "?overview=false&steps=false&alternatives=false"
+    )
+    try:
+        req = UrlRequest(url, headers={
+            "User-Agent": "Conect-Inteligencia-Logistica/1.0",
+            "Accept": "application/json",
+        })
+        with urlopen(req, timeout=10) as resposta:
+            dados = json.loads(resposta.read().decode("utf-8"))
+        rotas = dados.get("routes") or []
+        if dados.get("code") == "Ok" and rotas:
+            distancia_km = max(0.0, float(rotas[0].get("distance") or 0) / 1000.0)
+            minutos_base = max(1.0, float(rotas[0].get("duration") or 0) / 60.0)
+            minutos = max(1, int(math.ceil(minutos_base * fator_trafego + margem_urbana)))
+            resultado = (round(distancia_km, 1), minutos, "osrm")
+            _CACHE_TRECHOS_RODOVIARIOS[chave] = resultado
+            logger.info("[ROTA] osrm distancia=%.1fkm base=%.1fmin operacional=%smin", distancia_km, minutos_base, minutos)
+            return resultado
+    except Exception as exc:
+        logger.warning("[ROTA] OSRM indisponível; usando estimativa conservadora: %s", exc)
+
+    linha_reta = _distancia_km(lat1, lon1, lat2, lon2)
+    if linha_reta is None:
+        return None, None, "falha"
+    # Ruas raramente seguem linha reta. O fator 1,30 aproxima a malha viária e a
+    # velocidade urbana é limitada a 25 km/h para não produzir previsões irreais.
+    distancia_km = max(0.1, linha_reta * 1.30)
+    velocidade_cfg = float(getattr(cfg, "velocidade_media_kmh", 25) or 25) if cfg else 25.0
+    velocidade_urbana = max(12.0, min(25.0, velocidade_cfg))
+    minutos = max(5, int(math.ceil((distancia_km / velocidade_urbana) * 60 * fator_trafego + margem_urbana)))
+    resultado = (round(distancia_km, 1), minutos, "estimativa")
+    _CACHE_TRECHOS_RODOVIARIOS[chave] = resultado
+    return resultado
+
+
 def _config_rota(db: Session, empresa_id: int):
     cfg = db.query(ConfiguracaoRotaInteligente).filter_by(empresa_id=empresa_id).first()
     if not cfg:
@@ -7321,10 +7381,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
         melhor = None
         melhor_chave = None
         for c in restantes:
-            distancia = _distancia_km(lat_atual, lon_atual, c["lat"], c["lon"])
-            desloc = (max(1, int(round((distancia / velocidade) * 60)))
-                       if distancia is not None else
-                       _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro")))
+            distancia, desloc, fonte_trecho = _trecho_rodoviario(lat_atual, lon_atual, c["lat"], c["lon"], cfg)
+            if desloc is None:
+                desloc = _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
             chegada = atual + timedelta(minutes=desloc)
             limite_dt = datetime.combine(data_operacao, c["limite"])
             atraso = (chegada - limite_dt).total_seconds() / 60
@@ -7350,10 +7409,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             for futura in restantes:
                 if futura is c or futura["tipo"] != "entrega":
                     continue
-                dist_futura = _distancia_km(c.get("lat"), c.get("lon"), futura.get("lat"), futura.get("lon"))
-                desloc_futuro = (max(1, int(round((dist_futura / velocidade) * 60)))
-                                  if dist_futura is not None else
-                                  _deslocamento_estimado_sem_coordenadas(c.get("bairro"), futura.get("bairro")))
+                dist_futura, desloc_futuro, _ = _trecho_rodoviario(c.get("lat"), c.get("lon"), futura.get("lat"), futura.get("lon"), cfg)
+                if desloc_futuro is None:
+                    desloc_futuro = _deslocamento_estimado_sem_coordenadas(c.get("bairro"), futura.get("bairro"))
                 chegada_futura = saida_candidata + timedelta(minutes=desloc_futuro)
                 limite_futuro = datetime.combine(data_operacao, futura["limite"])
                 atraso_futuro = int((chegada_futura - limite_futuro).total_seconds() / 60)
@@ -7491,10 +7549,9 @@ def _simular_sequencia_rota(ordenados, data_operacao, hora_saida, cfg, origem_la
     velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
     atrasos = []
     for c in ordenados:
-        distancia = _distancia_km(lat_atual, lon_atual, c.get("lat"), c.get("lon"))
-        desloc = (max(1, int(round((distancia / velocidade) * 60)))
-                   if distancia is not None else
-                   _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro")))
+        distancia, desloc, _ = _trecho_rodoviario(lat_atual, lon_atual, c.get("lat"), c.get("lon"), cfg)
+        if desloc is None:
+            desloc = _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
         chegada = atual + timedelta(minutes=desloc)
         saida = chegada + timedelta(minutes=max(0, int(c.get("servico") or 0)))
         c["distancia"] = float(distancia or 0)
@@ -7536,8 +7593,9 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
             # ou adiantamentos ocorridos durante a execução.
             atual = p.chegada_real
         else:
-            distancia = _distancia_km(lat_atual, lon_atual, p.latitude, p.longitude)
-            desloc = max(1, int(round(((distancia or 0) / velocidade) * 60))) if distancia is not None else 30
+            distancia, desloc, _ = _trecho_rodoviario(lat_atual, lon_atual, p.latitude, p.longitude, cfg)
+            if desloc is None:
+                desloc = 30
             p.distancia_anterior_km = float(distancia or 0); p.deslocamento_anterior_min = desloc
             p.chegada_prevista = atual + timedelta(minutes=desloc)
             p.saida_prevista = p.chegada_prevista + timedelta(minutes=p.servico_min or 0)
@@ -8122,8 +8180,9 @@ def _calcular_horario_saida_ideal(ordenados, data_operacao, cfg, origem_lat=None
     velocidade = max(5.0, float(cfg.velocidade_media_kmh or 30))
     limites = []
     for c in ordenados:
-        distancia = _distancia_km(lat_atual, lon_atual, c.get("lat"), c.get("lon"))
-        desloc = max(1, int(round((distancia / velocidade) * 60))) if distancia is not None else _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
+        distancia, desloc, _ = _trecho_rodoviario(lat_atual, lon_atual, c.get("lat"), c.get("lon"), cfg)
+        if desloc is None:
+            desloc = _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
         acumulado += desloc
         if c.get("limite") and (c.get("tipo") == "entrega" or c.get("retirada_obrigatoria")):
             limite_dt = datetime.combine(data_operacao, c["limite"])

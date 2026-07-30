@@ -100,6 +100,10 @@
 
         {% if p.endereco %}<p class="endereco"><i class="bi bi-geo-alt"></i> {{ p.endereco }}</p>{% endif %}
         <div class="dados-parada">
+          {% if p.deslocamento_anterior_min is not none %}<span><strong>Deslocamento {{ p.deslocamento_anterior_min }} min</strong></span>{% endif %}
+          {% if p.distancia_anterior_km is not none %}<span>{{ '%.1f'|format(p.distancia_anterior_km) }} km no trecho</span>{% endif %}
+          {% if p.tipo == 'entrega' and p.servico_min %}<span>Instalação {{ p.servico_min }} min</span>{% elif p.tipo == 'retirada' and p.servico_min %}<span>Retirada {{ p.servico_min }} min</span>{% endif %}
+          {% if p.tipo == 'entrega' and p.saida_prevista %}<span><strong>Pronto às {{ p.saida_prevista.strftime('%H:%M') }}</strong></span>{% endif %}
           {% if p.tipo == 'entrega' and p.hora_inicio_evento_view %}<span><strong>Evento {{ p.hora_inicio_evento_view.strftime('%H:%M') }}</strong></span>{% endif %}
           {% if p.tipo == 'retirada' and p.retirada_hora_view %}<span><strong>Retirada obrigatória {{ p.retirada_hora_view.strftime('%H:%M') }}</strong></span>
           {% elif p.tipo == 'retirada' and p.hora_fim_evento_view %}<span>Evento terminou {{ p.hora_fim_evento_view.strftime('%H:%M') }}</span>{% endif %}
