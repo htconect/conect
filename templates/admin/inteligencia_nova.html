@@ -12,34 +12,6 @@
     </form>
   </section>
 
-  {% if candidatos %}
-  <section class="intel-card intel-geo-status">
-    <div class="intel-section-head">
-      <div>
-        <h2>Qualidade das localizações</h2>
-        <p>As coordenadas são internas e existem somente para o cálculo da Inteligência.</p>
-      </div>
-      {% set total_geo = candidatos|length %}
-      {% set pend_geo = localizacoes_pendentes|length %}
-      <strong class="intel-count">{{ total_geo - pend_geo }}/{{ total_geo }}</strong>
-    </div>
-    {% if localizacoes_pendentes %}
-      <div class="intel-notice intel-geo-warning">
-        <i class="bi bi-geo-alt"></i>
-        <div><strong>{{ localizacoes_pendentes|length }} endereço(s) sem coordenadas</strong><p>A Inteligência calcula automaticamente pelo endereço. A edição manual fica disponível somente quando algum endereço não for encontrado.</p></div>
-        <form method="post" action="/painel/inteligencia-logistica/localizacoes/automaticas" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerHTML='<i class=&quot;bi bi-hourglass-split&quot;></i> Calculando...';">
-          <input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}">
-          <input type="hidden" name="equipe_id" value="{{ equipe_id }}">
-          <button class="botao btn-krj-primary" type="submit"><i class="bi bi-geo-alt-fill"></i> Calcular automaticamente</button>
-        </form>
-        <button class="botao btn-krj-outline" type="button" onclick="abrirGeoModal()"><i class="bi bi-pencil-square"></i> Revisar manualmente</button>
-      </div>
-    {% else %}
-      <div class="intel-notice"><i class="bi bi-check-circle"></i><div><strong>Localizações prontas</strong><p>Todos os contratos desta operação possuem latitude e longitude.</p></div></div>
-    {% endif %}
-  </section>
-  {% endif %}
-
   <section class="intel-card">
     <div class="intel-section-head"><div><h2>Operações encontradas</h2><p>Entregas e retiradas que participarão do cálculo.</p></div><strong class="intel-count">{{ candidatos|length }}</strong></div>
     <div class="intel-candidate-list">
@@ -50,10 +22,9 @@
           <strong>{{ c.titulo }}</strong>
           <span>
             {% if c.retirada_vencida %}<b>RETIRADA VENCIDA</b> · {% elif c.retirada_obrigatoria %}<b>RETIRADA OBRIGATÓRIA</b> · {% endif %}
-            {{ c.tipo|title }} · {{ c.endereco or 'Endereço não informado' }}{% if c.lat is not none and c.lon is not none %} · GPS {{ '%.6f'|format(c.lat) }}, {{ '%.6f'|format(c.lon) }}{% endif %}
+            {{ c.tipo|title }} · {{ c.endereco or 'Endereço não informado' }}
             {% if c.horario_calculado %} · horário calculado{% endif %}
             {% if c.reaproveitamento %} · reaproveitamento para {{ c.reaproveita_para }}{% endif %}
-            {% if c.sem_coordenadas %} · sem coordenadas{% endif %}
           </span>
         </div>
         <span>{{ c.limite.strftime('%H:%M') if c.limite else '--:--' }}</span>
@@ -66,43 +37,6 @@
   {% if existente %}<section class="intel-notice"><i class="bi bi-check-circle"></i><div><strong>Já existe uma inteligência para essa data e equipe</strong><p>Abrir a rota existente não consome outro Humiat.</p></div><a class="botao btn-krj-primary" href="/painel/inteligencia-logistica/rota/{{ existente.id }}">Abrir rota</a></section>{% elif candidatos %}
   <section class="intel-card destaque"><form method="post" action="/painel/inteligencia-logistica/gerar" class="intel-form duas-colunas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><div class="intel-notice"><i class="bi bi-clock-history"></i><div><strong>Horário calculado automaticamente</strong><p>A Inteligência encontrará o horário mais tarde possível para sair da loja sem atrasar entregas ou retiradas obrigatórias.</p></div></div><label>Veículo<select name="veiculo_id" required><option value="">Selecione o veículo</option>{% for v in veiculos %}<option value="{{ v.id }}">{{ v.nome }} · Interno {{ v.capacidade_interno or 0 }} / Mala {{ v.capacidade_mala or 0 }} / Teto-outros {{ v.capacidade_teto or 0 }}</option>{% endfor %}</select></label><div class="intel-confirm span2"><div><strong>Saldo atual: {{ empresa.humiat_saldo or 0 }}</strong><span>Saldo depois da geração: {{ (empresa.humiat_saldo or 0) - 1 }}</span></div><button class="botao btn-krj-primary" type="submit" onclick="return confirm('Gerar esta inteligência consumirá 1 Humiat. Continuar?')"><i class="bi bi-stars"></i> Calcular rota completa</button></div></form></section>{% endif %}
 
-{% if localizacoes_pendentes %}
-<div id="geoModal" class="intel-geo-modal" aria-hidden="true">
-  <div class="intel-geo-backdrop" onclick="fecharGeoModal()"></div>
-  <div class="intel-geo-dialog" role="dialog" aria-modal="true" aria-labelledby="geoTitle">
-    <div class="intel-geo-head">
-      <div><span class="intel-kicker">Inteligência Logística</span><h2 id="geoTitle">Revisar localizações pendentes</h2><p>Use esta tela apenas quando o cálculo automático não encontrar o endereço corretamente.</p></div>
-      <button type="button" class="intel-geo-close" onclick="fecharGeoModal()" aria-label="Fechar">×</button>
-    </div>
-    <div class="intel-geo-list">
-      {% for item in localizacoes_pendentes %}
-      <form method="post" action="/painel/inteligencia-logistica/localizacao/{{ item.id }}" class="intel-geo-item">
-        <input type="hidden" name="retorno" value="/painel/inteligencia-logistica/nova?data={{ data_filtro.isoformat() }}&equipe_id={{ equipe_id }}&abrir_geo=1">
-        <div class="intel-geo-address">
-          <strong>{{ item.cliente }}</strong>
-          <span>{{ item.endereco }}{% if item.bairro %} · {{ item.bairro }}{% endif %}</span>
-          <a href="https://www.google.com/maps/search/?api=1&query={{ (item.endereco ~ ' ' ~ item.bairro)|urlencode }}" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i> Abrir no Google Maps</a>
-        </div>
-        <label>Latitude<input name="latitude" inputmode="decimal" placeholder="-22.912345" required></label>
-        <label>Longitude<input name="longitude" inputmode="decimal" placeholder="-43.234567" required></label>
-        <button class="botao btn-krj-primary" type="submit"><i class="bi bi-check2"></i> Salvar</button>
-      </form>
-      {% endfor %}
-    </div>
-    <div class="intel-geo-footer"><form method="post" action="/painel/inteligencia-logistica/localizacoes/automaticas"><input type="hidden" name="data_operacao" value="{{ data_filtro.isoformat() }}"><input type="hidden" name="equipe_id" value="{{ equipe_id }}"><button class="botao btn-krj-primary" type="submit"><i class="bi bi-arrow-repeat"></i> Tentar novamente automaticamente</button></form><button class="botao btn-krj-outline" type="button" onclick="fecharGeoModal()">Fechar</button></div>
-  </div>
-</div>
-<script>
-function abrirGeoModal(){ const modal=document.getElementById('geoModal'); if(modal){ modal.classList.add('aberto'); modal.setAttribute('aria-hidden','false'); document.body.style.overflow='hidden'; } }
-function fecharGeoModal(){ const modal=document.getElementById('geoModal'); if(modal){ modal.classList.remove('aberto'); modal.setAttribute('aria-hidden','true'); document.body.style.overflow=''; } }
-document.addEventListener('DOMContentLoaded', function(){
-  const params=new URLSearchParams(window.location.search);
-  if(params.get('abrir_geo')==='1' || {{ 'true' if localizacoes_pendentes else 'false' }}) abrirGeoModal();
-});
-</script>
-<style>
-.intel-geo-modal{display:none;position:fixed;inset:0;z-index:9999}.intel-geo-modal.aberto{display:block}.intel-geo-backdrop{position:absolute;inset:0;background:rgba(10,20,35,.72);backdrop-filter:blur(3px)}.intel-geo-dialog{position:relative;margin:4vh auto;background:#fff;width:min(980px,94vw);max-height:92vh;overflow:auto;border-radius:22px;padding:24px;box-shadow:0 30px 80px rgba(0,0,0,.3)}.intel-geo-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;border-bottom:1px solid #e8edf3;padding-bottom:16px}.intel-geo-head h2{margin:3px 0}.intel-geo-head p{margin:0;color:#64748b}.intel-geo-close{border:0;background:#eef2f7;border-radius:50%;width:42px;height:42px;font-size:28px;cursor:pointer}.intel-geo-list{display:grid;gap:12px;padding:18px 0}.intel-geo-item{display:grid;grid-template-columns:minmax(240px,1fr) 150px 150px auto;gap:12px;align-items:end;border:1px solid #dfe7f0;border-radius:16px;padding:16px}.intel-geo-address{display:flex;flex-direction:column;gap:4px}.intel-geo-address span{color:#526174}.intel-geo-address a{font-size:.88rem}.intel-geo-item label{display:flex;flex-direction:column;gap:5px;font-weight:700}.intel-geo-item input{padding:11px;border:1px solid #cbd5e1;border-radius:10px}.intel-geo-footer{display:flex;justify-content:flex-end;border-top:1px solid #e8edf3;padding-top:16px}.intel-geo-warning{margin:0}.intel-geo-status .intel-notice{margin-top:12px}@media(max-width:760px){.intel-geo-dialog{margin:0;width:100vw;min-height:100vh;border-radius:0}.intel-geo-item{grid-template-columns:1fr 1fr}.intel-geo-address{grid-column:1/-1}.intel-geo-item .botao{grid-column:1/-1}}
-</style>
-{% endif %}
+
 </div>
 {% endblock %}

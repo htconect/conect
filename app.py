@@ -204,8 +204,16 @@ def validar_total_pagamentos(item: Solicitacao, total_pago: float):
         raise HTTPException(400, "A soma dos pagamentos não pode ser maior que o total do contrato.")
 
 
+STATUS_CONTRATO_APROVADO = {"aceito", "aguardando_pagamento", "reserva_confirmada"}
+
+
 def status_reserva_confirmada(status: str) -> bool:
-    return status in {"aceito", "aguardando_pagamento", "reserva_confirmada"}
+    return (status or "") in STATUS_CONTRATO_APROVADO
+
+
+def contrato_aprovado_para_operacao(item: Solicitacao | None) -> bool:
+    """Somente contratos efetivamente aprovados podem entrar na Operação/Inteligência."""
+    return bool(item and status_reserva_confirmada(item.status) and reserva_tem_itens(item))
 
 
 def status_em_contrato(status: str) -> bool:
@@ -1474,8 +1482,8 @@ def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
 
 
 def criar_eventos_operacionais(db: Session, item: Solicitacao):
-    """Garante a entrega e, se existir retirada obrigatória, garante também a busca do cliente."""
-    if not item or not item.id:
+    """Cria operação somente para contrato aprovado com itens."""
+    if not item or not item.id or not contrato_aprovado_para_operacao(item):
         return
 
     titulo_base = f"{nome_item_reserva(item)} - {item.cliente.nome if item.cliente else 'Cliente'}"
@@ -1549,20 +1557,16 @@ def garantir_agenda_reservas(db: Session, empresa_id: int | None = None):
     Garante que toda reserva operacionalmente ativa apareça na Agenda.
     Contratos em crédito ou cancelados não podem recriar Entregar/Buscar.
     """
-    status_ignorados = {
-        "aguardando_nova_data",
-        "rejeitada",
-        "cancelada",
-        "cancelado",
-        "cancelado_cliente",
-    }
     q = db.query(Solicitacao)
     if empresa_id:
         q = q.filter(Solicitacao.empresa_id == empresa_id)
 
     alterou = False
     for reserva in q.all():
-        if reserva.status in status_ignorados:
+        if not contrato_aprovado_para_operacao(reserva):
+            # Limpa cards antigos que possam ter sido criados quando o contrato ainda era rascunho.
+            removidos = db.query(Agenda).filter_by(empresa_id=reserva.empresa_id, solicitacao_id=reserva.id).delete(synchronize_session=False)
+            alterou = alterou or bool(removidos)
             continue
         existe = (
             db.query(Agenda)
@@ -2836,6 +2840,7 @@ def preparar_reservas(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
+    garantir_agenda_reservas(db, empresa.id)
     inicio, fim = periodo_semana_atual()
 
     # Compatibilidade com links antigos que usam data_inicio/data_fim.
@@ -2915,11 +2920,10 @@ def preparar_reservas(
     if not mostrar_concluidas:
         q = q.filter(Agenda.status_operacional != "concluido")
 
-    # Segurança adicional: contratos em crédito/cancelados nunca aparecem na operação,
-    # mesmo se existir algum card antigo no banco.
-    status_fora_operacao = ["aguardando_nova_data", "cancelada", "cancelado", "cancelado_cliente", "rejeitada"]
+    # Regra central: a Operação trabalha exclusivamente com contratos aprovados/aceitos.
+    # Rascunhos, aguardando aceite, crédito, cancelados e qualquer outro status ficam fora no backend.
     q = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
-        ~Solicitacao.status.in_(status_fora_operacao)
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
     )
     itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).all()
     sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
@@ -3191,7 +3195,9 @@ def salvar_cliente_da_solicitacao(
     elif cliente.telefone:
         cliente.identificador = cliente.telefone
 
+    _invalidar_geocodificacao(item)
     db.commit()
+    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -3265,7 +3271,9 @@ def salvar_edicao_solicitacao(
         item.status = "reserva_confirmada"
         item.aprovado_em = agora_utc()
 
+    _invalidar_geocodificacao(item)
     db.commit()
+    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -3380,10 +3388,12 @@ def salvar_cliente_local_solicitacao(
     item.local_responsavel_telefone = limpar_identificador(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
 
-    if item.status not in ["cancelada", "cancelado_cliente", "aguardando_nova_data"]:
+    if contrato_aprovado_para_operacao(item):
         criar_eventos_operacionais(db, item)
 
+    _invalidar_geocodificacao(item)
     db.commit()
+    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -7169,7 +7179,7 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
     """
     q = db.query(Agenda).join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
         Agenda.empresa_id == empresa.id,
-        Solicitacao.status.notin_(["rejeitada", "cancelada"]),
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
     )
     # A equipe restringe operações atribuídas a outra equipe, mas mantém as ainda não atribuídas.
     if equipe_id:
@@ -7677,6 +7687,53 @@ def _geocodificar_solicitacoes_automaticamente(db: Session, empresa_id: int, sol
     return resultado
 
 
+def _invalidar_geocodificacao(item: Solicitacao):
+    item.latitude = None
+    item.longitude = None
+    item.status_geocodificacao = "pendente"
+    item.data_geocodificacao = None
+
+
+def _tentar_geocodificar_solicitacao(db: Session, item: Solicitacao, *, commit: bool = True) -> bool:
+    """Tenta localizar sem nunca impedir o salvamento do contrato."""
+    try:
+        endereco = endereco_rota_solicitacao(item)
+        if not endereco:
+            item.status_geocodificacao = "revisar"
+            if commit: db.commit()
+            return False
+        lat, lon, _ = _geocodificar_endereco_nominatim(endereco, item.bairro or "")
+        item.data_geocodificacao = agora_utc()
+        if lat is None or lon is None:
+            item.status_geocodificacao = "revisar"
+            if commit: db.commit()
+            return False
+        item.latitude, item.longitude = lat, lon
+        item.status_geocodificacao = "localizado"
+        if commit: db.commit()
+        return True
+    except Exception:
+        # Geocodificação é auxiliar; nunca derruba cadastro, edição ou operação.
+        item.status_geocodificacao = "revisar"
+        if commit:
+            try: db.commit()
+            except Exception: db.rollback()
+        return False
+
+
+def _garantir_localizacao_loja(db: Session, cfg) -> bool:
+    if cfg.latitude_loja is not None and cfg.longitude_loja is not None:
+        return True
+    if not (cfg.endereco_loja or "").strip():
+        return False
+    lat, lon, _ = _geocodificar_endereco_nominatim(cfg.endereco_loja, "")
+    if lat is None or lon is None:
+        return False
+    cfg.latitude_loja, cfg.longitude_loja = lat, lon
+    db.commit()
+    return True
+
+
 def _solicitacoes_sem_coordenadas(candidatos):
     """Deduplica contratos sem coordenadas que participam da operação consultada."""
     pendentes = []
@@ -7697,6 +7754,28 @@ def _solicitacoes_sem_coordenadas(candidatos):
                 "longitude": sol.longitude,
             })
     return pendentes
+
+
+@app.get("/painel/solicitacao/{solicitacao_id}/iniciar-rota")
+def iniciar_rota_solicitacao(
+    solicitacao_id: int, provedor: str = "maps",
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+):
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item:
+        raise HTTPException(404)
+    if item.latitude is None or item.longitude is None:
+        _tentar_geocodificar_solicitacao(db, item)
+    # Se conseguiu, usa coordenadas precisas; senão, mantém o endereço textual que já funciona.
+    if item.latitude is not None and item.longitude is not None:
+        destino = f"{item.latitude:.7f},{item.longitude:.7f}"
+    else:
+        destino = endereco_rota_solicitacao(item)
+    if provedor == "waze":
+        url = "https://waze.com/ul?" + urlencode({"ll": destino, "navigate": "yes"}) if "," in destino and destino.replace("-","").replace(",","").replace(".","").isdigit() else "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
+    else:
+        url = "https://www.google.com/maps/search/?api=1&" + urlencode({"query": destino})
+    return RedirectResponse(url, status_code=303)
 
 
 @app.post("/painel/inteligencia-logistica/localizacoes/automaticas")
@@ -7807,6 +7886,7 @@ def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empr
 
 @app.get("/painel/inteligencia-logistica/nova", response_class=HTMLResponse)
 def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    garantir_agenda_reservas(db, empresa.id)
     try:
         data_filtro = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
     except Exception:
@@ -7854,11 +7934,13 @@ def historico_inteligencia(request: Request, db: Session = Depends(get_db), empr
 @app.post("/painel/inteligencia-logistica/configuracao")
 def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
-    cfg.endereco_loja = endereco_loja.strip() or None
-    try: cfg.latitude_loja = float(latitude_loja.replace(",", ".")) if latitude_loja.strip() else None
-    except Exception: cfg.latitude_loja = None
-    try: cfg.longitude_loja = float(longitude_loja.replace(",", ".")) if longitude_loja.strip() else None
-    except Exception: cfg.longitude_loja = None
+    endereco_anterior = (cfg.endereco_loja or "").strip()
+    novo_endereco = endereco_loja.strip()
+    cfg.endereco_loja = novo_endereco or None
+    # Coordenadas da loja são técnicas e calculadas automaticamente pelo endereço.
+    if endereco_anterior != novo_endereco:
+        cfg.latitude_loja = None
+        cfg.longitude_loja = None
     cfg.minutos_montagem = max(0, minutos_montagem); cfg.minutos_desmontagem = max(0, minutos_desmontagem)
     cfg.antecedencia_entrega = max(0, antecedencia_entrega); cfg.minutos_parada_loja = max(0, minutos_parada_loja)
     try: cfg.velocidade_media_kmh = max(5, float(velocidade_media_kmh.replace(",", ".")))
@@ -7868,6 +7950,7 @@ def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), 
     try: cfg.custo_hora_equipe = max(0, float(custo_hora_equipe.replace(",", ".")))
     except Exception: cfg.custo_hora_equipe = 0
     db.commit()
+    _garantir_localizacao_loja(db, cfg)
     return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Configuração salva", status_code=303)
 
 
@@ -7935,6 +8018,7 @@ def salvar_perfil_carga_veiculo(veiculo_id: int, produto_id: int = Form(...), vo
 
 @app.post("/painel/inteligencia-logistica/gerar")
 def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equipe_id: int = Form(0), veiculo_id: int = Form(0), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    garantir_agenda_reservas(db, empresa.id)
     try:
         data_op = datetime.strptime(data_operacao, "%Y-%m-%d").date()
     except Exception:
@@ -7957,7 +8041,28 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     cfg = _config_rota(db, empresa.id)
     candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora_provisoria)
     if not candidatos:
-        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada aprovada disponível para essa data/equipe", status_code=303)
+
+    # Primeiro clique em Calcular: localiza silenciosamente e salva para todo o sistema.
+    itens_geo, vistos_geo = [], set()
+    for candidato in candidatos:
+        ag = candidato.get("agenda")
+        sol = ag.solicitacao if ag else None
+        if sol and sol.id not in vistos_geo and (sol.latitude is None or sol.longitude is None):
+            vistos_geo.add(sol.id)
+            itens_geo.append((sol, endereco_rota_solicitacao(sol), sol.bairro or ""))
+    if itens_geo:
+        _geocodificar_solicitacoes_automaticamente(db, empresa.id, itens_geo)
+    if not _garantir_localizacao_loja(db, cfg):
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote("Não foi possível localizar o endereço da loja. Confira o endereço nas configurações da Inteligência."), status_code=303)
+
+    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora_provisoria)
+    pendentes_geo = _solicitacoes_sem_coordenadas(candidatos)
+    if pendentes_geo:
+        nomes = ", ".join(p["cliente"] for p in pendentes_geo[:3])
+        complemento = f" e mais {len(pendentes_geo)-3}" if len(pendentes_geo) > 3 else ""
+        return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote(f"Não foi possível localizar automaticamente: {nomes}{complemento}. Confira rua, número, bairro e cidade no contrato. O contrato permanece salvo."), status_code=303)
+
     ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja)
     try:
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)

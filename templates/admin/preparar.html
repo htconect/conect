@@ -87,9 +87,9 @@
     (', ' ~ c.estado if c.estado else '') ~
     (', CEP ' ~ c.cep if c.cep else '')
     %}
-    {% set url_waze = 'https://waze.com/ul?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
-    {% set url_waze_app = 'waze://?q=' ~ (endereco_rota|urlencode) ~ '&navigate=yes' %}
-    {% set url_maps = 'https://www.google.com/maps/search/?api=1&query=' ~ (endereco_rota|urlencode) %}
+    {% set url_waze = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=waze' %}
+    {% set url_waze_app = url_waze %}
+    {% set url_maps = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=maps' %}
     <details
             class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
             data-agenda-id="{{ a.id }}">
