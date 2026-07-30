@@ -7133,6 +7133,78 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     rota.versao_calculo = int(rota.versao_calculo or 0) + 1
 
 
+
+def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
+    """Reconstrói as paradas com os dados atuais da Operação, sem novo consumo.
+
+    Preserva paradas concluídas e recria todas as demais a partir das agendas e
+    retiradas vigentes. Isso permite incluir contratos adicionados depois da
+    geração inicial e remover operações canceladas ou já concluídas.
+    """
+    empresa = db.get(Empresa, rota.empresa_id)
+    if not empresa:
+        return 0
+    cfg = _config_rota(db, rota.empresa_id)
+    candidatos = _montar_candidatos_rota(
+        db, empresa, rota.data_operacao, rota.equipe_id, cfg, rota.horario_saida
+    )
+    ordenados = _ordenar_inteligente(
+        candidatos, rota.data_operacao, rota.horario_saida, cfg,
+        cfg.latitude_loja, cfg.longitude_loja
+    )
+    veiculo = db.query(VeiculoLogistico).filter_by(
+        id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
+    ).first() if rota.veiculo_id else None
+    ordenados = _inserir_retornos_capacidade(
+        ordenados, veiculo.capacidade_pontos if veiculo else None, cfg
+    )
+
+    existentes = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(
+        RotaInteligenteParada.ordem
+    ).all()
+    concluidas = [p for p in existentes if p.status == "concluido"]
+    chaves_concluidas = {
+        (p.agenda_id, p.solicitacao_id, p.tipo)
+        for p in concluidas if p.tipo != "loja"
+    }
+
+    for p in existentes:
+        if p.status != "concluido":
+            db.delete(p)
+    db.flush()
+
+    ordem = 1
+    for p in concluidas:
+        p.ordem = ordem
+        ordem += 1
+
+    adicionadas = 0
+    for c in ordenados:
+        ag = c.get("agenda")
+        agenda_id = ag.id if ag else None
+        solicitacao_id = ag.solicitacao_id if ag else None
+        chave = (agenda_id, solicitacao_id, c["tipo"])
+        if c["tipo"] != "loja" and chave in chaves_concluidas:
+            continue
+        db.add(RotaInteligenteParada(
+            rota_id=rota.id, agenda_id=agenda_id, solicitacao_id=solicitacao_id,
+            ordem=ordem, tipo=c["tipo"], titulo=c["titulo"], endereco=c["endereco"],
+            latitude=c.get("lat"), longitude=c.get("lon"), horario_limite=c.get("limite"),
+            chegada_prevista=c.get("chegada"), saida_prevista=c.get("saida"),
+            distancia_anterior_km=c.get("distancia", 0),
+            deslocamento_anterior_min=c.get("desloc", 0), servico_min=c["servico"],
+            risco=c.get("risco", "normal"), motivo_prioridade=c.get("motivo"),
+            retorno_loja=c["tipo"] == "loja",
+            carga_movimento=int(c.get("carga_movimento", 0)),
+            carga_apos_parada=int(c.get("carga_apos", 0)),
+        ))
+        ordem += 1
+        adicionadas += 1
+
+    db.flush()
+    _recalcular_rota_salva(db, rota)
+    return adicionadas
+
 @app.get("/painel/inteligencia-logistica", response_class=HTMLResponse)
 def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
@@ -7240,7 +7312,12 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), hor
     chave = f"{empresa.id}:{data_op.isoformat()}:{equipe_id or 0}"
     existente = db.query(RotaInteligente).filter_by(empresa_id=empresa.id, chave_consumo=chave).first()
     if existente:
-        return RedirectResponse(f"/painel/inteligencia-logistica/rota/{existente.id}", status_code=303)
+        _reconstruir_rota_salva(db, existente)
+        db.commit()
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{existente.id}?sucesso=Rota atualizada com os dados atuais sem novo consumo",
+            status_code=303
+        )
     if int(empresa.humiat_saldo or 0) < 1:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Saldo Humiat insuficiente para gerar a rota", status_code=303)
     cfg = _config_rota(db, empresa.id)
@@ -7281,8 +7358,12 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
 def recalcular_rota_inteligente(rota_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
     if not rota: raise HTTPException(status_code=404)
-    _recalcular_rota_salva(db, rota); db.commit()
-    return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Rota recalculada sem novo consumo", status_code=303)
+    quantidade = _reconstruir_rota_salva(db, rota)
+    db.commit()
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Rota reconstruída com {quantidade} operação(ões) atual(is), sem novo consumo",
+        status_code=303
+    )
 
 
 @app.post("/painel/inteligencia-logistica/rota/{rota_id}/carro-cheio/{parada_id}")
