@@ -744,6 +744,23 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN prazo_retirada_dias INTEGER DEFAULT 1")
         if "carga_pontos" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN carga_pontos INTEGER DEFAULT 1 NOT NULL")
+        if "volume_logistico" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN volume_logistico INTEGER DEFAULT 1 NOT NULL")
+        if "permite_interno" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN permite_interno BOOLEAN DEFAULT true NOT NULL")
+        if "permite_mala" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN permite_mala BOOLEAN DEFAULT true NOT NULL")
+        if "permite_teto" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN permite_teto BOOLEAN DEFAULT false NOT NULL")
+
+    if "veiculos_logisticos" in tabelas:
+        cols_vei = colunas("veiculos_logisticos")
+        if "capacidade_interno" not in cols_vei:
+            comandos.append("ALTER TABLE veiculos_logisticos ADD COLUMN capacidade_interno INTEGER DEFAULT 4 NOT NULL")
+        if "capacidade_mala" not in cols_vei:
+            comandos.append("ALTER TABLE veiculos_logisticos ADD COLUMN capacidade_mala INTEGER DEFAULT 1 NOT NULL")
+        if "capacidade_teto" not in cols_vei:
+            comandos.append("ALTER TABLE veiculos_logisticos ADD COLUMN capacidade_teto INTEGER DEFAULT 3 NOT NULL")
 
     if "solicitacoes" in tabelas:
         cols_sol = colunas("solicitacoes")
@@ -2553,10 +2570,11 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
 def salvar_produto_url(produto_id_url: int, nome: str = Form(...), descricao: str = Form(""),
                        quantidade_disponivel: int = Form(1), valor_base: str = Form("0"),
                        duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
-                       carga_pontos: int = Form(1), contrato_id: str = Form(""),
-                       db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+                       carga_pontos: int = Form(1), volume_logistico: int = Form(1),
+                       permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
+                       contrato_id: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     return salvar_produto(str(produto_id_url), nome, descricao, quantidade_disponivel, valor_base, duracao_minutos,
-                          prazo_retirada_dias, carga_pontos, contrato_id, db, empresa)
+                          prazo_retirada_dias, carga_pontos, volume_logistico, permite_interno, permite_mala, permite_teto, contrato_id, db, empresa)
 
 
 @app.post("/painel/produtos")
@@ -2564,8 +2582,9 @@ def salvar_produto(
         produto_id: str = Form(""),
         nome: str = Form(...), descricao: str = Form(""),
         quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240),
-        prazo_retirada_dias: int = Form(1), carga_pontos: int = Form(1), contrato_id: str = Form(""),
-        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+        prazo_retirada_dias: int = Form(1), carga_pontos: int = Form(1), volume_logistico: int = Form(1),
+        permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
+        contrato_id: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
@@ -2582,6 +2601,12 @@ def salvar_produto(
     produto.duracao_minutos = duracao_minutos
     produto.prazo_retirada_dias = prazo_retirada_dias
     produto.carga_pontos = max(1, int(carga_pontos or 1))
+    produto.volume_logistico = max(1, int(volume_logistico or 1))
+    produto.permite_interno = bool(permite_interno)
+    produto.permite_mala = bool(permite_mala)
+    produto.permite_teto = bool(permite_teto)
+    if not (produto.permite_interno or produto.permite_mala or produto.permite_teto):
+        produto.permite_interno = True
     produto.tipo_locacao = "horas_fixas"
     db.commit()
     return RedirectResponse("/painel/produtos", status_code=303)
@@ -2595,7 +2620,9 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
     novo = ProdutoServico(empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
                           descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
                           valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
-                          prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1, ativo=True)
+                          prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
+                          volume_logistico=origem.volume_logistico or 1, permite_interno=origem.permite_interno,
+                          permite_mala=origem.permite_mala, permite_teto=origem.permite_teto, ativo=True)
     db.add(novo)
     db.commit()
     db.refresh(novo)
@@ -6884,6 +6911,102 @@ def _pontos_carga_solicitacao(sol: Solicitacao | None) -> int:
     return max(1, total)
 
 
+def _unidades_carga_solicitacao(sol: Solicitacao | None):
+    unidades = []
+    if not sol:
+        return [{"nome": "Equipamento", "locais": ("interno",), "produto_id": None}]
+    itens = list(sol.itens or [])
+    if not itens and sol.produto:
+        itens = [type("ItemCarga", (), {"produto": sol.produto, "quantidade": 1})()]
+    for item in itens:
+        produto = item.produto
+        if not produto:
+            continue
+        locais = tuple(local for local, permitido in (
+            ("interno", getattr(produto, "permite_interno", True)),
+            ("mala", getattr(produto, "permite_mala", True)),
+            ("teto", getattr(produto, "permite_teto", False)),
+        ) if permitido)
+        if not locais:
+            locais = ("interno",)
+        qtd = max(1, int(item.quantidade or 1))
+        volumes = max(1, int(getattr(produto, "volume_logistico", 1) or 1))
+        for equipamento in range(qtd):
+            for volume in range(volumes):
+                unidades.append({"nome": produto.nome, "locais": locais, "produto_id": produto.id})
+    return unidades or [{"nome": "Equipamento", "locais": ("interno",), "produto_id": None}]
+
+
+def _acomodar_unidades(unidades, capacidades):
+    ocupacao = {"interno": 0, "mala": 0, "teto": 0}
+    ordenadas = sorted(unidades, key=lambda u: len(u.get("locais") or ("interno",)))
+    def tentar(i):
+        if i >= len(ordenadas):
+            return True
+        unidade = ordenadas[i]
+        for local in sorted(unidade.get("locais") or ("interno",), key=lambda l: capacidades.get(l, 0) - ocupacao.get(l, 0)):
+            if ocupacao.get(local, 0) < capacidades.get(local, 0):
+                ocupacao[local] += 1
+                if tentar(i + 1):
+                    return True
+                ocupacao[local] -= 1
+        return False
+    return (True, ocupacao.copy()) if tentar(0) else (False, ocupacao)
+
+
+def _inserir_retornos_por_compartimento(ordenados, veiculo, cfg):
+    if not veiculo:
+        return _inserir_retornos_capacidade(ordenados, None, cfg)
+    capacidades = {"interno": int(veiculo.capacidade_interno or 0), "mala": int(veiculo.capacidade_mala or 0), "teto": int(veiculo.capacidade_teto or 0)}
+    resultado, carga = [], []
+    entregas_pendentes = [c for c in ordenados if c["tipo"] == "entrega"]
+    carregadas = set()
+    def carregar_na_loja(inicio=0):
+        nonlocal carga
+        carga = []  # retiradas são descarregadas e entregas futuras são carregadas
+        for futura in ordenados[inicio:]:
+            if futura["tipo"] != "entrega":
+                continue
+            chave = futura["agenda"].id if futura.get("agenda") else id(futura)
+            if chave in carregadas:
+                continue
+            teste = carga + futura.get("unidades_carga", [])
+            cabe, _ = _acomodar_unidades(teste, capacidades)
+            if cabe:
+                carga = teste
+                carregadas.add(chave)
+    carregar_na_loja(0)
+    for idx, c in enumerate(ordenados):
+        chave = c["agenda"].id if c.get("agenda") else id(c)
+        unidades = c.get("unidades_carga", [])
+        precisa_loja = False
+        if c["tipo"] == "entrega" and chave not in carregadas:
+            precisa_loja = True
+        elif c["tipo"] == "retirada":
+            precisa_loja = not _acomodar_unidades(carga + unidades, capacidades)[0]
+        if precisa_loja:
+            resultado.append({"agenda": None, "tipo": "loja", "titulo": "Retorno automático à loja",
+                "endereco": cfg.endereco_loja or "Loja", "lat": cfg.latitude_loja, "lon": cfg.longitude_loja,
+                "limite": None, "servico": max(0, int(cfg.minutos_parada_loja or 20)), "pontos": 0,
+                "carga_movimento": -len(carga), "carga_apos": 0, "risco": "normal",
+                "motivo": "Retorno automático: redistribuição da carga por compartimentos"})
+            carregar_na_loja(idx)
+        if c["tipo"] == "entrega":
+            for unidade in unidades:
+                for pos, atual in enumerate(carga):
+                    if atual.get("produto_id") == unidade.get("produto_id"):
+                        carga.pop(pos); break
+            movimento = -len(unidades)
+        else:
+            carga.extend(unidades); movimento = len(unidades)
+        cabe, ocupacao = _acomodar_unidades(carga, capacidades)
+        c["carga_movimento"] = movimento
+        c["carga_apos"] = len(carga)
+        c["ocupacao_compartimentos"] = ocupacao
+        resultado.append(c)
+    return resultado
+
+
 def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, equipe_id: int | None, cfg,
                              hora_saida: time | None = None):
     """Monta operações independentes de entrega e retirada.
@@ -6914,6 +7037,7 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
         servico = int(cfg.minutos_desmontagem if tipo == "retirada" else cfg.minutos_montagem)
         pontos = _pontos_carga_solicitacao(sol)
         produtos = _produtos_quantidades(sol)
+        unidades_carga = _unidades_carga_solicitacao(sol)
         vencida = bool(tipo == "retirada" and (data_retirada or (sol.retirada_data if sol else None) or ag.data) < data_operacao)
         obrigatoria = bool(tipo == "retirada" and (vencida or (sol and sol.retirada_obrigatoria)))
         titulo_base = ag.titulo
@@ -7293,9 +7417,7 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     veiculo = db.query(VeiculoLogistico).filter_by(
         id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
     ).first() if rota.veiculo_id else None
-    ordenados = _inserir_retornos_capacidade(
-        ordenados, veiculo.capacidade_pontos if veiculo else None, cfg
-    )
+    ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
 
     existentes = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(
         RotaInteligenteParada.ordem
@@ -7499,11 +7621,14 @@ def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), 
 
 
 @app.post("/painel/inteligencia-logistica/veiculos")
-def criar_veiculo_logistico(nome: str = Form(...), capacidade_pontos: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def criar_veiculo_logistico(nome: str = Form(...), capacidade_interno: int = Form(4), capacidade_mala: int = Form(1),
+                            capacidade_teto: int = Form(3), db: Session = Depends(get_db),
+                            empresa: Empresa = Depends(empresa_logada)):
     nome = nome.strip()
     if nome and not db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, nome=nome).first():
-        cap = int(capacidade_pontos) if capacidade_pontos.strip().isdigit() else None
-        db.add(VeiculoLogistico(empresa_id=empresa.id, nome=nome, capacidade_pontos=cap))
+        db.add(VeiculoLogistico(empresa_id=empresa.id, nome=nome,
+            capacidade_interno=max(0, capacidade_interno), capacidade_mala=max(0, capacidade_mala),
+            capacidade_teto=max(0, capacidade_teto)))
         db.commit()
     return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Veículo adicionado", status_code=303)
 
@@ -7531,7 +7656,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), hor
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
     ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
     veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first() if veiculo_id else None
-    ordenados = _inserir_retornos_capacidade(ordenados, veiculo.capacidade_pontos if veiculo else None, cfg)
+    ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
     atrasos = _simular_sequencia_rota(ordenados, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
     if atrasos:
         resumo = ", ".join(f"{a['titulo']} ({a['minutos']} min)" for a in atrasos[:3])

@@ -221,6 +221,10 @@ class ProdutoServico(Base):
     duracao_minutos = Column(Integer, default=240)
     prazo_retirada_dias = Column(Integer, default=1)
     carga_pontos = Column(Integer, nullable=False, default=1)
+    volume_logistico = Column(Integer, nullable=False, default=1)
+    permite_interno = Column(Boolean, nullable=False, default=True)
+    permite_mala = Column(Boolean, nullable=False, default=True)
+    permite_teto = Column(Boolean, nullable=False, default=False)
     ativo = Column(Boolean, default=True)
 
     empresa = relationship("Empresa", back_populates="produtos")
@@ -485,6 +489,9 @@ class VeiculoLogistico(Base):
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
     nome = Column(String(100), nullable=False)
     capacidade_pontos = Column(Integer, nullable=True)
+    capacidade_interno = Column(Integer, nullable=False, default=4)
+    capacidade_mala = Column(Integer, nullable=False, default=1)
+    capacidade_teto = Column(Integer, nullable=False, default=3)
     ativo = Column(Boolean, nullable=False, default=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 

@@ -34,8 +34,8 @@
         <button class="botao btn-krj-outline span2" type="submit">Salvar configuração</button>
       </form></details>
       <details><summary><i class="bi bi-truck"></i> Veículos</summary>
-        <form method="post" action="/painel/inteligencia-logistica/veiculos" class="intel-form linha"><input name="nome" placeholder="Nome do veículo" required><input type="number" name="capacidade_pontos" placeholder="Capacidade futura"><button class="botao btn-krj-outline">Adicionar</button></form>
-        <div class="chips">{% for v in veiculos %}<span>{{ v.nome }}{% if v.capacidade_pontos %} · {{ v.capacidade_pontos }} pts{% endif %}</span>{% else %}<small>Nenhum veículo cadastrado.</small>{% endfor %}</div>
+        <form method="post" action="/painel/inteligencia-logistica/veiculos" class="intel-form linha"><input name="nome" placeholder="Nome do veículo" required><input type="number" name="capacidade_interno" value="4" min="0" title="Interno"><input type="number" name="capacidade_mala" value="1" min="0" title="Mala"><input type="number" name="capacidade_teto" value="3" min="0" title="Teto"><button class="botao btn-krj-outline">Adicionar</button></form>
+        <div class="chips">{% for v in veiculos %}<span>{{ v.nome }} · I{{ v.capacidade_interno or 0 }}/M{{ v.capacidade_mala or 0 }}/T{{ v.capacidade_teto or 0 }}</span>{% else %}<small>Nenhum veículo cadastrado.</small>{% endfor %}</div>
       </details>
     </section>
   </div>
