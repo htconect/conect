@@ -1,34 +1,134 @@
 {% extends "base.html" %}
 {% block conteudo %}
 <div class="inteligencia-wrap intel-page">
-  <div class="intel-hero compacto"><div><a href="/painel/inteligencia-logistica" class="voltar">← Central de Inteligência</a><h1>{{ rota.codigo }}</h1><p>{{ rota.data_operacao.strftime('%d/%m/%Y') }} · Saída {{ rota.horario_saida.strftime('%H:%M') }} · {{ rota.equipe.nome if rota.equipe else 'Todas as equipes' }}</p></div><div class="intel-saldo"><small>Custo desta análise</small><strong>1</strong><span>Humiat</span></div></div>
-  {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
-  {% if rota.status == 'invalida_atraso' %}
-  <div class="alerta erro rota-invalida">
-    <strong><i class="bi bi-exclamation-octagon"></i> ROTA INVÁLIDA — EXISTE ENTREGA APÓS O LIMITE</strong><br>
-    Esta rota não deve ser executada como está. Antecipe a saída, redistribua a operação ou programe a entrega no dia anterior.
+  <div class="intel-hero compacto">
+    <div>
+      <a href="/painel/inteligencia-logistica" class="voltar">← Central de Inteligência</a>
+      <h1>{{ rota.codigo }}</h1>
+      <p>{{ rota.data_operacao.strftime('%d/%m/%Y') }} · {{ rota.equipe.nome if rota.equipe else 'Todas as equipes' }} · {{ rota.veiculo.nome if rota.veiculo else 'Veículo não informado' }}</p>
+    </div>
+    <div class="intel-saldo"><small>Plano do dia</small><strong>{{ resumos_rotas|length }}</strong><span>rota(s)</span></div>
   </div>
-  {% else %}
-  <div class="alerta sucesso rota-valida"><strong><i class="bi bi-shield-check"></i> Rota validada:</strong> nenhuma entrega está prevista depois do horário-limite.</div>
-  {% endif %}
-  <div class="metricas-rota"><div><span>Distância prevista</span><strong>{{ '%.1f'|format(rota.distancia_total_km or 0) }} km</strong></div><div><span>Duração prevista</span><strong>{{ (rota.duracao_total_min or 0)//60 }}h {{ (rota.duracao_total_min or 0)%60 }}min</strong></div><div><span>Retornos à loja</span><strong>{{ rota.retornos_loja or 0 }}</strong></div><div><span>Carga máxima</span><strong>{{ rota.carga_maxima_pontos or 0 }} pts</strong></div><div><span>Custo estimado</span><strong>R$ {{ '%.2f'|format(rota.custo_estimado or 0) }}</strong></div><div><span>Versão do cálculo</span><strong>{{ rota.versao_calculo }}</strong></div></div>
-  <div class="acoes-rota"><form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/recalcular"><button class="botao btn-krj-primary"><i class="bi bi-arrow-repeat"></i> Recalcular sem consumir</button></form><span>Paradas concluídas são preservadas.</span></div>
-  <section class="timeline-rota">
-    {% for p in paradas %}<article class="parada-rota {{ p.risco }} {% if p.status=='concluido' %}concluida{% endif %}">
-      <div class="ordem">{% if p.tipo=='loja' %}<i class="bi bi-house-door"></i>{% else %}{{ p.ordem }}{% endif %}</div>
-      <div class="parada-corpo"><div class="parada-topo"><div><span class="tipo {{ p.tipo }}">{{ p.tipo }}</span><h3>{{ p.titulo }}</h3></div><div class="horario"><small>Chegada prevista</small><strong>{{ p.chegada_prevista.strftime('%H:%M') if p.chegada_prevista else '--:--' }}</strong></div></div>
-        <p class="endereco"><i class="bi bi-geo-alt"></i> {{ p.endereco or 'Endereço não informado' }}</p>
-        <div class="dados-parada">
-          {% if p.tipo == 'entrega' and p.hora_inicio_evento_view %}<span><strong>Início do evento {{ p.hora_inicio_evento_view.strftime('%H:%M') }}</strong></span>{% endif %}
-          {% if p.tipo == 'retirada' and p.hora_fim_evento_view %}<span>Fim do evento {{ p.hora_fim_evento_view.strftime('%H:%M') }}</span>{% endif %}
-          <span>{{ '%.1f'|format(p.distancia_anterior_km or 0) }} km</span><span>{{ p.deslocamento_anterior_min or 0 }} min deslocamento</span><span>{{ p.servico_min or 0 }} min no local</span><span>Carga após: {{ p.carga_apos_parada or 0 }} pts</span>
-          {% if p.horario_limite %}<span>Limite {{ p.horario_limite.strftime('%H:%M') }}</span>{% endif %}
-          {% if p.folga_min_view is not none %}<span class="{% if p.folga_min_view < 0 %}folga-atraso{% else %}folga-ok{% endif %}">{% if p.folga_min_view < 0 %}Atraso {{ -p.folga_min_view }} min{% else %}Folga {{ p.folga_min_view }} min{% endif %}</span>{% endif %}
-        </div>
-        <p class="motivo">{{ p.motivo_prioridade }}</p>
-        <div class="acoes-parada">{% if p.status!='concluido' %}<form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/concluir/{{ p.id }}"><button class="botao btn-krj-outline btn-krj-compact">Concluir parada</button></form>{% if p.tipo!='loja' %}<form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/carro-cheio/{{ p.id }}"><button class="botao btn-krj-warning btn-krj-compact" onclick="return confirm('Inserir retorno à loja depois desta parada?')"><i class="bi bi-truck"></i> Carro cheio</button></form>{% endif %}{% else %}<span class="concluido-ok"><i class="bi bi-check-circle"></i> Concluída</span>{% endif %}</div>
+
+  {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+
+  <section class="intel-card">
+    <div class="intel-section-head">
+      <div>
+        <h2>Prévia operacional</h2>
+        <p>O horário pode ser ajustado antes da saída. Você também pode iniciar qualquer pedido da sequência.</p>
       </div>
-    </article>{% endfor %}
+      <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/horario-saida" class="intel-inline-time">
+        <label>Início da 1ª rota
+          <input type="time" name="horario_saida" value="{{ rota.horario_saida.strftime('%H:%M') }}" required>
+        </label>
+        <button class="botao btn-krj-outline btn-krj-compact" type="submit">Atualizar prévia</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="intel-day-summary">
+    {% for resumo in resumos_rotas %}
+    <article class="intel-route-summary {% if resumo.concluida %}concluida{% elif resumo.em_execucao %}ativa{% endif %}">
+      <header>
+        <div>
+          <span class="intel-kicker">{{ resumo.numero }}ª rota do dia</span>
+          <h2>
+            {% if resumo.concluida %}Concluída
+            {% elif resumo.em_execucao %}Em execução
+            {% else %}Prevista{% endif %}
+          </h2>
+        </div>
+        <strong>
+          {{ resumo.inicio.strftime('%H:%M') if resumo.inicio else '--:--' }}
+          {% if resumo.fim %} → {{ resumo.fim.strftime('%H:%M') }}{% endif %}
+        </strong>
+      </header>
+
+      {% if resumo.sair_com %}
+      <div class="intel-summary-block">
+        <h3><i class="bi bi-box-arrow-up-right"></i> Sair da loja com</h3>
+        <ul>{% for item in resumo.sair_com %}<li>{{ item }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+
+      {% if resumo.reaproveitar %}
+      <div class="intel-summary-block destaque-reuso">
+        <h3><i class="bi bi-arrow-left-right"></i> Retirar e levar na próxima entrega</h3>
+        <ul>{% for item in resumo.reaproveitar %}<li>{{ item }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+
+      {% if resumo.deixar %}
+      <div class="intel-summary-block">
+        <h3><i class="bi bi-house-down"></i> Ao voltar à loja, deixar</h3>
+        <ul>{% for item in resumo.deixar %}<li>{{ item }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+
+      {% if resumo.retorno %}
+      <div class="intel-return-row">
+        <i class="bi bi-house-door"></i>
+        <span>Voltar à loja para preparar a {{ resumo.numero + 1 }}ª rota</span>
+        <strong>{{ resumo.retorno.chegada_prevista.strftime('%H:%M') if resumo.retorno.chegada_prevista else '--:--' }}</strong>
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <div class="acoes-rota">
+    <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/recalcular">
+      <button class="botao btn-krj-primary"><i class="bi bi-arrow-repeat"></i> Recalcular plano atual</button>
+    </form>
+    <span>As paradas concluídas permanecem registradas.</span>
+  </div>
+
+  <section class="timeline-rota">
+    {% for p in paradas %}
+    <article class="parada-rota {{ p.risco }} {% if p.status=='concluido' %}concluida{% elif p.status=='em_andamento' %}em-andamento{% endif %}">
+      <div class="ordem">{% if p.tipo=='loja' %}<i class="bi bi-house-door"></i>{% else %}{{ p.ordem }}{% endif %}</div>
+      <div class="parada-corpo">
+        <div class="parada-topo">
+          <div>
+            <span class="tipo {{ p.tipo }}">{% if p.tipo=='loja' %}loja{% else %}{{ p.tipo }}{% endif %}</span>
+            <h3>{{ p.titulo }}</h3>
+          </div>
+          <div class="horario"><small>Chegada prevista</small><strong>{{ p.chegada_prevista.strftime('%H:%M') if p.chegada_prevista else '--:--' }}</strong></div>
+        </div>
+
+        {% if p.endereco %}<p class="endereco"><i class="bi bi-geo-alt"></i> {{ p.endereco }}</p>{% endif %}
+        <div class="dados-parada">
+          {% if p.tipo == 'entrega' and p.hora_inicio_evento_view %}<span><strong>Evento {{ p.hora_inicio_evento_view.strftime('%H:%M') }}</strong></span>{% endif %}
+          {% if p.tipo == 'retirada' and p.retirada_hora_view %}<span><strong>Retirada obrigatória {{ p.retirada_hora_view.strftime('%H:%M') }}</strong></span>
+          {% elif p.tipo == 'retirada' and p.hora_fim_evento_view %}<span>Evento terminou {{ p.hora_fim_evento_view.strftime('%H:%M') }}</span>{% endif %}
+          {% if p.horario_limite %}<span>Compromisso até {{ p.horario_limite.strftime('%H:%M') }}</span>{% endif %}
+          {% if p.folga_min_view is not none %}<span class="{% if p.folga_min_view < 0 %}folga-atraso{% else %}folga-ok{% endif %}">{% if p.folga_min_view < 0 %}Atraso previsto {{ -p.folga_min_view }} min{% else %}Folga {{ p.folga_min_view }} min{% endif %}</span>{% endif %}
+        </div>
+        {% if p.motivo_prioridade %}<p class="motivo">{{ p.motivo_prioridade }}</p>{% endif %}
+
+        <div class="acoes-parada">
+          {% if p.status == 'concluido' %}
+            <span class="concluido-ok"><i class="bi bi-check-circle"></i> Concluída</span>
+          {% else %}
+            <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/iniciar/{{ p.id }}">
+              <button class="botao {% if p.status=='em_andamento' %}btn-krj-primary{% else %}btn-krj-outline{% endif %} btn-krj-compact" type="submit">
+                <i class="bi bi-play-fill"></i> {% if p.status=='em_andamento' %}Em andamento{% else %}Iniciar esta parada{% endif %}
+              </button>
+            </form>
+            <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/concluir/{{ p.id }}">
+              <button class="botao btn-krj-primary btn-krj-compact" type="submit">Concluir</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    </article>
+    {% endfor %}
   </section>
 </div>
+
+<style>
+.intel-inline-time{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}.intel-inline-time label{font-weight:700}.intel-inline-time input{display:block;margin-top:.35rem;padding:.65rem;border:1px solid #d7dce2;border-radius:.65rem}.intel-day-summary{display:grid;gap:1rem;margin:1rem 0}.intel-route-summary{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;box-shadow:0 8px 22px rgba(0,0,0,.04)}.intel-route-summary.ativa{border-color:#6c63ff}.intel-route-summary.concluida{opacity:.78}.intel-route-summary header{display:flex;justify-content:space-between;gap:1rem;align-items:center;border-bottom:1px solid #edf0f4;padding-bottom:.75rem}.intel-route-summary h2{margin:.15rem 0 0}.intel-summary-block{margin-top:.85rem}.intel-summary-block h3{font-size:1rem;margin:0 0 .45rem}.intel-summary-block ul{margin:0;padding-left:1.15rem}.destaque-reuso{background:#f4fbf7;border-radius:.75rem;padding:.75rem}.intel-return-row{display:flex;align-items:center;gap:.65rem;margin-top:.85rem;padding:.75rem;background:#f7f8fa;border-radius:.75rem}.intel-return-row span{flex:1}.parada-rota.em-andamento{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}@media(max-width:720px){.intel-route-summary header{align-items:flex-start}.intel-section-head{align-items:flex-start}.intel-inline-time{width:100%}.intel-inline-time label{flex:1}.intel-inline-time input{width:100%}}
+</style>
 {% endblock %}

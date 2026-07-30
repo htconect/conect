@@ -7527,7 +7527,10 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     for idx, p in enumerate(paradas, 1):
         p.ordem = idx
         if p.status == "concluido" and p.chegada_real:
-            atual = p.chegada_real + timedelta(minutes=p.servico_min or 0)
+            # chegada_real registra o instante em que o operador encerrou a parada.
+            # A partir daqui, toda a previsão usa o relógio real, absorvendo atrasos
+            # ou adiantamentos ocorridos durante a execução.
+            atual = p.chegada_real
         else:
             distancia = _distancia_km(lat_atual, lon_atual, p.latitude, p.longitude)
             desloc = max(1, int(round(((distancia or 0) / velocidade) * 60))) if distancia is not None else 30
@@ -7552,7 +7555,12 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     rota.retornos_loja = retornos; rota.carga_maxima_pontos = carga_max
     rota.custo_estimado = round(distancia_total * float(cfg.custo_km or 0) + (duracao / 60) * float(cfg.custo_hora_equipe or 0), 2)
     entregas_atrasadas = [p for p in paradas if p.tipo == "entrega" and p.risco == "atrasado"]
-    rota.status = "invalida_atraso" if entregas_atrasadas else ("concluida" if paradas and all(p.status == "concluido" for p in paradas) else "planejada")
+    if paradas and all(p.status == "concluido" for p in paradas):
+        rota.status = "concluida"
+    elif any(p.status in ("em_andamento", "concluido") for p in paradas):
+        rota.status = "em_execucao"
+    else:
+        rota.status = "invalida_atraso" if entregas_atrasadas else "planejada"
     rota.versao_calculo = int(rota.versao_calculo or 0) + 1
 
 
@@ -8101,6 +8109,94 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Rota gerada com 1 Humiat", status_code=303)
 
 
+
+def _nomes_produtos_solicitacao(sol: Solicitacao | None) -> list[str]:
+    if not sol:
+        return []
+    nomes = []
+    for item in sol.itens or []:
+        nome = item.produto.nome if item.produto else "Equipamento"
+        qtd = max(1, int(item.quantidade or 1))
+        nomes.append(f"{qtd}x {nome}" if qtd > 1 else nome)
+    if not nomes and sol.produto:
+        nomes.append(sol.produto.nome)
+    return nomes
+
+
+def _resumo_rotas_do_dia(paradas: list[RotaInteligenteParada]):
+    """Divide o plano em saídas da loja e resume somente o que a operação precisa ver.
+
+    Uma rota do dia é o trecho entre a saída da loja e o próximo retorno à loja.
+    O resumo identifica o que sai da loja, o que é retirado e reaproveitado em uma
+    entrega posterior e o que deve ser deixado ao retornar.
+    """
+    grupos, atual = [], []
+    for parada in paradas:
+        atual.append(parada)
+        if parada.tipo == "loja":
+            grupos.append(atual)
+            atual = []
+    if atual:
+        grupos.append(atual)
+
+    resumos = []
+    for numero, grupo in enumerate(grupos, 1):
+        disponiveis_retirados: dict[int, int] = {}
+        sair_com, reaproveitar, deixar = [], [], []
+        retiradas_no_trecho = []
+
+        for parada in grupo:
+            if parada.tipo == "loja":
+                continue
+            sol = parada.solicitacao
+            produtos = _produtos_quantidades(sol)
+            nomes = _nomes_produtos_solicitacao(sol)
+            cliente = sol.cliente.nome if sol and sol.cliente else parada.titulo
+            if parada.tipo == "retirada":
+                retiradas_no_trecho.append((parada, produtos, nomes, cliente))
+                for pid, qtd in produtos.items():
+                    disponiveis_retirados[pid] = disponiveis_retirados.get(pid, 0) + qtd
+                continue
+
+            usados_retirada = False
+            for pid, qtd in produtos.items():
+                usar = min(qtd, disponiveis_retirados.get(pid, 0))
+                if usar:
+                    usados_retirada = True
+                    disponiveis_retirados[pid] -= usar
+            texto = f"{', '.join(nomes) or 'Equipamento'} → {cliente}"
+            if usados_retirada:
+                reaproveitar.append(texto)
+            else:
+                sair_com.append(texto)
+
+        # Tudo que foi retirado e não reaproveitado antes do retorno fica para deixar na loja.
+        saldo = dict(disponiveis_retirados)
+        for parada, produtos, nomes, cliente in retiradas_no_trecho:
+            restante = sum(min(qtd, saldo.get(pid, 0)) for pid, qtd in produtos.items())
+            if restante > 0:
+                deixar.append(f"{', '.join(nomes) or 'Equipamento'} ← {cliente}")
+                for pid, qtd in produtos.items():
+                    saldo[pid] = max(0, saldo.get(pid, 0) - qtd)
+
+        operacoes = [p for p in grupo if p.tipo != "loja"]
+        retorno = next((p for p in reversed(grupo) if p.tipo == "loja"), None)
+        resumos.append({
+            "numero": numero,
+            "paradas": grupo,
+            "operacoes": operacoes,
+            "sair_com": sair_com,
+            "reaproveitar": reaproveitar,
+            "deixar": deixar,
+            "retorno": retorno,
+            "inicio": operacoes[0].chegada_prevista if operacoes else None,
+            "fim": (retorno.chegada_prevista if retorno else (operacoes[-1].saida_prevista if operacoes else None)),
+            "concluida": bool(grupo and all(p.status == "concluido" for p in grupo)),
+            "em_execucao": any(p.status == "em_andamento" for p in grupo),
+        })
+    return resumos
+
+
 @app.get("/painel/inteligencia-logistica/rota/{rota_id}", response_class=HTMLResponse)
 def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
@@ -8115,7 +8211,77 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
         if p.chegada_prevista and p.horario_limite:
             limite_dt = datetime.combine(rota.data_operacao, p.horario_limite)
             p.folga_min_view = int((limite_dt - p.chegada_prevista).total_seconds() / 60)
-    return templates.TemplateResponse("admin/inteligencia_rota.html", {"request": request, "empresa": empresa, "rota": rota, "paradas": paradas, "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")})
+    resumos_rotas = _resumo_rotas_do_dia(paradas)
+    return templates.TemplateResponse("admin/inteligencia_rota.html", {
+        "request": request, "empresa": empresa, "rota": rota, "paradas": paradas,
+        "resumos_rotas": resumos_rotas,
+        "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")
+    })
+
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/horario-saida")
+def alterar_horario_saida_rota(
+    rota_id: int, horario_saida: str = Form(...), db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada)
+):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    if not rota:
+        raise HTTPException(status_code=404)
+    try:
+        nova_hora = datetime.strptime(horario_saida, "%H:%M").time()
+    except Exception:
+        return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota_id}?erro=Horário inválido", status_code=303)
+    rota.horario_saida = nova_hora
+    _recalcular_rota_salva(db, rota)
+    db.commit()
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso=Horário alterado e previsões recalculadas",
+        status_code=303,
+    )
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/iniciar/{parada_id}")
+def iniciar_parada_inteligente(
+    rota_id: int, parada_id: int, db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada)
+):
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
+    if not rota or not parada:
+        raise HTTPException(status_code=404)
+    if parada.status == "concluido":
+        return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}?erro=Esta parada já foi concluída", status_code=303)
+
+    # O operador pode iniciar qualquer pedido. Ele vira a próxima parada, sem apagar
+    # o plano anterior nem as conclusões já registradas.
+    pendentes = db.query(RotaInteligenteParada).filter(
+        RotaInteligenteParada.rota_id == rota.id,
+        RotaInteligenteParada.status != "concluido",
+    ).order_by(RotaInteligenteParada.ordem).all()
+    concluidas = db.query(RotaInteligenteParada).filter(
+        RotaInteligenteParada.rota_id == rota.id,
+        RotaInteligenteParada.status == "concluido",
+    ).order_by(RotaInteligenteParada.ordem).all()
+    for p in pendentes:
+        if p.id != parada.id and p.status == "em_andamento":
+            p.status = "pendente"
+    parada.status = "em_andamento"
+    nova_ordem = concluidas + [parada] + [p for p in pendentes if p.id != parada.id]
+    for ordem, p in enumerate(nova_ordem, 1):
+        p.ordem = ordem
+
+    # Ao começar o trabalho, o relógio real passa a comandar as próximas previsões.
+    agora = agora_utc()
+    if rota.data_operacao == agora.date() and not concluidas:
+        rota.horario_saida = agora.time().replace(second=0, microsecond=0)
+    rota.status = "em_execucao"
+    _recalcular_rota_salva(db, rota)
+    db.commit()
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote('Parada iniciada. As próximas previsões foram recalculadas.')}",
+        status_code=303,
+    )
 
 
 @app.post("/painel/inteligencia-logistica/rota/{rota_id}/recalcular")
