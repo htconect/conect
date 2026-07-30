@@ -6823,14 +6823,44 @@ def _endereco_operacao(agenda: Agenda):
     return ", ".join([str(x).strip() for x in partes if x and str(x).strip()]) or agenda.bairro or "Endereço não informado"
 
 
-def _limite_operacao(agenda: Agenda, cfg: ConfiguracaoRotaInteligente, tipo: str | None = None):
+def _hora_somar(hora_base: time | None, minutos: int, padrao: time = time(8, 0)) -> time:
+    """Soma minutos a um horário sem depender da data real do evento."""
+    base = hora_base or padrao
+    return (datetime.combine(date.today(), base) + timedelta(minutes=max(0, int(minutos or 0)))).time()
+
+
+def _produtos_quantidades(sol: Solicitacao | None) -> dict[int, int]:
+    produtos: dict[int, int] = {}
+    if not sol:
+        return produtos
+    for item in sol.itens or []:
+        produto_id = getattr(item, "produto_id", None) or (item.produto.id if item.produto else None)
+        if produto_id:
+            produtos[int(produto_id)] = produtos.get(int(produto_id), 0) + max(1, int(item.quantidade or 1))
+    if not produtos and sol.produto_id:
+        produtos[int(sol.produto_id)] = 1
+    return produtos
+
+
+def _limite_operacao(agenda: Agenda, cfg: ConfiguracaoRotaInteligente, tipo: str | None = None,
+                     data_operacao: date | None = None, hora_saida: time | None = None):
     sol = agenda.solicitacao
     tipo = tipo or agenda.tipo_evento
     if tipo == "retirada":
-        return (sol.retirada_hora if sol and sol.retirada_hora else agenda.hora_inicio)
+        if sol and sol.retirada_hora:
+            return sol.retirada_hora, False
+        # Sem horário informado: no mesmo dia, parte do fim do contrato. No dia seguinte,
+        # sugere o início da operação para liberar o equipamento cedo.
+        if sol:
+            data_ref = data_operacao or sol.retirada_data or sol.data_evento
+            if data_ref == sol.data_evento:
+                base = sol.hora_fim or _hora_somar(sol.hora_inicio, getattr(sol.produto, "duracao_minutos", 240) or 240)
+                return _hora_somar(base, int(cfg.minutos_desmontagem or 20)), True
+            return hora_saida or time(8, 0), True
+        return agenda.hora_inicio or hora_saida or time(8, 0), True
     inicio = sol.hora_inicio if sol and sol.hora_inicio else agenda.hora_inicio
     base = datetime.combine(date.today(), inicio)
-    return (base - timedelta(minutes=max(0, int(cfg.antecedencia_entrega or 60)))).time()
+    return (base - timedelta(minutes=max(0, int(cfg.antecedencia_entrega or 60)))).time(), False
 
 
 def _pontos_carga_solicitacao(sol: Solicitacao | None) -> int:
@@ -6845,32 +6875,110 @@ def _pontos_carga_solicitacao(sol: Solicitacao | None) -> int:
     return max(1, total)
 
 
-def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, equipe_id: int | None, cfg):
+def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, equipe_id: int | None, cfg,
+                             hora_saida: time | None = None):
+    """Monta operações independentes de entrega e retirada.
+
+    Inclui entregas do dia, retiradas do dia, retiradas vencidas de dias anteriores e
+    cria uma retirada sintética quando o contrato tem retirada prevista mas não existe
+    um card específico de retirada na agenda.
+    """
     q = db.query(Agenda).join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
         Agenda.empresa_id == empresa.id,
-        Agenda.status_operacional != "concluido",
         Solicitacao.status.notin_(["rejeitada", "cancelada"]),
-        or_(Agenda.data == data_operacao, Solicitacao.retirada_data == data_operacao),
     )
+    # A equipe restringe operações atribuídas a outra equipe, mas mantém as ainda não atribuídas.
     if equipe_id:
-        q = q.filter(Agenda.equipe_id == equipe_id)
-    itens = q.order_by(Agenda.hora_inicio.asc(), Agenda.id.asc()).all()
+        q = q.filter(or_(Agenda.equipe_id == equipe_id, Agenda.equipe_id.is_(None)))
+    agendas = q.order_by(Agenda.data.asc(), Agenda.hora_inicio.asc(), Agenda.id.asc()).all()
+
     candidatos = []
-    for ag in itens:
+    retiradas_existentes: set[int] = set()
+    entregas_do_dia = []
+
+    def adicionar(ag: Agenda, tipo: str, *, sintetica: bool = False, data_retirada: date | None = None):
         sol = ag.solicitacao
-        tipo = ag.tipo_evento if ag.tipo_evento in ("entrega", "retirada") else "entrega"
-        if sol and sol.retirada_data == data_operacao and ag.data != data_operacao:
-            tipo = "retirada"
         lat, lon = _coord_de_link(ag.link_localizacao)
-        limite = _limite_operacao(ag, cfg, tipo)
+        limite, horario_calculado = _limite_operacao(ag, cfg, tipo, data_operacao, hora_saida)
         servico = int(cfg.minutos_desmontagem if tipo == "retirada" else cfg.minutos_montagem)
         pontos = _pontos_carga_solicitacao(sol)
+        produtos = _produtos_quantidades(sol)
+        vencida = bool(tipo == "retirada" and (data_retirada or (sol.retirada_data if sol else None) or ag.data) < data_operacao)
+        obrigatoria = bool(tipo == "retirada" and (vencida or (sol and sol.retirada_obrigatoria)))
+        titulo_base = ag.titulo
+        if tipo == "retirada" and not str(titulo_base).lower().startswith("retirada"):
+            titulo_base = f"Retirada - {titulo_base}"
         candidatos.append({
-            "agenda": ag, "tipo": tipo, "titulo": ag.titulo,
+            "agenda": ag, "tipo": tipo, "titulo": titulo_base,
             "endereco": _endereco_operacao(ag), "lat": lat, "lon": lon,
             "limite": limite, "servico": max(0, servico), "pontos": pontos,
             "sem_coordenadas": lat is None or lon is None,
+            "horario_calculado": horario_calculado,
+            "retirada_vencida": vencida,
+            "retirada_obrigatoria": obrigatoria,
+            "sintetica": sintetica,
+            "produtos": produtos,
+            "prioridade_grupo": 0 if obrigatoria else (1 if tipo == "entrega" else 2),
+            "reaproveitamento": False,
+            "reaproveita_para": None,
         })
+
+    # Cards reais da agenda.
+    for ag in agendas:
+        sol = ag.solicitacao
+        tipo_agenda = ag.tipo_evento if ag.tipo_evento in ("entrega", "retirada") else "entrega"
+        if tipo_agenda == "entrega" and ag.data == data_operacao and ag.status_operacional != "concluido":
+            adicionar(ag, "entrega")
+            entregas_do_dia.append(candidatos[-1])
+        elif tipo_agenda == "retirada" and ag.data <= data_operacao and ag.status_operacional != "concluido":
+            adicionar(ag, "retirada", data_retirada=ag.data)
+            retiradas_existentes.add(ag.solicitacao_id)
+
+    # Retiradas previstas no contrato que ainda não ganharam card próprio na Agenda.
+    for ag in agendas:
+        sol = ag.solicitacao
+        if not sol or sol.id in retiradas_existentes or not sol.retirada_data:
+            continue
+        if sol.retirada_data <= data_operacao:
+            # Não cria retirada de contrato cuja própria retirada já foi concluída em outro card.
+            retirada_concluida = any(
+                outro.solicitacao_id == sol.id and outro.tipo_evento == "retirada" and outro.status_operacional == "concluido"
+                for outro in agendas
+            )
+            if not retirada_concluida:
+                adicionar(ag, "retirada", sintetica=True, data_retirada=sol.retirada_data)
+                retiradas_existentes.add(sol.id)
+
+    # Cruza a disponibilidade cadastrada com as entregas. Quando faltar unidade,
+    # promove apenas as retiradas necessárias. As demais continuam opcionais, mas
+    # são marcadas como oportunidade de reaproveitamento quando compartilham produto.
+    retiradas = [c for c in candidatos if c["tipo"] == "retirada"]
+    demanda: dict[int, int] = {}
+    for entrega in entregas_do_dia:
+        for produto_id, qtd in entrega["produtos"].items():
+            demanda[produto_id] = demanda.get(produto_id, 0) + qtd
+    disponibilidade = {
+        p.id: max(0, int(p.quantidade_disponivel or 0))
+        for p in db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+    }
+    deficit = {pid: max(0, qtd - disponibilidade.get(pid, 0)) for pid, qtd in demanda.items()}
+
+    for entrega in entregas_do_dia:
+        for retirada in retiradas:
+            comuns = set(entrega["produtos"]) & set(retirada["produtos"])
+            if not comuns:
+                continue
+            retirada["reaproveitamento"] = True
+            retirada["reaproveita_para"] = entrega["titulo"]
+            for produto_id in comuns:
+                if deficit.get(produto_id, 0) > 0:
+                    retirada["retirada_obrigatoria"] = True
+                    retirada["prioridade_grupo"] = 0
+                    deficit[produto_id] = max(0, deficit[produto_id] - retirada["produtos"].get(produto_id, 1))
+                    break
+            if retirada["retirada_obrigatoria"]:
+                break
+
     return candidatos
 
 
@@ -6885,15 +6993,25 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
         melhor_chave = None
         for c in restantes:
             distancia = _distancia_km(lat_atual, lon_atual, c["lat"], c["lon"])
-            desloc = max(1, int(round((distancia / velocidade) * 60))) if distancia is not None else 30
+            desloc = max(1, int(round((distancia / velocidade) * 60))) if distancia is not None else 20
             chegada = atual + timedelta(minutes=desloc)
             limite_dt = datetime.combine(data_operacao, c["limite"])
             atraso = (chegada - limite_dt).total_seconds() / 60
             folga = (limite_dt - chegada).total_seconds() / 60
-            liberada = c["tipo"] == "retirada" and chegada >= limite_dt
-            # Prazo é dominante; distância desempata sem mandar uma parada muito futura para o início.
-            chave = (0 if atraso > 0 else 1, -atraso if atraso > 0 else folga,
-                     0 if liberada else 1, distancia if distancia is not None else 9999, c["agenda"].id)
+
+            # Regra dominante: retirada obrigatória -> entrega -> retirada opcional.
+            # Dentro do grupo, prazo e proximidade decidem. Retirada com reaproveitamento
+            # recebe vantagem para ficar imediatamente antes da entrega relacionada.
+            grupo = int(c.get("prioridade_grupo", 2))
+            reaproveita = 0 if c.get("reaproveitamento") else 1
+            chave = (
+                grupo,
+                reaproveita,
+                0 if atraso > 0 else 1,
+                -atraso if atraso > 0 else folga,
+                distancia if distancia is not None else 9999,
+                c["agenda"].id if c.get("agenda") else 0,
+            )
             if melhor_chave is None or chave < melhor_chave:
                 melhor_chave = chave
                 melhor = (c, distancia, desloc, chegada, limite_dt)
@@ -6901,9 +7019,22 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
         atraso_min = int((chegada - limite_dt).total_seconds() / 60)
         folga_min = int((limite_dt - chegada).total_seconds() / 60)
         risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
-        motivo = [f"Atraso previsto de {atraso_min} min" if risco == "atrasado" else
-                  f"Folga de apenas {max(0, folga_min)} min" if risco == "atencao" else "Operação dentro do prazo"]
-        motivo.append(f"Próxima parada a {distancia:.1f} km" if distancia is not None else "Sem coordenadas: previsão conservadora de 30 min")
+        motivo = []
+        if c.get("retirada_vencida"):
+            motivo.append("Retirada pendente de dia anterior: prioridade máxima")
+        elif c.get("retirada_obrigatoria"):
+            motivo.append("Retirada obrigatória antes das entregas")
+        elif c["tipo"] == "entrega":
+            motivo.append("Entrega priorizada pelo horário do contrato")
+        else:
+            motivo.append("Retirada encaixada após as entregas prioritárias")
+        if c.get("horario_calculado"):
+            motivo.append(f"Horário de retirada calculado automaticamente: {c['limite'].strftime('%H:%M')}")
+        if c.get("reaproveitamento"):
+            motivo.append(f"Equipamento pode seguir para {c.get('reaproveita_para')}")
+        motivo.append(f"Atraso previsto de {atraso_min} min" if risco == "atrasado" else
+                      f"Folga de apenas {max(0, folga_min)} min" if risco == "atencao" else "Operação dentro do prazo")
+        motivo.append(f"Próxima parada a {distancia:.1f} km" if distancia is not None else "Localização sem coordenadas: usado deslocamento estimado de 20 min")
         motivo.append(f"Carga: {c['pontos']} ponto(s)")
         saida = chegada + timedelta(minutes=c["servico"])
         resultado.append({**c, "distancia": float(distancia or 0), "desloc": desloc, "chegada": chegada,
@@ -6919,34 +7050,45 @@ def _inserir_retornos_capacidade(ordenados, capacidade: int | None, cfg):
     if not capacidade or capacidade <= 0:
         for c in ordenados:
             c["carga_movimento"] = -c["pontos"] if c["tipo"] == "entrega" else c["pontos"]
+            c["carga_apos"] = 0
         return ordenados
     resultado, carga = [], 0
-    # Carrega na saída apenas as entregas até a capacidade, na ordem planejada.
     pendentes_entrega = [c for c in ordenados if c["tipo"] == "entrega"]
     carregados = set()
     for c in pendentes_entrega:
+        chave_agenda = c["agenda"].id if c.get("agenda") else id(c)
         if carga + c["pontos"] <= capacidade:
-            carga += c["pontos"]; carregados.add(c["agenda"].id)
-    for c in ordenados:
+            carga += c["pontos"]
+            carregados.add(chave_agenda)
+    for idx, c in enumerate(ordenados):
+        chave_agenda = c["agenda"].id if c.get("agenda") else id(c)
         movimento = -c["pontos"] if c["tipo"] == "entrega" else c["pontos"]
-        precisa_loja = (c["tipo"] == "entrega" and c["agenda"].id not in carregados) or (c["tipo"] == "retirada" and carga + c["pontos"] > capacidade)
+        # Retirada reaproveitada pode alimentar a próxima entrega do mesmo produto sem loja.
+        reaproveita = bool(c.get("reaproveitamento"))
+        precisa_loja = (
+            (c["tipo"] == "entrega" and chave_agenda not in carregados and carga < c["pontos"])
+            or (c["tipo"] == "retirada" and not reaproveita and carga + c["pontos"] > capacidade)
+        )
         if precisa_loja:
             resultado.append({"agenda": None, "tipo": "loja", "titulo": "Retorno automático à loja",
                 "endereco": cfg.endereco_loja or "Loja", "lat": cfg.latitude_loja, "lon": cfg.longitude_loja,
                 "limite": None, "servico": max(0, int(cfg.minutos_parada_loja or 20)), "pontos": 0,
-                "carga_movimento": -carga, "risco": "normal", "motivo": "Retorno inserido automaticamente pela capacidade do veículo"})
+                "carga_movimento": -carga, "carga_apos": 0, "risco": "normal",
+                "motivo": "Retorno inserido automaticamente pela capacidade do veículo"})
             carga = 0
             if c["tipo"] == "entrega":
-                # Recarrega esta e as próximas entregas que couberem.
-                for futura in ordenados[ordenados.index(c):]:
-                    if futura["tipo"] == "entrega" and futura["agenda"].id not in carregados and carga + futura["pontos"] <= capacidade:
-                        carga += futura["pontos"]; carregados.add(futura["agenda"].id)
+                for futura in ordenados[idx:]:
+                    if futura["tipo"] != "entrega":
+                        continue
+                    futura_chave = futura["agenda"].id if futura.get("agenda") else id(futura)
+                    if futura_chave not in carregados and carga + futura["pontos"] <= capacidade:
+                        carga += futura["pontos"]
+                        carregados.add(futura_chave)
         c["carga_movimento"] = movimento
         carga = max(0, carga + movimento)
         c["carga_apos"] = carga
         resultado.append(c)
     return resultado
-
 
 def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
     cfg = _config_rota(db, rota.empresa_id)
@@ -7027,7 +7169,7 @@ def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: 
     cfg = _config_rota(db, empresa.id)
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()
-    candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg)
+    candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg, time(7, 0))
     existente = db.query(RotaInteligente).filter_by(
         empresa_id=empresa.id, chave_consumo=f"{empresa.id}:{data_filtro.isoformat()}:{equipe_id or 0}"
     ).first()
@@ -7102,7 +7244,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), hor
     if int(empresa.humiat_saldo or 0) < 1:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Saldo Humiat insuficiente para gerar a rota", status_code=303)
     cfg = _config_rota(db, empresa.id)
-    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg)
+    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora)
     if not candidatos:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=Nenhuma entrega ou retirada disponível para essa data/equipe", status_code=303)
     ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
