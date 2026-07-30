@@ -144,7 +144,7 @@
   </div>
 
   <p class="texto-discreto">
-    Use estes botões para definir se a reserva continua na agenda/operação ou se deve sair da operação mantendo o controle no financeiro.
+    Ao colocar em crédito, o sistema exclui automaticamente Entregar e Buscar da operação. O contrato, os equipamentos e os pagamentos já registrados permanecem salvos para reutilização em uma nova data.
   </p>
 
   <form method="post" action="/painel/solicitacao/{{ item.id }}/status" class="grid-acoes-mobile">
@@ -153,9 +153,9 @@
       <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
     {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
       <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>
-      <button type="submit" name="status" value="aguardando_nova_data" class="secundario">Crédito</button>
+      <button type="submit" name="status" value="aguardando_nova_data" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
     {% else %}
-      <button type="submit" name="status" value="aguardando_nova_data" class="secundario">Crédito</button>
+      <button type="submit" name="status" value="aguardando_nova_data" class="secundario" onclick="return confirm('Colocar este contrato em crédito e excluir Entregar/Buscar da operação? Os pagamentos permanecerão salvos.')">Crédito</button>
       <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
     {% endif %}
   </form>

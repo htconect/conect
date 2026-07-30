@@ -1464,12 +1464,47 @@ def criar_eventos_operacionais(db: Session, item: Solicitacao):
 
     criar_ou_atualizar_retirada_obrigatoria(db, item)
 
+def retirar_solicitacao_da_operacao(db: Session, item: Solicitacao):
+    """Retira entrega/busca da operação sem apagar contrato, itens ou pagamentos.
+
+    O contrato continua disponível como crédito. Os pagamentos já registrados
+    permanecem vinculados e serão reaproveitados quando uma nova data for definida.
+    """
+    if not item or not item.id:
+        return
+
+    agendas = (
+        db.query(Agenda)
+        .filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id)
+        .all()
+    )
+    agenda_ids = [agenda.id for agenda in agendas if agenda.id]
+
+    # Preserva o histórico das rotas inteligentes, removendo apenas o vínculo
+    # com os cards operacionais que deixarão de existir.
+    if agenda_ids:
+        db.query(RotaInteligenteParada).filter(
+            RotaInteligenteParada.agenda_id.in_(agenda_ids)
+        ).update({RotaInteligenteParada.agenda_id: None}, synchronize_session=False)
+
+    db.query(Agenda).filter_by(
+        empresa_id=item.empresa_id,
+        solicitacao_id=item.id,
+    ).delete(synchronize_session=False)
+
+
 def garantir_agenda_reservas(db: Session, empresa_id: int | None = None):
     """
-    Garante que toda reserva válida apareça na Agenda.
-    Isso corrige bases locais onde a reserva foi criada, mas o item da agenda não nasceu.
+    Garante que toda reserva operacionalmente ativa apareça na Agenda.
+    Contratos em crédito ou cancelados não podem recriar Entregar/Buscar.
     """
-    status_ignorados = {"rejeitada", "cancelada", "cancelado"}
+    status_ignorados = {
+        "aguardando_nova_data",
+        "rejeitada",
+        "cancelada",
+        "cancelado",
+        "cancelado_cliente",
+    }
     q = db.query(Solicitacao)
     if empresa_id:
         q = q.filter(Solicitacao.empresa_id == empresa_id)
@@ -3140,9 +3175,9 @@ def salvar_edicao_solicitacao(
 
     if status in ["aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"]:
         item.status = status
-        # Crédito ou cancelamento sai da operação e da roteirização,
-        # mas permanece no financeiro e pode ser visto pelo filtro da agenda.
-        db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
+        # Crédito ou cancelamento elimina Entregar/Buscar da operação, mas
+        # preserva contrato, equipamentos e pagamentos já registrados.
+        retirar_solicitacao_da_operacao(db, item)
     else:
         if data_evento:
             item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -3203,7 +3238,7 @@ def atualizar_status_solicitacao(
             if status == "reserva_confirmada" and not item.aprovado_em:
                 item.aprovado_em = agora_utc()
             if status in ["aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"]:
-                db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
+                retirar_solicitacao_da_operacao(db, item)
             else:
                 criar_eventos_operacionais(db, item)
 
