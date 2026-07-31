@@ -7515,10 +7515,6 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
     vantagem para permitir retirada -> entrega direta, sem retorno à loja.
     """
     restantes = list(candidatos)
-    # Histórico técnico usado pela tela "Entender o cálculo". Ele registra por que
-    # uma parada perdeu prioridade em cada etapa antes de finalmente ser escolhida.
-    for candidato in restantes:
-        candidato["historico_calculo"] = []
     resultado = []
     atual = datetime.combine(data_operacao, hora_saida)
     lat_atual, lon_atual = origem_lat, origem_lon
@@ -7632,38 +7628,18 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
 
             score_dist = desloc * 25
             penalidade_inviavel = (1_000_000 + maior_atraso_futuro * 100_000) if inviabiliza_entrega else 0
-            pontuacao_total = penalidade_inviavel + score_prazo + score_tipo + score_dist + bonus_reuso
             chave = (
-                pontuacao_total,
+                penalidade_inviavel + score_prazo + score_tipo + score_dist + bonus_reuso,
                 0 if c["tipo"] == "entrega" else 1,
                 limite_dt,
                 c["agenda"].id if c.get("agenda") else 0,
             )
-            diagnostico_etapa = {
-                "etapa": len(resultado) + 1,
-                "hora_base": atual.strftime("%H:%M"),
-                "deslocamento": int(desloc or 0),
-                "chegada": chegada.strftime("%H:%M"),
-                "pontuacao": int(pontuacao_total),
-                "score_tipo": int(score_tipo),
-                "score_prazo": int(score_prazo),
-                "score_distancia": int(score_dist),
-                "bonus_reuso": int(bonus_reuso),
-                "penalidade_inviavel": int(penalidade_inviavel),
-                "inviabiliza_entrega": bool(inviabiliza_entrega),
-                "maior_atraso_futuro": int(maior_atraso_futuro),
-                "desvio_reaproveitamento": None if desvio_reaproveitamento is None else int(desvio_reaproveitamento),
-                "oportunidade_geografica": bool(oportunidade_geografica),
-                "retirada_protegida": bool(c.get("retirada_horario_protegido")),
-                "fonte_trecho": fonte_trecho or "estimativa",
-            }
-            c.setdefault("historico_calculo", []).append(diagnostico_etapa)
             if melhor_chave is None or chave < melhor_chave:
                 melhor_chave = chave
                 melhor = (c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos,
-                          oportunidade_geografica, desvio_reaproveitamento, diagnostico_etapa)
+                          oportunidade_geografica, desvio_reaproveitamento)
 
-        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos, oportunidade_geografica, desvio_reaproveitamento, diagnostico_escolhido = melhor
+        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos, oportunidade_geografica, desvio_reaproveitamento = melhor
         atraso_min = int((chegada - limite_dt).total_seconds() / 60)
         folga_min = int((limite_dt - chegada).total_seconds() / 60)
         risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
@@ -7696,45 +7672,6 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
         motivo.append(f"Trecho de {distancia:.1f} km" if distancia is not None else
                       f"Sem coordenadas: deslocamento estimado em {desloc} min")
         motivo.append(f"Carga: {c['pontos']} ponto(s)")
-
-        # Explicação auditável: mostra o que efetivamente pesou na decisão e, nas
-        # retiradas, registra também por que ela não foi escolhida nas etapas anteriores.
-        detalhe = diagnostico_escolhido
-        motivo.append(
-            "Cálculo: total {total} = prazo {prazo} + tipo {tipo} + distância {dist} "
-            "+ penalidade {pen} + bônus de reaproveitamento {bonus}".format(
-                total=detalhe["pontuacao"], prazo=detalhe["score_prazo"],
-                tipo=detalhe["score_tipo"], dist=detalhe["score_distancia"],
-                pen=detalhe["penalidade_inviavel"], bonus=detalhe["bonus_reuso"],
-            )
-        )
-        if c["tipo"] == "retirada":
-            if detalhe["desvio_reaproveitamento"] is None:
-                motivo.append("Reaproveitamento geográfico: não foi possível calcular o desvio")
-            else:
-                limite_desvio = 25
-                motivo.append(
-                    f"Desvio para reaproveitar: {detalhe['desvio_reaproveitamento']} min "
-                    f"(limite atual: {limite_desvio} min)"
-                )
-            if detalhe["inviabiliza_entrega"]:
-                motivo.append(
-                    f"Antecipar neste ponto atrasaria uma entrega em até "
-                    f"{detalhe['maior_atraso_futuro']} min"
-                )
-            avaliacoes_anteriores = c.get("historico_calculo", [])[:-1]
-            for avaliacao in avaliacoes_anteriores[-4:]:
-                causa = []
-                if avaliacao.get("inviabiliza_entrega"):
-                    causa.append(f"risco de atraso de {avaliacao.get('maior_atraso_futuro', 0)} min")
-                desvio_ant = avaliacao.get("desvio_reaproveitamento")
-                if desvio_ant is not None and desvio_ant > 25:
-                    causa.append(f"desvio de {desvio_ant} min acima do limite")
-                if not causa:
-                    causa.append(f"pontuação {avaliacao.get('pontuacao', 0)} maior que a parada escolhida")
-                motivo.append(
-                    f"Na etapa {avaliacao.get('etapa')}, não foi escolhida: " + ", ".join(causa)
-                )
         saida = chegada + timedelta(minutes=c["servico"])
         resultado.append({**c, "distancia": float(distancia or 0), "desloc": desloc, "chegada": chegada,
                           "saida": saida, "risco": risco, "motivo": " • ".join(motivo),
@@ -8714,7 +8651,6 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
                 entrega and entrega.status_operacional != "concluido"
             )
 
-        p.calculo_view = [trecho.strip() for trecho in str(p.motivo_prioridade or "").split(" • ") if trecho.strip()]
         p.folga_min_view = None
         # Atraso só existe durante a execução. No planejamento mostramos apenas
         # o horário recomendado.
@@ -8737,12 +8673,11 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
     )
 
     resumos_rotas = _resumo_rotas_do_dia(paradas)
-    cfg_inteligencia = _config_rota(db, empresa.id)
     return templates.TemplateResponse("admin/inteligencia_rota.html", {
         "request": request, "empresa": empresa, "rota": rota, "paradas": paradas,
         "resumos_rotas": resumos_rotas, "em_execucao": em_execucao,
         "inicio_semana": inicio_semana, "fim_semana": fim_semana,
-        "rotas_semana": rotas_semana, "cfg_inteligencia": cfg_inteligencia,
+        "rotas_semana": rotas_semana,
         "sucesso": request.query_params.get("sucesso"), "erro": request.query_params.get("erro")
     })
 
