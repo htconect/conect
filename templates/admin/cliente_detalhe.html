@@ -25,6 +25,7 @@
       </div>
     </a>
     <div class="acoes linha-acoes acoes-cliente-reserva">
+      <a class="botao" href="/painel/solicitacao/{{ i.id }}"><i class="bi bi-file-earmark-text" aria-hidden="true"></i> Ver contrato</a>
       {% if contrato_aceito %}
         <a class="botao-whats" target="_blank" href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
       {% else %}

@@ -2351,7 +2351,9 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         .filter(
             Solicitacao.empresa_id == empresa.id,
             Solicitacao.cancelado_em == None,
-            ~Solicitacao.status.in_(["cancelada", "cancelado", "cancelado_cliente", "rejeitada"]),
+            # Rascunho/aguardando aceite ainda não é dívida do cliente.
+            # Só contratos efetivamente aprovados entram em "a receber".
+            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
             Solicitacao.data_evento < date.today(),
             (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
         )
@@ -4833,6 +4835,10 @@ def financeiro(
     q_contratos_receber = db.query(Solicitacao).join(Cliente).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
+        # O saldo do contrato só vira conta a receber depois do aceite/aprovação.
+        # Pagamentos já lançados em rascunhos continuam disponíveis para conciliação,
+        # mas o restante não é cobrado enquanto o contrato não estiver aprovado.
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009
     )
     if data_inicial:
@@ -4918,6 +4924,7 @@ def financeiro(
     contratos_cards = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
         Solicitacao.data_evento >= mes_cards_inicio,
         Solicitacao.data_evento <= mes_cards_fim
     ).all()
@@ -7224,20 +7231,29 @@ def _produtos_quantidades(sol: Solicitacao | None) -> dict[int, int]:
 
 def _limite_operacao(agenda: Agenda, cfg: ConfiguracaoRotaInteligente, tipo: str | None = None,
                      data_operacao: date | None = None, hora_saida: time | None = None):
+    """Retorna o compromisso usado pela Inteligência.
+
+    Uma retirada comum e ainda não roteirizada é flexível: os horários existentes no
+    contrato/operação não funcionam como trava. O horário só é protegido quando o
+    operador salvou a roteirização ou quando a retirada é obrigatória.
+    """
     sol = agenda.solicitacao
     tipo = tipo or agenda.tipo_evento
     if tipo == "retirada":
-        if sol and sol.retirada_hora:
-            return sol.retirada_hora, False
-        # Sem horário informado: no mesmo dia, parte do fim do contrato. No dia seguinte,
-        # sugere o início da operação para liberar o equipamento cedo.
-        if sol:
-            data_ref = data_operacao or sol.retirada_data or sol.data_evento
-            if data_ref == sol.data_evento:
-                base = sol.hora_fim or _hora_somar(sol.hora_inicio, getattr(sol.produto, "duracao_minutos", 240) or 240)
-                return _hora_somar(base, int(cfg.minutos_desmontagem or 20)), True
-            return hora_saida or time(8, 0), True
-        return agenda.hora_inicio or hora_saida or time(8, 0), True
+        horario_protegido = bool(agenda.roteirizado or (sol and sol.retirada_obrigatoria))
+        if horario_protegido:
+            # Roteirização manual prevalece sobre qualquer sugestão da Inteligência.
+            if agenda.roteirizado and agenda.hora_inicio:
+                return agenda.hora_inicio, False
+            if sol and sol.retirada_hora:
+                return sol.retirada_hora, False
+            return agenda.hora_inicio or hora_saida or time(8, 0), False
+
+        # Retirada não roteirizada e não obrigatória não possui compromisso de hora.
+        # 23:59 é apenas um limite técnico neutro; a posição será escolhida por
+        # proximidade, reaproveitamento e impacto nas entregas.
+        return time(23, 59), False
+
     inicio = sol.hora_inicio if sol and sol.hora_inicio else agenda.hora_inicio
     base = datetime.combine(date.today(), inicio)
     return (base - timedelta(minutes=max(0, int(cfg.antecedencia_entrega or 60)))).time(), False
@@ -7393,6 +7409,8 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             "horario_calculado": horario_calculado,
             "retirada_vencida": vencida,
             "retirada_obrigatoria": obrigatoria,
+            "retirada_roteirizada_manual": bool(tipo == "retirada" and ag.roteirizado),
+            "retirada_horario_protegido": bool(tipo == "retirada" and (ag.roteirizado or obrigatoria)),
             "sintetica": sintetica,
             "produtos": produtos,
             "bairro": ((sol.bairro if sol else None) or ag.bairro or "").strip(),
@@ -7513,6 +7531,14 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 desloc = _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
             chegada = atual + timedelta(minutes=desloc)
             limite_dt = datetime.combine(data_operacao, c["limite"])
+
+            # Retirada roteirizada pelo operador ou obrigatória tem horário protegido.
+            # Se a equipe chegar antes, considera a espera até o horário definido.
+            espera_protegida = 0
+            if c["tipo"] == "retirada" and c.get("retirada_horario_protegido") and chegada < limite_dt:
+                espera_protegida = int((limite_dt - chegada).total_seconds() / 60)
+                chegada = limite_dt
+
             atraso = (chegada - limite_dt).total_seconds() / 60
             folga = (limite_dt - chegada).total_seconds() / 60
 
@@ -7578,10 +7604,14 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 score_prazo = max(0, atraso) * 10000 + max(0, 90 - folga) * 40
                 bonus_reuso = -2500 * comuns_recolhidos
             else:
-                # Retirada é estratégica, não prioridade absoluta.
+                # Retirada flexível é estratégica, não prioridade absoluta. Quando foi
+                # roteirizada manualmente ou é obrigatória, o horário passa a ser trava.
                 score_tipo = 3500
-                score_prazo = max(0, atraso) * 80
-                bonus_reuso = -2200 if libera_entrega else (-700 if c.get("reaproveitamento") else 0)
+                if c.get("retirada_horario_protegido"):
+                    score_prazo = max(0, atraso) * 10000 + espera_protegida * 20
+                else:
+                    score_prazo = 0
+                bonus_reuso = -3200 if libera_entrega else (-1800 if c.get("reaproveitamento") else 0)
                 if oportunidade_geografica:
                     # Supera a preferência padrão por entrega quando a retirada está perto
                     # da origem/rota e pode ser usada diretamente na entrega seguinte.
@@ -7629,8 +7659,12 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             motivo.append("Retirada encaixada sem comprometer as entregas")
         if c.get("retirada_vencida"):
             motivo.append("Retirada pendente de dia anterior")
-        if c.get("horario_calculado"):
-            motivo.append(f"Horário de retirada sugerido: {c['limite'].strftime('%H:%M')}")
+        if c.get("retirada_roteirizada_manual"):
+            motivo.append(f"Horário definido manualmente e protegido: {c['limite'].strftime('%H:%M')}")
+        elif c.get("retirada_obrigatoria"):
+            motivo.append(f"Horário obrigatório protegido: {c['limite'].strftime('%H:%M')}")
+        elif c["tipo"] == "retirada":
+            motivo.append("Retirada flexível: horário escolhido pela Inteligência")
         if c.get("reaproveitamento"):
             motivo.append(f"Pode atender {c.get('reaproveita_para')}")
         motivo.append(f"Atraso previsto de {atraso_min} min" if risco == "atrasado" else
