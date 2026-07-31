@@ -524,6 +524,8 @@ class ConfiguracaoRotaInteligente(Base):
     minutos_desmontagem = Column(Integer, nullable=False, default=20)
     antecedencia_entrega = Column(Integer, nullable=False, default=60)
     horario_minimo_cliente = Column(Time, nullable=False, default=time(8, 0))
+    raio_retirada_estrategica_km = Column(Float, nullable=False, default=10)
+    desvio_max_retirada_estrategica_min = Column(Integer, nullable=False, default=60)
     minutos_parada_loja = Column(Integer, nullable=False, default=20)
     velocidade_media_kmh = Column(Float, nullable=False, default=30)
     custo_km = Column(Float, nullable=False, default=0)

@@ -1113,6 +1113,10 @@ def garantir_colunas_novas():
         cols_cfg_ri = colunas("configuracoes_rota_inteligente")
         if "horario_minimo_cliente" not in cols_cfg_ri:
             comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN horario_minimo_cliente TIME DEFAULT '08:00:00' NOT NULL")
+        if "raio_retirada_estrategica_km" not in cols_cfg_ri:
+            comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN raio_retirada_estrategica_km FLOAT DEFAULT 10 NOT NULL")
+        if "desvio_max_retirada_estrategica_min" not in cols_cfg_ri:
+            comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN desvio_max_retirada_estrategica_min INTEGER DEFAULT 60 NOT NULL")
         if "custo_km" not in cols_cfg_ri:
             comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN custo_km FLOAT DEFAULT 0 NOT NULL")
         if "custo_hora_equipe" not in cols_cfg_ri:
@@ -7796,6 +7800,18 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 and desvio_reaproveitamento is not None
             )
 
+            # Retirada estratégica: na primeira decisão, avalia a proximidade real
+            # da loja, o reaproveitamento e o desvio máximo configurado. A decisão
+            # só será priorizada depois que a missão completa confirmar que nenhuma
+            # entrega ficará atrasada e que a capacidade do veículo é válida.
+            distancia_loja_retirada = None
+            if c["tipo"] == "retirada" and c.get("lat") is not None and cfg.latitude_loja is not None:
+                distancia_loja_retirada, _, _ = _trecho_rodoviario(
+                    cfg.latitude_loja, cfg.longitude_loja, c.get("lat"), c.get("lon"), cfg
+                )
+            raio_estrategico = max(0.0, float(getattr(cfg, "raio_retirada_estrategica_km", 10) or 10))
+            desvio_max_estrategico = max(0, int(getattr(cfg, "desvio_max_retirada_estrategica_min", 60) or 60))
+
             # Compara a missão inteira a partir do local atual. A análise não termina
             # no próximo cliente: inclui todas as paradas, retornos exigidos pela carga
             # e a volta final obrigatória à loja.
@@ -7808,6 +7824,16 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             )
             inviabiliza_entrega = bool(avaliacao_missao.get("inviavel"))
             maior_atraso_futuro = int(avaliacao_missao.get("maior_atraso") or 0)
+            retirada_estrategica = bool(
+                len(resultado) == 0
+                and c["tipo"] == "retirada"
+                and c.get("reaproveitamento")
+                and distancia_loja_retirada is not None
+                and float(distancia_loja_retirada) <= raio_estrategico
+                and desvio_reaproveitamento is not None
+                and int(desvio_reaproveitamento) <= desvio_max_estrategico
+                and not inviabiliza_entrega
+            )
 
             # Menor chave vence. Atraso de entrega domina qualquer economia.
             if c["tipo"] == "entrega":
@@ -7849,9 +7875,22 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             if c["tipo"] == "retirada" and c.get("reaproveitamento"):
                 score_missao -= 1800
             pontuacao_total = penalidade_inviavel + score_prazo + score_tipo + score_dist + score_missao + bonus_reuso
+            # A prioridade operacional vem antes da pontuação matemática.
+            # 0: retirada obrigatória viável; 1: retirada estratégica viável;
+            # 2: entrega; 3: demais retiradas. Atrasos continuam eliminatórios.
+            if inviabiliza_entrega:
+                prioridade_operacional = 9
+            elif c["tipo"] == "retirada" and c.get("retirada_obrigatoria"):
+                prioridade_operacional = 0
+            elif retirada_estrategica:
+                prioridade_operacional = 1
+            elif c["tipo"] == "entrega":
+                prioridade_operacional = 2
+            else:
+                prioridade_operacional = 3
             chave = (
+                prioridade_operacional,
                 pontuacao_total,
-                0 if c["tipo"] == "entrega" else 1,
                 limite_dt,
                 c["agenda"].id if c.get("agenda") else 0,
             )
@@ -7875,6 +7914,11 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 "maior_atraso_futuro": int(maior_atraso_futuro),
                 "desvio_reaproveitamento": None if desvio_reaproveitamento is None else int(desvio_reaproveitamento),
                 "oportunidade_geografica": bool(oportunidade_geografica),
+                "retirada_estrategica": bool(retirada_estrategica),
+                "prioridade_operacional": int(prioridade_operacional),
+                "distancia_loja_retirada": None if distancia_loja_retirada is None else float(distancia_loja_retirada),
+                "raio_estrategico": float(raio_estrategico),
+                "desvio_max_estrategico": int(desvio_max_estrategico),
                 "retirada_protegida": bool(c.get("retirada_horario_protegido")),
                 "fonte_trecho": fonte_trecho or "estimativa",
             }
@@ -7882,9 +7926,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             if melhor_chave is None or chave < melhor_chave:
                 melhor_chave = chave
                 melhor = (c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos,
-                          oportunidade_geografica, desvio_reaproveitamento, diagnostico_etapa)
+                          oportunidade_geografica, desvio_reaproveitamento, retirada_estrategica, diagnostico_etapa)
 
-        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos, oportunidade_geografica, desvio_reaproveitamento, diagnostico_escolhido = melhor
+        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos, oportunidade_geografica, desvio_reaproveitamento, retirada_estrategica, diagnostico_escolhido = melhor
         atraso_min = int((chegada - limite_dt).total_seconds() / 60)
         folga_min = int((limite_dt - chegada).total_seconds() / 60)
         risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
@@ -7893,8 +7937,16 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             motivo.append("Entrega priorizada pelo horário de início e pela menor folga")
             if comuns_recolhidos:
                 motivo.append("Usa equipamento recolhido anteriormente, sem retorno à loja")
+        elif retirada_estrategica:
+            motivo.append("Retirada estratégica priorizada antes da primeira entrega")
+            motivo.append(
+                f"Próxima da loja: {diagnostico_escolhido.get('distancia_loja_retirada', 0):.1f} km "
+                f"(raio configurado: {diagnostico_escolhido.get('raio_estrategico', 0):.1f} km)"
+            )
+            motivo.append("Missão completa validada sem atraso nas entregas")
+            motivo.append("Aumenta o estoque disponível para uma entrega posterior")
         elif libera_entrega:
-            motivo.append("Retirada estratégica: libera equipamento para entrega seguinte")
+            motivo.append("Retirada obrigatória: libera equipamento para entrega seguinte")
         elif oportunidade_geografica:
             motivo.append("Retirada antecipada por proximidade da rota e reaproveitamento direto")
             motivo.append(f"Desvio estimado de apenas {int(desvio_reaproveitamento or 0)} min")
@@ -7949,6 +8001,11 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             f"{detalhe.get('volta_loja_min', 0)} min do último ponto até a loja"
         )
         if c["tipo"] == "retirada":
+            if detalhe.get("retirada_estrategica"):
+                motivo.append(
+                    "Classificação operacional: estratégica; entrou antes da pontuação por estar próxima da loja, "
+                    "reaproveitar equipamento e não atrasar nenhuma entrega"
+                )
             # Na etapa final a entrega vinculada pode já ter sido removida da lista,
             # portanto o desvio atual pode ficar vazio mesmo havendo coordenadas.
             # Para a auditoria, usa o melhor desvio calculado nas etapas anteriores.
@@ -8727,7 +8784,7 @@ def historico_inteligencia(request: Request, db: Session = Depends(get_db), empr
 
 
 @app.post("/painel/inteligencia-logistica/configuracao")
-def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), horario_minimo_cliente: str = Form("08:00"), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), horario_minimo_cliente: str = Form("08:00"), raio_retirada_estrategica_km: str = Form("10"), desvio_max_retirada_estrategica_min: int = Form(60), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
     endereco_anterior = (cfg.endereco_loja or "").strip()
     novo_endereco = endereco_loja.strip()
@@ -8742,6 +8799,11 @@ def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), 
         cfg.horario_minimo_cliente = datetime.strptime((horario_minimo_cliente or "08:00").strip(), "%H:%M").time()
     except Exception:
         cfg.horario_minimo_cliente = time(8, 0)
+    try:
+        cfg.raio_retirada_estrategica_km = max(0, float((raio_retirada_estrategica_km or "10").replace(",", ".")))
+    except Exception:
+        cfg.raio_retirada_estrategica_km = 10
+    cfg.desvio_max_retirada_estrategica_min = max(0, int(desvio_max_retirada_estrategica_min or 0))
     try: cfg.velocidade_media_kmh = max(5, float(velocidade_media_kmh.replace(",", ".")))
     except Exception: cfg.velocidade_media_kmh = 30
     try: cfg.custo_km = max(0, float(custo_km.replace(",", ".")))

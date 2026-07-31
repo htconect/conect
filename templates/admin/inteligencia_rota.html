@@ -108,7 +108,8 @@
         <div><small>Tempo de instalação</small><strong>{{ cfg_inteligencia.minutos_montagem or 30 }} min</strong></div>
         <div><small>Tempo de retirada</small><strong>{{ cfg_inteligencia.minutos_desmontagem or 20 }} min</strong></div>
         <div><small>Velocidade média</small><strong>{{ cfg_inteligencia.velocidade_media_kmh or 30 }} km/h</strong></div>
-        <div><small>Limite para desvio de reaproveitamento</small><strong>25 min</strong></div>
+        <div><small>Raio da retirada estratégica</small><strong>{{ cfg_inteligencia.raio_retirada_estrategica_km or 10 }} km</strong></div>
+        <div><small>Desvio máximo estratégico</small><strong>{{ cfg_inteligencia.desvio_max_retirada_estrategica_min or 60 }} min</strong></div>
         <div><small>Regra principal</small><strong>Menor pontuação vence</strong></div>
       </div>
       <p class="intel-explain-note"><i class="bi bi-info-circle"></i> Atrasar uma entrega gera a maior penalidade. Retiradas flexíveis podem subir quando ficam próximas da rota, reaproveitam o mesmo equipamento e não criam atraso.</p>
