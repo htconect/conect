@@ -8677,6 +8677,63 @@ def _calcular_horario_saida_ideal(ordenados, data_operacao, cfg, origem_lat=None
 
 
 
+@app.post("/painel/inteligencia-logistica/veiculos/{veiculo_id}/editar")
+def editar_veiculo_logistico(veiculo_id: int, nome: str = Form(...), capacidade_interno: int = Form(0),
+                              capacidade_mala: int = Form(0), capacidade_teto: int = Form(0),
+                              db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first()
+    if not veiculo:
+        raise HTTPException(status_code=404)
+    nome = (nome or "").strip()
+    if not nome:
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Informe o nome do veículo", status_code=303)
+    duplicado = db.query(VeiculoLogistico).filter(
+        VeiculoLogistico.empresa_id == empresa.id,
+        VeiculoLogistico.nome == nome,
+        VeiculoLogistico.id != veiculo.id,
+    ).first()
+    if duplicado:
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Já existe outro veículo com esse nome", status_code=303)
+    veiculo.nome = nome
+    veiculo.capacidade_interno = max(0, int(capacidade_interno or 0))
+    veiculo.capacidade_mala = max(0, int(capacidade_mala or 0))
+    veiculo.capacidade_teto = max(0, int(capacidade_teto or 0))
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Veículo atualizado", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/veiculos/{veiculo_id}/perfil/{perfil_id}/editar")
+def editar_perfil_carga_veiculo(veiculo_id: int, perfil_id: int, volumes: int = Form(1),
+                                 permite_interno: bool = Form(False), permite_mala: bool = Form(False),
+                                 permite_teto: bool = Form(False), db: Session = Depends(get_db),
+                                 empresa: Empresa = Depends(empresa_logada)):
+    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first()
+    perfil = db.query(VeiculoPerfilCarga).filter_by(id=perfil_id, veiculo_id=veiculo_id).first()
+    if not veiculo or not perfil:
+        raise HTTPException(status_code=404)
+    if not (permite_interno or permite_mala or permite_teto):
+        return RedirectResponse("/painel/inteligencia-logistica/configuracoes?erro=Selecione ao menos um compartimento", status_code=303)
+    perfil.volumes = max(1, int(volumes or 1))
+    perfil.permite_interno = bool(permite_interno)
+    perfil.permite_mala = bool(permite_mala)
+    perfil.permite_teto = bool(permite_teto)
+    perfil.ativo = True
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Equipamento atualizado", status_code=303)
+
+
+@app.post("/painel/inteligencia-logistica/veiculos/{veiculo_id}/perfil/{perfil_id}/remover")
+def remover_perfil_carga_veiculo(veiculo_id: int, perfil_id: int, db: Session = Depends(get_db),
+                                  empresa: Empresa = Depends(empresa_logada)):
+    veiculo = db.query(VeiculoLogistico).filter_by(id=veiculo_id, empresa_id=empresa.id, ativo=True).first()
+    perfil = db.query(VeiculoPerfilCarga).filter_by(id=perfil_id, veiculo_id=veiculo_id).first()
+    if not veiculo or not perfil:
+        raise HTTPException(status_code=404)
+    perfil.ativo = False
+    db.commit()
+    return RedirectResponse("/painel/inteligencia-logistica/configuracoes?sucesso=Equipamento removido do veículo", status_code=303)
+
+
 @app.post("/painel/inteligencia-logistica/veiculos/{veiculo_id}/perfil")
 def salvar_perfil_carga_veiculo(veiculo_id: int, produto_id: int = Form(...), volumes: int = Form(1),
                                 permite_interno: bool = Form(False), permite_mala: bool = Form(False),

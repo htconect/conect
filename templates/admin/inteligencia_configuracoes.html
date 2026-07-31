@@ -1,9 +1,100 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="inteligencia-wrap intel-page"><a class="intel-back" href="/painel/inteligencia-logistica"><i class="bi bi-arrow-left"></i> Central de Inteligência</a><section class="intel-page-title"><div><span class="intel-kicker">Base do cálculo</span><h1>Configurações</h1><p>Parâmetros usados para prever deslocamentos, montagem, retirada e retornos.</p></div></section>{% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}{% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
-<div class="intel-config-grid"><section class="intel-card"><div class="intel-card-title"><i class="bi bi-shop"></i><div><h2>Loja e operação</h2><p>Ponto inicial e tempos médios. A localização é calculada automaticamente.</p></div></div><form method="post" action="/painel/inteligencia-logistica/configuracao" class="intel-form duas-colunas"><label class="span2">Endereço da loja<input name="endereco_loja" value="{{ config.endereco_loja or '' }}" placeholder="Endereço completo da base"></label><label>Montagem (min)<input type="number" name="minutos_montagem" value="{{ config.minutos_montagem }}" min="0"></label><label>Desmontagem (min)<input type="number" name="minutos_desmontagem" value="{{ config.minutos_desmontagem }}" min="0"></label><label>Antecedência (min)<input type="number" name="antecedencia_entrega" value="{{ config.antecedencia_entrega }}" min="0"></label><label>Parada na loja (min)<input type="number" name="minutos_parada_loja" value="{{ config.minutos_parada_loja }}" min="0"></label><label>Velocidade média (km/h)<input name="velocidade_media_kmh" value="{{ config.velocidade_media_kmh }}"></label><label>Custo por km (R$)<input name="custo_km" value="{{ config.custo_km or 0 }}"></label><label>Custo da equipe por hora (R$)<input name="custo_hora_equipe" value="{{ config.custo_hora_equipe or 0 }}"></label><button class="botao btn-krj-primary span2" type="submit">Salvar configurações</button></form></section>
-<section class="intel-card"><div class="intel-card-title"><i class="bi bi-truck"></i><div><h2>Veículos</h2><p>Defina a capacidade física de cada compartimento.</p></div></div><form method="post" action="/painel/inteligencia-logistica/veiculos" class="intel-form duas-colunas"><label class="span2">Nome do veículo<input name="nome" placeholder="Ex.: Grand Siena" required></label><label>Volumes internos<input type="number" name="capacidade_interno" min="0" value="4" required></label><label>Volumes na mala<input type="number" name="capacidade_mala" min="0" value="1" required></label><label>Volumes em teto / outros<input type="number" name="capacidade_teto" min="0" value="3" required></label><button class="botao btn-krj-outline span2">Adicionar veículo</button></form><div class="intel-vehicle-list">{% for v in veiculos %}<div><i class="bi bi-truck"></i><strong>{{ v.nome }}</strong><span>Interno {{ v.capacidade_interno or 0 }} · Mala {{ v.capacidade_mala or 0 }} · Teto/outros {{ v.capacidade_teto or 0 }}</span></div>{% else %}<div class="intel-empty"><span>Nenhum veículo cadastrado.</span></div>{% endfor %}</div></section>
-<section class="intel-card span2"><div class="intel-card-title"><i class="bi bi-box-seam"></i><div><h2>Perfis de carga por veículo</h2><p>Todos os volumes e locais permitidos ficam somente na Inteligência e podem ser diferentes em cada veículo.</p></div></div>
-{% for v in veiculos %}<div style="border:1px solid #dfe7f0;border-radius:16px;padding:16px;margin:12px 0"><h3 style="margin-top:0">{{ v.nome }}</h3><form method="post" action="/painel/inteligencia-logistica/veiculos/{{ v.id }}/perfil" class="intel-form duas-colunas"><label>Equipamento<select name="produto_id" required><option value="">Selecione</option>{% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></label><label>Volumes neste veículo<input type="number" name="volumes" min="1" value="1" required></label><label><input type="checkbox" name="permite_interno" value="true"> Interno</label><label><input type="checkbox" name="permite_mala" value="true"> Mala</label><label><input type="checkbox" name="permite_teto" value="true"> Teto / outros</label><button class="botao btn-krj-primary" type="submit">Salvar perfil</button></form>
-<div class="intel-vehicle-list">{% for perfil in v.perfis_carga %}{% if perfil.ativo %}<div><i class="bi bi-box"></i><strong>{{ perfil.produto.nome }}</strong><span>{{ perfil.volumes }} volume(s) · {% if perfil.permite_interno %}Interno {% endif %}{% if perfil.permite_mala %}Mala {% endif %}{% if perfil.permite_teto %}Teto/outros{% endif %}</span></div>{% endif %}{% else %}<div class="intel-empty"><span>Nenhum perfil configurado para este veículo.</span></div>{% endfor %}</div></div>{% endfor %}</section></div></div>
+<div class="inteligencia-wrap intel-page">
+  <a class="intel-back" href="/painel/inteligencia-logistica"><i class="bi bi-arrow-left"></i> Central de Inteligência</a>
+  <section class="intel-page-title"><div><span class="intel-kicker">Base do cálculo</span><h1>Configurações</h1><p>Parâmetros usados para prever deslocamentos, montagem, retirada e retornos.</p></div></section>
+  {% if erro %}<div class="alerta erro">{{ erro }}</div>{% endif %}
+  {% if sucesso %}<div class="alerta sucesso">{{ sucesso }}</div>{% endif %}
+
+  <div class="intel-config-grid">
+    <section class="intel-card">
+      <div class="intel-card-title"><i class="bi bi-shop"></i><div><h2>Loja e operação</h2><p>Ponto inicial e tempos médios. A localização é calculada automaticamente.</p></div></div>
+      <form method="post" action="/painel/inteligencia-logistica/configuracao" class="intel-form duas-colunas">
+        <label class="span2">Endereço da loja<input name="endereco_loja" value="{{ config.endereco_loja or '' }}" placeholder="Endereço completo da base"></label>
+        <label>Montagem (min)<input type="number" name="minutos_montagem" value="{{ config.minutos_montagem }}" min="0"></label>
+        <label>Desmontagem (min)<input type="number" name="minutos_desmontagem" value="{{ config.minutos_desmontagem }}" min="0"></label>
+        <label>Antecedência (min)<input type="number" name="antecedencia_entrega" value="{{ config.antecedencia_entrega }}" min="0"></label>
+        <label>Parada na loja (min)<input type="number" name="minutos_parada_loja" value="{{ config.minutos_parada_loja }}" min="0"></label>
+        <label>Velocidade média (km/h)<input name="velocidade_media_kmh" value="{{ config.velocidade_media_kmh }}"></label>
+        <label>Custo por km (R$)<input name="custo_km" value="{{ config.custo_km or 0 }}"></label>
+        <label>Custo da equipe por hora (R$)<input name="custo_hora_equipe" value="{{ config.custo_hora_equipe or 0 }}"></label>
+        <button class="botao btn-krj-primary span2" type="submit">Salvar configurações</button>
+      </form>
+    </section>
+
+    <section class="intel-card">
+      <div class="intel-card-title"><i class="bi bi-truck"></i><div><h2>Veículos</h2><p>Adicione ou edite a capacidade física de cada compartimento.</p></div></div>
+      <form method="post" action="/painel/inteligencia-logistica/veiculos" class="intel-form duas-colunas">
+        <label class="span2">Nome do veículo<input name="nome" placeholder="Ex.: Grand Siena" required></label>
+        <label>Volumes internos<input type="number" name="capacidade_interno" min="0" value="4" required></label>
+        <label>Volumes na mala<input type="number" name="capacidade_mala" min="0" value="1" required></label>
+        <label>Volumes em teto / outros<input type="number" name="capacidade_teto" min="0" value="3" required></label>
+        <button class="botao btn-krj-outline span2" type="submit"><i class="bi bi-plus-circle"></i> Adicionar veículo</button>
+      </form>
+
+      <div class="intel-vehicle-list" style="margin-top:16px">
+      {% for v in veiculos %}
+        <details style="width:100%;border:1px solid #dfe7f0;border-radius:14px;padding:12px 14px;background:#fff">
+          <summary style="cursor:pointer;display:flex;gap:10px;align-items:center;list-style:none">
+            <i class="bi bi-truck"></i><strong style="flex:1">{{ v.nome }}</strong>
+            <span>Interno {{ v.capacidade_interno or 0 }} · Mala {{ v.capacidade_mala or 0 }} · Teto/outros {{ v.capacidade_teto or 0 }}</span>
+            <i class="bi bi-pencil-square"></i>
+          </summary>
+          <form method="post" action="/painel/inteligencia-logistica/veiculos/{{ v.id }}/editar" class="intel-form duas-colunas" style="margin-top:14px">
+            <label class="span2">Nome do veículo<input name="nome" value="{{ v.nome }}" required></label>
+            <label>Volumes internos<input type="number" name="capacidade_interno" min="0" value="{{ v.capacidade_interno or 0 }}" required></label>
+            <label>Volumes na mala<input type="number" name="capacidade_mala" min="0" value="{{ v.capacidade_mala or 0 }}" required></label>
+            <label>Volumes em teto / outros<input type="number" name="capacidade_teto" min="0" value="{{ v.capacidade_teto or 0 }}" required></label>
+            <button class="botao btn-krj-primary span2" type="submit"><i class="bi bi-check2-circle"></i> Salvar veículo</button>
+          </form>
+        </details>
+      {% else %}
+        <div class="intel-empty"><span>Nenhum veículo cadastrado.</span></div>
+      {% endfor %}
+      </div>
+    </section>
+
+    <section class="intel-card span2">
+      <div class="intel-card-title"><i class="bi bi-box-seam"></i><div><h2>Equipamentos por veículo</h2><p>Edite o volume ocupado e os compartimentos permitidos. Essas regras são usadas para separar as missões.</p></div></div>
+      {% for v in veiculos %}
+      <div style="border:1px solid #dfe7f0;border-radius:16px;padding:16px;margin:12px 0">
+        <h3 style="margin-top:0"><i class="bi bi-truck"></i> {{ v.nome }}</h3>
+        <form method="post" action="/painel/inteligencia-logistica/veiculos/{{ v.id }}/perfil" class="intel-form duas-colunas">
+          <label>Equipamento<select name="produto_id" required><option value="">Selecione</option>{% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></label>
+          <label>Volumes neste veículo<input type="number" name="volumes" min="1" value="1" required></label>
+          <label><input type="checkbox" name="permite_interno" value="true"> Interno</label>
+          <label><input type="checkbox" name="permite_mala" value="true"> Mala</label>
+          <label><input type="checkbox" name="permite_teto" value="true"> Teto / outros</label>
+          <button class="botao btn-krj-outline" type="submit"><i class="bi bi-plus-circle"></i> Adicionar equipamento</button>
+        </form>
+
+        <div style="display:grid;gap:12px;margin-top:16px">
+        {% for perfil in v.perfis_carga %}{% if perfil.ativo %}
+          <details style="border:1px solid #dfe7f0;border-radius:14px;padding:12px 14px;background:#fff">
+            <summary style="cursor:pointer;display:flex;gap:10px;align-items:center;list-style:none">
+              <i class="bi bi-box"></i><strong style="flex:1">{{ perfil.produto.nome }}</strong>
+              <span>{{ perfil.volumes }} volume(s) · {% if perfil.permite_interno %}Interno {% endif %}{% if perfil.permite_mala %}Mala {% endif %}{% if perfil.permite_teto %}Teto/outros{% endif %}</span>
+              <i class="bi bi-pencil-square"></i>
+            </summary>
+            <form method="post" action="/painel/inteligencia-logistica/veiculos/{{ v.id }}/perfil/{{ perfil.id }}/editar" class="intel-form duas-colunas" style="margin-top:14px">
+              <label class="span2">Equipamento<input value="{{ perfil.produto.nome }}" disabled></label>
+              <label>Volumes neste veículo<input type="number" name="volumes" min="1" value="{{ perfil.volumes }}" required></label>
+              <label><input type="checkbox" name="permite_interno" value="true" {% if perfil.permite_interno %}checked{% endif %}> Interno</label>
+              <label><input type="checkbox" name="permite_mala" value="true" {% if perfil.permite_mala %}checked{% endif %}> Mala</label>
+              <label><input type="checkbox" name="permite_teto" value="true" {% if perfil.permite_teto %}checked{% endif %}> Teto / outros</label>
+              <button class="botao btn-krj-primary" type="submit"><i class="bi bi-check2-circle"></i> Salvar equipamento</button>
+            </form>
+            <form method="post" action="/painel/inteligencia-logistica/veiculos/{{ v.id }}/perfil/{{ perfil.id }}/remover" style="margin-top:8px" onsubmit="return confirm('Remover este equipamento do veículo?')">
+              <button class="botao" type="submit" style="border:1px solid #ef4444;color:#dc2626;background:#fff"><i class="bi bi-trash"></i> Remover equipamento</button>
+            </form>
+          </details>
+        {% endif %}{% else %}
+          <div class="intel-empty"><span>Nenhum perfil configurado para este veículo.</span></div>
+        {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </section>
+  </div>
+</div>
 {% endblock %}
