@@ -7321,17 +7321,38 @@ def _inserir_retornos_por_compartimento(ordenados, veiculo, cfg):
     def carregar_na_loja(inicio=0):
         nonlocal carga
         carga = []  # retiradas são descarregadas e entregas futuras são carregadas
+        # Créditos representam equipamentos que serão recolhidos antes da entrega.
+        # Assim a loja não carrega uma segunda unidade desnecessariamente.
+        creditos_retirada: dict[int, int] = {}
         for futura in ordenados[inicio:]:
+            if futura["tipo"] == "retirada":
+                for pid, qtd in (futura.get("produtos") or {}).items():
+                    creditos_retirada[int(pid)] = creditos_retirada.get(int(pid), 0) + int(qtd or 0)
+                continue
             if futura["tipo"] != "entrega":
                 continue
             chave = futura["agenda"].id if futura.get("agenda") else id(futura)
             if chave in carregadas:
                 continue
-            teste = carga + futura.get("unidades_carga", [])
+            # Se uma retirada anterior na sequência abastece esta entrega, carrega
+            # na loja apenas o saldo não coberto por esse reaproveitamento.
+            faltantes_por_produto = dict(futura.get("produtos") or {})
+            for pid, qtd in list(faltantes_por_produto.items()):
+                credito = min(int(qtd or 0), creditos_retirada.get(int(pid), 0))
+                if credito:
+                    faltantes_por_produto[int(pid)] = int(qtd or 0) - credito
+                    creditos_retirada[int(pid)] -= credito
+            faltantes_por_produto = {pid: qtd for pid, qtd in faltantes_por_produto.items() if qtd > 0}
+            unidades_loja, erro = _unidades_carga_por_veiculo(faltantes_por_produto, veiculo)
+            if erro:
+                raise ValueError(erro)
+            teste = carga + (unidades_loja or [])
             cabe, _ = _acomodar_unidades(teste, capacidades)
             if cabe:
                 carga = teste
                 carregadas.add(chave)
+                futura["unidades_carregadas_loja"] = unidades_loja or []
+                futura["abastecida_por_retirada"] = len(unidades_loja or []) < len(futura.get("unidades_carga", []))
     carregar_na_loja(0)
     for idx, c in enumerate(ordenados):
         chave = c["agenda"].id if c.get("agenda") else id(c)
@@ -7506,7 +7527,99 @@ def _deslocamento_estimado_sem_coordenadas(origem_bairro: str | None, destino_ba
     return 30
 
 
-def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None):
+
+def _copiar_candidato_rota(c):
+    """Cópia rasa segura para simulações; preserva referências ORM sem alterar o plano real."""
+    novo = dict(c)
+    novo["produtos"] = dict(c.get("produtos") or {})
+    novo["historico_calculo"] = list(c.get("historico_calculo") or [])
+    novo.pop("unidades_carga", None)
+    novo.pop("ocupacao_compartimentos", None)
+    return novo
+
+
+def _ordem_cauda_aproximada(restantes, lat, lon, cfg):
+    """Monta uma cauda rápida para comparar missões completas, sempre terminando na loja."""
+    pendentes = list(restantes)
+    ordem = []
+    lat_atual, lon_atual = lat, lon
+    while pendentes:
+        melhor = None
+        melhor_chave = None
+        for c in pendentes:
+            _, minutos, _ = _trecho_rodoviario(lat_atual, lon_atual, c.get("lat"), c.get("lon"), cfg)
+            if minutos is None:
+                minutos = _deslocamento_estimado_sem_coordenadas("", c.get("bairro"))
+            # Entregas com menor limite continuam protegidas, mas a distância participa.
+            limite_min = c["limite"].hour * 60 + c["limite"].minute if c.get("limite") else 24 * 60
+            protegida = 0 if c.get("retirada_horario_protegido") else 1
+            chave = (0 if c["tipo"] == "entrega" else protegida, limite_min, int(minutos or 0))
+            if melhor_chave is None or chave < melhor_chave:
+                melhor_chave, melhor = chave, c
+        ordem.append(melhor)
+        if melhor.get("lat") is not None:
+            lat_atual, lon_atual = melhor.get("lat"), melhor.get("lon")
+        pendentes.remove(melhor)
+    return ordem
+
+
+def _avaliar_missao_completa(ordem, data_operacao, hora_saida, cfg, veiculo, origem_lat, origem_lon):
+    """Avalia local atual -> todas as paradas -> loja, incluindo carga, retornos e horários."""
+    simulados = [_copiar_candidato_rota(c) for c in ordem]
+    try:
+        if veiculo:
+            simulados = _inserir_retornos_por_compartimento(simulados, veiculo, cfg)
+    except ValueError:
+        return {"inviavel": True, "atraso": 9999, "minutos": 99999, "km": 99999.0, "retornos": 99}
+
+    atual = datetime.combine(data_operacao, hora_saida)
+    lat_atual, lon_atual = origem_lat, origem_lon
+    km_total = 0.0
+    atraso_total = 0
+    maior_atraso = 0
+    retornos = 0
+    for p in simulados:
+        dist, mins, _ = _trecho_rodoviario(lat_atual, lon_atual, p.get("lat"), p.get("lon"), cfg)
+        if mins is None:
+            mins = _deslocamento_estimado_sem_coordenadas("", p.get("bairro"))
+        atual += timedelta(minutes=int(mins or 0))
+        km_total += float(dist or 0)
+        if p.get("tipo") == "retirada" and p.get("retirada_horario_protegido") and p.get("limite"):
+            limite = datetime.combine(data_operacao, p["limite"])
+            if atual < limite:
+                atual = limite
+        if p.get("tipo") == "entrega" and p.get("limite"):
+            limite = datetime.combine(data_operacao, p["limite"])
+            atraso = max(0, int((atual - limite).total_seconds() / 60))
+            atraso_total += atraso
+            maior_atraso = max(maior_atraso, atraso)
+        atual += timedelta(minutes=max(0, int(p.get("servico") or 0)))
+        if p.get("tipo") == "loja":
+            retornos += 1
+        if p.get("lat") is not None:
+            lat_atual, lon_atual = p.get("lat"), p.get("lon")
+
+    # O fim da missão é sempre a loja, nunca o último cliente.
+    dist_volta, min_volta, _ = _trecho_rodoviario(
+        lat_atual, lon_atual, cfg.latitude_loja, cfg.longitude_loja, cfg
+    )
+    if min_volta is None:
+        min_volta = 30
+    atual += timedelta(minutes=int(min_volta or 0))
+    km_total += float(dist_volta or 0)
+    duracao = max(0, int((atual - datetime.combine(data_operacao, hora_saida)).total_seconds() / 60))
+    return {
+        "inviavel": atraso_total > 0,
+        "atraso": atraso_total,
+        "maior_atraso": maior_atraso,
+        "minutos": duracao,
+        "km": round(km_total, 1),
+        "retornos": retornos,
+        "volta_loja_min": int(min_volta or 0),
+    }
+
+
+def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None, veiculo=None):
     """Ordena por compromisso de entrega, deslocamento e reaproveitamento real.
 
     Retirada vencida não é colocada automaticamente em primeiro lugar. Ela sobe
@@ -7580,27 +7693,20 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 c["tipo"] == "retirada"
                 and c.get("reaproveitamento")
                 and desvio_reaproveitamento is not None
-                and desvio_reaproveitamento <= 25
             )
 
-            # Restrição absoluta: uma escolha não pode tornar uma entrega futura atrasada.
-            # Avalia, de forma conservadora, se cada entrega restante ainda seria alcançável
-            # imediatamente após esta parada. Retiradas que criam atraso ficam inviáveis.
-            saida_candidata = chegada + timedelta(minutes=c["servico"])
-            inviabiliza_entrega = False
-            maior_atraso_futuro = 0
-            for futura in restantes:
-                if futura is c or futura["tipo"] != "entrega":
-                    continue
-                dist_futura, desloc_futuro, _ = _trecho_rodoviario(c.get("lat"), c.get("lon"), futura.get("lat"), futura.get("lon"), cfg)
-                if desloc_futuro is None:
-                    desloc_futuro = _deslocamento_estimado_sem_coordenadas(c.get("bairro"), futura.get("bairro"))
-                chegada_futura = saida_candidata + timedelta(minutes=desloc_futuro)
-                limite_futuro = datetime.combine(data_operacao, futura["limite"])
-                atraso_futuro = int((chegada_futura - limite_futuro).total_seconds() / 60)
-                if atraso_futuro > 0:
-                    inviabiliza_entrega = True
-                    maior_atraso_futuro = max(maior_atraso_futuro, atraso_futuro)
+            # Compara a missão inteira a partir do local atual. A análise não termina
+            # no próximo cliente: inclui todas as paradas, retornos exigidos pela carga
+            # e a volta final obrigatória à loja.
+            cauda = _ordem_cauda_aproximada(
+                [x for x in restantes if x is not c], c.get("lat"), c.get("lon"), cfg
+            )
+            avaliacao_missao = _avaliar_missao_completa(
+                [c] + cauda, data_operacao, atual.time(), cfg, veiculo,
+                lat_atual, lon_atual
+            )
+            inviabiliza_entrega = bool(avaliacao_missao.get("inviavel"))
+            maior_atraso_futuro = int(avaliacao_missao.get("maior_atraso") or 0)
 
             # Menor chave vence. Atraso de entrega domina qualquer economia.
             if c["tipo"] == "entrega":
@@ -7630,9 +7736,18 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                         entregas_criticas += 1
                 score_tipo += entregas_criticas * 5000
 
-            score_dist = desloc * 25
-            penalidade_inviavel = (1_000_000 + maior_atraso_futuro * 100_000) if inviabiliza_entrega else 0
-            pontuacao_total = penalidade_inviavel + score_prazo + score_tipo + score_dist + bonus_reuso
+            score_dist = desloc * 10
+            penalidade_inviavel = (1_000_000 + int(avaliacao_missao.get("atraso") or 0) * 100_000) if inviabiliza_entrega else 0
+            score_missao = (
+                int(avaliacao_missao.get("minutos") or 0) * 20
+                + int(float(avaliacao_missao.get("km") or 0) * 10)
+                + int(avaliacao_missao.get("retornos") or 0) * 600
+            )
+            # Reaproveitamento válido ganha valor por reduzir carga inicial/retorno,
+            # mas nunca supera atraso real de entrega.
+            if c["tipo"] == "retirada" and c.get("reaproveitamento"):
+                score_missao -= 1800
+            pontuacao_total = penalidade_inviavel + score_prazo + score_tipo + score_dist + score_missao + bonus_reuso
             chave = (
                 pontuacao_total,
                 0 if c["tipo"] == "entrega" else 1,
@@ -7650,6 +7765,11 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 "score_distancia": int(score_dist),
                 "bonus_reuso": int(bonus_reuso),
                 "penalidade_inviavel": int(penalidade_inviavel),
+                "score_missao": int(score_missao),
+                "missao_minutos": int(avaliacao_missao.get("minutos") or 0),
+                "missao_km": float(avaliacao_missao.get("km") or 0),
+                "missao_retornos": int(avaliacao_missao.get("retornos") or 0),
+                "volta_loja_min": int(avaliacao_missao.get("volta_loja_min") or 0),
                 "inviabiliza_entrega": bool(inviabiliza_entrega),
                 "maior_atraso_futuro": int(maior_atraso_futuro),
                 "desvio_reaproveitamento": None if desvio_reaproveitamento is None else int(desvio_reaproveitamento),
@@ -7702,11 +7822,18 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
         detalhe = diagnostico_escolhido
         motivo.append(
             "Cálculo: total {total} = prazo {prazo} + tipo {tipo} + distância {dist} "
-            "+ penalidade {pen} + bônus de reaproveitamento {bonus}".format(
+            "+ missão completa {missao} + penalidade {pen} + bônus de reaproveitamento {bonus}".format(
                 total=detalhe["pontuacao"], prazo=detalhe["score_prazo"],
                 tipo=detalhe["score_tipo"], dist=detalhe["score_distancia"],
+                missao=detalhe.get("score_missao", 0),
                 pen=detalhe["penalidade_inviavel"], bonus=detalhe["bonus_reuso"],
             )
+        )
+        motivo.append(
+            f"Missão simulada: {detalhe.get('missao_km', 0):.1f} km, "
+            f"{detalhe.get('missao_minutos', 0)} min, "
+            f"{detalhe.get('missao_retornos', 0)} retorno(s) intermediário(s) e "
+            f"{detalhe.get('volta_loja_min', 0)} min do último ponto até a loja"
         )
         if c["tipo"] == "retirada":
             # Na etapa final a entrega vinculada pode já ter sido removida da lista,
@@ -7723,10 +7850,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             if desvio_auditoria is None:
                 motivo.append("Reaproveitamento geográfico não aplicável nesta etapa: a entrega vinculada já foi escolhida")
             else:
-                limite_desvio = 25
                 motivo.append(
-                    f"Desvio para reaproveitar: {int(desvio_auditoria)} min "
-                    f"(limite atual: {limite_desvio} min)"
+                    f"Acréscimo local estimado: {int(desvio_auditoria)} min; "
+                    "a decisão final usa a missão completa com volta à loja"
                 )
             if detalhe["inviabiliza_entrega"]:
                 motivo.append(
@@ -7739,8 +7865,8 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 if avaliacao.get("inviabiliza_entrega"):
                     causa.append(f"risco de atraso de {avaliacao.get('maior_atraso_futuro', 0)} min")
                 desvio_ant = avaliacao.get("desvio_reaproveitamento")
-                if desvio_ant is not None and desvio_ant > 25:
-                    causa.append(f"desvio de {desvio_ant} min acima do limite")
+                if desvio_ant is not None:
+                    causa.append(f"acréscimo local de {desvio_ant} min; missão completa ficou pior")
                 if not causa:
                     causa.append(f"pontuação {avaliacao.get('pontuacao', 0)} maior que a parada escolhida")
                 motivo.append(
@@ -7920,7 +8046,10 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     )
     ordenados = _ordenar_inteligente(
         candidatos, rota.data_operacao, hora_base, cfg,
-        cfg.latitude_loja, cfg.longitude_loja
+        cfg.latitude_loja, cfg.longitude_loja,
+        db.query(VeiculoLogistico).filter_by(
+            id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
+        ).first() if rota.veiculo_id else None
     )
     veiculo = db.query(VeiculoLogistico).filter_by(
         id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
@@ -8570,7 +8699,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
         complemento = f" e mais {len(pendentes_geo)-3}" if len(pendentes_geo) > 3 else ""
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote(f"Não foi possível localizar automaticamente: {nomes}{complemento}. Confira rua, número, bairro e cidade no contrato. O contrato permanece salvo."), status_code=303)
 
-    ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja)
+    ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja, veiculo)
     try:
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
     except ValueError as exc:
