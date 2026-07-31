@@ -14,6 +14,7 @@
         <label>Montagem (min)<input type="number" name="minutos_montagem" value="{{ config.minutos_montagem }}" min="0"></label>
         <label>Desmontagem (min)<input type="number" name="minutos_desmontagem" value="{{ config.minutos_desmontagem }}" min="0"></label>
         <label>Antecedência (min)<input type="number" name="antecedencia_entrega" value="{{ config.antecedencia_entrega }}" min="0"></label>
+        <label>Chegada mínima ao cliente<input type="time" name="horario_minimo_cliente" value="{{ config.horario_minimo_cliente.strftime('%H:%M') if config.horario_minimo_cliente else '08:00' }}" required><small>A equipe pode sair antes, mas não chegar ao cliente antes deste horário.</small></label>
         <label>Parada na loja (min)<input type="number" name="minutos_parada_loja" value="{{ config.minutos_parada_loja }}" min="0"></label>
         <label>Velocidade média (km/h)<input name="velocidade_media_kmh" value="{{ config.velocidade_media_kmh }}"></label>
         <label>Custo por km (R$)<input name="custo_km" value="{{ config.custo_km or 0 }}"></label>

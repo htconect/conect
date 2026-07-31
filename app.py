@@ -1111,6 +1111,8 @@ def garantir_colunas_novas():
 
     if "configuracoes_rota_inteligente" in tabelas:
         cols_cfg_ri = colunas("configuracoes_rota_inteligente")
+        if "horario_minimo_cliente" not in cols_cfg_ri:
+            comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN horario_minimo_cliente TIME DEFAULT '08:00:00' NOT NULL")
         if "custo_km" not in cols_cfg_ri:
             comandos.append("ALTER TABLE configuracoes_rota_inteligente ADD COLUMN custo_km FLOAT DEFAULT 0 NOT NULL")
         if "custo_hora_equipe" not in cols_cfg_ri:
@@ -7216,6 +7218,20 @@ def _hora_somar(hora_base: time | None, minutos: int, padrao: time = time(8, 0))
     return (datetime.combine(date.today(), base) + timedelta(minutes=max(0, int(minutos or 0)))).time()
 
 
+def _respeitar_horario_minimo_cliente(instante: datetime, cfg: ConfiguracaoRotaInteligente, tipo: str | None = None) -> datetime:
+    """Impede chegada ao cliente antes do horário mínimo contratual configurado.
+
+    A equipe pode sair da loja antes desse horário, mas aguarda para chegar ao primeiro
+    cliente somente a partir do limite definido nas configurações da Inteligência.
+    Paradas técnicas de loja não recebem essa restrição.
+    """
+    if tipo == "loja":
+        return instante
+    minimo = getattr(cfg, "horario_minimo_cliente", None) or time(8, 0)
+    limite = datetime.combine(instante.date(), minimo)
+    return max(instante, limite)
+
+
 def _produtos_quantidades(sol: Solicitacao | None) -> dict[int, int]:
     produtos: dict[int, int] = {}
     if not sol:
@@ -7667,6 +7683,7 @@ def _avaliar_missao_completa(ordem, data_operacao, hora_saida, cfg, veiculo, ori
         if mins is None:
             mins = _deslocamento_estimado_sem_coordenadas("", p.get("bairro"))
         atual += timedelta(minutes=int(mins or 0))
+        atual = _respeitar_horario_minimo_cliente(atual, cfg, p.get("tipo"))
         km_total += float(dist or 0)
         if p.get("tipo") == "retirada" and p.get("retirada_horario_protegido") and p.get("limite"):
             limite = datetime.combine(data_operacao, p["limite"])
@@ -8088,6 +8105,7 @@ def _simular_sequencia_rota(ordenados, data_operacao, hora_saida, cfg, origem_la
         if desloc is None:
             desloc = _deslocamento_estimado_sem_coordenadas(bairro_atual, c.get("bairro"))
         chegada = atual + timedelta(minutes=desloc)
+        chegada = _respeitar_horario_minimo_cliente(chegada, cfg, c.get("tipo"))
         saida = chegada + timedelta(minutes=max(0, int(c.get("servico") or 0)))
         c["distancia"] = float(distancia or 0)
         c["desloc"] = desloc
@@ -8133,6 +8151,7 @@ def _recalcular_rota_salva(db: Session, rota: RotaInteligente):
                 desloc = 30
             p.distancia_anterior_km = float(distancia or 0); p.deslocamento_anterior_min = desloc
             p.chegada_prevista = atual + timedelta(minutes=desloc)
+            p.chegada_prevista = _respeitar_horario_minimo_cliente(p.chegada_prevista, cfg, p.tipo)
             p.saida_prevista = p.chegada_prevista + timedelta(minutes=p.servico_min or 0)
             if p.horario_limite:
                 limite = datetime.combine(rota.data_operacao, p.horario_limite)
@@ -8708,7 +8727,7 @@ def historico_inteligencia(request: Request, db: Session = Depends(get_db), empr
 
 
 @app.post("/painel/inteligencia-logistica/configuracao")
-def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), horario_minimo_cliente: str = Form("08:00"), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     cfg = _config_rota(db, empresa.id)
     endereco_anterior = (cfg.endereco_loja or "").strip()
     novo_endereco = endereco_loja.strip()
@@ -8719,6 +8738,10 @@ def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), 
         cfg.longitude_loja = None
     cfg.minutos_montagem = max(0, minutos_montagem); cfg.minutos_desmontagem = max(0, minutos_desmontagem)
     cfg.antecedencia_entrega = max(0, antecedencia_entrega); cfg.minutos_parada_loja = max(0, minutos_parada_loja)
+    try:
+        cfg.horario_minimo_cliente = datetime.strptime((horario_minimo_cliente or "08:00").strip(), "%H:%M").time()
+    except Exception:
+        cfg.horario_minimo_cliente = time(8, 0)
     try: cfg.velocidade_media_kmh = max(5, float(velocidade_media_kmh.replace(",", ".")))
     except Exception: cfg.velocidade_media_kmh = 30
     try: cfg.custo_km = max(0, float(custo_km.replace(",", ".")))

@@ -1,3 +1,4 @@
+from datetime import time
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Time,
     UniqueConstraint, func
@@ -522,6 +523,7 @@ class ConfiguracaoRotaInteligente(Base):
     minutos_montagem = Column(Integer, nullable=False, default=30)
     minutos_desmontagem = Column(Integer, nullable=False, default=20)
     antecedencia_entrega = Column(Integer, nullable=False, default=60)
+    horario_minimo_cliente = Column(Time, nullable=False, default=time(8, 0))
     minutos_parada_loja = Column(Integer, nullable=False, default=20)
     velocidade_media_kmh = Column(Float, nullable=False, default=30)
     custo_km = Column(Float, nullable=False, default=0)

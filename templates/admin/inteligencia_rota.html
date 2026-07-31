@@ -104,6 +104,7 @@
     <div class="intel-explain-body">
       <div class="intel-rule-grid">
         <div><small>Antecedência das entregas</small><strong>{{ cfg_inteligencia.antecedencia_entrega or 60 }} min</strong></div>
+        <div><small>Chegada mínima ao cliente</small><strong>{{ cfg_inteligencia.horario_minimo_cliente.strftime('%H:%M') if cfg_inteligencia.horario_minimo_cliente else '08:00' }}</strong></div>
         <div><small>Tempo de instalação</small><strong>{{ cfg_inteligencia.minutos_montagem or 30 }} min</strong></div>
         <div><small>Tempo de retirada</small><strong>{{ cfg_inteligencia.minutos_desmontagem or 20 }} min</strong></div>
         <div><small>Velocidade média</small><strong>{{ cfg_inteligencia.velocidade_media_kmh or 30 }} km/h</strong></div>
