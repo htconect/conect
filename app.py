@@ -8107,8 +8107,23 @@ def _inserir_retornos_capacidade(ordenados, capacidade: int | None, cfg):
     return resultado
 
 def _garantir_retorno_final_loja(ordenados, cfg):
-    """Fecha cada plano na loja e diferencia retorno final de retorno entre missões."""
+    """Fecha cada plano na loja e diferencia retorno final de retorno entre missões.
+
+    Como toda missão começa fisicamente na loja, um retorno inserido na primeira
+    posição é redundante e criava uma "1ª rota" vazia. Também compactamos retornos
+    consecutivos para não exibir missões sem nenhuma operação entre eles.
+    """
     resultado = list(ordenados)
+
+    while resultado and resultado[0].get("tipo") == "loja":
+        resultado.pop(0)
+    compactado = []
+    for parada in resultado:
+        if parada.get("tipo") == "loja" and compactado and compactado[-1].get("tipo") == "loja":
+            compactado[-1] = parada
+        else:
+            compactado.append(parada)
+    resultado = compactado
 
     # Retornos já existentes no meio do plano encerram uma missão e iniciam outra.
     for idx, parada in enumerate(resultado):
@@ -9396,6 +9411,11 @@ def mover_parada_inteligente(
             f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Uma parada iniciada ou concluída não pode ser movida.')}",
             status_code=303,
         )
+    if parada.fixada:
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Destrave este card antes de alterar sua posição.')}",
+            status_code=303,
+        )
 
     paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(
         RotaInteligenteParada.ordem.asc(), RotaInteligenteParada.id.asc()
@@ -9406,9 +9426,9 @@ def mover_parada_inteligente(
         return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}", status_code=303)
 
     vizinha = paradas[destino]
-    if vizinha.status in ("concluido", "em_andamento"):
+    if vizinha.status in ("concluido", "em_andamento") or vizinha.fixada or vizinha.tipo == "loja":
         return RedirectResponse(
-            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Não é possível mover uma parada antes de uma etapa já iniciada ou concluída.')}",
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Não é possível atravessar uma parada iniciada, concluída, travada ou um retorno à loja.')}",
             status_code=303,
         )
 
@@ -9418,6 +9438,33 @@ def mover_parada_inteligente(
     db.commit()
     return RedirectResponse(
         f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote('Ordem alterada. Somente os horários e deslocamentos foram recalculados.')}",
+        status_code=303,
+    )
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/fixar/{parada_id}")
+def fixar_parada_inteligente(
+    rota_id: int,
+    parada_id: int,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Trava/destrava a posição escolhida pelo operador sem reotimizar a rota."""
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
+    if not rota or not parada:
+        raise HTTPException(status_code=404)
+    if parada.tipo == "loja" or parada.status in ("concluido", "em_andamento"):
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Este card não pode ser travado ou destravado agora.')}",
+            status_code=303,
+        )
+    parada.fixada = not bool(parada.fixada)
+    _recalcular_rota_salva(db, rota)
+    db.commit()
+    mensagem = "Card travado. A Inteligência não poderá mudar esta posição." if parada.fixada else "Card destravado. Ele pode ser movimentado novamente."
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote(mensagem)}",
         status_code=303,
     )
 

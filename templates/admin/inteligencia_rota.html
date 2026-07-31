@@ -154,6 +154,7 @@
           <i class="bi bi-calendar3"></i>
           <strong>{{ p.dia_semana_view }} • {{ p.data_operacao_view.strftime('%d/%m/%Y') }}</strong>
           {% if p.aguardando_entrega_view %}<span>Aguardando entrega</span>{% endif %}
+          {% if p.fixada %}<span class="intel-fixed-badge"><i class="bi bi-lock-fill"></i> Ordem travada</span>{% endif %}
         </div>
         {% if p.endereco %}<p class="endereco"><i class="bi bi-geo-alt"></i> {{ p.endereco }}</p>{% endif %}
         {% if p.contrato_url_view %}
@@ -181,14 +182,19 @@
 
         <div class="acoes-parada">
           {% if p.status not in ('concluido', 'em_andamento') and p.tipo != 'loja' %}
-          <div class="intel-order-buttons" aria-label="Alterar ordem da parada">
+          <div class="intel-order-buttons" aria-label="Alterar e travar ordem da parada">
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/mover/{{ p.id }}">
               <input type="hidden" name="direcao" value="subir">
-              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Subir esta parada"><i class="bi bi-arrow-up"></i> Subir</button>
+              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Subir esta parada" {% if p.fixada %}disabled{% endif %}><i class="bi bi-arrow-up"></i> Subir</button>
             </form>
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/mover/{{ p.id }}">
               <input type="hidden" name="direcao" value="descer">
-              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Descer esta parada"><i class="bi bi-arrow-down"></i> Descer</button>
+              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Descer esta parada" {% if p.fixada %}disabled{% endif %}><i class="bi bi-arrow-down"></i> Descer</button>
+            </form>
+            <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/fixar/{{ p.id }}">
+              <button class="botao {% if p.fixada %}btn-krj-primary{% else %}btn-krj-outline{% endif %} btn-krj-compact" type="submit" title="{% if p.fixada %}Destravar posição{% else %}Travar esta posição{% endif %}">
+                <i class="bi {% if p.fixada %}bi-lock-fill{% else %}bi-unlock{% endif %}"></i> {% if p.fixada %}Travado{% else %}Travar{% endif %}
+              </button>
             </form>
           </div>
           {% endif %}
@@ -214,7 +220,7 @@
 <style>
 .intel-inline-time{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}.intel-inline-time label{font-weight:700}.intel-inline-time input{display:block;margin-top:.35rem;padding:.65rem;border:1px solid #d7dce2;border-radius:.65rem}.intel-day-summary{display:grid;gap:1rem;margin:1rem 0}.intel-route-summary{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;box-shadow:0 8px 22px rgba(0,0,0,.04)}.intel-route-summary.ativa{border-color:#6c63ff}.intel-route-summary.concluida{opacity:.78}.intel-route-summary header{display:flex;justify-content:space-between;gap:1rem;align-items:center;border-bottom:1px solid #edf0f4;padding-bottom:.75rem}.intel-route-summary h2{margin:.15rem 0 0}.intel-summary-block{margin-top:.85rem}.intel-summary-block h3{font-size:1rem;margin:0 0 .45rem}.intel-summary-block ul{margin:0;padding-left:1.15rem}.destaque-reuso{background:#f4fbf7;border-radius:.75rem;padding:.75rem}.intel-return-row{display:flex;align-items:center;gap:.65rem;margin-top:.85rem;padding:.75rem;background:#f7f8fa;border-radius:.75rem}.intel-return-row span{flex:1}.parada-rota.em-andamento{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}@media(max-width:720px){.intel-route-summary header{align-items:flex-start}.intel-section-head{align-items:flex-start}.intel-inline-time{width:100%}.intel-inline-time label{flex:1}.intel-inline-time input{width:100%}}
 .intel-week-nav{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;margin:1rem 0}.intel-week-days{display:flex;gap:.65rem;overflow-x:auto;padding-bottom:.15rem}.intel-week-days a{min-width:92px;text-decoration:none;color:inherit;border:1px solid #e2e6eb;border-radius:.8rem;padding:.7rem;display:flex;flex-direction:column;gap:.2rem}.intel-week-days a.ativo{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}.intel-week-days small,.intel-week-days span{font-size:.78rem;color:#667085}.parada-data{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.45rem 0 .6rem}.parada-data span,.intel-waiting{background:#fff4d6;color:#805b00;border-radius:999px;padding:.32rem .6rem;font-size:.82rem;font-weight:700}.ver-contrato{display:inline-flex;margin:0 0 .7rem}.intel-empty-week{color:#667085}.intel-waiting{display:inline-flex;align-items:center;gap:.35rem}
-.intel-order-buttons{display:flex;gap:.4rem;align-items:center}.intel-order-buttons form{margin:0}.intel-order-buttons .botao{white-space:nowrap}@media(max-width:720px){.acoes-parada{align-items:stretch}.intel-order-buttons{width:100%}.intel-order-buttons form{flex:1}.intel-order-buttons .botao{width:100%;justify-content:center}}
+.intel-order-buttons{display:flex;gap:.4rem;align-items:center}.intel-order-buttons form{margin:0}.intel-order-buttons .botao{white-space:nowrap}.intel-order-buttons .botao:disabled{opacity:.45;cursor:not-allowed}.intel-fixed-badge{background:#e9e7ff!important;color:#4338ca!important;display:inline-flex;align-items:center;gap:.3rem}@media(max-width:720px){.acoes-parada{align-items:stretch}.intel-order-buttons{width:100%}.intel-order-buttons form{flex:1}.intel-order-buttons .botao{width:100%;justify-content:center}}
 
 .intel-explain-panel{background:#fff;border:1px solid #dbe3ee;border-radius:1rem;margin:1rem 0;overflow:hidden;box-shadow:0 8px 22px rgba(0,0,0,.04)}.intel-explain-panel>summary{display:flex;align-items:center;gap:.75rem;padding:1rem;cursor:pointer;list-style:none}.intel-explain-panel>summary::-webkit-details-marker{display:none}.intel-explain-panel>summary>span{display:flex;flex:1;flex-direction:column}.intel-explain-panel>summary small{font-weight:400;color:#667085;margin-top:.15rem}.intel-explain-panel .seta{transition:transform .2s}.intel-explain-panel[open] .seta{transform:rotate(180deg)}.intel-explain-body{border-top:1px solid #edf0f4;padding:1rem}.intel-rule-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem}.intel-rule-grid>div{border:1px solid #e3e8ef;background:#f8fafc;border-radius:.75rem;padding:.7rem;display:flex;flex-direction:column;gap:.2rem}.intel-rule-grid small{color:#667085}.intel-explain-note{display:flex;gap:.5rem;align-items:flex-start;background:#eef6ff;border:1px solid #b7d7ff;border-radius:.75rem;padding:.75rem}.intel-calc-list{display:grid;gap:.7rem}.intel-calc-item{border:1px solid #e4e7ec;border-radius:.8rem;padding:.8rem}.intel-calc-item header{display:flex;gap:.6rem;align-items:center}.intel-calc-item header>div{display:flex;flex-direction:column}.intel-calc-item header small{color:#667085}.calc-order{width:2rem;height:2rem;border-radius:999px;background:#eaf2ff;color:#075bc7;display:grid;place-items:center;font-weight:800}.intel-calc-item ul,.intel-card-calc ul{margin:.65rem 0 0;padding-left:1.2rem}.intel-calc-item li,.intel-card-calc li{margin:.25rem 0}.intel-card-calc{margin:.65rem 0;background:#f8fafc;border:1px solid #e3e8ef;border-radius:.75rem;padding:.65rem .75rem}.intel-card-calc summary{cursor:pointer;display:flex;align-items:center;gap:.4rem;font-weight:700;list-style:none}.intel-card-calc summary::-webkit-details-marker{display:none}.intel-card-calc summary .bi-chevron-down{margin-left:auto;transition:transform .2s}.intel-card-calc[open] summary .bi-chevron-down{transform:rotate(180deg)}@media(max-width:720px){.intel-rule-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
