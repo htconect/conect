@@ -175,7 +175,7 @@
         {% endif %}
 
         <div class="acoes-parada">
-          {% if p.status not in ('concluido', 'em_andamento') %}
+          {% if p.status not in ('concluido', 'em_andamento') and p.tipo != 'loja' %}
           <div class="intel-order-buttons" aria-label="Alterar ordem da parada">
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/mover/{{ p.id }}">
               <input type="hidden" name="direcao" value="subir">
@@ -192,11 +192,11 @@
           {% else %}
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/iniciar/{{ p.id }}">
               <button class="botao {% if p.status=='em_andamento' %}btn-krj-primary{% else %}btn-krj-outline{% endif %} btn-krj-compact" type="submit">
-                <i class="bi bi-play-fill"></i> {% if p.status=='em_andamento' %}Em andamento{% else %}Iniciar esta parada{% endif %}
+                <i class="bi bi-play-fill"></i> {% if p.status=='em_andamento' %}Em andamento{% elif p.tipo=='loja' %}Iniciar retorno à loja{% else %}Iniciar esta parada{% endif %}
               </button>
             </form>
             <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/concluir/{{ p.id }}">
-              <button class="botao btn-krj-primary btn-krj-compact" type="submit">Concluir</button>
+              <button class="botao btn-krj-primary btn-krj-compact" type="submit">{% if p.tipo=='loja' %}Cheguei à loja{% else %}Concluir{% endif %}</button>
             </form>
           {% endif %}
         </div>

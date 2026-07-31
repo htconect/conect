@@ -7936,6 +7936,50 @@ def _inserir_retornos_capacidade(ordenados, capacidade: int | None, cfg):
         resultado.append(c)
     return resultado
 
+def _garantir_retorno_final_loja(ordenados, cfg):
+    """Fecha cada plano na loja e diferencia retorno final de retorno entre missões."""
+    resultado = list(ordenados)
+
+    # Retornos já existentes no meio do plano encerram uma missão e iniciam outra.
+    for idx, parada in enumerate(resultado):
+        if parada.get("tipo") != "loja":
+            continue
+        tem_operacao_depois = any(p.get("tipo") != "loja" for p in resultado[idx + 1:])
+        if tem_operacao_depois:
+            parada["titulo"] = "Retornar à loja — preparar próxima missão"
+            parada["motivo"] = (
+                parada.get("motivo")
+                or "Retorno intermediário para descarregar, reorganizar a carga e iniciar a próxima missão"
+            )
+            parada["retorno_final"] = False
+        else:
+            parada["titulo"] = "Retornar à loja — finalizar operação"
+            parada["motivo"] = "Última etapa obrigatória: a rota termina na loja, não no cliente"
+            parada["retorno_final"] = True
+
+    # O último card deve ser sempre a volta à loja.
+    if not resultado or resultado[-1].get("tipo") != "loja":
+        resultado.append({
+            "tipo": "loja",
+            "titulo": "Retornar à loja — finalizar operação",
+            "endereco": cfg.endereco_loja or "Loja",
+            "bairro": "",
+            "lat": cfg.latitude_loja,
+            "lon": cfg.longitude_loja,
+            "limite": None,
+            "servico": 0,
+            "pontos": 0,
+            "produtos": {},
+            "carga_movimento": 0,
+            "carga_apos": 0,
+            "risco": "normal",
+            "retorno_final": True,
+            "motivo": "Última etapa obrigatória: retornar à loja para finalizar a operação",
+            "historico_calculo": [],
+        })
+    return resultado
+
+
 def _simular_sequencia_rota(ordenados, data_operacao, hora_saida, cfg, origem_lat=None, origem_lon=None):
     """Recalcula a linha do tempo e informa se alguma entrega chega após o limite."""
     atual = datetime.combine(data_operacao, hora_saida)
@@ -8055,6 +8099,7 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
         id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
     ).first() if rota.veiculo_id else None
     ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
+    ordenados = _garantir_retorno_final_loja(ordenados, cfg)
     rota.horario_saida = _calcular_horario_saida_ideal(
         ordenados, rota.data_operacao, cfg, cfg.latitude_loja, cfg.longitude_loja
     )
@@ -8702,6 +8747,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja, veiculo)
     try:
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
+        ordenados = _garantir_retorno_final_loja(ordenados, cfg)
     except ValueError as exc:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote(str(exc)), status_code=303)
     hora = _calcular_horario_saida_ideal(ordenados, data_op, cfg, cfg.latitude_loja, cfg.longitude_loja)
