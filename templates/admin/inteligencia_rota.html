@@ -147,6 +147,18 @@
         {% if p.motivo_prioridade %}<p class="motivo">{{ p.motivo_prioridade }}</p>{% endif %}
 
         <div class="acoes-parada">
+          {% if p.status not in ('concluido', 'em_andamento') %}
+          <div class="intel-order-buttons" aria-label="Alterar ordem da parada">
+            <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/mover/{{ p.id }}">
+              <input type="hidden" name="direcao" value="subir">
+              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Subir esta parada"><i class="bi bi-arrow-up"></i> Subir</button>
+            </form>
+            <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/mover/{{ p.id }}">
+              <input type="hidden" name="direcao" value="descer">
+              <button class="botao btn-krj-outline btn-krj-compact" type="submit" title="Descer esta parada"><i class="bi bi-arrow-down"></i> Descer</button>
+            </form>
+          </div>
+          {% endif %}
           {% if p.aguardando_entrega_view %}
             <span class="intel-waiting"><i class="bi bi-hourglass-split"></i> Previsão semanal — libera após concluir a entrega</span>
           {% else %}
@@ -169,5 +181,6 @@
 <style>
 .intel-inline-time{display:flex;gap:.75rem;align-items:end;flex-wrap:wrap}.intel-inline-time label{font-weight:700}.intel-inline-time input{display:block;margin-top:.35rem;padding:.65rem;border:1px solid #d7dce2;border-radius:.65rem}.intel-day-summary{display:grid;gap:1rem;margin:1rem 0}.intel-route-summary{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;box-shadow:0 8px 22px rgba(0,0,0,.04)}.intel-route-summary.ativa{border-color:#6c63ff}.intel-route-summary.concluida{opacity:.78}.intel-route-summary header{display:flex;justify-content:space-between;gap:1rem;align-items:center;border-bottom:1px solid #edf0f4;padding-bottom:.75rem}.intel-route-summary h2{margin:.15rem 0 0}.intel-summary-block{margin-top:.85rem}.intel-summary-block h3{font-size:1rem;margin:0 0 .45rem}.intel-summary-block ul{margin:0;padding-left:1.15rem}.destaque-reuso{background:#f4fbf7;border-radius:.75rem;padding:.75rem}.intel-return-row{display:flex;align-items:center;gap:.65rem;margin-top:.85rem;padding:.75rem;background:#f7f8fa;border-radius:.75rem}.intel-return-row span{flex:1}.parada-rota.em-andamento{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}@media(max-width:720px){.intel-route-summary header{align-items:flex-start}.intel-section-head{align-items:flex-start}.intel-inline-time{width:100%}.intel-inline-time label{flex:1}.intel-inline-time input{width:100%}}
 .intel-week-nav{background:#fff;border:1px solid #e6e9ee;border-radius:1rem;padding:1rem;margin:1rem 0}.intel-week-days{display:flex;gap:.65rem;overflow-x:auto;padding-bottom:.15rem}.intel-week-days a{min-width:92px;text-decoration:none;color:inherit;border:1px solid #e2e6eb;border-radius:.8rem;padding:.7rem;display:flex;flex-direction:column;gap:.2rem}.intel-week-days a.ativo{border-color:#6c63ff;box-shadow:0 0 0 2px rgba(108,99,255,.12)}.intel-week-days small,.intel-week-days span{font-size:.78rem;color:#667085}.parada-data{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.45rem 0 .6rem}.parada-data span,.intel-waiting{background:#fff4d6;color:#805b00;border-radius:999px;padding:.32rem .6rem;font-size:.82rem;font-weight:700}.ver-contrato{display:inline-flex;margin:0 0 .7rem}.intel-empty-week{color:#667085}.intel-waiting{display:inline-flex;align-items:center;gap:.35rem}
+.intel-order-buttons{display:flex;gap:.4rem;align-items:center}.intel-order-buttons form{margin:0}.intel-order-buttons .botao{white-space:nowrap}@media(max-width:720px){.acoes-parada{align-items:stretch}.intel-order-buttons{width:100%}.intel-order-buttons form{flex:1}.intel-order-buttons .botao{width:100%;justify-content:center}}
 </style>
 {% endblock %}

@@ -7527,6 +7527,32 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             ] if c["tipo"] == "retirada" else []
             libera_entrega = bool(entregas_dependentes and c.get("retirada_obrigatoria"))
 
+            # Oportunidade geográfica: mesmo sem déficit de estoque, uma retirada pode
+            # abastecer diretamente uma entrega posterior quando o desvio é pequeno.
+            # Ex.: loja -> retirada próxima -> entrega, evitando levar outra unidade da loja.
+            desvio_reaproveitamento = None
+            if c["tipo"] == "retirada" and entregas_dependentes:
+                for entrega_dep in entregas_dependentes:
+                    _, direto_min, _ = _trecho_rodoviario(
+                        lat_atual, lon_atual, entrega_dep.get("lat"), entrega_dep.get("lon"), cfg
+                    )
+                    _, retirada_entrega_min, _ = _trecho_rodoviario(
+                        c.get("lat"), c.get("lon"), entrega_dep.get("lat"), entrega_dep.get("lon"), cfg
+                    )
+                    if direto_min is None:
+                        direto_min = _deslocamento_estimado_sem_coordenadas(bairro_atual, entrega_dep.get("bairro"))
+                    if retirada_entrega_min is None:
+                        retirada_entrega_min = _deslocamento_estimado_sem_coordenadas(c.get("bairro"), entrega_dep.get("bairro"))
+                    desvio = max(0, int(desloc) + int(c["servico"]) + int(retirada_entrega_min) - int(direto_min))
+                    if desvio_reaproveitamento is None or desvio < desvio_reaproveitamento:
+                        desvio_reaproveitamento = desvio
+            oportunidade_geografica = bool(
+                c["tipo"] == "retirada"
+                and c.get("reaproveitamento")
+                and desvio_reaproveitamento is not None
+                and desvio_reaproveitamento <= 25
+            )
+
             # Restrição absoluta: uma escolha não pode tornar uma entrega futura atrasada.
             # Avalia, de forma conservadora, se cada entrega restante ainda seria alcançável
             # imediatamente após esta parada. Retiradas que criam atraso ficam inviáveis.
@@ -7556,6 +7582,10 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 score_tipo = 3500
                 score_prazo = max(0, atraso) * 80
                 bonus_reuso = -2200 if libera_entrega else (-700 if c.get("reaproveitamento") else 0)
+                if oportunidade_geografica:
+                    # Supera a preferência padrão por entrega quando a retirada está perto
+                    # da origem/rota e pode ser usada diretamente na entrega seguinte.
+                    bonus_reuso -= max(3200, 5200 - int(desvio_reaproveitamento or 0) * 50)
                 # Se há entrega que já ficaria apertada, não desvia para retirada agora.
                 entregas_criticas = 0
                 for e in restantes:
@@ -7576,9 +7606,10 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             )
             if melhor_chave is None or chave < melhor_chave:
                 melhor_chave = chave
-                melhor = (c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos)
+                melhor = (c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos,
+                          oportunidade_geografica, desvio_reaproveitamento)
 
-        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos = melhor
+        c, distancia, desloc, chegada, limite_dt, libera_entrega, comuns_recolhidos, oportunidade_geografica, desvio_reaproveitamento = melhor
         atraso_min = int((chegada - limite_dt).total_seconds() / 60)
         folga_min = int((limite_dt - chegada).total_seconds() / 60)
         risco = "atrasado" if atraso_min > 0 else ("atencao" if folga_min <= 20 else "normal")
@@ -7589,6 +7620,9 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
                 motivo.append("Usa equipamento recolhido anteriormente, sem retorno à loja")
         elif libera_entrega:
             motivo.append("Retirada estratégica: libera equipamento para entrega seguinte")
+        elif oportunidade_geografica:
+            motivo.append("Retirada antecipada por proximidade da rota e reaproveitamento direto")
+            motivo.append(f"Desvio estimado de apenas {int(desvio_reaproveitamento or 0)} min")
         elif c.get("reaproveitamento"):
             motivo.append("Retirada encaixada por oportunidade de reaproveitamento")
         else:
@@ -8687,6 +8721,56 @@ def iniciar_parada_inteligente(
     db.commit()
     return RedirectResponse(
         f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote('Parada iniciada. As próximas previsões foram recalculadas.')}",
+        status_code=303,
+    )
+
+
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/mover/{parada_id}")
+def mover_parada_inteligente(
+    rota_id: int,
+    parada_id: int,
+    direcao: str = Form(...),
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Move um card manualmente e recalcula somente distâncias e horários.
+
+    A sequência escolhida pelo operador é preservada; não executa novamente o
+    otimizador e não consome Humiat.
+    """
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    parada = db.query(RotaInteligenteParada).filter_by(id=parada_id, rota_id=rota_id).first()
+    if not rota or not parada:
+        raise HTTPException(status_code=404)
+    if direcao not in ("subir", "descer"):
+        raise HTTPException(status_code=400, detail="Direção inválida")
+    if parada.status in ("concluido", "em_andamento"):
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Uma parada iniciada ou concluída não pode ser movida.')}",
+            status_code=303,
+        )
+
+    paradas = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(
+        RotaInteligenteParada.ordem.asc(), RotaInteligenteParada.id.asc()
+    ).all()
+    indice = next((i for i, item in enumerate(paradas) if item.id == parada.id), None)
+    destino = (indice - 1) if direcao == "subir" else (indice + 1)
+    if indice is None or destino < 0 or destino >= len(paradas):
+        return RedirectResponse(f"/painel/inteligencia-logistica/rota/{rota.id}", status_code=303)
+
+    vizinha = paradas[destino]
+    if vizinha.status in ("concluido", "em_andamento"):
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote('Não é possível mover uma parada antes de uma etapa já iniciada ou concluída.')}",
+            status_code=303,
+        )
+
+    parada.ordem, vizinha.ordem = vizinha.ordem, parada.ordem
+    db.flush()
+    _recalcular_rota_salva(db, rota)
+    db.commit()
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote('Ordem alterada. Somente os horários e deslocamentos foram recalculados.')}",
         status_code=303,
     )
 
