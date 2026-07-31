@@ -7385,14 +7385,86 @@ def _inserir_retornos_por_compartimento(ordenados, veiculo, cfg):
     return resultado
 
 
+def _retiradas_planejadas_inteligencia(db: Session, empresa_id: int, ignorar_rota_id: int | None = None):
+    """Retorna a primeira data planejada de cada retirada ainda ativa.
+
+    Uma previsão aceita pela Inteligência fica reservada para aquele dia e não
+    reaparece automaticamente nos dias seguintes. Se a parada não for concluída,
+    adiada ou removida, a sincronização do próprio dia poderá recolocá-la depois.
+    """
+    q = (
+        db.query(RotaInteligenteParada, RotaInteligente)
+        .join(RotaInteligente, RotaInteligenteParada.rota_id == RotaInteligente.id)
+        .filter(
+            RotaInteligente.empresa_id == empresa_id,
+            RotaInteligente.status != "concluida",
+            RotaInteligenteParada.tipo == "retirada",
+            RotaInteligenteParada.status != "concluido",
+            RotaInteligenteParada.solicitacao_id.isnot(None),
+        )
+    )
+    if ignorar_rota_id:
+        q = q.filter(RotaInteligente.id != ignorar_rota_id)
+    planejadas = {}
+    for parada, rota in q.order_by(RotaInteligente.data_operacao.asc()).all():
+        sid = int(parada.solicitacao_id)
+        planejadas.setdefault(sid, rota.data_operacao)
+    return planejadas
+
+
+def _estoque_fisico_projetado(db: Session, empresa: Empresa, data_operacao: date,
+                               retiradas_planejadas: dict[int, date]):
+    """Calcula o que estará fisicamente na loja no início do dia.
+
+    quantidade_disponivel representa o total operacional cadastrado. Descontamos
+    contratos entregues e ainda na rua. Uma retirada planejada para dia anterior
+    é considerada realizada; retirada do próprio dia continua na rua até a parada.
+    """
+    totais = {
+        p.id: max(0, int(p.quantidade_disponivel or 0))
+        for p in db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+    }
+    na_rua = {pid: 0 for pid in totais}
+    entregas = (
+        db.query(Agenda)
+        .join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id)
+        .filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.tipo_evento == "entrega",
+            Agenda.data < data_operacao,
+            Agenda.status_operacional == "concluido",
+            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        ).all()
+    )
+    for entrega in entregas:
+        sid = int(entrega.solicitacao_id)
+        retirada_concluida = db.query(Agenda.id).filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.solicitacao_id == sid,
+            Agenda.tipo_evento == "retirada",
+            Agenda.status_operacional == "concluido",
+        ).first()
+        if retirada_concluida:
+            continue
+        data_planejada = retiradas_planejadas.get(sid)
+        if data_planejada and data_planejada < data_operacao:
+            continue
+        for pid, qtd in _produtos_quantidades(entrega.solicitacao).items():
+            na_rua[int(pid)] = na_rua.get(int(pid), 0) + int(qtd or 0)
+    na_loja = {pid: max(0, total - na_rua.get(pid, 0)) for pid, total in totais.items()}
+    return totais, na_rua, na_loja
+
+
 def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, equipe_id: int | None, cfg,
-                             hora_saida: time | None = None):
+                             hora_saida: time | None = None, ignorar_rota_id: int | None = None):
     """Monta operações independentes de entrega e retirada.
 
     Inclui entregas do dia, retiradas do dia, retiradas vencidas de dias anteriores e
     cria uma retirada sintética quando o contrato tem retirada prevista mas não existe
     um card específico de retirada na agenda.
     """
+    retiradas_planejadas = _retiradas_planejadas_inteligencia(db, empresa.id, ignorar_rota_id)
+
     q = db.query(Agenda).join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
         Agenda.empresa_id == empresa.id,
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
@@ -7430,6 +7502,7 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             "horario_calculado": horario_calculado,
             "retirada_vencida": vencida,
             "retirada_obrigatoria": obrigatoria,
+            "retirada_obrigatoria_estoque": False,
             "retirada_roteirizada_manual": bool(tipo == "retirada" and ag.roteirizado),
             "retirada_horario_protegido": bool(tipo == "retirada" and (ag.roteirizado or obrigatoria)),
             "sintetica": sintetica,
@@ -7450,6 +7523,9 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             adicionar(ag, "entrega")
             entregas_do_dia.append(candidatos[-1])
         elif tipo_agenda == "retirada" and ag.data <= data_operacao and ag.status_operacional != "concluido":
+            data_reservada = retiradas_planejadas.get(int(ag.solicitacao_id))
+            if data_reservada and data_reservada < data_operacao:
+                continue
             adicionar(ag, "retirada", data_retirada=ag.data)
             retiradas_existentes.add(ag.solicitacao_id)
 
@@ -7474,6 +7550,9 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             continue
 
         data_prevista, _ = _previsao_retirada_operacional(sol, entrega)
+        data_reservada = retiradas_planejadas.get(int(solicitacao_id))
+        if data_reservada and data_reservada < data_operacao:
+            continue
         if data_prevista <= data_operacao:
             adicionar(entrega, "retirada", sintetica=True, data_retirada=data_prevista)
             retiradas_existentes.add(solicitacao_id)
@@ -7486,11 +7565,15 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
     for entrega in entregas_do_dia:
         for produto_id, qtd in entrega["produtos"].items():
             demanda[produto_id] = demanda.get(produto_id, 0) + qtd
-    disponibilidade = {
-        p.id: max(0, int(p.quantidade_disponivel or 0))
-        for p in db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
-    }
+    estoque_total, estoque_na_rua, disponibilidade = _estoque_fisico_projetado(
+        db, empresa, data_operacao, retiradas_planejadas
+    )
     deficit = {pid: max(0, qtd - disponibilidade.get(pid, 0)) for pid, qtd in demanda.items()}
+    for candidato in candidatos:
+        candidato["estoque_total"] = dict(estoque_total)
+        candidato["estoque_na_rua"] = dict(estoque_na_rua)
+        candidato["estoque_loja"] = dict(disponibilidade)
+        candidato["demanda_dia"] = dict(demanda)
 
     for entrega in entregas_do_dia:
         for retirada in retiradas:
@@ -7502,6 +7585,7 @@ def _montar_candidatos_rota(db: Session, empresa: Empresa, data_operacao: date, 
             for produto_id in comuns:
                 if deficit.get(produto_id, 0) > 0:
                     retirada["retirada_obrigatoria"] = True
+                    retirada["retirada_obrigatoria_estoque"] = True
                     # A retirada é necessária para liberar equipamento, mas não ganha
                     # prioridade fixa. O otimizador decide sua posição sem atrasar entregas.
                     deficit[produto_id] = max(0, deficit[produto_id] - retirada["produtos"].get(produto_id, 1))
@@ -7805,6 +7889,18 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             motivo.append("Retirada pendente de dia anterior")
         if c.get("retirada_roteirizada_manual"):
             motivo.append(f"Horário definido manualmente e protegido: {c['limite'].strftime('%H:%M')}")
+        elif c.get("retirada_obrigatoria_estoque"):
+            motivo.append("Retirada obrigatória por falta de estoque físico na loja; horário escolhido pela Inteligência")
+            for pid, qtd in (c.get("produtos") or {}).items():
+                falta = max(0, int((c.get("demanda_dia") or {}).get(pid, 0)) - int((c.get("estoque_loja") or {}).get(pid, 0)))
+                if falta:
+                    motivo.append(
+                        f"Estoque operacional: total {(c.get('estoque_total') or {}).get(pid, 0)}, "
+                        f"na loja {(c.get('estoque_loja') or {}).get(pid, 0)}, "
+                        f"na rua {(c.get('estoque_na_rua') or {}).get(pid, 0)}, "
+                        f"demanda do dia {(c.get('demanda_dia') or {}).get(pid, 0)}; falta {falta}"
+                    )
+                    break
         elif c.get("retirada_obrigatoria"):
             motivo.append(f"Horário obrigatório protegido: {c['limite'].strftime('%H:%M')}")
         elif c["tipo"] == "retirada":
@@ -8078,7 +8174,7 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
         return 0
     cfg = _config_rota(db, rota.empresa_id)
     candidatos = _montar_candidatos_rota(
-        db, empresa, rota.data_operacao, rota.equipe_id, cfg, rota.horario_saida
+        db, empresa, rota.data_operacao, rota.equipe_id, cfg, rota.horario_saida, ignorar_rota_id=rota.id
     )
     # A ordem deve ser escolhida sem ficar presa ao horário de saída salvo.
     # Primeiro otimiza a missão com uma base neutra; depois recalcula apenas os
@@ -8086,7 +8182,7 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     # artificial causado por uma saída calculada para a ordem antiga.
     hora_base = time(8, 0)
     candidatos = _montar_candidatos_rota(
-        db, empresa, rota.data_operacao, rota.equipe_id, cfg, hora_base
+        db, empresa, rota.data_operacao, rota.equipe_id, cfg, hora_base, ignorar_rota_id=rota.id
     )
     ordenados = _ordenar_inteligente(
         candidatos, rota.data_operacao, hora_base, cfg,
