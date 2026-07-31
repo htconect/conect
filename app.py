@@ -9252,7 +9252,20 @@ def aplicar_rota_inteligente_na_operacao(
         agenda.data = nova_data
         agenda.hora_inicio = nova_hora
         agenda.previsao_entrega = nova_hora.strftime("%H:%M")
-        agenda.roteirizado = True
+
+        # Aplicar a Inteligência deve copiar somente data e hora. Não altera
+        # roteirização, equipe ou status do card. A versão anterior marcava
+        # roteirizado=True sem definir equipe, fazendo entregas desaparecerem
+        # quando a Operação estava filtrada por equipe.
+        observacoes_anteriores = agenda.observacoes_operacionais or ""
+        aplicado_sem_equipe = (
+            agenda.roteirizado
+            and not agenda.equipe_id
+            and "Data e hora aplicadas pela Inteligência" in observacoes_anteriores
+        )
+        if aplicado_sem_equipe:
+            # Repara automaticamente os cards afetados pela versão anterior.
+            agenda.roteirizado = False
 
         registro = (
             f"[{agora}] Data e hora aplicadas pela Inteligência por {usuario}. "
