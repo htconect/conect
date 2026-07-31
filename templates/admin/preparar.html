@@ -127,6 +127,19 @@
             <a class="link-detalhe link-contrato-operacao" href="{{ link_contrato_visual }}" target="_blank">Ver
                 contrato</a>
 
+            {% set vinculada = operacoes_vinculadas.get(a.id) %}
+            {% if vinculada %}
+                <a class="link-detalhe link-operacao-vinculada"
+                   href="/painel/agenda/{{ a.id }}/localizar-vinculada">
+                    {{ 'Ver busca vinculada' if tipo == 'entrega' else 'Ver entrega vinculada' }}
+                </a>
+            {% else %}
+                <span class="link-detalhe link-operacao-vinculada indisponivel"
+                      title="Nenhum registro correspondente foi encontrado no banco de dados">
+                    {{ 'Busca ainda não criada' if tipo == 'entrega' else 'Entrega não encontrada' }}
+                </span>
+            {% endif %}
+
             <div class="linha">
                 <div><label>Equipe</label><select name="equipe_id" required><option value="">Selecione</option>{% for e in equipes %}<option value="{{ e.id }}" {% if a.equipe_id == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></div>
                 <div>

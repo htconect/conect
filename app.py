@@ -2987,6 +2987,37 @@ def preparar_reservas(
         return (data_base or date.max, hora_roteirizada(a), a.id)
 
     itens = sorted(itens, key=chave_operacao)
+
+    # Mapa de vínculo entre ENTREGA e RETIRADA da mesma solicitação.
+    # A consulta ignora os filtros da tela para permitir localizar também
+    # operações concluídas ou fora do período atualmente selecionado.
+    ids_solicitacoes = {a.solicitacao_id for a in itens if a.solicitacao_id}
+    operacoes_vinculadas = {}
+    if ids_solicitacoes:
+        eventos_relacionados = (
+            db.query(Agenda)
+            .filter(
+                Agenda.empresa_id == empresa.id,
+                Agenda.solicitacao_id.in_(ids_solicitacoes),
+            )
+            .order_by(Agenda.id.asc())
+            .all()
+        )
+        por_solicitacao = {}
+        for evento in eventos_relacionados:
+            por_solicitacao.setdefault(evento.solicitacao_id, []).append(evento)
+
+        for agenda in itens:
+            tipo_atual = agenda.tipo_evento or "entrega"
+            tipo_procurado = "retirada" if tipo_atual == "entrega" else "entrega"
+            candidatos = [
+                evento for evento in por_solicitacao.get(agenda.solicitacao_id, [])
+                if (evento.tipo_evento or "entrega") == tipo_procurado
+            ]
+            # Em bases antigas pode haver duplicidade. Exibimos o registro mais
+            # recente, que é o melhor candidato para auditoria operacional.
+            operacoes_vinculadas[agenda.id] = candidatos[-1] if candidatos else None
+
     return templates.TemplateResponse("admin/preparar.html", {
         "request": request,
         "empresa": empresa,
@@ -2999,7 +3030,59 @@ def preparar_reservas(
         "mostrar_concluidas": mostrar_concluidas,
         "equipes": equipes, "equipe_id": equipe_id, "situacao_rota": situacao_rota,
         "mensagens": mensagens_empresa(empresa),
+        "operacoes_vinculadas": operacoes_vinculadas,
     })
+
+
+@app.get("/painel/agenda/{agenda_id}/localizar-vinculada")
+def localizar_operacao_vinculada(
+        agenda_id: int,
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    """Abre, na tela Operação, a entrega ou retirada vinculada ao mesmo contrato."""
+    agenda = db.query(Agenda).filter_by(id=agenda_id, empresa_id=empresa.id).first()
+    if not agenda:
+        raise HTTPException(404, "Operação não encontrada.")
+
+    tipo_atual = agenda.tipo_evento or "entrega"
+    tipo_procurado = "retirada" if tipo_atual == "entrega" else "entrega"
+    vinculada = (
+        db.query(Agenda)
+        .filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.solicitacao_id == agenda.solicitacao_id,
+            Agenda.tipo_evento == tipo_procurado,
+        )
+        .order_by(Agenda.id.desc())
+        .first()
+    )
+    if not vinculada:
+        raise HTTPException(
+            404,
+            "A operação vinculada ainda não existe no banco de dados."
+        )
+
+    data_vinculada = vinculada.data or (
+        vinculada.solicitacao.data_evento if vinculada.solicitacao else None
+    )
+    data_texto = data_vinculada.isoformat() if data_vinculada else date.today().isoformat()
+    parametros = {
+        "data_inicial": data_texto,
+        "data_final": data_texto,
+        "mostrar_entregas": "1",
+        "mostrar_retiradas": "1",
+        "mostrar_concluidas": "1",
+        "situacao_rota": "todos",
+    }
+    if vinculada.equipe_id:
+        parametros["equipe_id"] = str(vinculada.equipe_id)
+
+    return RedirectResponse(
+        url=f"/painel/reservas?{urlencode(parametros)}#agenda-{vinculada.id}",
+        status_code=303,
+    )
 
 
 @app.get("/painel/solicitacoes", response_class=HTMLResponse)
