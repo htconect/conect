@@ -70,6 +70,9 @@
       {% if resumo.sair_com %}
       <div class="intel-summary-block">
         <h3><i class="bi bi-box-arrow-up-right"></i> Sair da loja com</h3>
+        {% if resumo.operacoes and resumo.operacoes[0].ocupacao_saida_view %}
+        <p class="intel-volume-line {% if resumo.operacoes[0].carga_saida_excede_view %}intel-volume-error{% endif %}"><strong>Volume na saída:</strong> {{ resumo.operacoes[0].ocupacao_saida_view }}</p>
+        {% endif %}
         <ul>{% for item in resumo.sair_com %}<li>{{ item }}</li>{% endfor %}</ul>
       </div>
       {% endif %}
@@ -163,6 +166,8 @@
         </a>
         {% endif %}
         <div class="dados-parada">
+          {% if p.ocupacao_antes_view %}<span class="{% if p.carga_antes_excede_view %}folga-atraso{% endif %}"><strong>Volume antes:</strong> {{ p.ocupacao_antes_view }}</span>{% endif %}
+          {% if p.ocupacao_depois_view %}<span class="{% if p.carga_depois_excede_view %}folga-atraso{% endif %}"><strong>Volume depois:</strong> {{ p.ocupacao_depois_view }}{% if p.carga_depois_excede_view %} — NÃO CABE{% endif %}</span>{% endif %}
           {% if p.deslocamento_anterior_min is not none %}<span><strong>Deslocamento {{ p.deslocamento_anterior_min }} min</strong></span>{% endif %}
           {% if p.distancia_anterior_km is not none %}<span>{{ '%.1f'|format(p.distancia_anterior_km) }} km no trecho</span>{% endif %}
           {% if p.tipo == 'entrega' and p.servico_min %}<span>Instalação {{ p.servico_min }} min</span>{% elif p.tipo == 'retirada' and p.servico_min %}<span>Retirada {{ p.servico_min }} min</span>{% endif %}

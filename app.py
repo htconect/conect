@@ -7405,6 +7405,107 @@ def _inserir_retornos_por_compartimento(ordenados, veiculo, cfg):
     return resultado
 
 
+
+def _ajustar_ordem_inicial_por_capacidade(ordenados, veiculo, cfg):
+    """Evita começar a missão com uma retirada que não cabe no veículo.
+
+    Se a simulação exigir um retorno à loja antes da primeira operação, a ordem
+    escolhida é fisicamente impossível: a missão já começa na loja. Nesse caso,
+    antecipa a primeira entrega disponível para liberar espaço e testa novamente.
+    """
+    if not veiculo or not ordenados:
+        return ordenados
+    base = list(ordenados)
+    for _ in range(len(base)):
+        simulada = _inserir_retornos_por_compartimento([_copiar_candidato_rota(c) for c in base], veiculo, cfg)
+        if not simulada or simulada[0].get("tipo") != "loja":
+            return base
+        if base[0].get("tipo") != "retirada":
+            return base
+        idx_entrega = next((i for i, c in enumerate(base[1:], 1) if c.get("tipo") == "entrega"), None)
+        if idx_entrega is None:
+            return base
+        entrega = base.pop(idx_entrega)
+        base.insert(0, entrega)
+        entrega["motivo"] = (entrega.get("motivo") or "Entrega priorizada") + " • Antecipada para liberar volume no veículo antes da retirada"
+    return base
+
+
+def _texto_ocupacao_compartimentos(ocupacao, capacidades):
+    ocupacao = ocupacao or {"interno": 0, "mala": 0, "teto": 0}
+    capacidades = capacidades or {"interno": 0, "mala": 0, "teto": 0}
+    return (
+        f"Interno {ocupacao.get('interno', 0)}/{capacidades.get('interno', 0)} · "
+        f"Mala {ocupacao.get('mala', 0)}/{capacidades.get('mala', 0)} · "
+        f"Teto/outros {ocupacao.get('teto', 0)}/{capacidades.get('teto', 0)}"
+    )
+
+
+def _anotar_ocupacao_rota_salva(paradas, veiculo):
+    """Reconstrói o volume antes/depois de cada card para auditoria visual."""
+    if not veiculo:
+        return
+    capacidades = {
+        "interno": int(veiculo.capacidade_interno or 0),
+        "mala": int(veiculo.capacidade_mala or 0),
+        "teto": int(veiculo.capacidade_teto or 0),
+    }
+    grupos, atual = [], []
+    for p in paradas:
+        atual.append(p)
+        if p.tipo == "loja":
+            grupos.append(atual); atual = []
+    if atual:
+        grupos.append(atual)
+
+    for grupo in grupos:
+        carga = []
+        creditos = {}
+        # Monta exatamente a carga prevista na saída desta missão.
+        for p in grupo:
+            if p.tipo == "loja":
+                continue
+            produtos = _produtos_quantidades(p.solicitacao)
+            if p.tipo == "retirada":
+                for pid, qtd in produtos.items():
+                    creditos[int(pid)] = creditos.get(int(pid), 0) + int(qtd or 0)
+                continue
+            faltantes = dict(produtos)
+            for pid, qtd in list(faltantes.items()):
+                usar = min(int(qtd or 0), creditos.get(int(pid), 0))
+                faltantes[int(pid)] = int(qtd or 0) - usar
+                creditos[int(pid)] = creditos.get(int(pid), 0) - usar
+            faltantes = {pid: qtd for pid, qtd in faltantes.items() if qtd > 0}
+            unidades, _ = _unidades_carga_por_veiculo(faltantes, veiculo)
+            carga.extend(unidades or [])
+
+        cabe_saida, ocup_saida = _acomodar_unidades(carga, capacidades)
+        primeira = next((p for p in grupo if p.tipo != "loja"), None)
+        if primeira:
+            primeira.ocupacao_saida_view = _texto_ocupacao_compartimentos(ocup_saida, capacidades)
+            primeira.carga_saida_excede_view = not cabe_saida
+
+        for p in grupo:
+            cabe_antes, ocup_antes = _acomodar_unidades(carga, capacidades)
+            p.ocupacao_antes_view = _texto_ocupacao_compartimentos(ocup_antes, capacidades)
+            p.carga_antes_excede_view = not cabe_antes
+            if p.tipo == "loja":
+                carga = []
+            else:
+                unidades, _ = _unidades_carga_por_veiculo(_produtos_quantidades(p.solicitacao), veiculo)
+                unidades = unidades or []
+                if p.tipo == "entrega":
+                    for unidade in unidades:
+                        for pos, atual_u in enumerate(carga):
+                            if atual_u.get("produto_id") == unidade.get("produto_id"):
+                                carga.pop(pos); break
+                elif p.tipo == "retirada":
+                    carga.extend(unidades)
+            cabe_depois, ocup_depois = _acomodar_unidades(carga, capacidades)
+            p.ocupacao_depois_view = _texto_ocupacao_compartimentos(ocup_depois, capacidades)
+            p.carga_depois_excede_view = not cabe_depois
+            p.capacidade_compartimentos_view = _texto_ocupacao_compartimentos({}, capacidades)
+
 def _retiradas_planejadas_inteligencia(db: Session, empresa_id: int, ignorar_rota_id: int | None = None):
     """Retorna a primeira data planejada de cada retirada ainda ativa.
 
@@ -7672,6 +7773,7 @@ def _avaliar_missao_completa(ordem, data_operacao, hora_saida, cfg, veiculo, ori
     simulados = [_copiar_candidato_rota(c) for c in ordem]
     try:
         if veiculo:
+            simulados = _ajustar_ordem_inicial_por_capacidade(simulados, veiculo, cfg)
             simulados = _inserir_retornos_por_compartimento(simulados, veiculo, cfg)
     except ValueError:
         return {"inviavel": True, "atraso": 9999, "minutos": 99999, "km": 99999.0, "retornos": 99}
@@ -8285,6 +8387,7 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     veiculo = db.query(VeiculoLogistico).filter_by(
         id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
     ).first() if rota.veiculo_id else None
+    ordenados = _ajustar_ordem_inicial_por_capacidade(ordenados, veiculo, cfg)
     ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
     ordenados = _garantir_retorno_final_loja(ordenados, cfg)
     rota.horario_saida = _calcular_horario_saida_ideal(
@@ -8999,6 +9102,7 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
 
     ordenados = _ordenar_inteligente(candidatos, data_op, hora_provisoria, cfg, cfg.latitude_loja, cfg.longitude_loja, veiculo)
     try:
+        ordenados = _ajustar_ordem_inicial_por_capacidade(ordenados, veiculo, cfg)
         ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
         ordenados = _garantir_retorno_final_loja(ordenados, cfg)
     except ValueError as exc:
@@ -9190,6 +9294,7 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
         .all()
     )
 
+    _anotar_ocupacao_rota_salva(paradas, rota.veiculo)
     resumos_rotas = _resumo_rotas_do_dia(paradas)
     cfg_inteligencia = _config_rota(db, empresa.id)
     return templates.TemplateResponse("admin/inteligencia_rota.html", {
