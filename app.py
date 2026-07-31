@@ -7709,12 +7709,23 @@ def _ordenar_inteligente(candidatos, data_operacao, hora_saida, cfg, origem_lat=
             )
         )
         if c["tipo"] == "retirada":
-            if detalhe["desvio_reaproveitamento"] is None:
-                motivo.append("Reaproveitamento geográfico: não foi possível calcular o desvio")
+            # Na etapa final a entrega vinculada pode já ter sido removida da lista,
+            # portanto o desvio atual pode ficar vazio mesmo havendo coordenadas.
+            # Para a auditoria, usa o melhor desvio calculado nas etapas anteriores.
+            desvios_validos = [
+                a.get("desvio_reaproveitamento")
+                for a in c.get("historico_calculo", [])
+                if a.get("desvio_reaproveitamento") is not None
+            ]
+            desvio_auditoria = detalhe["desvio_reaproveitamento"]
+            if desvio_auditoria is None and desvios_validos:
+                desvio_auditoria = min(desvios_validos)
+            if desvio_auditoria is None:
+                motivo.append("Reaproveitamento geográfico não aplicável nesta etapa: a entrega vinculada já foi escolhida")
             else:
                 limite_desvio = 25
                 motivo.append(
-                    f"Desvio para reaproveitar: {detalhe['desvio_reaproveitamento']} min "
+                    f"Desvio para reaproveitar: {int(desvio_auditoria)} min "
                     f"(limite atual: {limite_desvio} min)"
                 )
             if detalhe["inviabiliza_entrega"]:
@@ -7899,14 +7910,29 @@ def _reconstruir_rota_salva(db: Session, rota: RotaInteligente):
     candidatos = _montar_candidatos_rota(
         db, empresa, rota.data_operacao, rota.equipe_id, cfg, rota.horario_saida
     )
+    # A ordem deve ser escolhida sem ficar presa ao horário de saída salvo.
+    # Primeiro otimiza a missão com uma base neutra; depois recalcula apenas os
+    # horários. Isso evita rejeitar uma retirada estratégica por um "atraso"
+    # artificial causado por uma saída calculada para a ordem antiga.
+    hora_base = time(8, 0)
+    candidatos = _montar_candidatos_rota(
+        db, empresa, rota.data_operacao, rota.equipe_id, cfg, hora_base
+    )
     ordenados = _ordenar_inteligente(
-        candidatos, rota.data_operacao, rota.horario_saida, cfg,
+        candidatos, rota.data_operacao, hora_base, cfg,
         cfg.latitude_loja, cfg.longitude_loja
     )
     veiculo = db.query(VeiculoLogistico).filter_by(
         id=rota.veiculo_id, empresa_id=rota.empresa_id, ativo=True
     ).first() if rota.veiculo_id else None
     ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
+    rota.horario_saida = _calcular_horario_saida_ideal(
+        ordenados, rota.data_operacao, cfg, cfg.latitude_loja, cfg.longitude_loja
+    )
+    _simular_sequencia_rota(
+        ordenados, rota.data_operacao, rota.horario_saida, cfg,
+        cfg.latitude_loja, cfg.longitude_loja
+    )
 
     existentes = db.query(RotaInteligenteParada).filter_by(rota_id=rota.id).order_by(
         RotaInteligenteParada.ordem
@@ -8550,10 +8576,10 @@ def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equ
     except ValueError as exc:
         return RedirectResponse("/painel/inteligencia-logistica/nova?erro=" + quote(str(exc)), status_code=303)
     hora = _calcular_horario_saida_ideal(ordenados, data_op, cfg, cfg.latitude_loja, cfg.longitude_loja)
-    # Reordena com o horário calculado e recalcula a carga/retornos.
-    candidatos = _montar_candidatos_rota(db, empresa, data_op, equipe_id or None, cfg, hora)
-    ordenados = _ordenar_inteligente(candidatos, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
-    ordenados = _inserir_retornos_por_compartimento(ordenados, veiculo, cfg)
+    # IMPORTANTE: não reordena depois de calcular a saída. O horário foi derivado
+    # desta sequência; reotimizar usando esse mesmo horário criava um ciclo em que
+    # a retirada anterior parecia atrasar a entrega, embora bastasse sair antes.
+    # Aqui recalculamos somente a linha do tempo da ordem já escolhida.
     atrasos = _simular_sequencia_rota(ordenados, data_op, hora, cfg, cfg.latitude_loja, cfg.longitude_loja)
     if atrasos:
         resumo = ", ".join(f"{a['titulo']} ({a['minutos']} min)" for a in atrasos[:3])
