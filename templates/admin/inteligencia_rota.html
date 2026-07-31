@@ -124,10 +124,13 @@
   </details>
 
   <div class="acoes-rota">
-    <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/recalcular">
-      <button class="botao btn-krj-primary"><i class="bi bi-arrow-repeat"></i> Recalcular plano atual</button>
+    <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/aplicar-operacao" onsubmit="return confirm('Aplicar na Operação somente as datas e os horários recomendados pela Inteligência?');">
+      <button class="botao btn-krj-primary" type="submit"><i class="bi bi-check2-square"></i> Aplicar na Operação</button>
     </form>
-    <span>As paradas concluídas permanecem registradas.</span>
+    <form method="post" action="/painel/inteligencia-logistica/rota/{{ rota.id }}/recalcular">
+      <button class="botao btn-krj-outline"><i class="bi bi-arrow-repeat"></i> Recalcular plano atual</button>
+    </form>
+    <span>Somente data e hora serão salvas. A Operação continuará totalmente editável.</span>
   </div>
 
   <section class="timeline-rota">

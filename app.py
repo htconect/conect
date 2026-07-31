@@ -9125,6 +9125,102 @@ def visualizar_rota_inteligente(rota_id: int, request: Request, db: Session = De
 
 
 
+@app.post("/painel/inteligencia-logistica/rota/{rota_id}/aplicar-operacao")
+def aplicar_rota_inteligente_na_operacao(
+    rota_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Copia somente data e hora planejadas pela Inteligência para a Operação.
+
+    Não cria cards, não altera equipe, status operacional ou qualquer outra
+    regra da Operação. O operador continua livre para editar a roteirização.
+    """
+    rota = db.query(RotaInteligente).filter_by(id=rota_id, empresa_id=empresa.id).first()
+    if not rota:
+        raise HTTPException(status_code=404)
+
+    paradas = (
+        db.query(RotaInteligenteParada)
+        .filter(
+            RotaInteligenteParada.rota_id == rota.id,
+            RotaInteligenteParada.tipo.in_(("entrega", "retirada")),
+            RotaInteligenteParada.status != "concluido",
+        )
+        .order_by(RotaInteligenteParada.ordem)
+        .all()
+    )
+
+    atualizadas = 0
+    ignoradas = 0
+    usuario = request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
+    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    for parada in paradas:
+        if not parada.chegada_prevista:
+            ignoradas += 1
+            continue
+
+        agenda = None
+        if parada.agenda_id:
+            agenda = db.query(Agenda).filter_by(
+                id=parada.agenda_id,
+                empresa_id=empresa.id,
+            ).first()
+
+        # Retiradas previstas pela Inteligência podem ter sido criadas de forma
+        # sintética. Nesse caso, usa o card operacional já existente do contrato.
+        if not agenda and parada.solicitacao_id:
+            agenda = db.query(Agenda).filter_by(
+                empresa_id=empresa.id,
+                solicitacao_id=parada.solicitacao_id,
+                tipo_evento=parada.tipo,
+            ).first()
+
+        if not agenda or agenda.status_operacional == "concluido":
+            ignoradas += 1
+            continue
+
+        data_anterior = agenda.data
+        hora_anterior = agenda.hora_inicio
+        nova_data = parada.chegada_prevista.date()
+        nova_hora = parada.chegada_prevista.time().replace(second=0, microsecond=0)
+
+        agenda.data = nova_data
+        agenda.hora_inicio = nova_hora
+        agenda.previsao_entrega = nova_hora.strftime("%H:%M")
+        agenda.roteirizado = True
+
+        registro = (
+            f"[{agora}] Data e hora aplicadas pela Inteligência por {usuario}. "
+            f"{data_anterior.strftime('%d/%m/%Y') if data_anterior else '-'} "
+            f"{hora_anterior.strftime('%H:%M') if hora_anterior else '-'} → "
+            f"{nova_data.strftime('%d/%m/%Y')} {nova_hora.strftime('%H:%M')}."
+        )
+        agenda.observacoes_operacionais = (
+            (agenda.observacoes_operacionais or "") + "\n" + registro
+        ).strip()
+        atualizadas += 1
+
+    db.commit()
+
+    if atualizadas == 0:
+        mensagem = "Nenhuma entrega ou retirada disponível para aplicar na Operação"
+        return RedirectResponse(
+            f"/painel/inteligencia-logistica/rota/{rota.id}?erro={quote(mensagem)}",
+            status_code=303,
+        )
+
+    mensagem = f"{atualizadas} operação(ões) atualizada(s) somente com data e hora"
+    if ignoradas:
+        mensagem += f"; {ignoradas} item(ns) sem vínculo ou já concluído(s) foram ignorados"
+    return RedirectResponse(
+        f"/painel/inteligencia-logistica/rota/{rota.id}?sucesso={quote(mensagem)}",
+        status_code=303,
+    )
+
+
 @app.post("/painel/inteligencia-logistica/rota/{rota_id}/horario-saida")
 def alterar_horario_saida_rota(
     rota_id: int, horario_saida: str = Form(...), db: Session = Depends(get_db),
