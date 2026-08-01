@@ -6561,10 +6561,10 @@ def atualizar_roteiro(
     if item.tipo_evento == "entrega" and status_anterior != "concluido" and item.status_operacional == "concluido":
         criar_retirada_apos_entrega(db, item)
 
-    # A Operação é a fonte da verdade. Qualquer entrega/retirada encerrada ou
-    # remanejada precisa ser lida pelas rotas inteligentes ainda abertas.
-    db.flush()
-    _sincronizar_rotas_inteligentes_ativas(db, empresa.id)
+    # A Operação precisa permanecer rápida e independente da Inteligência.
+    # Rotas inteligentes abertas não são recalculadas durante o atendimento
+    # operacional; elas serão atualizadas somente dentro do próprio módulo de
+    # Inteligência quando o usuário solicitar gerar/recalcular a rota.
     db.commit()
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
@@ -8734,13 +8734,12 @@ def iniciar_rota_solicitacao(
     item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
     if not item:
         raise HTTPException(404)
-    if item.latitude is None or item.longitude is None:
-        _tentar_geocodificar_solicitacao(db, item)
-    # Se conseguiu, usa coordenadas precisas; senão, mantém o endereço textual que já funciona.
-    if item.latitude is not None and item.longitude is not None:
-        destino = f"{item.latitude:.7f},{item.longitude:.7f}"
-    else:
-        destino = endereco_rota_solicitacao(item)
+    # A navegação operacional usa sempre o endereço cadastrado. Não consulta
+    # geocodificação nem reutiliza latitude/longitude da Inteligência, evitando
+    # espera de rede e coordenadas incorretas durante entregas e retiradas.
+    destino = endereco_rota_solicitacao(item)
+    if not destino:
+        raise HTTPException(400, "Endereço não informado para iniciar a rota.")
     if provedor == "waze":
         url = "https://waze.com/ul?" + urlencode({"ll": destino, "navigate": "yes"}) if "," in destino and destino.replace("-","").replace(",","").replace(".","").isdigit() else "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
     else:
