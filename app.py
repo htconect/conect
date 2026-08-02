@@ -20,6 +20,7 @@ from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 import time as time_module
+import threading
 
 logger = logging.getLogger("conect")
 geo_logger = logging.getLogger("conect.geocodificacao")
@@ -28,7 +29,7 @@ from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, Upload
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
@@ -1695,12 +1696,72 @@ def url_publica(request: Request, caminho: str) -> str:
     return f"{base}{caminho}"
 
 
+# Cache leve de empresa para evitar uma consulta ao Neon em toda página de leitura.
+# O cache guarda apenas colunas escalares e nunca substitui o banco em gravações.
+_EMPRESA_CACHE_TTL_SECONDS = max(60, int(os.getenv("EMPRESA_CACHE_TTL_SECONDS", "3600")))
+_empresa_cache: dict[int, tuple[float, dict]] = {}
+_empresa_cache_lock = threading.Lock()
+
+
+def _empresa_cache_snapshot(empresa: Empresa) -> dict:
+    return {col.name: getattr(empresa, col.name) for col in Empresa.__table__.columns}
+
+
+def empresa_cache_salvar(empresa: Empresa) -> None:
+    if not empresa or not getattr(empresa, "id", None):
+        return
+    expira_em = time_module.monotonic() + _EMPRESA_CACHE_TTL_SECONDS
+    with _empresa_cache_lock:
+        _empresa_cache[int(empresa.id)] = (expira_em, _empresa_cache_snapshot(empresa))
+
+
+def empresa_cache_invalidar(empresa_id: int | None = None) -> None:
+    with _empresa_cache_lock:
+        if empresa_id is None:
+            _empresa_cache.clear()
+        else:
+            _empresa_cache.pop(int(empresa_id), None)
+
+
+def _empresa_cache_obter(db: Session, empresa_id: int) -> Empresa | None:
+    agora = time_module.monotonic()
+    with _empresa_cache_lock:
+        entrada = _empresa_cache.get(int(empresa_id))
+        if not entrada:
+            return None
+        expira_em, snapshot = entrada
+        if expira_em <= agora:
+            _empresa_cache.pop(int(empresa_id), None)
+            return None
+        dados = dict(snapshot)
+
+    # Recria uma instância destacada e a anexa à sessão sem SELECT.
+    # Assim o restante do sistema continua recebendo um objeto Empresa normal.
+    empresa = Empresa(**dados)
+    make_transient_to_detached(empresa)
+    return db.merge(empresa, load=False)
+
+
 def empresa_logada(request: Request, db: Session = Depends(get_db)) -> Empresa:
     empresa_id = request.session.get("empresa_id")
     if not empresa_id:
         raise HTTPException(status_code=303, headers={"Location": "/empresa/login"})
-    empresa = db.get(Empresa, empresa_id)
+
+    # GET/HEAD são consultas: reutilizam a empresa já conhecida da sessão.
+    # Qualquer gravação invalida o cache e lê o registro atual antes de salvar.
+    empresa = None
+    if request.method in {"GET", "HEAD"}:
+        empresa = _empresa_cache_obter(db, int(empresa_id))
+    else:
+        empresa_cache_invalidar(int(empresa_id))
+
+    if empresa is None:
+        empresa = db.get(Empresa, empresa_id)
+        if empresa:
+            empresa_cache_salvar(empresa)
+
     if not empresa:
+        empresa_cache_invalidar(int(empresa_id))
         request.session.clear()
         raise HTTPException(status_code=303, headers={"Location": "/empresa/login"})
     return empresa
@@ -2011,6 +2072,7 @@ def admin_salvar_empresa(
     empresa.humiat_gratis_mes = max(0, int(humiat_gratis_mes or 0))
     empresa.humiat_custo_contrato = max(0, int(humiat_custo_contrato or 0))
     db.commit()
+    empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/admin", status_code=303)
 
 
@@ -2192,6 +2254,7 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
         request.session["usuario_nome"] = empresa.usuario_admin or usuario_limpo
         request.session["acesso_total"] = True
         request.session["acessos"] = {}
+        empresa_cache_salvar(empresa)
         return RedirectResponse("/painel", status_code=303)
 
     usuario_empresa = (
@@ -2216,6 +2279,9 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
             "cadastros": bool(usuario_empresa.acesso_cadastros),
             "relatorios": bool(usuario_empresa.acesso_relatorios),
         }
+        empresa_usuario = db.get(Empresa, usuario_empresa.empresa_id)
+        if empresa_usuario:
+            empresa_cache_salvar(empresa_usuario)
         return RedirectResponse("/painel", status_code=303)
 
     return RedirectResponse(
