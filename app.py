@@ -3002,6 +3002,7 @@ def preparar_reservas(
             joinedload(Agenda.equipe),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
+            selectinload(Agenda.solicitacao).selectinload(Solicitacao.pagamentos),
         )
         .join(Cliente, Solicitacao.cliente_id == Cliente.id)
         .all()
@@ -4490,12 +4491,27 @@ def usuario_pode_financeiro(request: Request, empresa: Empresa, db: Session) -> 
 
 
 def garantir_contas_financeiras(db: Session, empresa_id: int):
-    contas = db.query(ContaFinanceira).filter_by(empresa_id=empresa_id).all()
-    if not contas:
+    # Caminho normal: uma única consulta. A criação automática só ocorre em base nova.
+    contas = (
+        db.query(ContaFinanceira)
+        .filter_by(empresa_id=empresa_id, ativa=True)
+        .order_by(ContaFinanceira.id)
+        .all()
+    )
+    if contas:
+        return contas
+    existe_alguma = db.query(ContaFinanceira.id).filter_by(empresa_id=empresa_id).first()
+    if not existe_alguma:
         for nome, tipo in [("Banco Principal", "banco"), ("Dinheiro", "dinheiro"), ("Cartão", "cartao")]:
             db.add(ContaFinanceira(empresa_id=empresa_id, nome=nome, tipo=tipo, saldo_inicial=0))
         db.commit()
-    return db.query(ContaFinanceira).filter_by(empresa_id=empresa_id, ativa=True).order_by(ContaFinanceira.id).all()
+        return (
+            db.query(ContaFinanceira)
+            .filter_by(empresa_id=empresa_id, ativa=True)
+            .order_by(ContaFinanceira.id)
+            .all()
+        )
+    return []
 
 
 def parse_valor_banco(valor) -> float:
@@ -4757,10 +4773,9 @@ def financeiro(
     if not usuario_pode_financeiro(request, empresa, db):
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
 
-    garantir_ordem_financeira(db, empresa.id)
-
+    # GET financeiro é somente leitura. A correção de ordem antiga não roda em toda abertura.
     contas = garantir_contas_financeiras(db, empresa.id)
-    conta = db.get(ContaFinanceira, conta_id) if conta_id else (contas[0] if contas else None)
+    conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
 
     hoje = date.today()
     data_inicial = data_inicial or hoje.replace(day=1).isoformat()
@@ -4817,6 +4832,8 @@ def financeiro(
     semana_cards_fim = semana_selecionada["fim"]
 
     q_banco = db.query(LancamentoBanco).options(
+        joinedload(LancamentoBanco.conta),
+        joinedload(LancamentoBanco.repasse_solicitacao).joinedload(Solicitacao.cliente),
         joinedload(LancamentoBanco.pagamento)
         .joinedload(Pagamento.solicitacao)
         .joinedload(Solicitacao.cliente),
@@ -4829,6 +4846,8 @@ def financeiro(
         .joinedload(Solicitacao.empresa_transferida),
     ).filter(LancamentoBanco.empresa_id == empresa.id)
     q_manual_real = db.query(LancamentoManualFinanceiro).options(
+        joinedload(LancamentoManualFinanceiro.conta),
+        joinedload(LancamentoManualFinanceiro.repasse_solicitacao).joinedload(Solicitacao.cliente),
         joinedload(LancamentoManualFinanceiro.pagamento)
         .joinedload(Pagamento.solicitacao)
         .joinedload(Solicitacao.cliente),
@@ -6295,6 +6314,10 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
     status_ignorados = ["cancelada", "rejeitada"]
     reservas_do_dia = (
         db.query(Solicitacao)
+        .options(
+            joinedload(Solicitacao.cliente),
+            selectinload(Solicitacao.itens),
+        )
         .filter(Solicitacao.empresa_id == empresa.id)
         .filter(Solicitacao.data_evento == data_consulta)
         .filter(~Solicitacao.status.in_(status_ignorados))
