@@ -3002,7 +3002,7 @@ def preparar_reservas(
             joinedload(Agenda.equipe),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
-            selectinload(Agenda.solicitacao).selectinload(Solicitacao.pagamentos),
+            joinedload(Agenda.solicitacao).selectinload(Solicitacao.pagamentos),
         )
         .join(Cliente, Solicitacao.cliente_id == Cliente.id)
         .all()
