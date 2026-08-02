@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, text, inspect, or_
+from sqlalchemy import func, text, inspect, or_, case
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
@@ -2314,127 +2314,137 @@ def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
 
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    # A home é somente consulta. Correções de agenda ficam fora do GET diário.
+    """Home leve: somente leitura, agregações consolidadas e relacionamentos pré-carregados."""
+    hoje = date.today()
+    inicio_semana, fim_semana = periodo_semana_atual()
+    status_pendentes = ["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"]
+    status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
+    competencia_humiat = agora_utc().strftime("%Y-%m")
+
+    with perf_stage("home.resumo_solicitacoes"):
+        resumo_solicitacoes = db.query(
+            func.sum(case((Solicitacao.status.in_(status_pendentes), 1), else_=0)).label("pendentes"),
+            func.sum(case((
+                (Solicitacao.data_evento >= inicio_semana)
+                & (Solicitacao.data_evento <= fim_semana)
+                & (~Solicitacao.status.in_(status_agenda_inativos)), 1
+            ), else_=0)).label("agenda_periodo"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat), 1
+            ), else_=0)).label("humiat_aceitos"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat)
+                & (Solicitacao.humiat_status == "gratuito"), 1
+            ), else_=0)).label("humiat_gratis"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat)
+                & (Solicitacao.humiat_status.in_(["debitado", "pendente_saldo"])), 1
+            ), else_=0)).label("humiat_cobrados"),
+        ).filter(Solicitacao.empresa_id == empresa.id).one()
+
+    with perf_stage("home.resumo_operacao"):
+        resumo_operacao = db.query(
+            func.sum(case((Agenda.tipo_evento == "entrega", 1), else_=0)).label("entregas"),
+            func.sum(case((Agenda.tipo_evento == "retirada", 1), else_=0)).label("retiradas"),
+        ).filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.data >= inicio_semana,
+            Agenda.data <= fim_semana,
+            Agenda.status_operacional != "concluido",
+        ).one()
+
+    with perf_stage("home.totais_cadastros"):
+        total_clientes = db.query(func.count(Cliente.id)).filter(Cliente.empresa_id == empresa.id).scalar() or 0
+        total_produtos = db.query(func.count(ProdutoServico.id)).filter(ProdutoServico.empresa_id == empresa.id).scalar() or 0
+
     with perf_stage("home.solicitacoes_pendentes"):
         solicitacoes = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
+            db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente), selectinload(Solicitacao.pagamentos))
+            .filter(Solicitacao.empresa_id == empresa.id, Solicitacao.status.in_(status_pendentes))
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+            .limit(8)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
-        .limit(8)
-        .all()
-    )
-
-    total_clientes = db.query(Cliente).filter_by(empresa_id=empresa.id).count()
-    total_produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).count()
-
-    pendentes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
-    ).count()
-
-    inicio_semana, fim_semana = periodo_semana_atual()
-    status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
-
-    agenda_periodo_qtd = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.data_evento >= inicio_semana,
-        Solicitacao.data_evento <= fim_semana,
-        ~Solicitacao.status.in_(status_agenda_inativos)
-    ).count()
-
-    operacao_base = db.query(Agenda).filter(
-        Agenda.empresa_id == empresa.id,
-        Agenda.data >= inicio_semana,
-        Agenda.data <= fim_semana,
-        Agenda.status_operacional != "concluido"
-    )
-    operacao_entregar_qtd = operacao_base.filter(Agenda.tipo_evento == "entrega").count()
-    operacao_buscar_qtd = operacao_base.filter(Agenda.tipo_evento == "retirada").count()
-    operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
 
     pendencias_agenda = solicitacoes
 
-    pendencias_sinal = []
-    if empresa.exige_sinal:
-        pendencias_sinal = (
+    with perf_stage("home.pendencias_contrato"):
+        pendencias_sinal = []
+        if empresa.exige_sinal:
+            pendencias_sinal = (
+                db.query(Solicitacao)
+                .options(joinedload(Solicitacao.cliente))
+                .filter(
+                    Solicitacao.empresa_id == empresa.id,
+                    Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                    Solicitacao.sinal > 0,
+                    Solicitacao.valor_pago <= 0,
+                )
+                .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+                .limit(12)
+                .all()
+            )
+
+        pendencias_envio_contrato = (
             db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente))
             .filter(
                 Solicitacao.empresa_id == empresa.id,
                 Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-                Solicitacao.sinal > 0,
-                Solicitacao.valor_pago <= 0
+                Solicitacao.contrato_id.isnot(None),
+                Solicitacao.contrato_enviado_em.is_(None),
+                Solicitacao.cancelado_em.is_(None),
             )
-            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
             .limit(12)
             .all()
         )
 
-    # Contratos já aprovados/aceitos que ainda precisam ser enviados ao cliente.
-    # O envio reutiliza o mesmo link e a mesma mensagem já tratados pelo fluxo do contrato.
-    pendencias_envio_contrato = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-            Solicitacao.contrato_id != None,
-            Solicitacao.contrato_enviado_em == None,
-            Solicitacao.cancelado_em == None,
+    with perf_stage("home.pendencias_financeiro_operacao"):
+        pendencias_a_receber = (
+            db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente))
+            .filter(
+                Solicitacao.empresa_id == empresa.id,
+                Solicitacao.cancelado_em.is_(None),
+                Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+                Solicitacao.data_evento < hoje,
+                (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+            )
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-        .limit(12)
-        .all()
-    )
 
-    pendencias_a_receber = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.cancelado_em == None,
-            # Rascunho/aguardando aceite ainda não é dívida do cliente.
-            # Só contratos efetivamente aprovados entram em "a receber".
-            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-            Solicitacao.data_evento < date.today(),
-            (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+        pendencias_operacao = (
+            db.query(Agenda)
+            .join(Solicitacao)
+            .options(joinedload(Agenda.solicitacao))
+            .filter(
+                Agenda.empresa_id == empresa.id,
+                Agenda.data < hoje,
+                Agenda.status_operacional != "concluido",
+                ~Solicitacao.status.in_(status_agenda_inativos),
+            )
+            .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-        .limit(12)
-        .all()
-    )
 
-    hoje = date.today()
-    pendencias_operacao = (
-        db.query(Agenda)
-        .join(Solicitacao)
-        .filter(
-            Agenda.empresa_id == empresa.id,
-            Agenda.data < hoje,
-            Agenda.status_operacional != "concluido",
-            ~Solicitacao.status.in_(status_agenda_inativos)
+        pendencias_financeiras = (
+            db.query(Pagamento)
+            .options(joinedload(Pagamento.solicitacao).joinedload(Solicitacao.cliente))
+            .filter(Pagamento.empresa_id == empresa.id, Pagamento.conciliado_em.is_(None))
+            .order_by(Pagamento.data_pagamento.asc(), Pagamento.id.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc())
-        .limit(12)
-        .all()
-    )
 
-    pendencias_financeiras = (
-        db.query(Pagamento)
-        .join(Solicitacao)
-        .join(Cliente)
-        .filter(
-            Pagamento.empresa_id == empresa.id,
-            Pagamento.conciliado_em == None
-        )
-        .order_by(Pagamento.data_pagamento.asc(), Pagamento.id.asc())
-        .limit(12)
-        .all()
-    )
-
-    # Responsável compacto usado nos cards da Agenda/Pendências.
     _anexar_responsaveis_exibicao(solicitacoes)
-    _anexar_responsaveis_exibicao(pendencias_agenda)
 
     link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
     mensagem_pre_contrato = aplicar_variaveis_mensagem(
@@ -2446,31 +2456,17 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         pix=empresa.pix_copia_cola or "",
     )
 
-    # Resumo da Carteira Humiat. Os créditos gratuitos são calculados apenas
-    # para exibição e consumo mensal; o saldo comprado continua separado.
-    competencia_humiat = agora_utc().strftime("%Y-%m")
-    aceitos_humiat_mes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-    ).count()
+    pendentes = int(resumo_solicitacoes.pendentes or 0)
+    agenda_periodo_qtd = int(resumo_solicitacoes.agenda_periodo or 0)
+    operacao_entregar_qtd = int(resumo_operacao.entregas or 0)
+    operacao_buscar_qtd = int(resumo_operacao.retiradas or 0)
+    operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
+
+    aceitos_humiat_mes = int(resumo_solicitacoes.humiat_aceitos or 0)
     gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo_contrato_h = 1
-    gratis_usados = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-        Solicitacao.humiat_status == "gratuito",
-    ).count()
+    gratis_usados = int(resumo_solicitacoes.humiat_gratis or 0)
     gratis_restantes = max(0, gratis_limite - gratis_usados)
-    humiats_gratis_restantes = gratis_restantes
-    contratos_cobrados_mes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-        Solicitacao.humiat_status.in_(["debitado", "pendente_saldo"]),
-    ).count()
-    humiats_consumidos_mes = aceitos_humiat_mes
+    contratos_cobrados_mes = int(resumo_solicitacoes.humiat_cobrados or 0)
 
     return templates.TemplateResponse("admin/painel.html", {
         "request": request,
@@ -2483,8 +2479,8 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
-        "total_clientes": total_clientes,
-        "total_produtos": total_produtos,
+        "total_clientes": int(total_clientes),
+        "total_produtos": int(total_produtos),
         "pendentes": pendentes,
         "agenda_periodo_qtd": agenda_periodo_qtd,
         "operacao_periodo_qtd": operacao_periodo_qtd,
@@ -2496,10 +2492,10 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "humiat_gratis_limite": gratis_limite,
         "humiat_gratis_usados": gratis_usados,
         "humiat_gratis_restantes": gratis_restantes,
-        "humiats_gratis_restantes": humiats_gratis_restantes,
+        "humiats_gratis_restantes": gratis_restantes,
         "humiat_contratos_cobrados_mes": contratos_cobrados_mes,
-        "humiats_consumidos_mes": int(humiats_consumidos_mes),
-        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
+        "humiats_consumidos_mes": aceitos_humiat_mes,
+        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
     })
 
 
