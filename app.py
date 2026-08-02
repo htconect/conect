@@ -29,7 +29,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, text, inspect, or_
+from sqlalchemy import func, text, inspect, or_, case
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
