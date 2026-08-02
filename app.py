@@ -2314,127 +2314,137 @@ def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
 
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    # A home é somente consulta. Correções de agenda ficam fora do GET diário.
+    """Home leve: somente leitura, agregações consolidadas e relacionamentos pré-carregados."""
+    hoje = date.today()
+    inicio_semana, fim_semana = periodo_semana_atual()
+    status_pendentes = ["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"]
+    status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
+    competencia_humiat = agora_utc().strftime("%Y-%m")
+
+    with perf_stage("home.resumo_solicitacoes"):
+        resumo_solicitacoes = db.query(
+            func.sum(case((Solicitacao.status.in_(status_pendentes), 1), else_=0)).label("pendentes"),
+            func.sum(case((
+                (Solicitacao.data_evento >= inicio_semana)
+                & (Solicitacao.data_evento <= fim_semana)
+                & (~Solicitacao.status.in_(status_agenda_inativos)), 1
+            ), else_=0)).label("agenda_periodo"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat), 1
+            ), else_=0)).label("humiat_aceitos"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat)
+                & (Solicitacao.humiat_status == "gratuito"), 1
+            ), else_=0)).label("humiat_gratis"),
+            func.sum(case((
+                (Solicitacao.humiat_processado == True)
+                & (Solicitacao.humiat_competencia == competencia_humiat)
+                & (Solicitacao.humiat_status.in_(["debitado", "pendente_saldo"])), 1
+            ), else_=0)).label("humiat_cobrados"),
+        ).filter(Solicitacao.empresa_id == empresa.id).one()
+
+    with perf_stage("home.resumo_operacao"):
+        resumo_operacao = db.query(
+            func.sum(case((Agenda.tipo_evento == "entrega", 1), else_=0)).label("entregas"),
+            func.sum(case((Agenda.tipo_evento == "retirada", 1), else_=0)).label("retiradas"),
+        ).filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.data >= inicio_semana,
+            Agenda.data <= fim_semana,
+            Agenda.status_operacional != "concluido",
+        ).one()
+
+    with perf_stage("home.totais_cadastros"):
+        total_clientes = db.query(func.count(Cliente.id)).filter(Cliente.empresa_id == empresa.id).scalar() or 0
+        total_produtos = db.query(func.count(ProdutoServico.id)).filter(ProdutoServico.empresa_id == empresa.id).scalar() or 0
+
     with perf_stage("home.solicitacoes_pendentes"):
         solicitacoes = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
+            db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente), selectinload(Solicitacao.pagamentos))
+            .filter(Solicitacao.empresa_id == empresa.id, Solicitacao.status.in_(status_pendentes))
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+            .limit(8)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
-        .limit(8)
-        .all()
-    )
-
-    total_clientes = db.query(Cliente).filter_by(empresa_id=empresa.id).count()
-    total_produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).count()
-
-    pendentes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"])
-    ).count()
-
-    inicio_semana, fim_semana = periodo_semana_atual()
-    status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
-
-    agenda_periodo_qtd = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.data_evento >= inicio_semana,
-        Solicitacao.data_evento <= fim_semana,
-        ~Solicitacao.status.in_(status_agenda_inativos)
-    ).count()
-
-    operacao_base = db.query(Agenda).filter(
-        Agenda.empresa_id == empresa.id,
-        Agenda.data >= inicio_semana,
-        Agenda.data <= fim_semana,
-        Agenda.status_operacional != "concluido"
-    )
-    operacao_entregar_qtd = operacao_base.filter(Agenda.tipo_evento == "entrega").count()
-    operacao_buscar_qtd = operacao_base.filter(Agenda.tipo_evento == "retirada").count()
-    operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
 
     pendencias_agenda = solicitacoes
 
-    pendencias_sinal = []
-    if empresa.exige_sinal:
-        pendencias_sinal = (
+    with perf_stage("home.pendencias_contrato"):
+        pendencias_sinal = []
+        if empresa.exige_sinal:
+            pendencias_sinal = (
+                db.query(Solicitacao)
+                .options(joinedload(Solicitacao.cliente))
+                .filter(
+                    Solicitacao.empresa_id == empresa.id,
+                    Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                    Solicitacao.sinal > 0,
+                    Solicitacao.valor_pago <= 0,
+                )
+                .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+                .limit(12)
+                .all()
+            )
+
+        pendencias_envio_contrato = (
             db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente))
             .filter(
                 Solicitacao.empresa_id == empresa.id,
                 Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-                Solicitacao.sinal > 0,
-                Solicitacao.valor_pago <= 0
+                Solicitacao.contrato_id.isnot(None),
+                Solicitacao.contrato_enviado_em.is_(None),
+                Solicitacao.cancelado_em.is_(None),
             )
-            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc())
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
             .limit(12)
             .all()
         )
 
-    # Contratos já aprovados/aceitos que ainda precisam ser enviados ao cliente.
-    # O envio reutiliza o mesmo link e a mesma mensagem já tratados pelo fluxo do contrato.
-    pendencias_envio_contrato = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-            Solicitacao.contrato_id != None,
-            Solicitacao.contrato_enviado_em == None,
-            Solicitacao.cancelado_em == None,
+    with perf_stage("home.pendencias_financeiro_operacao"):
+        pendencias_a_receber = (
+            db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente))
+            .filter(
+                Solicitacao.empresa_id == empresa.id,
+                Solicitacao.cancelado_em.is_(None),
+                Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+                Solicitacao.data_evento < hoje,
+                (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+            )
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-        .limit(12)
-        .all()
-    )
 
-    pendencias_a_receber = (
-        db.query(Solicitacao)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.cancelado_em == None,
-            # Rascunho/aguardando aceite ainda não é dívida do cliente.
-            # Só contratos efetivamente aprovados entram em "a receber".
-            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-            Solicitacao.data_evento < date.today(),
-            (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+        pendencias_operacao = (
+            db.query(Agenda)
+            .join(Solicitacao)
+            .options(joinedload(Agenda.solicitacao))
+            .filter(
+                Agenda.empresa_id == empresa.id,
+                Agenda.data < hoje,
+                Agenda.status_operacional != "concluido",
+                ~Solicitacao.status.in_(status_agenda_inativos),
+            )
+            .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-        .limit(12)
-        .all()
-    )
 
-    hoje = date.today()
-    pendencias_operacao = (
-        db.query(Agenda)
-        .join(Solicitacao)
-        .filter(
-            Agenda.empresa_id == empresa.id,
-            Agenda.data < hoje,
-            Agenda.status_operacional != "concluido",
-            ~Solicitacao.status.in_(status_agenda_inativos)
+        pendencias_financeiras = (
+            db.query(Pagamento)
+            .options(joinedload(Pagamento.solicitacao).joinedload(Solicitacao.cliente))
+            .filter(Pagamento.empresa_id == empresa.id, Pagamento.conciliado_em.is_(None))
+            .order_by(Pagamento.data_pagamento.asc(), Pagamento.id.asc())
+            .limit(12)
+            .all()
         )
-        .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc())
-        .limit(12)
-        .all()
-    )
 
-    pendencias_financeiras = (
-        db.query(Pagamento)
-        .join(Solicitacao)
-        .join(Cliente)
-        .filter(
-            Pagamento.empresa_id == empresa.id,
-            Pagamento.conciliado_em == None
-        )
-        .order_by(Pagamento.data_pagamento.asc(), Pagamento.id.asc())
-        .limit(12)
-        .all()
-    )
-
-    # Responsável compacto usado nos cards da Agenda/Pendências.
     _anexar_responsaveis_exibicao(solicitacoes)
-    _anexar_responsaveis_exibicao(pendencias_agenda)
 
     link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
     mensagem_pre_contrato = aplicar_variaveis_mensagem(
@@ -2446,31 +2456,17 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         pix=empresa.pix_copia_cola or "",
     )
 
-    # Resumo da Carteira Humiat. Os créditos gratuitos são calculados apenas
-    # para exibição e consumo mensal; o saldo comprado continua separado.
-    competencia_humiat = agora_utc().strftime("%Y-%m")
-    aceitos_humiat_mes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-    ).count()
+    pendentes = int(resumo_solicitacoes.pendentes or 0)
+    agenda_periodo_qtd = int(resumo_solicitacoes.agenda_periodo or 0)
+    operacao_entregar_qtd = int(resumo_operacao.entregas or 0)
+    operacao_buscar_qtd = int(resumo_operacao.retiradas or 0)
+    operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
+
+    aceitos_humiat_mes = int(resumo_solicitacoes.humiat_aceitos or 0)
     gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo_contrato_h = 1
-    gratis_usados = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-        Solicitacao.humiat_status == "gratuito",
-    ).count()
+    gratis_usados = int(resumo_solicitacoes.humiat_gratis or 0)
     gratis_restantes = max(0, gratis_limite - gratis_usados)
-    humiats_gratis_restantes = gratis_restantes
-    contratos_cobrados_mes = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.humiat_processado == True,
-        Solicitacao.humiat_competencia == competencia_humiat,
-        Solicitacao.humiat_status.in_(["debitado", "pendente_saldo"]),
-    ).count()
-    humiats_consumidos_mes = aceitos_humiat_mes
+    contratos_cobrados_mes = int(resumo_solicitacoes.humiat_cobrados or 0)
 
     return templates.TemplateResponse("admin/painel.html", {
         "request": request,
@@ -2483,8 +2479,8 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
-        "total_clientes": total_clientes,
-        "total_produtos": total_produtos,
+        "total_clientes": int(total_clientes),
+        "total_produtos": int(total_produtos),
         "pendentes": pendentes,
         "agenda_periodo_qtd": agenda_periodo_qtd,
         "operacao_periodo_qtd": operacao_periodo_qtd,
@@ -2496,10 +2492,10 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "humiat_gratis_limite": gratis_limite,
         "humiat_gratis_usados": gratis_usados,
         "humiat_gratis_restantes": gratis_restantes,
-        "humiats_gratis_restantes": humiats_gratis_restantes,
+        "humiats_gratis_restantes": gratis_restantes,
         "humiat_contratos_cobrados_mes": contratos_cobrados_mes,
-        "humiats_consumidos_mes": int(humiats_consumidos_mes),
-        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
+        "humiats_consumidos_mes": aceitos_humiat_mes,
+        "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
     })
 
 
@@ -4820,8 +4816,24 @@ def financeiro(
     semana_cards_inicio = semana_selecionada["inicio"]
     semana_cards_fim = semana_selecionada["fim"]
 
-    q_banco = db.query(LancamentoBanco).filter(LancamentoBanco.empresa_id == empresa.id)
-    q_manual_real = db.query(LancamentoManualFinanceiro).filter(
+    q_banco = db.query(LancamentoBanco).options(
+        joinedload(LancamentoBanco.pagamento)
+        .joinedload(Pagamento.solicitacao)
+        .joinedload(Solicitacao.cliente),
+        joinedload(LancamentoBanco.organiza_lancamento),
+        joinedload(LancamentoBanco.vinculos_repasse)
+        .joinedload(VinculoRepasseBanco.solicitacao)
+        .joinedload(Solicitacao.cliente),
+        joinedload(LancamentoBanco.vinculos_repasse)
+        .joinedload(VinculoRepasseBanco.solicitacao)
+        .joinedload(Solicitacao.empresa_transferida),
+    ).filter(LancamentoBanco.empresa_id == empresa.id)
+    q_manual_real = db.query(LancamentoManualFinanceiro).options(
+        joinedload(LancamentoManualFinanceiro.pagamento)
+        .joinedload(Pagamento.solicitacao)
+        .joinedload(Solicitacao.cliente),
+        joinedload(LancamentoManualFinanceiro.organiza_lancamento),
+    ).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real"
     )
@@ -4882,7 +4894,9 @@ def financeiro(
                                            LancamentoManualFinanceiro.id.asc()).all()
     receber = q_receber.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
 
-    q_contratos_receber = db.query(Solicitacao).join(Cliente).filter(
+    q_contratos_receber = db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente)
+    ).join(Cliente).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         # O saldo do contrato só vira conta a receber depois do aceite/aprovação.
@@ -4913,7 +4927,9 @@ def financeiro(
     total_contratos_vencidos = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_vencidos)
     total_contratos_em_dia = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_em_dia)
 
-    q_pagamentos_sistema = db.query(Pagamento).join(Solicitacao).join(Cliente).filter(
+    q_pagamentos_sistema = db.query(Pagamento).options(
+        joinedload(Pagamento.solicitacao).joinedload(Solicitacao.cliente)
+    ).join(Solicitacao).join(Cliente).filter(
         Pagamento.empresa_id == empresa.id
     )
     if data_inicial:
@@ -4941,7 +4957,9 @@ def financeiro(
 
     pagamentos_sistema = q_pagamentos_sistema.order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc()).all()
 
-    pagamentos_pendentes_vinculo = db.query(Pagamento).join(Solicitacao).join(Cliente).filter(
+    pagamentos_pendentes_vinculo = db.query(Pagamento).options(
+        joinedload(Pagamento.solicitacao).joinedload(Solicitacao.cliente)
+    ).join(Solicitacao).join(Cliente).filter(
         Pagamento.empresa_id == empresa.id,
         Pagamento.conciliado_em == None
     ).all()
@@ -4971,13 +4989,14 @@ def financeiro(
     total_receber = sum(
         max(float(l.valor or 0), 0) for l in manuais_cards if l.tipo == "receber" and not l.recebido)
 
-    contratos_cards = db.query(Solicitacao).filter(
+    # Uma única consulta mensal alimenta os cards, o relatório semanal e a semana selecionada.
+    contratos_mes = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
-        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
         Solicitacao.data_evento >= mes_cards_inicio,
-        Solicitacao.data_evento <= mes_cards_fim
+        Solicitacao.data_evento <= mes_cards_fim,
     ).all()
+    contratos_cards = [c for c in contratos_mes if c.status in STATUS_CONTRATO_APROVADO]
     contratos_cards_proprios = [c for c in contratos_cards if not c.empresa_transferida_id]
     contratos_cards_transferidos = [c for c in contratos_cards if c.empresa_transferida_id]
     quantidade_contratos_cards = len(contratos_cards)
@@ -4987,55 +5006,51 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
     total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
-    # Acumulado do banco: independente do mês escolhido nos cards.
-    # Considera todas as movimentações reais do ano corrente até hoje.
+    # Acumulado do banco: duas consultas agrupadas para todas as contas.
+    # Evita executar duas somas separadas para cada conta financeira.
     inicio_ano = hoje.replace(month=1, day=1)
-
-    def saldo_real_conta(conta_calculo):
-        """
-        Calcula quanto existe na conta neste momento.
-
-        Regra:
-        entradas - saídas do ano corrente até hoje.
-
-        O seletor de mês afeta apenas os cards e o relatório mensal. Lançamentos
-        futuros não entram no saldo atual.
-        """
-        # O acumulado anual representa somente as movimentações reais do ano.
-        # O saldo inicial cadastrado na conta não entra neste cartão.
-        total_importado = db.query(
-            func.coalesce(func.sum(LancamentoBanco.valor), 0)
+    totais_banco_por_conta = {
+        conta_id_resultado: float(total or 0)
+        for conta_id_resultado, total in db.query(
+            LancamentoBanco.conta_id,
+            func.coalesce(func.sum(LancamentoBanco.valor), 0),
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.conta_id == conta_calculo.id,
             LancamentoBanco.data >= inicio_ano,
-            LancamentoBanco.data <= hoje
-        ).scalar() or 0
-
-        total_manual = db.query(
-            func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)
+            LancamentoBanco.data <= hoje,
+        ).group_by(LancamentoBanco.conta_id).all()
+    }
+    totais_manuais_por_conta = {
+        conta_id_resultado: float(total or 0)
+        for conta_id_resultado, total in db.query(
+            LancamentoManualFinanceiro.conta_id,
+            func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0),
         ).filter(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
-            LancamentoManualFinanceiro.conta_id == conta_calculo.id,
             LancamentoManualFinanceiro.tipo == "real",
             LancamentoManualFinanceiro.data >= inicio_ano,
-            LancamentoManualFinanceiro.data <= hoje
-        ).scalar() or 0
+            LancamentoManualFinanceiro.data <= hoje,
+        ).group_by(LancamentoManualFinanceiro.conta_id).all()
+    }
 
-        return float(total_importado) + float(total_manual)
+    def saldo_real_conta(conta_calculo):
+        if not conta_calculo:
+            return 0.0
+        return (
+            totais_banco_por_conta.get(conta_calculo.id, 0.0)
+            + totais_manuais_por_conta.get(conta_calculo.id, 0.0)
+        )
 
-    saldo_banco = saldo_real_conta(conta) if conta else 0.0
+    saldo_banco = saldo_real_conta(conta)
     saldo_todos = sum(saldo_real_conta(c) for c in contas if c.ativa)
 
-    # Relatório mensal por semana, sempre limitado ao mês selecionado.
+    # Relatório mensal por semana calculado em memória sobre a única consulta mensal.
     relatorio_semanal = []
     for indice, periodo in enumerate(semanas_cards, start=1):
-        contratos_periodo = db.query(Solicitacao).filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.cancelado_em == None,
-            Solicitacao.data_evento >= periodo["inicio"],
-            Solicitacao.data_evento <= periodo["fim"]
-        ).all()
+        contratos_periodo = [
+            c for c in contratos_mes
+            if c.data_evento and periodo["inicio"] <= c.data_evento <= periodo["fim"]
+        ]
         valor_total_periodo = sum(float(c.valor or 0) for c in contratos_periodo)
         valor_recebido_periodo = sum(min(float(c.valor_pago or 0), float(c.valor or 0)) for c in contratos_periodo)
         valor_receber_periodo = sum(
@@ -5072,13 +5087,11 @@ def financeiro(
 
     saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
 
-    # Cards inferiores: semana escolhida, sempre de segunda-feira a domingo.
-    contratos_semana = db.query(Solicitacao).filter(
-        Solicitacao.empresa_id == empresa.id,
-        Solicitacao.cancelado_em == None,
-        Solicitacao.data_evento >= semana_cards_inicio,
-        Solicitacao.data_evento <= semana_cards_fim
-    ).all()
+    # Cards inferiores: reutilizam os contratos já carregados para o mês.
+    contratos_semana = [
+        c for c in contratos_mes
+        if c.data_evento and semana_cards_inicio <= c.data_evento <= semana_cards_fim
+    ]
     contratos_semana_proprios = [c for c in contratos_semana if not c.empresa_transferida_id]
     contratos_semana_transferidos = [c for c in contratos_semana if c.empresa_transferida_id]
     quantidade_contratos_semana = len(contratos_semana)
@@ -5095,7 +5108,10 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_semana_transferidos)
     valor_repasse_semana = sum(float(c.valor_repasse or 0) for c in contratos_semana_transferidos)
 
-    q_repasses = db.query(Solicitacao).join(Cliente).filter(
+    q_repasses = db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente),
+        joinedload(Solicitacao.empresa_transferida),
+    ).join(Cliente).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
@@ -5114,7 +5130,10 @@ def financeiro(
     repasses_base = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
 
     # O status do repasse é calculado pelo total efetivamente vinculado no banco.
-    vinculos_repasse_todos = db.query(VinculoRepasseBanco).filter(
+    vinculos_repasse_todos = db.query(VinculoRepasseBanco).options(
+        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.cliente),
+        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.empresa_transferida),
+    ).filter(
         VinculoRepasseBanco.empresa_id == empresa.id
     ).all()
     valor_vinculado_por_repasse = {}
@@ -5168,37 +5187,35 @@ def financeiro(
         if not l.pagamento_id and not getattr(l, "organiza_lancamento_id", None) and l.categoria == "aluguel"
     }
 
-    # Organiza: Venda e Manutenção usam o mesmo fluxo de conciliação do banco.
+    # Organiza: carrega vínculos e registros uma única vez.
+    lancamentos_banco_organiza = db.query(LancamentoBanco).options(
+        joinedload(LancamentoBanco.organiza_lancamento)
+    ).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.organiza_lancamento_id != None,
+    ).all()
+    lancamentos_manuais_organiza = db.query(LancamentoManualFinanceiro).options(
+        joinedload(LancamentoManualFinanceiro.organiza_lancamento)
+    ).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.organiza_lancamento_id != None,
+    ).all()
+
     ids_organiza_vinculados = {
-        oid for (oid,) in db.query(LancamentoBanco.organiza_lancamento_id)
-        .filter(
-            LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.organiza_lancamento_id != None
-        ).all()
-        if oid
+        l.organiza_lancamento_id
+        for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
+        if l.organiza_lancamento_id
     }
-    ids_organiza_vinculados.update({
-        oid for (oid,) in db.query(LancamentoManualFinanceiro.organiza_lancamento_id)
-        .filter(
-            LancamentoManualFinanceiro.empresa_id == empresa.id,
-            LancamentoManualFinanceiro.organiza_lancamento_id != None
-        ).all()
-        if oid
-    })
-    registros_organiza_disponiveis = (
-        db.query(LancamentoOrganiza)
-        .filter(
-            LancamentoOrganiza.empresa_id == empresa.id,
-            ~LancamentoOrganiza.id.in_(ids_organiza_vinculados)
-        )
-        .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
-        .all()
-    ) if ids_organiza_vinculados else (
+    todos_lancamentos_organiza = (
         db.query(LancamentoOrganiza)
         .filter(LancamentoOrganiza.empresa_id == empresa.id)
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .all()
     )
+    registros_organiza_disponiveis = [
+        item for item in todos_lancamentos_organiza
+        if item.id not in ids_organiza_vinculados
+    ]
     candidatos_organiza = {
         l.id: melhores_vinculos_organiza(l, registros_organiza_disponiveis, l.categoria)
         for l in banco
@@ -5209,17 +5226,9 @@ def financeiro(
     }
     bancos_por_organiza = {
         l.organiza_lancamento_id: l
-        for l in db.query(LancamentoBanco).filter(
-            LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.organiza_lancamento_id != None
-        ).all()
+        for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
-    for m in db.query(LancamentoManualFinanceiro).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa.id,
-        LancamentoManualFinanceiro.organiza_lancamento_id != None
-    ).all():
-        bancos_por_organiza[m.organiza_lancamento_id] = m
 
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
@@ -5236,20 +5245,8 @@ def financeiro(
     }
 
     # Organiza fica separado dos lançamentos nativos do Connect.
-    # Esses registros são apenas exibidos nesta aba; a conciliação continua no Banco.
-    try:
-        lancamentos_organiza_financeiro = (
-            db.query(LancamentoOrganiza)
-            .filter(LancamentoOrganiza.empresa_id == empresa.id)
-            .order_by(
-                LancamentoOrganiza.data_pagamento.desc(),
-                LancamentoOrganiza.id.desc()
-            )
-            .limit(500)
-            .all()
-        )
-    except Exception:
-        lancamentos_organiza_financeiro = []
+    # Reutiliza a consulta já realizada e limita somente a exibição.
+    lancamentos_organiza_financeiro = todos_lancamentos_organiza[:500]
 
     return templates.TemplateResponse("admin/financeiro.html", {
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
