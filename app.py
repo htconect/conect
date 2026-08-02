@@ -33,7 +33,7 @@ from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
-from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status
+from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
@@ -1721,16 +1721,37 @@ def admin_geral_logado(request: Request):
     return True
 
 
-@app.get("/admin/performance", response_class=JSONResponse)
+@app.get("/admin/performance", response_class=HTMLResponse)
 def admin_performance(
-        limit: int = 100,
+        request: Request,
+        limit: int = 200,
         ok: bool = Depends(admin_geral_logado),
 ):
-    """Diagnóstico temporário; não expõe parâmetros SQL nem dados de clientes."""
-    return {
+    """Painel temporário de diagnóstico, sem dados pessoais ou parâmetros SQL."""
+    resumo = performance_summary(limit)
+    return templates.TemplateResponse("admin/performance.html", {
+        "request": request,
         "monitor": monitor_status(),
-        "registros": recent_records(limit),
-    }
+        "ranking": resumo["ranking"],
+        "registros": resumo["records"],
+        "limite": limit,
+        "limpos": request.query_params.get("limpos"),
+    })
+
+
+@app.get("/admin/performance/dados", response_class=JSONResponse)
+def admin_performance_dados(
+        limit: int = 200,
+        ok: bool = Depends(admin_geral_logado),
+):
+    resumo = performance_summary(limit)
+    return {"monitor": monitor_status(), **resumo}
+
+
+@app.post("/admin/performance/limpar")
+def admin_performance_limpar(ok: bool = Depends(admin_geral_logado)):
+    total = clear_records()
+    return RedirectResponse(f"/admin/performance?limpos={total}", status_code=303)
 
 
 @app.get("/admin/login", response_class=HTMLResponse)

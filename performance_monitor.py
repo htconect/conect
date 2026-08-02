@@ -147,6 +147,42 @@ def recent_records(limit: int = 100) -> list[dict[str, Any]]:
     return list(_recent_records)[:max(1, min(limit, PERFORMANCE_MAX_RECORDS))]
 
 
+
+def clear_records() -> int:
+    """Limpa os registros em memória e retorna quantos foram removidos."""
+    total = len(_recent_records)
+    _recent_records.clear()
+    return total
+
+
+def performance_summary(limit: int = 300) -> dict[str, Any]:
+    records = recent_records(limit)
+    grouped: dict[str, dict[str, Any]] = {}
+    for record in records:
+        key = f"{record.get('method', 'GET')} {record.get('path', '')}"
+        item = grouped.setdefault(key, {
+            "route": key, "calls": 0, "total_ms": 0.0, "sql_ms": 0.0,
+            "sql_count": 0, "max_ms": 0.0, "errors": 0,
+        })
+        item["calls"] += 1
+        item["total_ms"] += float(record.get("total_ms") or 0)
+        item["sql_ms"] += float(record.get("sql_ms") or 0)
+        item["sql_count"] += int(record.get("sql_count") or 0)
+        item["max_ms"] = max(item["max_ms"], float(record.get("total_ms") or 0))
+        if int(record.get("status") or 200) >= 400 or record.get("error"):
+            item["errors"] += 1
+    ranking = []
+    for item in grouped.values():
+        calls = max(1, item["calls"])
+        item["avg_ms"] = round(item["total_ms"] / calls, 2)
+        item["avg_sql_ms"] = round(item["sql_ms"] / calls, 2)
+        item["avg_sql_count"] = round(item["sql_count"] / calls, 1)
+        item["total_ms"] = round(item["total_ms"], 2)
+        item["sql_ms"] = round(item["sql_ms"], 2)
+        ranking.append(item)
+    ranking.sort(key=lambda x: (x["avg_ms"], x["max_ms"]), reverse=True)
+    return {"records": records, "ranking": ranking}
+
 def monitor_status() -> dict[str, Any]:
     return {
         "enabled": PERFORMANCE_MONITORING,
