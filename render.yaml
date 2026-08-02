@@ -13,3 +13,14 @@ services:
         value: Admin
       - key: CONECT_ADMIN_SENHA
         value: humiat123
+
+      - key: PERFORMANCE_MONITORING
+        value: "true"
+      - key: PERFORMANCE_DETAIL
+        value: slow
+      - key: PERFORMANCE_ROUTES
+        value: /painel
+      - key: PERFORMANCE_SLOW_REQUEST_MS
+        value: "500"
+      - key: PERFORMANCE_SLOW_SQL_MS
+        value: "300"

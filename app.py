@@ -33,6 +33,7 @@ from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
+from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
@@ -85,6 +86,8 @@ class ControleAcessoMiddleware:
 
 
 app = FastAPI(title=APP_NOME)
+install_sql_monitor(engine)
+app.add_middleware(PerformanceMiddleware)
 app.add_middleware(ControleAcessoMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -1718,6 +1721,18 @@ def admin_geral_logado(request: Request):
     return True
 
 
+@app.get("/admin/performance", response_class=JSONResponse)
+def admin_performance(
+        limit: int = 100,
+        ok: bool = Depends(admin_geral_logado),
+):
+    """Diagnóstico temporário; não expõe parâmetros SQL nem dados de clientes."""
+    return {
+        "monitor": monitor_status(),
+        "registros": recent_records(limit),
+    }
+
+
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_form(request: Request):
     return templates.TemplateResponse("admin/login.html", {
@@ -2278,9 +2293,9 @@ def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
 
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    garantir_agenda_reservas(db, empresa.id)
-
-    solicitacoes = (
+    # A home é somente consulta. Correções de agenda ficam fora do GET diário.
+    with perf_stage("home.solicitacoes_pendentes"):
+        solicitacoes = (
         db.query(Solicitacao)
         .filter(
             Solicitacao.empresa_id == empresa.id,

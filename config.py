@@ -12,3 +12,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "troque-esta-chave-em-producao")
 
 ADMIN_NOME = os.getenv("CONECT_ADMIN_NOME", "Admin")
 ADMIN_SENHA = os.getenv("CONECT_ADMIN_SENHA", "humiat123")
+
+# Diagnóstico temporário de performance. Desative no Render após a otimização.
+PERFORMANCE_MONITORING = os.getenv("PERFORMANCE_MONITORING", "true")
+PERFORMANCE_DETAIL = os.getenv("PERFORMANCE_DETAIL", "slow")
