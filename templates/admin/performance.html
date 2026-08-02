@@ -57,10 +57,17 @@
             <td>{{ (r.created_at or '')[:19]|replace('T',' ') }}</td><td><strong>{{ r.method }} {{ r.path }}</strong><br><small>{{ r.request_id }}</small></td>
             <td><span class="perf-badge {% if r.total_ms >= 5000 %}perf-bad{% elif r.total_ms >= 1000 %}perf-warn{% else %}perf-ok{% endif %}">{{ '%.2f'|format((r.total_ms or 0)/1000) }} s</span></td>
             <td>{{ '%.2f'|format((r.sql_ms or 0)/1000) }} s<br><small>máx. {{ '%.0f'|format(r.sql_max_ms or 0) }} ms</small></td><td>{{ r.sql_count or 0 }}</td><td>{{ r.status }}</td>
-            <td class="perf-details"><details><summary>Etapas e SQL lento</summary>
+            <td class="perf-details"><details><summary>Etapas e consultas SQL</summary>
               {% if r.stages %}<h4>Etapas</h4><ul>{% for etapa in r.stages %}<li>{{ etapa.name }}: <strong>{{ etapa.ms }} ms</strong></li>{% endfor %}</ul>{% endif %}
-              {% if r.slow_sql %}<h4>SQL lento</h4>{% for sql in r.slow_sql %}<pre>{{ sql.verb }} — {{ sql.ms }} ms\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
-              {% if not r.stages and not r.slow_sql %}<p class="perf-note">Sem detalhes adicionais neste registro.</p>{% endif %}
+              {% if r.sql_groups %}
+                <h4>Consultas agrupadas</h4>
+                <p class="perf-note">Ordenadas pelo tempo total acumulado. Os parâmetros não são registrados.</p>
+                {% for sql in r.sql_groups %}
+                  <pre>{{ sql.verb }} — {{ sql.count }}x — total {{ sql.total_ms }} ms — média {{ sql.avg_ms }} ms — máx. {{ sql.max_ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>
+                {% endfor %}
+              {% endif %}
+              {% if r.slow_sql %}<h4>Execuções individuais lentas</h4>{% for sql in r.slow_sql %}<pre>{{ sql.verb }} — {{ sql.ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
+              {% if not r.stages and not r.sql_groups and not r.slow_sql %}<p class="perf-note">Sem detalhes adicionais neste registro.</p>{% endif %}
             </details></td>
           </tr>
         {% else %}<tr><td colspan="7" class="perf-empty">Nenhum registro disponível.</td></tr>{% endfor %}
