@@ -28,7 +28,7 @@ from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, Upload
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, text, inspect, or_
 
 from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
@@ -2880,7 +2880,7 @@ def preparar_reservas(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    garantir_agenda_reservas(db, empresa.id)
+    # Consulta operacional deve ser somente leitura. Correções históricas ficam fora do GET.
     inicio, fim = periodo_semana_atual()
 
     # Compatibilidade com links antigos que usam data_inicio/data_fim.
@@ -2965,8 +2965,16 @@ def preparar_reservas(
     q = q.join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
     )
-    itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).all()
-    sincronizar_pagamentos_solicitacoes(db, [a.solicitacao for a in itens])
+    itens = (
+        q.options(
+            joinedload(Agenda.equipe),
+            joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
+            joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
+        )
+        .join(Cliente, Solicitacao.cliente_id == Cliente.id)
+        .all()
+    )
+    # valor_pago já é mantido quando o pagamento é gravado. Não recalcular contrato a contrato aqui.
 
     def hora_roteirizada(a: Agenda):
         """
@@ -6355,7 +6363,7 @@ def agenda(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    garantir_agenda_reservas(db, empresa.id)
+    # Agenda em modo consulta não executa auditoria nem manutenção automática.
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     ids_equipes = {e.id for e in equipes}
     if equipe_id and equipe_id not in ids_equipes:
@@ -6407,7 +6415,12 @@ def agenda(
     # Agenda deve mostrar todas as locações do período.
     # O filtro de rascunho/contrato sem aceite fica somente na tela inicial (/painel).
     solicitacoes = (
-        q.order_by(
+        q.options(
+            joinedload(Solicitacao.cliente),
+            joinedload(Solicitacao.produto),
+            selectinload(Solicitacao.pagamentos),
+        )
+        .order_by(
             Solicitacao.data_evento.asc(),
             Solicitacao.hora_inicio.asc(),
             Solicitacao.id.asc(),
@@ -6415,7 +6428,12 @@ def agenda(
         .all()
     )
 
-    agenda_operacional = db.query(Agenda).filter(Agenda.empresa_id == empresa.id, Agenda.solicitacao_id.in_([x.id for x in solicitacoes] or [-1])).all()
+    agenda_operacional = (
+        db.query(Agenda)
+        .options(joinedload(Agenda.equipe))
+        .filter(Agenda.empresa_id == empresa.id, Agenda.solicitacao_id.in_([x.id for x in solicitacoes] or [-1]))
+        .all()
+    )
     rotas_por_solicitacao = {}
     for rota in agenda_operacional:
         atual = rotas_por_solicitacao.get(rota.solicitacao_id)

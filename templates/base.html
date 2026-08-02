@@ -9,8 +9,9 @@
   <link rel="apple-touch-icon" href="/static/icon-192.png">
   <link rel="stylesheet" href="/static/css/style.css?v=20260725-intel2">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  {% block head_extra %}{% endblock %}
 </head>
-<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %}">
+<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% block body_class %}{% endblock %}">
 <header class="topo-app">
   <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
     {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
@@ -176,7 +177,7 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     timer = setTimeout(function () {
       overlay.classList.add("ativo");
       overlay.setAttribute("aria-hidden", "false");
-    }, 120);
+    }, 450);
   }
 
   window.mostrarCarregando = mostrarCarregando;
