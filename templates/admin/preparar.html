@@ -106,6 +106,10 @@
                 {% set resp_contrato = a.solicitacao.responsavel_contrato or '' %}
                 {% if not resp_contrato and a.solicitacao.pagamentos %}{% set resp_contrato = (a.solicitacao.pagamentos|sort(attribute='id')|first).usuario_registro or '' %}{% endif %}
                 {% if resp_contrato or a.solicitacao.responsavel_operacao %}<small class="responsaveis-operacao-mini">Contrato: {{ resp_contrato or '-' }} · Operação: {{ a.solicitacao.responsavel_operacao or '-' }}</small>{% endif %}
+                {% set observacao_card = a.solicitacao.observacoes or a.solicitacao.cliente.observacoes %}
+                {% if observacao_card %}
+                <small class="observacao-destaque">{{ observacao_card }}</small>
+                {% endif %}
                 <em>{{ 'RETIRADA' if tipo == 'retirada' else 'ENTREGA' }}</em>
             </div>
             <div class="status-rota-card {% if concluido %}status-encerrado{% elif roteirizado %}status-roteirizado{% else %}status-nao-roteirizado{% endif %}">
