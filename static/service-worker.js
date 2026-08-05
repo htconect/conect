@@ -7,7 +7,7 @@ const ARQUIVOS = [
   "/static/favicon-16x16.png",
   "/static/favicon.ico",
   "/static/css/style.css",
-  "/static/manifest.webmanifest?v=3"
+  "/static/manifest.webmanifest?v=4"
 ];
 
 self.addEventListener("install", (evento) => {
