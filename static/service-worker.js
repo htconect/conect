@@ -1,9 +1,13 @@
-const CACHE = "conect-pwa-v2";
+const CACHE = "conect-pwa-v3-icons";
 const ARQUIVOS = [
   "/static/icon-192.png",
   "/static/icon-512.png",
+  "/static/apple-touch-icon.png",
+  "/static/favicon-32x32.png",
+  "/static/favicon-16x16.png",
+  "/static/favicon.ico",
   "/static/css/style.css",
-  "/static/manifest.webmanifest"
+  "/static/manifest.webmanifest?v=3"
 ];
 
 self.addEventListener("install", (evento) => {
