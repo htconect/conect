@@ -1440,10 +1440,22 @@ def startup():
 
 
 def nome_item_reserva(item: Solicitacao) -> str:
+    """Nome operacional da reserva, sempre refletindo todos os itens do contrato.
+
+    Solicitacao.produto representa apenas o produto principal/legado. Quando a
+    reserva possui ReservaItem, a Operacao precisa mostrar o conjunto completo
+    para evitar que um equipamento deixe de ser separado ou entregue.
+    """
+    itens_reserva = list(getattr(item, "itens", None) or [])
+    if itens_reserva:
+        nomes = []
+        for ri in itens_reserva:
+            nome = (getattr(ri, "nome", None) or "Item").strip()
+            quantidade = int(getattr(ri, "quantidade", None) or 1)
+            nomes.append(f"{quantidade}x {nome}" if quantidade > 1 else nome)
+        return " + ".join(nomes)
     if item.produto:
         return item.produto.nome
-    if item.itens:
-        return item.itens[0].nome
     return "Reserva"
 
 
@@ -3068,6 +3080,7 @@ def preparar_reservas(
             joinedload(Agenda.equipe),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
             joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
+            joinedload(Agenda.solicitacao).selectinload(Solicitacao.itens),
             joinedload(Agenda.solicitacao).selectinload(Solicitacao.pagamentos),
         )
         .join(Cliente, Solicitacao.cliente_id == Cliente.id)
@@ -6578,6 +6591,7 @@ def agenda(
         q.options(
             joinedload(Solicitacao.cliente),
             joinedload(Solicitacao.produto),
+            selectinload(Solicitacao.itens),
             selectinload(Solicitacao.pagamentos),
         )
         .order_by(

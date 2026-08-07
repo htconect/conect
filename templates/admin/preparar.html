@@ -42,6 +42,7 @@
     {% set data_entrega_texto = a.data.strftime('%d/%m/%Y') if a.data else '-' %}
     {% set hora_entrega = a.previsao_entrega if a.previsao_entrega else (a.hora_inicio.strftime('%H:%M') if
     a.hora_inicio else '--') %}
+    {% set itens_contrato = a.solicitacao.itens if a.solicitacao and a.solicitacao.itens else [] %}
     {% set item_nome = a.solicitacao.produto.nome if a.solicitacao.produto else a.titulo %}
     {% set tipo = a.tipo_evento or 'entrega' %}
     {% set falta_receber = (a.solicitacao.valor or 0) - (a.solicitacao.valor_pago or 0) %}
@@ -100,7 +101,15 @@
                 <strong>{{ data_agenda }}</strong>
             </div>
             <div class="info-agenda operacao-info-card">
+                {% if itens_contrato %}
+                <div class="itens-operacao-card">
+                    {% for ri in itens_contrato %}
+                    <b class="item-operacao-linha">{% if (ri.quantidade or 1) > 1 %}{{ ri.quantidade }}x {% endif %}{{ ri.nome }}</b>
+                    {% endfor %}
+                </div>
+                {% else %}
                 <b>{{ item_nome }}</b>
+                {% endif %}
                 <small>{{ a.solicitacao.cliente.nome }}</small>
                 <small>{{ a.bairro or a.solicitacao.bairro or '-' }}</small>
                 {% set resp_contrato = a.solicitacao.responsavel_contrato or '' %}
@@ -688,4 +697,10 @@ document.addEventListener('click', function(e){
       return true;
     }
 </script>
+
+<style>
+.itens-operacao-card{display:flex;flex-direction:column;gap:2px;min-width:0}
+.item-operacao-linha{display:block;white-space:normal;overflow-wrap:anywhere;line-height:1.18}
+.item-operacao-linha + .item-operacao-linha:before{content:"+ ";font-weight:900}
+</style>
 {% endblock %}

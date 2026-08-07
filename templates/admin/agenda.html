@@ -44,7 +44,14 @@
     <div class="data-agenda">{{ data_curta }}</div>
     <div class="info-agenda">
       <b>{{ hora_base }} · {{ s.cliente.nome }}</b>
-      <small>{{ item_nome }} · {{ s.bairro or s.cliente.bairro or '-' }}</small>
+      <small class="agenda-itens-contrato">
+        {% if s.itens %}
+          {% for ri in s.itens %}{% if not loop.first %} + {% endif %}{% if (ri.quantidade or 1) > 1 %}{{ ri.quantidade }}x {% endif %}{{ ri.nome }}{% endfor %}
+        {% else %}
+          {{ item_nome }}
+        {% endif %}
+        · {{ s.bairro or s.cliente.bairro or '-' }}
+      </small>
       {% set rota = rotas_por_solicitacao.get(s.id) %}<small class="financeiro-mini">{% if rota and rota.roteirizado %}Roteirizado · {{ rota.equipe.nome if rota.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}</small>
       {% if eh_credito %}
         <small class="financeiro-mini">Situação: Em crédito</small>
