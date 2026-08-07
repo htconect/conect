@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <h1>Contrato indisponível</h1>
+</section>
+
+<div class="box aviso" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">
+  <h2>Este contrato não está disponível para aceite no momento.</h2>
+  <p>Entre em contato com o responsável para revisar ou reativar a reserva.</p>
+  {% if empresa.nome %}<p class="texto-discreto">{{ empresa.nome }}</p>{% endif %}
+</div>
+{% endblock %}

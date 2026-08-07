@@ -14,7 +14,8 @@
 {% set tem_itens = item.itens and item.itens|length > 0 %}
 {% set contrato_aceito = status_reserva_confirmada(item.status) %}
 {% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
-{% set em_rascunho = not contrato_pendente and not contrato_aceito %}
+{% set em_credito = item.status == "aguardando_nova_data" %}
+{% set em_rascunho = item.status in ["pre_reserva", "reserva"] %}
 {% set erro = request.query_params.get("erro") %}
 
 {% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
@@ -44,8 +45,8 @@
     <div class="status-pill {% if tem_itens %}ok{% else %}pendente{% endif %}">
       <small>Itens</small><b>{% if tem_itens %}{{ item.itens|length }}{% else %}Pendente{% endif %}</b>
     </div>
-    <div class="status-pill {% if contrato_aceito %}ok{% elif contrato_pendente %}alerta{% else %}pendente{% endif %}">
-      <small>Contrato</small><b>{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Enviado{% else %}Rascunho{% endif %}</b>
+    <div class="status-pill {% if contrato_aceito %}ok{% elif contrato_pendente or em_credito %}alerta{% else %}pendente{% endif %}">
+      <small>Contrato</small><b>{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Enviado{% elif em_credito %}Crédito{% else %}Rascunho{% endif %}</b>
     </div>
     <div class="status-pill {% if pago > 0 %}ok{% else %}neutro{% endif %}">
       <small>Pagamento</small><b>{% if pago > 0 %}R$ {{ pago|moeda_br }}{% else %}Opcional{% endif %}</b>
@@ -82,7 +83,17 @@
   {% endif %}
 </details>
 
-{% if not tem_itens %}
+{% if em_credito %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Contrato em crédito</b>
+  <p>Sem entrega ou retirada programada. O valor pago permanece disponível para uma nova data.</p>
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/reativar">
+    <button class="botao largura-total btn-krj-primary" type="submit">Reativar contrato</button>
+  </form>
+  <button class="botao largura-total secundario" type="button" onclick="toggleBloco('formPagamento')">Ver pagamentos e crédito</button>
+</section>
+{% elif not tem_itens %}
 <section class="proxima-acao">
   <small>Próxima ação</small>
   <b>Adicionar equipamento</b>
@@ -99,13 +110,6 @@
   <small>Status</small>
   <b>Aguardando aceite do cliente</b>
   <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
-</section>
-{% elif item.status == "aguardando_nova_data" %}
-<section class="proxima-acao aviso-acao">
-  <small>Status</small>
-  <b>Contrato em crédito</b>
-  <p>Sem entrega ou retirada programada. O valor pago permanece disponível para uma nova data.</p>
-  <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Ver pagamentos e crédito</button>
 </section>
 {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
 <section class="proxima-acao aviso-acao">
@@ -164,7 +168,7 @@
 
   <form method="post" action="/painel/solicitacao/{{ item.id }}/status" class="grid-acoes-mobile">
     {% if item.status == "aguardando_nova_data" %}
-      <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>
+      <button type="submit" formaction="/painel/solicitacao/{{ item.id }}/reativar" formmethod="post" class="secundario">Reativar contrato</button>
       <button type="submit" name="status" value="cancelada" class="secundario" onclick="return confirm('Marcar esta reserva como cancelada?')">Cancelar</button>
     {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
       <button type="submit" name="status" value="reserva_confirmada" class="secundario">Ativar</button>

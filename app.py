@@ -3295,6 +3295,12 @@ def compartilhar_aceite_whatsapp(
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
 
+    if item.status == "aguardando_nova_data":
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Reative o contrato e revise o rascunho antes de enviar para aceite.",
+            status_code=303,
+        )
+
     telefone = _limpar_tel_whatsapp(item.cliente.telefone or item.cliente.identificador)
     if not telefone:
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
@@ -3505,6 +3511,38 @@ def salvar_edicao_solicitacao(
     db.commit()
     _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/reativar")
+def reativar_solicitacao_em_credito(
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Reabre um contrato em crédito como rascunho para revisão antes de novo aceite.
+
+    Mantém itens e pagamentos já registrados, mas inicia um novo ciclo de aceite.
+    """
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    if item.status != "aguardando_nova_data":
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+    item.status = "pre_reserva"
+    item.aprovado_em = None
+    item.aceite_em = None
+    item.contrato_enviado_em = None
+    item.cancelado_em = None
+    # Não recria operação neste momento. Ela só volta após o novo aceite.
+    retirar_solicitacao_da_operacao(db, item)
+    db.commit()
+
+    return RedirectResponse(
+        f"/painel/solicitacao/{solicitacao_id}/editar-completo?reativado=1",
+        status_code=303,
+    )
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/credito")
@@ -7074,12 +7112,21 @@ def contrato_cliente_clausulas(slug: str, solicitacao_id: int, request: Request,
 def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = db.get(Solicitacao, solicitacao_id)
-    if not empresa or not item or item.empresa_id != empresa.id or item.status not in ["pre_reserva", "reserva",
-                                                                                       "aguardando_aceite",
-                                                                                       "contrato_enviado", "aceito",
-                                                                                       "aguardando_pagamento",
-                                                                                       "reserva_confirmada",
-                                                                                       "cancelado_cliente"]:
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    # Contrato em crédito continua existindo, porém o aceite fica indisponível
+    # até o responsável reativá-lo e revisar o novo rascunho.
+    if item.status == "aguardando_nova_data":
+        return templates.TemplateResponse("publico/contrato_indisponivel.html", {
+            "request": request,
+            "empresa": empresa,
+            "item": item,
+        })
+
+    if item.status not in ["pre_reserva", "reserva", "aguardando_aceite",
+                           "contrato_enviado", "aceito", "aguardando_pagamento",
+                           "reserva_confirmada", "cancelado_cliente"]:
         raise HTTPException(404)
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
     produto = db.get(ProdutoServico, item.produto_id) if item.produto_id else None
