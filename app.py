@@ -871,6 +871,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN empresa_transferida_id INTEGER")
         if "valor_repasse" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_repasse FLOAT DEFAULT 0")
+        if "transferencia_origem_id" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferencia_origem_id INTEGER")
+        if "transferencia_copia_id" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferencia_copia_id INTEGER")
         if "transferida_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN transferida_em TIMESTAMP")
         if "repasse_pago_em" not in cols_sol:
@@ -3250,6 +3254,163 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "mensagens": mensagens})
 
 
+
+def _copiar_cliente_para_empresa(db: Session, cliente_origem: Cliente, empresa_destino_id: int) -> Cliente:
+    """Garante o mesmo cliente na empresa de destino sem misturar os cadastros das empresas."""
+    cliente = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_destino_id,
+        Cliente.identificador == cliente_origem.identificador,
+    ).first()
+    if cliente:
+        return cliente
+
+    campos = (
+        "identificador", "telefone", "cpf", "cnpj", "nome", "data_nascimento", "email",
+        "endereco", "numero", "complemento", "bairro", "cidade", "estado", "cep", "observacoes",
+    )
+    cliente = Cliente(empresa_id=empresa_destino_id, **{
+        campo: getattr(cliente_origem, campo) for campo in campos
+    })
+    db.add(cliente)
+    db.flush()
+
+    for endereco in cliente_origem.enderecos:
+        db.add(EnderecoCliente(
+            empresa_id=empresa_destino_id,
+            cliente_id=cliente.id,
+            apelido=endereco.apelido,
+            endereco=endereco.endereco,
+            numero=endereco.numero,
+            complemento=endereco.complemento,
+            bairro=endereco.bairro,
+            cidade=endereco.cidade,
+            estado=endereco.estado,
+            cep=endereco.cep,
+            ativo=endereco.ativo,
+        ))
+    return cliente
+
+
+def _copiar_modelo_contrato_para_empresa(db: Session, contrato_origem: Contrato | None, empresa_destino_id: int) -> Contrato | None:
+    """Copia o texto contratual para que a empresa de destino tenha um contrato próprio."""
+    if not contrato_origem:
+        return None
+    contrato = db.query(Contrato).filter(
+        Contrato.empresa_id == empresa_destino_id,
+        Contrato.nome == contrato_origem.nome,
+        Contrato.clausulas == contrato_origem.clausulas,
+    ).first()
+    if contrato:
+        return contrato
+    contrato = Contrato(
+        empresa_id=empresa_destino_id,
+        nome=contrato_origem.nome,
+        descricao=contrato_origem.descricao,
+        clausulas=contrato_origem.clausulas,
+        ativo=contrato_origem.ativo,
+    )
+    db.add(contrato)
+    db.flush()
+    return contrato
+
+
+def _sincronizar_copia_transferencia(db: Session, origem: Solicitacao, destino: Empresa) -> Solicitacao:
+    """Cria/atualiza a cópia operacional da transferência sem duplicar recebimentos do cliente."""
+    copia = db.get(Solicitacao, origem.transferencia_copia_id) if origem.transferencia_copia_id else None
+    if copia and copia.empresa_id != destino.id:
+        # O contrato mudou de empresa de destino. Preservamos o histórico da cópia anterior,
+        # mas ela deixa de participar da operação.
+        copia.cancelado_em = copia.cancelado_em or agora_utc()
+        copia = None
+
+    cliente_destino = _copiar_cliente_para_empresa(db, origem.cliente, destino.id)
+    contrato_destino = _copiar_modelo_contrato_para_empresa(db, origem.contrato, destino.id)
+
+    campos = (
+        "data_evento", "hora_inicio", "hora_fim", "retirada_obrigatoria", "retirada_data",
+        "retirada_hora", "bairro", "local", "local_nome", "local_responsavel_nome",
+        "local_responsavel_telefone", "retirada_responsavel_nome", "retirada_responsavel_telefone",
+        "acesso_local", "valor", "sinal", "valor_pago", "sinal_recebido", "pagamento_confirmado_em",
+        "observacoes", "status", "aceite_em", "aprovado_em", "contrato_enviado_em",
+        "responsavel_contrato", "responsavel_operacao",
+    )
+    dados = {campo: getattr(origem, campo) for campo in campos}
+
+    if not copia:
+        copia = Solicitacao(
+            empresa_id=destino.id,
+            cliente_id=cliente_destino.id,
+            produto_id=None,
+            contrato_id=contrato_destino.id if contrato_destino else None,
+            transferencia_origem_id=origem.id,
+            empresa_transferida_id=None,
+            valor_repasse=0,
+            transferida_em=origem.transferida_em,
+            # Transferência interna não pode gerar uma segunda cobrança HUMIAT.
+            humiat_processado=True,
+            humiat_status="transferencia_interna",
+            **dados,
+        )
+        db.add(copia)
+        db.flush()
+        origem.transferencia_copia_id = copia.id
+    else:
+        copia.cliente_id = cliente_destino.id
+        copia.contrato_id = contrato_destino.id if contrato_destino else None
+        copia.transferencia_origem_id = origem.id
+        copia.cancelado_em = None
+        for campo, valor in dados.items():
+            setattr(copia, campo, valor)
+
+    # Itens são cópias descritivas. Não vinculamos produto da empresa de origem
+    # ao estoque da empresa de destino.
+    db.query(ReservaItem).filter(ReservaItem.solicitacao_id == copia.id).delete(synchronize_session=False)
+    for item_origem in origem.itens:
+        db.add(ReservaItem(
+            empresa_id=destino.id,
+            solicitacao_id=copia.id,
+            produto_id=None,
+            nome=item_origem.nome,
+            descricao=item_origem.descricao,
+            quantidade=item_origem.quantidade,
+            valor_unitario=item_origem.valor_unitario,
+            valor_total=item_origem.valor_total,
+        ))
+
+    # Agenda/operação acompanha o contrato transferido.
+    agenda_origem = origem.agenda
+    agenda_destino = db.query(Agenda).filter(Agenda.solicitacao_id == copia.id).first()
+    if agenda_origem:
+        if not agenda_destino:
+            agenda_destino = Agenda(
+                empresa_id=destino.id,
+                solicitacao_id=copia.id,
+                data=agenda_origem.data,
+                hora_inicio=agenda_origem.hora_inicio,
+                hora_fim=agenda_origem.hora_fim,
+                titulo=agenda_origem.titulo,
+                bairro=agenda_origem.bairro,
+                equipe_id=None,
+                roteirizado=False,
+                previsao_entrega=agenda_origem.previsao_entrega,
+                link_localizacao=agenda_origem.link_localizacao,
+                tipo_evento=agenda_origem.tipo_evento,
+                status_operacional="pendente",
+                observacoes_operacionais=agenda_origem.observacoes_operacionais,
+            )
+            db.add(agenda_destino)
+        else:
+            agenda_destino.data = agenda_origem.data
+            agenda_destino.hora_inicio = agenda_origem.hora_inicio
+            agenda_destino.hora_fim = agenda_origem.hora_fim
+            agenda_destino.titulo = agenda_origem.titulo
+            agenda_destino.bairro = agenda_origem.bairro
+            agenda_destino.previsao_entrega = agenda_origem.previsao_entrega
+            agenda_destino.link_localizacao = agenda_origem.link_localizacao
+            agenda_destino.tipo_evento = agenda_origem.tipo_evento
+    return copia
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/transferir")
 def transferir_solicitacao_empresa(
     solicitacao_id: int,
@@ -3258,12 +3419,18 @@ def transferir_solicitacao_empresa(
     db: Session = Depends(get_db),
     empresa: Empresa = Depends(empresa_logada),
 ):
-    """Marca o contrato para repasse a outra empresa sem retirar o histórico da empresa de origem."""
+    """Transfere o contrato preservando a origem e, quando possível, cria a cópia na empresa de destino."""
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
 
     if not empresa_destino_id:
+        # Remoção da transferência: não apagamos a cópia para preservar histórico; apenas a cancelamos.
+        if item.transferencia_copia_id:
+            copia = db.get(Solicitacao, item.transferencia_copia_id)
+            if copia:
+                copia.cancelado_em = copia.cancelado_em or agora_utc()
+        item.transferencia_copia_id = None
         item.empresa_transferida_id = None
         item.valor_repasse = 0
         item.transferida_em = None
@@ -3278,20 +3445,43 @@ def transferir_solicitacao_empresa(
     if not destino or not destino.ativa or destino.id == empresa.id:
         raise HTTPException(400, "Empresa de destino inválida.")
 
-    repasse = max(texto_para_float(valor_repasse or "0"), 0)
-    if repasse <= 0:
-        # Na ausência de um valor informado, usa o valor total do contrato como base de repasse.
-        repasse = max(float(item.valor or 0), 0)
+    destino_e_interno = (destino.nome or "").strip().lower() not in {"outros", "outro", "externo", "empresa externa"}
 
-    mudou_destino_ou_valor = item.empresa_transferida_id != destino.id or abs(float(item.valor_repasse or 0) - repasse) > 0.009
+    if destino_e_interno:
+        # Em transferência interna, o que a Empresa A deve à B é o valor que ela já recebeu
+        # do cliente. Esse valor deixa de ser conta a receber do cliente na Empresa B.
+        repasse = max(float(item.valor_pago or 0), 0)
+        if repasse <= 0 and item.sinal_recebido:
+            repasse = max(float(item.sinal or 0), 0)
+    else:
+        # Para "Outros"/externos, preserva exatamente a regra antiga.
+        repasse = max(texto_para_float(valor_repasse or "0"), 0)
+        if repasse <= 0:
+            repasse = max(float(item.valor or 0), 0)
+
+    mudou_destino_ou_valor = (
+        item.empresa_transferida_id != destino.id
+        or abs(float(item.valor_repasse or 0) - repasse) > 0.009
+    )
     item.empresa_transferida_id = destino.id
     item.valor_repasse = repasse
     item.transferida_em = agora_utc()
+
+    if destino_e_interno:
+        _sincronizar_copia_transferencia(db, item, destino)
+    elif item.transferencia_copia_id:
+        # Se mudou de uma empresa interna para "Outros", desativa a antiga cópia.
+        copia = db.get(Solicitacao, item.transferencia_copia_id)
+        if copia:
+            copia.cancelado_em = copia.cancelado_em or agora_utc()
+        item.transferencia_copia_id = None
+
     if mudou_destino_ou_valor:
         item.repasse_pago_em = None
         item.repasse_pago_por = None
         db.query(LancamentoBanco).filter(LancamentoBanco.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
         db.query(LancamentoManualFinanceiro).filter(LancamentoManualFinanceiro.repasse_solicitacao_id == item.id).update({"repasse_solicitacao_id": None})
+
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -5384,6 +5574,51 @@ def financeiro(
     # Reutiliza a consulta já realizada e limita somente a exibição.
     lancamentos_organiza_financeiro = todos_lancamentos_organiza[:500]
 
+    # Transferências internas recebidas: na empresa de destino o valor já pago pelo
+    # cliente deixa de ser "a receber do cliente" e passa a ser "a receber da empresa de origem".
+    copias_transferencia = db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente)
+    ).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.transferencia_origem_id != None,
+    ).all()
+    origens_ids = [c.transferencia_origem_id for c in copias_transferencia if c.transferencia_origem_id]
+    origens_transferencia = {}
+    empresas_origem = {}
+    pagos_por_origem = {}
+    if origens_ids:
+        origens = db.query(Solicitacao).filter(Solicitacao.id.in_(origens_ids)).all()
+        origens_transferencia = {o.id: o for o in origens}
+        empresa_ids_origem = {o.empresa_id for o in origens}
+        if empresa_ids_origem:
+            empresas_origem = {
+                e.id: e for e in db.query(Empresa).filter(Empresa.id.in_(empresa_ids_origem)).all()
+            }
+        totais_pago = db.query(
+            VinculoRepasseBanco.solicitacao_id,
+            func.coalesce(func.sum(VinculoRepasseBanco.valor), 0),
+        ).filter(
+            VinculoRepasseBanco.solicitacao_id.in_(origens_ids)
+        ).group_by(VinculoRepasseBanco.solicitacao_id).all()
+        pagos_por_origem = {sid: float(total or 0) for sid, total in totais_pago}
+
+    repasses_receber_interempresa = []
+    for copia in copias_transferencia:
+        origem = origens_transferencia.get(copia.transferencia_origem_id)
+        if not origem:
+            continue
+        total = max(float(origem.valor_repasse or 0), 0)
+        pago = min(pagos_por_origem.get(origem.id, 0.0), total)
+        repasses_receber_interempresa.append({
+            "copia": copia,
+            "origem": origem,
+            "empresa_origem": empresas_origem.get(origem.empresa_id),
+            "total": total,
+            "pago": pago,
+            "saldo": max(total - pago, 0),
+        })
+
     return templates.TemplateResponse("admin/financeiro.html", {
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
@@ -5422,6 +5657,7 @@ def financeiro(
         "candidatos_organiza": candidatos_organiza,
         "bancos_por_organiza": bancos_por_organiza,
         "repasses_sistema": repasses_sistema,
+        "repasses_receber_interempresa": repasses_receber_interempresa,
                 "valor_vinculado_por_repasse": valor_vinculado_por_repasse,
         "vinculos_por_banco": vinculos_por_banco,
         "candidatos_repasse_por_banco": candidatos_repasse_por_banco,

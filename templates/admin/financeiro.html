@@ -603,6 +603,29 @@
               <tr><th>Data</th><th>Cliente / descrição</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
             </thead>
             <tbody>
+              {% for rep in repasses_receber_interempresa %}
+                {% if rep.total > 0.01 %}
+                <tr>
+                  <td>{{ rep.copia.data_evento.strftime('%d/%m') if rep.copia.data_evento else '-' }}</td>
+                  <td class="cliente-cell">
+                    <a href="/painel/solicitacao/{{ rep.copia.id }}">{{ rep.copia.cliente.nome }}</a>
+                    <small>A receber de {{ rep.empresa_origem.nome if rep.empresa_origem else 'empresa de origem' }} · contrato transferido</small>
+                  </td>
+                  <td><span class="tipo-chip repasse">Repasse</span></td>
+                  <td class="positivo">R$ {{ rep.saldo|moeda_br }}</td>
+                  <td>
+                    {% if rep.saldo <= 0.01 %}
+                      <span class="badge-ok">Recebido</span>
+                    {% elif rep.pago > 0.01 %}
+                      <span class="badge-pendente">Parcial · R$ {{ rep.pago|moeda_br }}</span>
+                    {% else %}
+                      <span class="badge-pendente">Empresa origem</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endif %}
+              {% endfor %}
+
               {% for r in contratos_receber %}
                 {% set falta = (r.valor or 0) - (r.valor_pago or 0) %}
                 {% if falta > 0.01 %}
@@ -661,7 +684,7 @@
                 {% endif %}
               {% endfor %}
 
-              {% if not contratos_receber and not receber and not lancamentos_organiza_financeiro %}
+              {% if not repasses_receber_interempresa and not contratos_receber and not receber and not lancamentos_organiza_financeiro %}
                 <tr><td colspan="5" class="tabela-vazia">Nenhum valor a receber neste filtro.</td></tr>
               {% endif %}
             </tbody>

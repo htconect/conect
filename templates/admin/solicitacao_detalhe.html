@@ -74,12 +74,21 @@
     </label>
     <label>Valor do repasse
       <input name="valor_repasse" data-mascara="moeda" value="{{ item.valor_repasse|moeda_br if item.valor_repasse else '' }}" placeholder="Ex.: 1.500,00">
+      <small>Empresa cadastrada: o sistema usa automaticamente o valor já recebido do cliente. “Outros”: mantém o valor informado aqui.</small>
       <small class="texto-discreto">Valor que deverá ser pago à empresa que receber o contrato.</small>
     </label>
     <button type="submit" class="botao">Salvar transferência</button>
   </form>
   {% if item.empresa_transferida %}
-    <p class="texto-discreto">Este contrato continua no histórico desta empresa, mas será separado nos relatórios financeiros como transferido. Repasse: <b>R$ {{ item.valor_repasse|moeda_br }}</b>.</p>
+    <p class="texto-discreto">
+      Este contrato continua no histórico desta empresa.
+      {% if item.transferencia_copia_id %}
+        A empresa de destino recebeu uma cópia operacional vinculada. A pagar para {{ item.empresa_transferida.nome }}:
+      {% else %}
+        Repasse:
+      {% endif %}
+      <b>R$ {{ item.valor_repasse|moeda_br }}</b>.
+    </p>
   {% endif %}
 </details>
 

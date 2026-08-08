@@ -264,6 +264,10 @@ class Solicitacao(Base):
     # mas pode ser marcado para execução/repasse a outra empresa.
     empresa_transferida_id = Column(Integer, ForeignKey("empresas.id"), nullable=True)
     valor_repasse = Column(Float, default=0)
+    # Quando a empresa de destino também usa o Conect, o registro de destino
+    # é uma cópia operacional vinculada ao contrato original.
+    transferencia_origem_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True, index=True)
+    transferencia_copia_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True, index=True)
     transferida_em = Column(DateTime, nullable=True)
     repasse_pago_em = Column(DateTime, nullable=True)
     repasse_pago_por = Column(String(120), nullable=True)
