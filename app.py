@@ -32,7 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
 
-from config import APP_NOME, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
+from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
@@ -86,13 +86,14 @@ class ControleAcessoMiddleware:
         return None
 
 
-app = FastAPI(title=APP_NOME)
+app = FastAPI(title=APP_NOME, version=APP_VERSION)
 install_sql_monitor(engine)
 app.add_middleware(PerformanceMiddleware)
 app.add_middleware(ControleAcessoMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["APP_VERSION"] = APP_VERSION
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
@@ -441,53 +442,117 @@ def _link_absoluto(request: Request, nome_rota: str, **params) -> str:
     return str(request.url_for(nome_rota, **params))
 
 
-def endereco_rota_solicitacao(item: Solicitacao) -> str:
-    """Monta o endereço operacional usando a mesma fonte confiável do botão Iniciar rota.
+def _solicitacao_tem_endereco_congelado(item: Solicitacao) -> bool:
+    """Diferencia contratos novos/migrados dos registros legados.
 
-    O campo ``item.local`` pode conter nome do local ou ponto de referência e, por isso,
-    nunca deve substituir o logradouro cadastrado no cliente quando este existir.
+    Campos vazios ("") contam como snapshot: isso é intencional para impedir que
+    um contrato antigo volte a herdar um número posteriormente alterado no cliente.
+    """
+    return any(
+        getattr(item, campo, None) is not None
+        for campo in ("local_numero", "local_complemento", "local_cidade", "local_estado", "local_cep")
+    )
+
+
+def dados_endereco_solicitacao(item: Solicitacao) -> dict:
+    """Retorna o endereço do EVENTO. O cadastro do cliente é apenas fallback legado.
+
+    Em contratos novos/migrados, nunca consulta endereço/número atual do cliente.
+    Isso impede que uma nova locação do mesmo cliente altere a rota de outra reserva.
     """
     cliente = item.cliente
-    if cliente:
-        partes = [
-            cliente.endereco,
-            cliente.numero,
-            cliente.complemento,
-            item.bairro or cliente.bairro,
-            cliente.cidade,
-            cliente.estado,
-            f"CEP {cliente.cep}" if cliente.cep else "",
-        ]
-    else:
-        partes = [item.local, item.bairro]
+    if _solicitacao_tem_endereco_congelado(item):
+        return {
+            "endereco": (item.local or "").strip(),
+            "numero": (item.local_numero or "").strip(),
+            "complemento": (item.local_complemento or "").strip(),
+            "bairro": (item.bairro or "").strip(),
+            "cidade": (item.local_cidade or "").strip(),
+            "estado": (item.local_estado or "").strip(),
+            "cep": (item.local_cep or "").strip(),
+        }
+
+    # Fallback de emergência para registro legado ainda não migrado. Se a reserva
+    # já possui um ``local``, nunca combina esse logradouro com o número atual do
+    # cliente: é preferível navegar sem número a enviar um número de outro evento.
+    local_legado = (item.local or "").strip()
+    if local_legado:
+        mesma_rua_atual = bool(
+            cliente and cliente.endereco
+            and _normalizar_chave_endereco(cliente.endereco) == _normalizar_chave_endereco(local_legado)
+        )
+        return {
+            "endereco": local_legado,
+            "numero": "",
+            "complemento": "",
+            "bairro": (item.bairro or (cliente.bairro if cliente and mesma_rua_atual else "") or "").strip(),
+            "cidade": ((cliente.cidade if cliente and mesma_rua_atual else "") or "").strip(),
+            "estado": ((cliente.estado if cliente and mesma_rua_atual else "") or "").strip(),
+            "cep": "",
+        }
+
+    # Registros muito antigos sem endereço na própria solicitação só têm o cadastro
+    # atual como última referência disponível. A migração de startup congela isso.
+    return {
+        "endereco": ((cliente.endereco if cliente else "") or "").strip(),
+        "numero": ((cliente.numero if cliente else "") or "").strip(),
+        "complemento": ((cliente.complemento if cliente else "") or "").strip(),
+        "bairro": ((cliente.bairro if cliente else "") or "").strip(),
+        "cidade": ((cliente.cidade if cliente else "") or "").strip(),
+        "estado": ((cliente.estado if cliente else "") or "").strip(),
+        "cep": ((cliente.cep if cliente else "") or "").strip(),
+    }
+
+
+def endereco_rota_solicitacao(item: Solicitacao) -> str:
+    """Monta o destino de navegação a partir do endereço congelado do contrato.
+
+    Complemento (apto, bloco, salão etc.) fica fora da busca do Waze/Maps porque
+    não identifica o ponto viário e pode piorar a correspondência do número.
+    Ele continua visível no contrato e nas informações operacionais.
+    """
+    dados = dados_endereco_solicitacao(item)
+    partes = [
+        dados["endereco"],
+        dados["numero"],
+        dados["bairro"],
+        dados["cidade"],
+        dados["estado"],
+        f"CEP {dados['cep']}" if dados["cep"] else "",
+    ]
     return ", ".join(str(valor).strip() for valor in partes if valor and str(valor).strip())
 
 
 def endereco_referencia_solicitacao(item: Solicitacao) -> str:
-    """Retorna nome do local/ponto de referência sem confundi-lo com o endereço."""
-    endereco_principal = (getattr(item.cliente, "endereco", "") or "").strip() if item.cliente else ""
-    local = (item.local or "").strip()
-    if local and local.casefold() != endereco_principal.casefold():
-        return local
-    return (item.local_nome or "").strip()
+    """Retorna nome/ponto de referência sem misturar referência com o endereço da rota."""
+    if (item.local_nome or "").strip():
+        return item.local_nome.strip()
+    # Compatibilidade com registros muito antigos em que ``local`` podia ser referência.
+    if not _solicitacao_tem_endereco_congelado(item) and item.cliente:
+        local = (item.local or "").strip()
+        endereco_cliente = (item.cliente.endereco or "").strip()
+        if local and endereco_cliente and local.casefold() != endereco_cliente.casefold():
+            return local
+    return ""
 
 
+templates.env.globals["dados_endereco_solicitacao"] = dados_endereco_solicitacao
 templates.env.globals["endereco_rota_solicitacao"] = endereco_rota_solicitacao
 templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
 def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
-    """Monta o endereço completo usando dados da reserva e do cadastro do cliente."""
-    cliente = item.cliente
+    """Monta o endereço completo a partir do snapshot do contrato/reserva."""
+    dados = dados_endereco_solicitacao(item)
     local_nome = (item.local_nome or "").strip()
-    endereco = (item.local or cliente.endereco or "").strip()
-    numero = (cliente.numero or "").strip()
-    complemento = (cliente.complemento or "").strip()
-    bairro = (item.bairro or cliente.bairro or "").strip()
-    cidade = (cliente.cidade or "").strip()
-    estado = (cliente.estado or "").strip()
-    cep = (cliente.cep or "").strip()
-    referencia = (item.observacoes or cliente.observacoes or "").strip()
+    endereco = dados["endereco"]
+    numero = dados["numero"]
+    complemento = dados["complemento"]
+    bairro = dados["bairro"]
+    cidade = dados["cidade"]
+    estado = dados["estado"]
+    cep = dados["cep"]
+    referencia = (item.observacoes or (item.cliente.observacoes if item.cliente else "") or "").strip()
 
     linhas = []
     if local_nome:
@@ -855,6 +920,16 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_hora TIME")
         if "local_nome" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_nome VARCHAR(160)")
+        if "local_numero" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_numero VARCHAR(30)")
+        if "local_complemento" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_complemento VARCHAR(120)")
+        if "local_cidade" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_cidade VARCHAR(120)")
+        if "local_estado" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_estado VARCHAR(40)")
+        if "local_cep" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_cep VARCHAR(20)")
         if "local_responsavel_nome" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN local_responsavel_nome VARCHAR(160)")
         if "local_responsavel_telefone" not in cols_sol:
@@ -1202,6 +1277,169 @@ def garantir_colunas_novas():
 
 
 
+
+def _normalizar_chave_endereco(valor: str) -> str:
+    texto_norm = unicodedata.normalize("NFKD", str(valor or ""))
+    texto_norm = "".join(ch for ch in texto_norm if not unicodedata.combining(ch)).casefold()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", texto_norm).split())
+
+
+def migrar_enderecos_contratos_legados():
+    """Congela o melhor endereço conhecido nos contratos antigos, uma única vez.
+
+    Regra de segurança: quando não existe histórico suficiente para provar o número
+    de um contrato antigo, o número fica vazio em vez de herdar silenciosamente o
+    número atual do cliente. Para o contrato mais recente do cliente, o endereço
+    atual pode ser usado quando o logradouro coincide.
+    """
+    chave_migracao = "20260830_endereco_evento_por_contrato_v1"
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    chave VARCHAR(120) PRIMARY KEY,
+                    executado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            if conn.execute(
+                text("SELECT chave FROM app_migrations WHERE chave = :chave"),
+                {"chave": chave_migracao},
+            ).first():
+                return
+    except Exception:
+        logger.exception("Falha ao preparar migração de endereço por contrato")
+        return
+
+    db = SessionLocal()
+    try:
+        pendentes = (
+            db.query(Solicitacao)
+            .filter(
+                Solicitacao.local_numero.is_(None),
+                Solicitacao.local_complemento.is_(None),
+                Solicitacao.local_cidade.is_(None),
+                Solicitacao.local_estado.is_(None),
+                Solicitacao.local_cep.is_(None),
+            )
+            .order_by(Solicitacao.cliente_id, Solicitacao.criado_em, Solicitacao.id)
+            .all()
+        )
+        if not pendentes:
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave_migracao})
+            return
+
+        cliente_ids = {s.cliente_id for s in pendentes if s.cliente_id}
+        historicos = (
+            db.query(EnderecoCliente)
+            .filter(EnderecoCliente.cliente_id.in_(cliente_ids or [-1]))
+            .order_by(EnderecoCliente.cliente_id, EnderecoCliente.criado_em, EnderecoCliente.id)
+            .all()
+        )
+        por_cliente = {}
+        for e in historicos:
+            por_cliente.setdefault(e.cliente_id, []).append(e)
+
+        # O cadastro atual é fallback somente para a reserva mais recente do cliente.
+        ids_mais_recentes = dict(
+            db.query(Solicitacao.cliente_id, func.max(Solicitacao.id))
+            .filter(Solicitacao.cliente_id.in_(cliente_ids or [-1]))
+            .group_by(Solicitacao.cliente_id)
+            .all()
+        )
+
+        migrados_historico = 0
+        migrados_atual = 0
+        sem_numero_confiavel = 0
+
+        for sol in pendentes:
+            cliente = sol.cliente
+            chave_rua = _normalizar_chave_endereco(sol.local)
+            chave_bairro = _normalizar_chave_endereco(sol.bairro)
+            candidatos = [
+                e for e in por_cliente.get(sol.cliente_id, [])
+                if chave_rua and _normalizar_chave_endereco(e.endereco) == chave_rua
+            ]
+            if chave_bairro:
+                candidatos_bairro = [e for e in candidatos if _normalizar_chave_endereco(e.bairro) == chave_bairro]
+                if candidatos_bairro:
+                    candidatos = candidatos_bairro
+
+            # Se o contrato já tinha nome do local, ele é um ótimo desempate para
+            # endereços repetidos do mesmo cliente (condomínio, salão, empresa etc.).
+            chave_apelido = _normalizar_chave_endereco(sol.local_nome)
+            if chave_apelido:
+                candidatos_apelido = [e for e in candidatos if _normalizar_chave_endereco(e.apelido) == chave_apelido]
+                if candidatos_apelido:
+                    candidatos = candidatos_apelido
+
+            escolhido = None
+            # Nunca "adivinha" entre dois números diferentes na mesma rua. Esse é
+            # justamente o tipo de ambiguidade que causava o Waze ir ao local errado.
+            numeros_distintos = {_normalizar_chave_endereco(e.numero) for e in candidatos if (e.numero or "").strip()}
+            historico_ambiguo = len(numeros_distintos) > 1
+            if candidatos and not historico_ambiguo:
+                if sol.criado_em:
+                    def distancia_tempo(e):
+                        momento = e.criado_em or e.atualizado_em
+                        if not momento:
+                            return float("inf")
+                        try:
+                            return abs((momento - sol.criado_em).total_seconds())
+                        except Exception:
+                            return float("inf")
+                    escolhido = min(candidatos, key=lambda e: (distancia_tempo(e), -(e.id or 0)))
+                else:
+                    escolhido = candidatos[-1]
+
+            if escolhido:
+                sol.local = (sol.local or escolhido.endereco or "").strip()
+                sol.local_numero = (escolhido.numero or "").strip()
+                sol.local_complemento = (escolhido.complemento or "").strip()
+                sol.bairro = (sol.bairro or escolhido.bairro or "").strip()
+                sol.local_cidade = (escolhido.cidade or "").strip()
+                sol.local_estado = (escolhido.estado or "").strip()
+                sol.local_cep = (escolhido.cep or "").strip()
+                migrados_historico += 1
+                continue
+
+            endereco_atual_igual = bool(
+                cliente and cliente.endereco and chave_rua
+                and _normalizar_chave_endereco(cliente.endereco) == chave_rua
+            )
+            eh_mais_recente = ids_mais_recentes.get(sol.cliente_id) == sol.id
+
+            if cliente and (not sol.local or (endereco_atual_igual and eh_mais_recente and not historico_ambiguo)):
+                sol.local = (sol.local or cliente.endereco or "").strip()
+                sol.local_numero = (cliente.numero or "").strip()
+                sol.local_complemento = (cliente.complemento or "").strip()
+                sol.bairro = (sol.bairro or cliente.bairro or "").strip()
+                sol.local_cidade = (cliente.cidade or "").strip()
+                sol.local_estado = (cliente.estado or "").strip()
+                sol.local_cep = (cliente.cep or "").strip()
+                migrados_atual += 1
+            else:
+                # Congela explicitamente sem número para nunca herdar outro número depois.
+                sol.local_numero = ""
+                sol.local_complemento = ""
+                sol.local_cidade = (cliente.cidade or "").strip() if cliente and endereco_atual_igual else ""
+                sol.local_estado = (cliente.estado or "").strip() if cliente and endereco_atual_igual else ""
+                sol.local_cep = ""
+                sem_numero_confiavel += 1
+
+        db.commit()
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave_migracao})
+        logger.info(
+            "Migração endereço por contrato concluída: historico=%s atual=%s sem_numero=%s",
+            migrados_historico, migrados_atual, sem_numero_confiavel,
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Falha na migração de endereço por contrato")
+    finally:
+        db.close()
+
 def migrar_vinculos_repasse_legados():
     """Converte vínculos antigos 1:1 para o novo rateio N:N sem duplicar dados."""
     db = SessionLocal()
@@ -1423,6 +1661,7 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
 def startup():
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
+    migrar_enderecos_contratos_legados()
     migrar_vinculos_repasse_legados()
     atualizar_mensagem_previsao_padrao()
     db = SessionLocal()
@@ -3328,7 +3567,8 @@ def _sincronizar_copia_transferencia(db: Session, origem: Solicitacao, destino: 
 
     campos = (
         "data_evento", "hora_inicio", "hora_fim", "retirada_obrigatoria", "retirada_data",
-        "retirada_hora", "bairro", "local", "local_nome", "local_responsavel_nome",
+        "retirada_hora", "bairro", "local", "local_numero", "local_complemento",
+        "local_cidade", "local_estado", "local_cep", "local_nome", "local_responsavel_nome",
         "local_responsavel_telefone", "retirada_responsavel_nome", "retirada_responsavel_telefone",
         "acesso_local", "valor", "sinal", "valor_pago", "sinal_recebido", "pagamento_confirmado_em",
         "observacoes", "status", "aceite_em", "aprovado_em", "contrato_enviado_em",
@@ -3634,9 +3874,7 @@ def salvar_cliente_da_solicitacao(
     elif cliente.telefone:
         cliente.identificador = cliente.telefone
 
-    _invalidar_geocodificacao(item)
     db.commit()
-    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -3851,13 +4089,25 @@ def salvar_cliente_local_solicitacao(
     if hora_inicio:
         item.hora_inicio = datetime.strptime(hora_inicio, "%H:%M").time()
     item.hora_fim = datetime.strptime(hora_fim, "%H:%M").time() if hora_fim else None
+    endereco_anterior = (item.local or "").strip()
     item.local = local.strip()
+    item.local_numero = numero.strip()
     item.bairro = bairro.strip()
+    if _normalizar_chave_endereco(endereco_anterior) != _normalizar_chave_endereco(item.local):
+        item.local_complemento = ""
+        item.local_cidade = ""
+        item.local_estado = ""
+        item.local_cep = ""
     item.acesso_local = acesso_local.strip()
     item.local_nome = local_nome.strip()
     item.local_responsavel_nome = local_responsavel_nome.strip()
     item.local_responsavel_telefone = limpar_identificador(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
+    salvar_endereco_cliente(
+        db, empresa.id, cliente.id, item.local, item.local_numero, item.local_complemento or "",
+        item.bairro, item.local_cidade or "", item.local_estado or "", item.local_cep or "",
+        apelido=item.local_nome,
+    )
 
     if contrato_aprovado_para_operacao(item):
         criar_eventos_operacionais(db, item)
@@ -4072,7 +4322,8 @@ def endereco_cliente_payload(item: EnderecoCliente) -> dict:
 
 def salvar_endereco_cliente(db: Session, empresa_id: int, cliente_id: int, endereco: str, numero: str = "",
                             complemento: str = "", bairro: str = "", cidade: str = "",
-                            estado: str = "", cep: str = ""):
+                            estado: str = "", cep: str = "", apelido: str = ""):
+    """Salva um endereço já utilizado pelo cliente como atalho para futuros contratos."""
     dados = {
         "endereco": (endereco or "").strip(), "numero": (numero or "").strip(),
         "complemento": (complemento or "").strip(), "bairro": (bairro or "").strip(),
@@ -4081,10 +4332,13 @@ def salvar_endereco_cliente(db: Session, empresa_id: int, cliente_id: int, ender
     if not dados["endereco"]:
         return None
     existente = db.query(EnderecoCliente).filter_by(empresa_id=empresa_id, cliente_id=cliente_id, **dados).first()
+    apelido_limpo = (apelido or "").strip()
     if existente:
         existente.ativo = True
+        if apelido_limpo:
+            existente.apelido = apelido_limpo
         return existente
-    item = EnderecoCliente(empresa_id=empresa_id, cliente_id=cliente_id, **dados)
+    item = EnderecoCliente(empresa_id=empresa_id, cliente_id=cliente_id, apelido=apelido_limpo or None, **dados)
     db.add(item)
     return item
 
@@ -4274,7 +4528,10 @@ def contrato_novo_salvar(
     cliente.cep = cep.strip()
     cliente.observacoes = observacoes.strip()
     db.flush()
-    salvar_endereco_cliente(db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep)
+    salvar_endereco_cliente(
+        db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep,
+        apelido=local_nome,
+    )
 
     if cadastro_cliente:
         db.commit()
@@ -4307,6 +4564,11 @@ def contrato_novo_salvar(
         retirada_hora=retirada_hora_obj,
         bairro=bairro.strip(),
         local=endereco.strip(),
+        local_numero=numero.strip(),
+        local_complemento=complemento.strip(),
+        local_cidade=cidade.strip(),
+        local_estado=estado.strip(),
+        local_cep=cep.strip(),
         local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome.strip(),
         local_responsavel_telefone=limpar_identificador(
@@ -4367,21 +4629,22 @@ def awaitable_form_fallback(request: Request) -> dict:
 
 
 def form_solicitacao_completo(item: Solicitacao) -> dict:
-    """Monta o formulário único com todos os dados já preenchidos para edição completa."""
+    """Monta o formulário único usando o endereço congelado do próprio contrato."""
     cliente = item.cliente
+    endereco_evento = dados_endereco_solicitacao(item)
     return {
         "nome": cliente.nome if cliente else "",
         "telefone": cliente.telefone if cliente else "",
         "cpf": cliente.cpf if cliente else "",
         "cnpj": cliente.cnpj if cliente else "",
         "email": cliente.email if cliente else "",
-        "endereco": cliente.endereco if cliente else "",
-        "numero": cliente.numero if cliente else "",
-        "complemento": cliente.complemento if cliente else "",
-        "bairro": cliente.bairro if cliente else item.bairro or "",
-        "cidade": cliente.cidade if cliente else "",
-        "estado": cliente.estado if cliente else "",
-        "cep": cliente.cep if cliente else "",
+        "endereco": endereco_evento["endereco"],
+        "numero": endereco_evento["numero"],
+        "complemento": endereco_evento["complemento"],
+        "bairro": endereco_evento["bairro"],
+        "cidade": endereco_evento["cidade"],
+        "estado": endereco_evento["estado"],
+        "cep": endereco_evento["cep"],
         "data_evento": item.data_evento.isoformat() if item.data_evento else "",
         "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
         "retirada_obrigatoria": "1" if retirada_obrigatoria_ativa(item) else "",
@@ -4405,6 +4668,7 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
 def editar_solicitacao_completa(
         solicitacao_id: int,
         request: Request,
+        copiado: str = "",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -4423,6 +4687,7 @@ def editar_solicitacao_completa(
         "form": form_solicitacao_completo(item),
         "modo_edicao": True,
         "item": item,
+        "copia_endereco": bool(copiado),
     })
 
 
@@ -4534,7 +4799,12 @@ def salvar_solicitacao_completa(
     item.retirada_data = retirada_data_obj if retirada_obrigatoria_bool else None
     item.retirada_hora = retirada_hora_obj or (item.hora_fim or item.hora_inicio if retirada_obrigatoria_bool else None)
     item.bairro = bairro.strip()
-    item.local = local.strip() or endereco.strip()
+    item.local = endereco.strip() or local.strip()
+    item.local_numero = numero.strip()
+    item.local_complemento = complemento.strip()
+    item.local_cidade = cidade.strip()
+    item.local_estado = estado.strip()
+    item.local_cep = cep.strip()
     item.local_nome = local_nome.strip()
     item.local_responsavel_nome = local_responsavel_nome.strip()
     item.local_responsavel_telefone = limpar_identificador(
@@ -4543,6 +4813,11 @@ def salvar_solicitacao_completa(
     item.valor = valor_float
     item.sinal = sinal_float
     item.observacoes = observacoes.strip()
+    salvar_endereco_cliente(
+        db, empresa.id, cliente.id, item.local, item.local_numero, item.local_complemento,
+        item.bairro, item.local_cidade, item.local_estado, item.local_cep, apelido=item.local_nome,
+    )
+    _invalidar_geocodificacao(item)
 
     if produto:
         item_principal = item.itens[0] if item.itens else None
@@ -4560,6 +4835,7 @@ def salvar_solicitacao_completa(
     else:
         criar_eventos_operacionais(db, item)
     db.commit()
+    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{item.id}", status_code=303)
 
 
@@ -4630,6 +4906,11 @@ def usar_solicitacao_como_base(
         hora_fim=origem.hora_fim,
         bairro=origem.bairro,
         local=origem.local,
+        local_numero=origem.local_numero,
+        local_complemento=origem.local_complemento,
+        local_cidade=origem.local_cidade,
+        local_estado=origem.local_estado,
+        local_cep=origem.local_cep,
         local_nome=origem.local_nome,
         local_responsavel_nome=origem.local_responsavel_nome,
         local_responsavel_telefone=origem.local_responsavel_telefone,
@@ -4657,7 +4938,7 @@ def usar_solicitacao_como_base(
         ))
 
     db.commit()
-    return RedirectResponse(f"/painel/solicitacao/{nova.id}/editar-completo", status_code=303)
+    return RedirectResponse(f"/painel/solicitacao/{nova.id}/editar-completo?copiado=1", status_code=303)
 
 
 @app.post("/painel/cliente/{cliente_id}/dados")
@@ -4733,6 +5014,26 @@ def criar_pre_reserva_rapida(
     if produto and produto.empresa_id != empresa.id:
         raise HTTPException(404)
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
+    endereco_texto = (local or cliente.endereco or "").strip()
+    historico = None
+    if endereco_texto:
+        historico = (
+            db.query(EnderecoCliente)
+            .filter(
+                EnderecoCliente.empresa_id == empresa.id,
+                EnderecoCliente.cliente_id == cliente.id,
+                func.lower(EnderecoCliente.endereco) == endereco_texto.lower(),
+            )
+            .order_by(EnderecoCliente.atualizado_em.desc(), EnderecoCliente.id.desc())
+            .first()
+        )
+    usar_atual = bool(cliente.endereco and cliente.endereco.strip().casefold() == endereco_texto.casefold())
+    numero_evento = (historico.numero if historico else cliente.numero if usar_atual else "") or ""
+    complemento_evento = (historico.complemento if historico else cliente.complemento if usar_atual else "") or ""
+    bairro_evento = (historico.bairro if historico else cliente.bairro if usar_atual else "") or ""
+    cidade_evento = (historico.cidade if historico else cliente.cidade if usar_atual else "") or ""
+    estado_evento = (historico.estado if historico else cliente.estado if usar_atual else "") or ""
+    cep_evento = (historico.cep if historico else cliente.cep if usar_atual else "") or ""
     item = Solicitacao(
         empresa_id=empresa.id,
         cliente_id=cliente.id,
@@ -4741,8 +5042,13 @@ def criar_pre_reserva_rapida(
         data_evento=datetime.strptime(data_evento, "%Y-%m-%d").date(),
         hora_inicio=inicio_obj,
         hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
-        bairro=cliente.bairro,
-        local=local,
+        bairro=bairro_evento.strip(),
+        local=endereco_texto,
+        local_numero=numero_evento.strip(),
+        local_complemento=complemento_evento.strip(),
+        local_cidade=cidade_evento.strip(),
+        local_estado=estado_evento.strip(),
+        local_cep=cep_evento.strip(),
         local_nome=local_nome,
         local_responsavel_nome=local_responsavel_nome,
         local_responsavel_telefone=local_responsavel_telefone,
@@ -6689,7 +6995,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
                 "cliente": reserva.cliente.nome if reserva.cliente else "Cliente",
                 "hora": reserva.hora_inicio.strftime("%H:%M") if reserva.hora_inicio else "-",
                 "hora_ordenacao": reserva.hora_inicio or time.min,
-                "bairro": reserva.bairro or (reserva.cliente.bairro if reserva.cliente else "") or "-",
+                "bairro": (dados_endereco_solicitacao(reserva).get("bairro") or "-"),
                 "quantidade": item.quantidade or 1,
                 "reserva_id": reserva.id,
                 "observacoes": ((reserva.observacoes or "") or (reserva.cliente.observacoes if reserva.cliente else "") or "").strip(),
@@ -7167,6 +7473,11 @@ def salvar_pre_cadastro(
     cliente.estado = estado
     cliente.cep = cep
     cliente.observacoes = observacoes
+    db.flush()
+    salvar_endereco_cliente(
+        db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep,
+        apelido=local_nome,
+    )
     db.commit()
     db.refresh(cliente)
 
@@ -7191,7 +7502,9 @@ def salvar_pre_cadastro(
     fim_obj = somar_minutos(inicio_obj, 240)
     solicitacao = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=data_obj, hora_inicio=inicio_obj,
-        hora_fim=fim_obj, bairro=bairro, local=endereco.strip(), local_nome=local_nome,
+        hora_fim=fim_obj, bairro=bairro.strip(), local=endereco.strip(), local_numero=numero.strip(),
+        local_complemento=complemento.strip(), local_cidade=cidade.strip(), local_estado=estado.strip(),
+        local_cep=cep.strip(), local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome, local_responsavel_telefone=local_responsavel_telefone,
         acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva"
     )
@@ -7395,6 +7708,7 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Reque
     if status_reserva_confirmada(item.status) or item.status == "cancelado_cliente":
         return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
 
+    endereco_evento = dados_endereco_solicitacao(item)
     return templates.TemplateResponse("publico/cadastro.html", {
         "request": request,
         "empresa": empresa,
@@ -7412,13 +7726,13 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Reque
             "cpf": item.cliente.cpf or "",
             "cnpj": item.cliente.cnpj or "",
             "email": item.cliente.email or "",
-            "endereco": item.cliente.endereco or "",
-            "numero": item.cliente.numero or "",
-            "complemento": item.cliente.complemento or "",
-            "bairro": item.bairro or item.cliente.bairro or "",
-            "cidade": item.cliente.cidade or "",
-            "estado": item.cliente.estado or "",
-            "cep": item.cliente.cep or "",
+            "endereco": endereco_evento["endereco"],
+            "numero": endereco_evento["numero"],
+            "complemento": endereco_evento["complemento"],
+            "bairro": endereco_evento["bairro"],
+            "cidade": endereco_evento["cidade"],
+            "estado": endereco_evento["estado"],
+            "cep": endereco_evento["cep"],
             "local": item.local or "",
             "local_nome": item.local_nome or "",
             "acesso_local": item.acesso_local or "",
@@ -7472,14 +7786,25 @@ def salvar_dados_contrato_cliente(
     item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
     item.hora_inicio = datetime.strptime(hora_inicio, "%H:%M").time()
     item.bairro = bairro.strip()
-    item.local = local.strip() or endereco.strip()
+    item.local = endereco.strip() or local.strip()
+    item.local_numero = numero.strip()
+    item.local_complemento = complemento.strip()
+    item.local_cidade = cidade.strip()
+    item.local_estado = estado.strip()
+    item.local_cep = (limpar_identificador(cep) or cep.strip())
     item.local_nome = local_nome.strip()
     item.acesso_local = acesso_local.strip()
     item.local_responsavel_nome = local_responsavel_nome.strip()
     item.local_responsavel_telefone = limpar_identificador(local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.observacoes = observacoes.strip()
+    salvar_endereco_cliente(
+        db, empresa.id, cliente.id, item.local, item.local_numero, item.local_complemento,
+        item.bairro, item.local_cidade, item.local_estado, item.local_cep, apelido=item.local_nome,
+    )
+    _invalidar_geocodificacao(item)
 
     db.commit()
+    _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
 
 
@@ -9024,18 +9349,14 @@ def _geocodificar_consultas(consultas, identificador="endereco"):
 
 
 def _variacoes_endereco_solicitacao(sol: Solicitacao):
-    cliente = sol.cliente
-    if not cliente:
-        base = _partes_unicas_endereco(sol.local, sol.bairro, "Rio de Janeiro", "RJ", "Brasil")
-        return [base]
-
-    rua = cliente.endereco or ""
-    numero = cliente.numero or ""
-    complemento = cliente.complemento or ""
-    bairro = sol.bairro or cliente.bairro or ""
-    cidade = cliente.cidade or "Rio de Janeiro"
-    estado = cliente.estado or "RJ"
-    cep = re.sub(r"\D", "", cliente.cep or "")
+    dados = dados_endereco_solicitacao(sol)
+    rua = dados["endereco"]
+    numero = dados["numero"]
+    complemento = dados["complemento"]
+    bairro = dados["bairro"]
+    cidade = dados["cidade"] or "Rio de Janeiro"
+    estado = dados["estado"] or "RJ"
+    cep = re.sub(r"\D", "", dados["cep"] or "")
 
     consultas = [
         _partes_unicas_endereco(rua, numero, bairro, cidade, estado, cep, "Brasil"),
@@ -9178,7 +9499,9 @@ def iniciar_rota_solicitacao(
     if not destino:
         raise HTTPException(400, "Endereço não informado para iniciar a rota.")
     if provedor == "waze":
-        url = "https://waze.com/ul?" + urlencode({"ll": destino, "navigate": "yes"}) if "," in destino and destino.replace("-","").replace(",","").replace(".","").isdigit() else "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
+        # O destino desta rota é sempre endereço textual do contrato. Manter ``q``
+        # também deixa o comportamento do navegador igual ao app móvel (waze://?q=...).
+        url = "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
     else:
         url = "https://www.google.com/maps/search/?api=1&" + urlencode({"query": destino})
     return RedirectResponse(url, status_code=303)

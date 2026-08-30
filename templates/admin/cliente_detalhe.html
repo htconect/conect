@@ -17,7 +17,7 @@
       <div class="agenda-topo">
         <div>
           <b>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.hora_inicio.strftime('%H:%M') }}</b>
-          <small>{{ i.bairro or cliente.bairro or '-' }} · R$ {{ i.valor|moeda_br }}</small>
+          <small>{{ i.bairro or '-' }} · R$ {{ i.valor|moeda_br }}</small>
           {% set observacao_card = i.observacoes or cliente.observacoes %}
           {% if observacao_card %}<small class="observacao-destaque">{{ observacao_card }}</small>{% endif %}
         </div>
@@ -57,6 +57,8 @@
   <summary>Dados do cliente / editar cadastro</summary>
 
   <form method="post" action="/painel/cliente/{{ cliente.id }}/dados" class="form-grid">
+    <p class="texto-discreto campo-cheio"><strong>Endereço do cliente (atalho):</strong> estes dados servem apenas como referência/último endereço usado. O destino operacional pertence a cada contrato e é alterado em <strong>Editar contrato</strong>.</p>
+
     <label>Nome
       <input name="nome" value="{{ cliente.nome or '' }}">
     </label>

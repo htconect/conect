@@ -248,7 +248,15 @@ class Solicitacao(Base):
     retirada_data = Column(Date, nullable=True)
     retirada_hora = Column(Time, nullable=True)
     bairro = Column(String(120))
+    # Endereço do EVENTO pertence ao contrato/reserva. ``local`` é o logradouro
+    # legado e continua sendo usado para compatibilidade; os demais campos
+    # congelam o destino daquele contrato para não depender do cadastro do cliente.
     local = Column(String(200))
+    local_numero = Column(String(30), nullable=True)
+    local_complemento = Column(String(120), nullable=True)
+    local_cidade = Column(String(120), nullable=True)
+    local_estado = Column(String(40), nullable=True)
+    local_cep = Column(String(20), nullable=True)
     local_nome = Column(String(160))
     local_responsavel_nome = Column(String(160))
     local_responsavel_telefone = Column(String(40))

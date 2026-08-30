@@ -79,15 +79,7 @@
     {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug,
     solicitacao_id=a.solicitacao_id) %}
     {% set c = a.solicitacao.cliente %}
-    {% set endereco_rota =
-    (c.endereco or a.solicitacao.local or '') ~
-    (', ' ~ c.numero if c.numero else '') ~
-    (', ' ~ c.complemento if c.complemento else '') ~
-    (', ' ~ (a.bairro or a.solicitacao.bairro or c.bairro) if (a.bairro or a.solicitacao.bairro or c.bairro) else '') ~
-    (', ' ~ c.cidade if c.cidade else '') ~
-    (', ' ~ c.estado if c.estado else '') ~
-    (', CEP ' ~ c.cep if c.cep else '')
-    %}
+    {% set endereco_rota = endereco_rota_solicitacao(a.solicitacao) %}
     {% set url_waze = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=waze' %}
     {% set url_maps = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=maps' %}
     <details
@@ -186,6 +178,15 @@
                   mas nunca depois do contrato.{% endif %}
                 {% endif %}
             </p>
+
+            {% set endereco_evento = dados_endereco_solicitacao(a.solicitacao) %}
+            <div class="descricao-roteiro">
+                <span><b>Destino:</b> {{ endereco_rota or 'Endereço não informado' }}</span>
+                {% if endereco_evento.complemento %}<span><b>Complemento:</b> {{ endereco_evento.complemento }}</span>{% endif %}
+            </div>
+            {% if endereco_evento.endereco and not endereco_evento.numero %}
+            <div class="box aviso">Número do endereço não confirmado neste contrato antigo. Revise o endereço do contrato antes de iniciar a rota.</div>
+            {% endif %}
 
             <div class="acoes-rota operacao-acoes-novas">
                 <button type="button" class="botao-mini botao-whats-btn escolher-contato-whatsapp"

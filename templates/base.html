@@ -18,7 +18,10 @@
 <header class="topo-app">
   <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
     {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
-    <span>{{ empresa.nome if empresa is defined and empresa else "Conect" }}</span>
+    <span class="marca-app-texto">
+      <span class="marca-app-nome">{{ empresa.nome if empresa is defined and empresa else "Conect" }}</span>
+      <small class="marca-app-versao">Versão do app {{ APP_VERSION }}</small>
+    </span>
   </a>
   {% if request.session.get('empresa_id') %}
     <div class="usuario-topo">

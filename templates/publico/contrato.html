@@ -38,11 +38,13 @@
   <div class="card">
     <h2>Local do evento</h2>
     {% set referencia_evento = endereco_referencia_solicitacao(item) %}
+    {% set endereco_evento = dados_endereco_solicitacao(item) %}
     <p><b>Local:</b> {{ item.local_nome or referencia_evento or '-' }}</p>
     <p><b>Endereço do evento:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
     {% if referencia_evento and referencia_evento != item.local_nome %}<p><b>Ponto de referência:</b> {{ referencia_evento }}</p>{% endif %}
-    <p><b>Número:</b> {{ item.cliente.numero or '-' }}</p>
-    <p><b>Bairro:</b> {{ item.bairro or item.cliente.bairro or '-' }}</p>
+    <p><b>Número:</b> {{ endereco_evento.numero or '-' }}</p>
+    {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
+    <p><b>Bairro:</b> {{ endereco_evento.bairro or '-' }}</p>
     <p><b>Acesso:</b> {{ item.acesso_local or '-' }}</p>
     <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}</p>
     <p><b>Telefone responsável:</b> {{ item.local_responsavel_telefone or '-' }}</p>

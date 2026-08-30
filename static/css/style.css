@@ -135,7 +135,7 @@ body[class*="tema-global"] .marca span{color:#fff}
 body{background:var(--fundo);font-size:16px;padding-bottom:86px;color:#172033}
 .topo-app{position:sticky;top:0;z-index:20;height:58px;background:#0f172a;color:white;display:flex;align-items:center;justify-content:space-between;padding:0 14px;box-shadow:0 4px 18px rgba(15,23,42,.14)}
 .marca-app{display:flex;align-items:center;gap:10px;color:white;text-decoration:none;font-weight:800;font-size:17px;min-width:0}
-.marca-app img{width:34px;height:34px;border-radius:10px;background:#fff;object-fit:contain;padding:3px}.marca-app span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.marca-app img{width:34px;height:34px;border-radius:10px;background:#fff;object-fit:contain;padding:3px}.marca-app-texto{display:flex;flex-direction:column;justify-content:center;min-width:0;line-height:1.05}.marca-app-nome{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.marca-app-versao{margin-top:3px;font-size:9px;font-weight:600;letter-spacing:.02em;color:rgba(255,255,255,.62);white-space:nowrap}
 .sair-app{color:white;text-decoration:none;font-size:14px;background:rgba(255,255,255,.12);padding:8px 10px;border-radius:999px}
 .container-app{max-width:720px;margin:0 auto;padding:16px 12px 24px}.cabecalho-mobile{margin:2px 0 14px}.cabecalho-mobile h1{font-size:25px;line-height:1.15;margin:4px 0 6px}.mini{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:0}.titulo-secao{font-size:18px;margin:20px 0 10px}
 .card,.box,.accordion{background:#fff;border:1px solid var(--borda);border-radius:18px;box-shadow:0 8px 22px rgba(15,23,42,.06);padding:16px;margin-bottom:12px}

@@ -147,8 +147,10 @@
       <p class="box aviso">{{ empresa.mensagem_hora_fim or mensagens.hora_fim }}</p>
     {% endif %}
     {% set referencia_evento = endereco_referencia_solicitacao(item) %}
+    {% set endereco_evento = dados_endereco_solicitacao(item) %}
     <p><small>Local / referência</small><b>{{ item.local_nome or referencia_evento or '-' }}</b></p>
     <p><small>Endereço do evento</small><b>{{ endereco_rota_solicitacao(item) or '-' }}</b></p>
+    {% if endereco_evento.complemento %}<p><small>Complemento</small><b>{{ endereco_evento.complemento }}</b></p>{% endif %}
     {% if referencia_evento and referencia_evento != item.local_nome %}<p><small>Ponto de referência</small><b>{{ referencia_evento }}</b></p>{% endif %}
     {% if item.acesso_local %}<p><small>Acesso ao local</small><b>{{ item.acesso_local }}</b></p>{% endif %}
     {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
@@ -214,8 +216,8 @@
     <input type="hidden" name="data_evento" value="{{ item.data_evento.isoformat() if item.data_evento else '' }}">
     <input type="hidden" name="hora_inicio" value="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}">
     <input type="hidden" name="hora_fim" value="{{ item.hora_fim.strftime('%H:%M') if item.hora_fim else '' }}">
-    <input type="hidden" name="bairro" value="{{ item.bairro or item.cliente.bairro or '' }}">
-    <input type="hidden" name="local" value="{{ item.local or item.cliente.endereco or '' }}">
+    <input type="hidden" name="bairro" value="{{ item.bairro or '' }}">
+    <input type="hidden" name="local" value="{{ item.local or '' }}">
     <input type="hidden" name="acesso_local" value="{{ item.acesso_local or '' }}">
 
     <div id="itensReserva">

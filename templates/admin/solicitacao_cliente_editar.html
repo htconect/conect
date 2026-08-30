@@ -8,6 +8,8 @@
 
 <section class="card-reserva">
   <form method="post" action="/painel/solicitacao/{{ item.id }}/cliente" class="form-mobile-simples">
+    <p class="texto-discreto"><strong>Importante:</strong> o endereço abaixo é apenas referência do cadastro do cliente. O endereço usado em <strong>A caminho</strong>, Waze, Maps e Inteligência pertence ao contrato e deve ser alterado em <strong>Editar contrato</strong>.</p>
+
     <label>Nome
       <input name="nome" value="{{ cliente.nome or '' }}" autocomplete="name">
     </label>

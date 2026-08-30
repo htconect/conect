@@ -50,7 +50,7 @@
         {% else %}
           {{ item_nome }}
         {% endif %}
-        · {{ s.bairro or s.cliente.bairro or '-' }}
+        · {{ s.bairro or '-' }}
       </small>
       {% set rota = rotas_por_solicitacao.get(s.id) %}<small class="financeiro-mini">{% if rota and rota.roteirizado %}Roteirizado · {{ rota.equipe.nome if rota.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}</small>
       {% if eh_credito %}

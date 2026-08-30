@@ -47,6 +47,13 @@
 
   <section class="secao-form">
     <h2>2. Endereço do evento</h2>
+    <p class="texto-discreto">Este é o destino deste contrato. Ele fica salvo na reserva e não depende do endereço cadastrado no cliente.</p>
+    {% if copia_endereco %}
+    <div class="box aviso">
+      <b>Onde será realizado o novo evento?</b>
+      <p class="texto-discreto">O endereço do contrato usado como base foi copiado abaixo. Você pode mantê-lo, escolher outro endereço já utilizado por este cliente ou digitar um novo.</p>
+    </div>
+    {% endif %}
     <div id="enderecosEncontrados" class="enderecos-encontrados" hidden></div>
     <div id="camposNovoEndereco">
       <div class="linha">
@@ -165,6 +172,7 @@ async function buscarCEP(){
     if(d.erro){ alert('CEP não encontrado.'); return; }
     document.getElementById('endereco').value=d.logradouro||''; document.getElementById('bairro').value=d.bairro||'';
     document.getElementById('cidade').value=d.localidade||''; document.getElementById('estado').value=d.uf||'';
+    const local=document.querySelector('input[name="local"]'); if(local) local.value=d.logradouro||'';
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
@@ -182,21 +190,29 @@ function travarDadosCliente(travar){['nomeCliente','cpfCliente','cnpjCliente','e
 function preencherEndereco(e){
   const mapa={cep:'cep',endereco:'endereco',numero:'numeroEvento',complemento:'complementoEvento',bairro:'bairro',cidade:'cidade',estado:'estado'};
   Object.entries(mapa).forEach(([k,id])=>{const el=document.getElementById(id);if(el) el.value=e[k]||'';});
+  const local=document.querySelector('input[name="local"]');
+  if(local) local.value=(e.endereco||'');
+  const nomeLocal=document.querySelector('input[name="local_nome"]');
+  if(nomeLocal) nomeLocal.value=(e.apelido||'');
 }
 function alternarCamposEndereco(mostrar){
   const area=document.getElementById('camposNovoEndereco'); if(area) area.hidden=!mostrar;
 }
 function mostrarEnderecos(lista){
   const box=document.getElementById('enderecosEncontrados'); if(!box)return; box.innerHTML='';
-  if(!lista||!lista.length){box.hidden=true;alternarCamposEndereco(true);return;}
+  alternarCamposEndereco(true);
+  if(!lista||!lista.length){box.hidden=true;return;}
   box.hidden=false;
-  const label=document.createElement('label');label.textContent='Endereço salvo';box.appendChild(label);
+  const label=document.createElement('label');label.textContent='Endereços já utilizados por este cliente';box.appendChild(label);
   const select=document.createElement('select');select.className='endereco-select';
-  lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);o.textContent=`Endereço ${i+1} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});
-  select.onchange=()=>{const e=lista[Number(select.value)];preencherEndereco(e);alternarCamposEndereco(false);};
+  const atual=(document.getElementById('endereco')?.value||'').trim();
+  const placeholder=document.createElement('option');placeholder.value='';placeholder.selected=true;
+  placeholder.textContent=atual?'Manter o endereço atual deste contrato':'Escolha um endereço já utilizado';
+  select.appendChild(placeholder);
+  lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);const nome=(e.apelido||'').trim()||`Endereço ${i+1}`;o.textContent=`${nome} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});
+  select.onchange=()=>{if(select.value==='')return;const e=lista[Number(select.value)];preencherEndereco(e);};
   box.appendChild(select);
-  const novo=document.createElement('button');novo.type='button';novo.className='botao-novo-endereco';novo.textContent='+ Usar novo endereço';novo.onclick=()=>{select.value='';preencherEndereco({});alternarCamposEndereco(true);document.getElementById('cep')?.focus();};box.appendChild(novo);
-  select.dispatchEvent(new Event('change'));
+  const novo=document.createElement('button');novo.type='button';novo.className='botao-novo-endereco';novo.textContent='+ Digitar novo endereço';novo.onclick=()=>{select.value='';preencherEndereco({});document.getElementById('cep')?.focus();};box.appendChild(novo);
 }
 async function consultarClientePorTelefone(){
   if(!document.getElementById('whatsappBrasil').checked) return;
@@ -205,7 +221,7 @@ async function consultarClientePorTelefone(){
   const st=document.getElementById('statusBuscaCliente'); st.textContent='Consultando cadastro...';
   if(window.mostrarCarregando) mostrarCarregando('Consultando cadastro','Localizando cliente e endereços já utilizados.');
   try{const r=await fetch(`/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();
-    if(d.encontrado){document.getElementById('nomeCliente').value=d.cliente.nome||'';document.getElementById('cpfCliente').value=d.cliente.cpf||'';document.getElementById('cnpjCliente').value=d.cliente.cnpj||'';document.getElementById('emailCliente').value=d.cliente.email||'';travarDadosCliente(true);mostrarEnderecos(d.enderecos);st.textContent='Cadastro encontrado. Confirme o endereço do evento.';}
+    if(d.encontrado){document.getElementById('nomeCliente').value=d.cliente.nome||'';document.getElementById('cpfCliente').value=d.cliente.cpf||'';document.getElementById('cnpjCliente').value=d.cliente.cnpj||'';document.getElementById('emailCliente').value=d.cliente.email||'';travarDadosCliente(true);mostrarEnderecos(d.enderecos);st.textContent='Cadastro encontrado. Mantenha o endereço atual, escolha um já utilizado ou digite um novo.';}
     else{travarDadosCliente(false);mostrarEnderecos([]);st.textContent='Novo cliente. Complete os dados abaixo.';}
   }catch(e){st.textContent='Não foi possível consultar agora. Você pode continuar preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}
 }
@@ -213,7 +229,11 @@ async function consultarClientePorTelefone(){
 document.addEventListener('DOMContentLoaded', function(){
   const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
   alternarTipoTelefone(); alternarEtapas();
-  const tel=document.getElementById('telefoneCliente'); if(tel) tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});
+  const tel=document.getElementById('telefoneCliente');
+  if(tel){
+    tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});
+    if(somenteDigitos(tel.value).length>=11) setTimeout(consultarClientePorTelefone,100);
+  }
 });
 function bloquearEnvioContratoNovo(form){
   if(form.dataset.enviando === '1') return false;
