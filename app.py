@@ -505,19 +505,17 @@ def dados_endereco_solicitacao(item: Solicitacao) -> dict:
 
 
 def endereco_rota_solicitacao(item: Solicitacao) -> str:
-    """Monta o destino de navegação a partir do endereço congelado do contrato.
+    """Monta exatamente o destino textual exibido na Operação e enviado à navegação.
 
-    Complemento (apto, bloco, salão etc.) fica fora da busca do Waze/Maps porque
-    não identifica o ponto viário e pode piorar a correspondência do número.
-    Ele continua visível no contrato e nas informações operacionais.
+    Para permitir comparação direta em produção, Waze e Google Maps recebem a mesma
+    string mostrada em ``Destino``: logradouro + número + bairro + CEP. Complemento
+    (apto, bloco, sala etc.) fica sempre fora da navegação.
     """
     dados = dados_endereco_solicitacao(item)
     partes = [
         dados["endereco"],
         dados["numero"],
         dados["bairro"],
-        dados["cidade"],
-        dados["estado"],
         f"CEP {dados['cep']}" if dados["cep"] else "",
     ]
     return ", ".join(str(valor).strip() for valor in partes if valor and str(valor).strip())
@@ -9505,20 +9503,15 @@ def iniciar_rota_solicitacao(
     item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
     if not item:
         raise HTTPException(404)
-    # A navegação operacional usa sempre os dados da própria solicitação. Para o
-    # Waze, coordenadas já geocodificadas/confirmadas do contrato têm prioridade;
-    # o endereço textual permanece como fallback.
+    # A navegação operacional usa exatamente o mesmo texto exibido em ``Destino``
+    # no card da Operação. Nesta versão diagnóstica não usamos latitude/longitude:
+    # isso permite comparar o endereço enviado pelo Conect com o resultado escolhido
+    # pelo Waze/Maps sem uma segunda fonte de destino escondida.
     destino = endereco_rota_solicitacao(item)
     if not destino:
         raise HTTPException(400, "Endereço não informado para iniciar a rota.")
     if provedor == "waze":
-        # Preferir coordenadas elimina a busca fuzzy do Waze. Com ``q=`` o Waze
-        # navega para o primeiro resultado encontrado, que pode ser um POI ou número
-        # vizinho. Só usamos texto como fallback quando o contrato ainda não possui
-        # coordenadas geocodificadas/confirmadas.
-        coordenadas = coordenadas_rota_solicitacao(item)
-        parametros = {"ll": coordenadas, "navigate": "yes"} if coordenadas else {"q": destino, "navigate": "yes"}
-        url = "https://waze.com/ul?" + urlencode(parametros)
+        url = "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
     else:
         url = "https://www.google.com/maps/search/?api=1&" + urlencode({"query": destino})
     return RedirectResponse(url, status_code=303)
