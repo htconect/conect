@@ -80,6 +80,7 @@
     solicitacao_id=a.solicitacao_id) %}
     {% set c = a.solicitacao.cliente %}
     {% set endereco_rota = endereco_rota_solicitacao(a.solicitacao) %}
+    {% set coordenadas_rota = coordenadas_rota_solicitacao(a.solicitacao) %}
     {% set url_waze = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=waze' %}
     {% set url_maps = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=maps' %}
     <details
@@ -210,14 +211,14 @@
                    data-retirada-nome="{{ a.solicitacao.retirada_responsavel_nome or '' }}"
                    data-retirada-tel="{{ (a.solicitacao.retirada_responsavel_telefone or '')|replace(' ','')|replace('-','')|replace('(','')|replace(')','') }}"
                    data-tipo="{{ tipo }}" data-agenda-id="{{ a.id }}"
-                   data-abrir-rota="1" data-waze="{{ url_waze }}" data-destino="{{ endereco_rota|e }}" data-maps="{{ url_maps }}">A caminho</button>
+                   data-abrir-rota="1" data-waze="{{ url_waze }}" data-destino="{{ endereco_rota|e }}" data-coordenadas="{{ coordenadas_rota }}" data-maps="{{ url_maps }}">A caminho</button>
                 {% else %}
                 <span class="botao-mini botao-whats-btn desabilitado"
                       title="Salve a data e a hora para liberar o aviso ao cliente.">A caminho</span>
                 {% endif %}
 
                 {% if endereco_rota|trim %}
-                <a class="botao-mini botao-rota btn-krj-route" href="{{ url_maps }}" target="_blank" rel="noopener" data-waze="{{ url_waze }}" data-destino="{{ endereco_rota|e }}"
+                <a class="botao-mini botao-rota btn-krj-route" href="{{ url_maps }}" target="_blank" rel="noopener" data-waze="{{ url_waze }}" data-destino="{{ endereco_rota|e }}" data-coordenadas="{{ coordenadas_rota }}"
                    data-maps="{{ url_maps }}" data-rota-agenda-id="{{ a.id }}"
                    title="Iniciar rota">Iniciar rota</a>
                 {% else %}
@@ -370,6 +371,7 @@ function abrirNavegacaoPreferida(elemento){
   const wazeWeb = elemento.dataset.waze;
   const maps = elemento.dataset.maps || elemento.href;
   const destino = (elemento.dataset.destino || '').trim();
+  const coordenadas = (elemento.dataset.coordenadas || '').trim();
   if(!maps && !wazeWeb) return;
 
   const ehAndroid = /Android/i.test(navigator.userAgent);
@@ -381,18 +383,18 @@ function abrirNavegacaoPreferida(elemento){
 
   // Android permite declarar o fallback no próprio "intent". Assim somente um
   // navegador é disparado: Waze quando instalado, Maps quando não estiver.
-  if(ehAndroid && destino){
-    const destinoCodificado = encodeURIComponent(destino);
+  if(ehAndroid && (coordenadas || destino)){
+    const parametro = coordenadas ? `ll=${encodeURIComponent(coordenadas)}` : `q=${encodeURIComponent(destino)}`;
     const fallback = encodeURIComponent(new URL(maps, window.location.origin).href);
     window.location.href =
-      `intent://?q=${destinoCodificado}&navigate=yes#Intent;scheme=waze;package=com.waze;S.browser_fallback_url=${fallback};end`;
+      `intent://?${parametro}&navigate=yes#Intent;scheme=waze;package=com.waze;S.browser_fallback_url=${fallback};end`;
     return;
   }
 
   // iOS não oferece detecção confiável de aplicativo instalado no navegador.
   // Tentamos o scheme do Waze e só usamos Maps se a página continuar realmente
   // ativa. blur/pagehide/visibility cancelam o fallback assim que o Waze abre.
-  if(ehIOS && destino){
+  if(ehIOS && (coordenadas || destino)){
     let aplicativoAbriu = false;
     let timerFallback = null;
     const cancelarFallback = () => {
@@ -405,7 +407,8 @@ function abrirNavegacaoPreferida(elemento){
     window.addEventListener('pagehide', cancelarFallback, {once:true});
     document.addEventListener('visibilitychange', aoOcultar, {once:true});
 
-    window.location.href = `waze://?q=${encodeURIComponent(destino)}&navigate=yes`;
+    const parametro = coordenadas ? `ll=${encodeURIComponent(coordenadas)}` : `q=${encodeURIComponent(destino)}`;
+    window.location.href = `waze://?${parametro}&navigate=yes`;
     timerFallback = window.setTimeout(() => {
       if(!aplicativoAbriu && !document.hidden && document.hasFocus() && maps){
         window.location.href = maps;

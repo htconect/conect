@@ -523,6 +523,21 @@ def endereco_rota_solicitacao(item: Solicitacao) -> str:
     return ", ".join(str(valor).strip() for valor in partes if valor and str(valor).strip())
 
 
+def coordenadas_rota_solicitacao(item: Solicitacao) -> str:
+    """Retorna coordenadas verificadas da própria solicitação para navegação.
+
+    O Waze com ``q=`` navega para o primeiro resultado da pesquisa e pode escolher
+    um estabelecimento/endereço vizinho. Quando a geocodificação do contrato está
+    marcada como localizada, usamos ``ll=latitude,longitude`` para eliminar essa
+    segunda pesquisa dentro do Waze.
+    """
+    if (item.status_geocodificacao or "").strip().lower() != "localizado":
+        return ""
+    if not _coordenadas_validas_brasil(item.latitude, item.longitude):
+        return ""
+    return f"{float(item.latitude):.7f},{float(item.longitude):.7f}"
+
+
 def endereco_referencia_solicitacao(item: Solicitacao) -> str:
     """Retorna nome/ponto de referência sem misturar referência com o endereço da rota."""
     if (item.local_nome or "").strip():
@@ -538,6 +553,7 @@ def endereco_referencia_solicitacao(item: Solicitacao) -> str:
 
 templates.env.globals["dados_endereco_solicitacao"] = dados_endereco_solicitacao
 templates.env.globals["endereco_rota_solicitacao"] = endereco_rota_solicitacao
+templates.env.globals["coordenadas_rota_solicitacao"] = coordenadas_rota_solicitacao
 templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
@@ -547,7 +563,6 @@ def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     local_nome = (item.local_nome or "").strip()
     endereco = dados["endereco"]
     numero = dados["numero"]
-    complemento = dados["complemento"]
     bairro = dados["bairro"]
     cidade = dados["cidade"]
     estado = dados["estado"]
@@ -9352,7 +9367,6 @@ def _variacoes_endereco_solicitacao(sol: Solicitacao):
     dados = dados_endereco_solicitacao(sol)
     rua = dados["endereco"]
     numero = dados["numero"]
-    complemento = dados["complemento"]
     bairro = dados["bairro"]
     cidade = dados["cidade"] or "Rio de Janeiro"
     estado = dados["estado"] or "RJ"
@@ -9360,7 +9374,6 @@ def _variacoes_endereco_solicitacao(sol: Solicitacao):
 
     consultas = [
         _partes_unicas_endereco(rua, numero, bairro, cidade, estado, cep, "Brasil"),
-        _partes_unicas_endereco(rua, numero, complemento, bairro, cidade, estado, "Brasil"),
         _partes_unicas_endereco(rua, numero, cidade, estado, cep, "Brasil"),
         _partes_unicas_endereco(cep, numero, cidade, estado, "Brasil") if cep else "",
         _partes_unicas_endereco(rua, numero, bairro, cidade, "Brasil"),
@@ -9492,16 +9505,20 @@ def iniciar_rota_solicitacao(
     item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
     if not item:
         raise HTTPException(404)
-    # A navegação operacional usa sempre o endereço cadastrado. Não consulta
-    # geocodificação nem reutiliza latitude/longitude da Inteligência, evitando
-    # espera de rede e coordenadas incorretas durante entregas e retiradas.
+    # A navegação operacional usa sempre os dados da própria solicitação. Para o
+    # Waze, coordenadas já geocodificadas/confirmadas do contrato têm prioridade;
+    # o endereço textual permanece como fallback.
     destino = endereco_rota_solicitacao(item)
     if not destino:
         raise HTTPException(400, "Endereço não informado para iniciar a rota.")
     if provedor == "waze":
-        # O destino desta rota é sempre endereço textual do contrato. Manter ``q``
-        # também deixa o comportamento do navegador igual ao app móvel (waze://?q=...).
-        url = "https://waze.com/ul?" + urlencode({"q": destino, "navigate": "yes"})
+        # Preferir coordenadas elimina a busca fuzzy do Waze. Com ``q=`` o Waze
+        # navega para o primeiro resultado encontrado, que pode ser um POI ou número
+        # vizinho. Só usamos texto como fallback quando o contrato ainda não possui
+        # coordenadas geocodificadas/confirmadas.
+        coordenadas = coordenadas_rota_solicitacao(item)
+        parametros = {"ll": coordenadas, "navigate": "yes"} if coordenadas else {"q": destino, "navigate": "yes"}
+        url = "https://waze.com/ul?" + urlencode(parametros)
     else:
         url = "https://www.google.com/maps/search/?api=1&" + urlencode({"query": destino})
     return RedirectResponse(url, status_code=303)
