@@ -2,7 +2,7 @@
 {% block conteudo %}
 {% set contrato_pronto = contrato and itens_reserva and itens_reserva|length > 0 %}
 
-<h1>{% if status_reserva_confirmada(item.status) %}Reserva confirmada{% else %}Pré-contrato para conferência{% endif %} - {{ empresa.nome }}</h1>
+<h1>{% if status_reserva_confirmada(item.status) %}Reserva confirmada{% elif item.status == 'aceite_pagamento_pendente' %}Aceite registrado - pagamento pendente{% else %}Pré-contrato para conferência{% endif %} - {{ empresa.nome }}</h1>
 
 {% if not contrato_pronto and not status_reserva_confirmada(item.status) and item.status != "cancelado_cliente" %}
 <div class="box aviso">
@@ -95,12 +95,15 @@
     <div><b>Preparado em:</b> {{ item.criado_em|datahora_local }}</div>
     <div><b>Aprovado em:</b> {{ (item.aprovado_em or item.aceite_em)|datahora_local if (item.aprovado_em or item.aceite_em) and status_reserva_confirmada(item.status) else '-' }}</div>
     <div><b>Cancelado em:</b> {{ item.cancelado_em|datahora_local }}</div>
-    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif status_reserva_confirmada(item.status) %}Reserva{% else %}Aguardando aceite{% endif %}</div>
+    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif status_reserva_confirmada(item.status) %}Reserva{% elif item.status == 'aceite_pagamento_pendente' %}Aguardando pagamento{% else %}Aguardando aceite{% endif %}</div>
   </div>
 </div>
 
 <div class="box">
-  {% if status_reserva_confirmada(item.status) %}
+  {% if item.status == 'aceite_pagamento_pendente' %}
+    <p><b>Seu aceite foi registrado.</b> Agora escolha Sinal ou Valor integral para confirmar a reserva.</p>
+    <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Escolher pagamento</a>
+  {% elif status_reserva_confirmada(item.status) %}
     <p><b>Contrato aceito.</b> A partir deste ponto ele passa a ser tratado como reserva.</p>
     <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar esta reserva?');">
       <button class="perigo" type="submit">Cancelar</button>
@@ -111,7 +114,7 @@
     {% if contrato_pronto %}
       <div class="acoes-contrato-publico">
         <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar"><i class="bi bi-pencil-square"></i> Editar meus dados</a>
-        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.">
+        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. {% if empresa.infinitepay_ativa %}Em seguida você escolherá Sinal ou Valor integral para pagar pela InfinitePay.{% else %}Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.{% endif %}">
           <label class="check"><input type="checkbox" name="aceite" value="sim" required> Li, conferi os dados e aceito o contrato.</label>
           <button>Aceitar</button>
         </form>

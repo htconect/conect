@@ -20,6 +20,8 @@ class Empresa(Base):
     criado_em = Column(DateTime, server_default=func.now())
     pix_copia_cola = Column(Text, nullable=True)
     whatsapp_retorno = Column(String(30), nullable=True)
+    infinitepay_ativa = Column(Boolean, default=False)
+    infinitepay_handle = Column(String(80), nullable=True)
     exige_sinal = Column(Boolean, default=False)
     suporte_inicio = Column(String(5), nullable=True)
     suporte_fim = Column(String(5), nullable=True)
@@ -55,6 +57,7 @@ class UsuarioEmpresa(Base):
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False)
     nome = Column(String(120), nullable=False)
     usuario = Column(String(80), nullable=False, index=True)
+    telefone = Column(String(30), nullable=True)
     senha = Column(String(120), nullable=False)
     ativo = Column(Boolean, default=True)
     # Acessos por área de trabalho. O administrador principal da empresa ignora estas marcações.
@@ -293,6 +296,7 @@ class Solicitacao(Base):
     contrato_enviado_em = Column(DateTime, nullable=True)
     # Responsáveis de comunicação: contrato/comercial e operação/logística.
     responsavel_contrato = Column(String(120), nullable=True)
+    responsavel_contrato_telefone = Column(String(30), nullable=True)
     responsavel_operacao = Column(String(120), nullable=True)
     cancelado_em = Column(DateTime, nullable=True)
     # Controle de cobrança Humiat: somente definido quando o contrato é aceito.
@@ -364,6 +368,41 @@ class Pagamento(Base):
     criado_em = Column(DateTime, server_default=func.now())
 
     solicitacao = relationship("Solicitacao", back_populates="pagamentos")
+
+
+class InfinitePayTaxa(Base):
+    __tablename__ = "infinitepay_taxas"
+    __table_args__ = (UniqueConstraint("empresa_id", "parcelas", name="uq_infinitepay_taxa_empresa_parcelas"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    parcelas = Column(Integer, nullable=False)
+    taxa_percentual = Column(Float, nullable=False, default=0)
+    ativa = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
+class InfinitePayCobranca(Base):
+    __tablename__ = "infinitepay_cobrancas"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=False, index=True)
+    pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True, index=True)
+    order_nsu = Column(String(120), nullable=False, unique=True, index=True)
+    tipo_pagamento = Column(String(20), nullable=False)  # sinal | integral
+    valor_centavos = Column(Integer, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="AGUARDANDO_PAGAMENTO")
+    checkout_url = Column(Text, nullable=True)
+    transaction_nsu = Column(String(180), nullable=True, unique=True, index=True)
+    invoice_slug = Column(String(180), nullable=True)
+    receipt_url = Column(Text, nullable=True)
+    capture_method = Column(String(40), nullable=True)
+    installments = Column(Integer, nullable=False, default=0)
+    paid_amount_centavos = Column(Integer, nullable=False, default=0)
+    pago_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now())
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
 class Agenda(Base):

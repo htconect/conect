@@ -35,6 +35,18 @@
     <input name="senha_admin" value="{{ empresa.senha_admin if empresa else '' }}" required>
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea>
+
+    <label>WhatsApp principal / fallback</label>
+    <input name="whatsapp_retorno" inputmode="tel" value="{{ empresa.whatsapp_retorno if empresa else '' }}" placeholder="(21) 99999-9999">
+
+    <div class="box-mini" style="margin-top:14px">
+      <h3>InfinitePay</h3>
+      <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa and empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
+      <label>InfiniteTag / handle</label>
+      <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else 'karaokerj' }}" placeholder="karaokerj">
+      <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Integral pelo checkout. A configuração é isolada por empresa.</p>
+    </div>
+
     <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
 
     <div class="linha">
@@ -186,6 +198,9 @@
         <input name="usuario" id="usuario_login" placeholder="luiz" required>
       </div>
     </div>
+    <label>WhatsApp do usuário</label>
+    <input name="telefone" id="usuario_telefone" inputmode="tel" placeholder="(21) 99999-9999">
+    <small class="texto-discreto">Usado quando este usuário for o responsável do contrato. Após o pagamento, o cliente será direcionado para este WhatsApp.</small>
     <label id="label_senha">Senha</label>
     <input name="senha" id="usuario_senha" required>
     <small class="texto-discreto" id="aviso_senha" style="display:none">Deixe em branco para manter a senha atual.</small>
@@ -223,7 +238,7 @@
       <div>
         <b>{{ u.nome }}</b>
         <small>
-          {{ u.usuario }} · {{ "Ativo" if u.ativo else "Inativo" }} ·
+          {{ u.usuario }}{% if u.telefone %} · {{ u.telefone }}{% endif %} · {{ "Ativo" if u.ativo else "Inativo" }} ·
           {% set acessos = [] %}
           {% if u.acesso_agenda %}{% set _ = acessos.append("Agenda") %}{% endif %}
           {% if u.acesso_operacao %}{% set _ = acessos.append("Operação") %}{% endif %}
@@ -244,6 +259,7 @@
             "id": u.id,
             "nome": u.nome,
             "usuario": u.usuario,
+            "telefone": u.telefone,
             "ativo": u.ativo,
             "acesso_agenda": u.acesso_agenda,
             "acesso_operacao": u.acesso_operacao,
@@ -284,6 +300,7 @@ function editarUsuario(usuario) {
   document.getElementById("usuario_id").value = usuario.id;
   document.getElementById("usuario_nome").value = usuario.nome || "";
   document.getElementById("usuario_login").value = usuario.usuario || "";
+  document.getElementById("usuario_telefone").value = usuario.telefone || "";
   document.getElementById("usuario_senha").value = "";
   document.getElementById("usuario_senha").required = false;
   document.getElementById("usuario_ativo").checked = Boolean(usuario.ativo);

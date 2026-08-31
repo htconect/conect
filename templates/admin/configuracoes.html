@@ -6,7 +6,25 @@
   <form method="post" enctype="multipart/form-data">
     <label>WhatsApp da empresa para receber confirmações</label>
     <input name="whatsapp_retorno" inputmode="tel" placeholder="(21) 99999-9999" value="{{ empresa.whatsapp_retorno or '' }}">
-    <p class="texto-discreto">Após preencher o pré-contrato ou aceitar o contrato, o WhatsApp do cliente abrirá com uma confirmação pronta para este número.</p>
+    <p class="texto-discreto">Este número também funciona como fallback quando o responsável do contrato é o acesso principal da empresa ou não possui WhatsApp próprio cadastrado.</p>
+
+    <div class="box-mini" style="margin:16px 0">
+      <h2>InfinitePay</h2>
+      <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
+      <label>InfiniteTag / handle</label>
+      <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle or 'karaokerj' }}" placeholder="karaokerj">
+      <p class="texto-discreto">Quando ativa: após o aceite o cliente escolhe somente <b>Sinal</b> ou <b>Valor integral</b>. O contrato só é aprovado quando a InfinitePay confirmar o pagamento.</p>
+      <h3>Taxas online para simulação</h3>
+      <p class="texto-discreto">Mesma tabela utilizada na Karaoke RJ/SolVoz. A simulação mostra o total e o valor das parcelas; a cobrança enviada à InfinitePay continua usando o valor-base escolhido.</p>
+      <div class="grid">
+        {% for tx in taxas_infinitepay or [] %}
+          <div>
+            <label>{{ tx.parcelas }}x (%)</label>
+            <input name="infinitepay_taxa_{{ tx.parcelas }}" inputmode="decimal" value="{{ ('%.2f'|format(tx.taxa)).replace('.', ',') }}">
+          </div>
+        {% endfor %}
+      </div>
+    </div>
 
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola or '' }}</textarea>

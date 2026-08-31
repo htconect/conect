@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">
+  <p class="mini">Contrato #{{ item.id }}</p>
+  <h1>Pagamento autorizado!</h1>
+  <p>Seu pagamento foi confirmado e o contrato já foi aprovado.</p>
+  {% if cobranca %}
+    <p><b>Pagamento:</b> {{ 'Sinal' if cobranca.tipo_pagamento == 'sinal' else 'Valor integral' }} · R$ {{ (cobranca.valor_centavos / 100)|moeda_br }}</p>
+  {% endif %}
+</div>
+
+<div class="box aviso" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">
+  {% if url_whatsapp %}
+    <h2>Estou preparando seu contrato para envio</h2>
+    <p>O WhatsApp do responsável pelo seu contrato será aberto automaticamente.</p>
+    <p><b>Na próxima tela, basta clicar em Enviar.</b></p>
+    <p class="texto-discreto">Não feche esta tela enquanto o WhatsApp é aberto.</p>
+
+    <a id="fallbackWhatsapp" class="botao botao-whats largura-total" href="{{ url_whatsapp }}" style="display:none;margin-top:18px;">
+      <i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp
+    </a>
+
+    <script>
+      (function () {
+        const destino = {{ url_whatsapp|tojson }};
+        // Navegação na própria aba: não depende de popup e funciona melhor no celular.
+        window.setTimeout(function () {
+          window.location.replace(destino);
+        }, 900);
+
+        // Se o navegador impedir a navegação automática, oferece recuperação manual.
+        window.setTimeout(function () {
+          const fallback = document.getElementById('fallbackWhatsapp');
+          if (fallback) fallback.style.display = 'inline-flex';
+        }, 5000);
+      })();
+    </script>
+  {% else %}
+    <h2>Pagamento confirmado</h2>
+    <p class="alerta erro">O WhatsApp do responsável pelo contrato ainda não está cadastrado. O pagamento e a aprovação foram registrados normalmente.</p>
+    <p class="texto-discreto">Cadastre o telefone do responsável no usuário da empresa antes de usar o envio automático nos próximos contratos.</p>
+  {% endif %}
+</div>
+{% endblock %}

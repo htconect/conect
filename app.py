@@ -37,7 +37,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -97,6 +97,13 @@ templates.env.globals["APP_VERSION"] = APP_VERSION
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
+
+# InfinitePay — mesma integração usada pela Karaoke RJ no SolVoz.
+INFINITEPAY_HANDLE_PADRAO = os.getenv("INFINITEPAY_HANDLE", "karaokerj").strip().lstrip("$")
+INFINITEPAY_LINKS_URL = "https://api.checkout.infinitepay.io/links"
+INFINITEPAY_PAYMENT_CHECK_URL = "https://api.checkout.infinitepay.io/payment_check"
+INFINITEPAY_TIMEOUT_SECONDS = max(3, int(os.getenv("INFINITEPAY_TIMEOUT_SECONDS", "15") or 15))
+INFINITEPAY_TAXAS_PADRAO = [4.20, 6.09, 7.01, 7.91, 8.80, 9.67, 12.59, 13.42, 14.25, 15.06, 15.87, 16.66]
 
 
 def agora_utc() -> datetime:
@@ -812,6 +819,7 @@ def garantir_colunas_novas():
             empresa_id INTEGER NOT NULL,
             nome VARCHAR(120) NOT NULL,
             usuario VARCHAR(80) NOT NULL,
+            telefone VARCHAR(30),
             senha VARCHAR(120) NOT NULL,
             ativo BOOLEAN DEFAULT true,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -824,6 +832,10 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN pix_copia_cola TEXT")
     if "whatsapp_retorno" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN whatsapp_retorno VARCHAR(30)")
+    if "infinitepay_ativa" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_ativa BOOLEAN DEFAULT false")
+    if "infinitepay_handle" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_handle VARCHAR(80)")
     if "exige_sinal" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN exige_sinal BOOLEAN DEFAULT false")
     if "suporte_inicio" not in cols_emp:
@@ -921,6 +933,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_enviado_em TIMESTAMP")
         if "responsavel_contrato" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_contrato VARCHAR(120)")
+        if "responsavel_contrato_telefone" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_contrato_telefone VARCHAR(30)")
         if "responsavel_operacao" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_operacao VARCHAR(120)")
         if "cancelado_em" not in cols_sol:
@@ -1042,6 +1056,8 @@ def garantir_colunas_novas():
 
     if "usuarios_empresa" in tabelas:
         cols_usu = colunas("usuarios_empresa")
+        if "telefone" not in cols_usu:
+            comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN telefone VARCHAR(30)")
         novas_permissoes = {
             "acesso_agenda": "BOOLEAN DEFAULT false",
             "acesso_operacao": "BOOLEAN DEFAULT false",
@@ -1681,6 +1697,14 @@ def startup():
     try:
         inicializar_dados(db)
         for emp in db.query(Empresa).all():
+            # Primeira migração: a Karaoke RJ já usa a mesma conta InfinitePay do SolVoz.
+            # O handle preenchido funciona como marcador para não reativar caso a empresa desabilite depois.
+            if (emp.slug or "").strip().lower() == "karaokerj" and not (emp.infinitepay_handle or "").strip():
+                emp.infinitepay_handle = INFINITEPAY_HANDLE_PADRAO or "karaokerj"
+                emp.infinitepay_ativa = True
+            if emp.infinitepay_ativa:
+                _infinitepay_seed_taxas(db, emp.id)
+                _conta_infinitepay(db, emp.id)
             configurar_campos_empresa(db, emp.id)
             criar_modelos_iniciais_empresa(db, emp)
             if db.query(Equipe).filter_by(empresa_id=emp.id).count() == 0:
@@ -2185,6 +2209,8 @@ def admin_criar_empresa(
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
         whatsapp_retorno: str = Form(""),
+        infinitepay_ativa: Optional[str] = Form(None),
+        infinitepay_handle: str = Form(""),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -2213,6 +2239,8 @@ def admin_criar_empresa(
         senha_admin=senha_admin.strip(),
         pix_copia_cola=pix_copia_cola.strip(),
         whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
+        infinitepay_ativa=bool(infinitepay_ativa),
+        infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
         exige_sinal=bool(exige_sinal),
         suporte_inicio=suporte_inicio.strip(),
         suporte_fim=suporte_fim.strip(),
@@ -2290,6 +2318,9 @@ def admin_salvar_empresa(
         senha_admin: str = Form(...),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
+        whatsapp_retorno: str = Form(""),
+        infinitepay_ativa: Optional[str] = Form(None),
+        infinitepay_handle: str = Form(""),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -2313,6 +2344,9 @@ def admin_salvar_empresa(
     empresa.usuario_admin = usuario_admin.strip()
     empresa.senha_admin = senha_admin.strip()
     empresa.pix_copia_cola = pix_copia_cola.strip()
+    empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
+    empresa.infinitepay_ativa = bool(infinitepay_ativa)
+    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
@@ -2375,6 +2409,7 @@ def admin_criar_usuario_empresa(
         empresa_id: int,
         nome: str = Form(...),
         usuario: str = Form(...),
+        telefone: str = Form(""),
         senha: Optional[str] = Form(None),
         usuario_id: Optional[str] = Form(None),
         ativo: Optional[str] = Form("1"),
@@ -2418,6 +2453,7 @@ def admin_criar_usuario_empresa(
     dados = {
         "nome": nome.strip(),
         "usuario": usuario_limpo,
+        "telefone": _limpar_tel_whatsapp(telefone),
         "ativo": bool(ativo),
         "acesso_agenda": bool(acesso_agenda),
         "acesso_operacao": bool(acesso_operacao),
@@ -2651,7 +2687,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
     """Home leve: somente leitura, agregações consolidadas e relacionamentos pré-carregados."""
     hoje = date.today()
     inicio_semana, fim_semana = periodo_semana_atual()
-    status_pendentes = ["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite"]
+    status_pendentes = ["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite", "aceite_pagamento_pendente"]
     status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
     competencia_humiat = agora_utc().strftime("%Y-%m")
 
@@ -2995,9 +3031,11 @@ def configuracoes_empresa(request: Request, db: Session = Depends(get_db), empre
     mensagens_padrao = mensagens_empresa(empresa)
     campos = db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).order_by(
         CampoEmpresa.ordem).all()
+    taxas_infinitepay = _infinitepay_taxas(db, empresa.id)
+    db.commit()
     return templates.TemplateResponse("admin/configuracoes.html",
                                       {"request": request, "empresa": empresa, "mensagens_padrao": mensagens_padrao,
-                                       "campos": campos})
+                                       "campos": campos, "taxas_infinitepay": taxas_infinitepay})
 
 
 @app.post("/painel/configuracoes")
@@ -3005,6 +3043,8 @@ async def salvar_configuracoes_empresa(
         request: Request,
         pix_copia_cola: str = Form(""),
         whatsapp_retorno: str = Form(""),
+        infinitepay_ativa: Optional[str] = Form(None),
+        infinitepay_handle: str = Form(""),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -3026,7 +3066,20 @@ async def salvar_configuracoes_empresa(
 ):
     empresa.pix_copia_cola = pix_copia_cola.strip()
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
+    empresa.infinitepay_ativa = bool(infinitepay_ativa)
+    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
     empresa.exige_sinal = bool(exige_sinal)
+    _infinitepay_seed_taxas(db, empresa.id)
+    form_data = await request.form()
+    for parcelas in range(1, 13):
+        chave = f"infinitepay_taxa_{parcelas}"
+        if chave not in form_data:
+            continue
+        taxa = texto_para_float(str(form_data.get(chave) or "0"))
+        linha = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa.id, parcelas=parcelas).first()
+        if linha and 0 < taxa < 100:
+            linha.taxa_percentual = taxa
+            linha.ativa = True
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
@@ -3769,13 +3822,10 @@ def compartilhar_aceite_whatsapp(
     # Para os novos contratos, quem fizer o primeiro envio para aceite passa a
     # ser o responsável pela comunicação comercial daquele contrato. Edições
     # posteriores não trocam o responsável.
-    if not item.responsavel_contrato:
-        item.responsavel_contrato = (
-            request.session.get("usuario_nome")
-            or request.session.get("usuario_sistema")
-            or request.session.get("usuario")
-            or "Usuário"
-        )
+    responsavel_nome_antes = item.responsavel_contrato
+    responsavel_tel_antes = item.responsavel_contrato_telefone
+    _responsavel_contrato_dados(request, db, empresa, item, fixar=True)
+    if item.responsavel_contrato != responsavel_nome_antes or item.responsavel_contrato_telefone != responsavel_tel_antes:
         alterou = True
     if alterou:
         db.commit()
@@ -7356,6 +7406,277 @@ def buscar_cliente(slug: str, identificador: str = Form(...), db: Session = Depe
     return RedirectResponse(f"/e/{slug}/cadastro?identificador={ident}", status_code=303)
 
 
+
+# ============================================================
+# INFINITEPAY — ACEITE, COBRANÇA E CONCILIAÇÃO AUTOMÁTICA
+# ============================================================
+class InfinitePayErro(RuntimeError):
+    def __init__(self, status_code: int, detalhe: str):
+        self.status_code = int(status_code or 0)
+        self.detalhe = str(detalhe or "")[:1600]
+        super().__init__(f"InfinitePay HTTP {self.status_code}: {self.detalhe}")
+
+
+def _infinitepay_handle(empresa: Empresa) -> str:
+    return str(getattr(empresa, "infinitepay_handle", "") or INFINITEPAY_HANDLE_PADRAO or "").strip().lstrip("$")
+
+
+def _infinitepay_habilitada(empresa: Empresa) -> bool:
+    return bool(getattr(empresa, "infinitepay_ativa", False) and _infinitepay_handle(empresa))
+
+
+def _infinitepay_public_url(request: Request, path: str) -> str:
+    caminho = "/" + str(path or "").lstrip("/")
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip().rstrip("/")
+    if not host:
+        return f"{str(request.base_url).rstrip('/')}{caminho}"
+    scheme = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip().lower()
+    if host.split(":")[0] not in {"localhost", "127.0.0.1"}:
+        scheme = "https"
+    return f"{scheme}://{host}{caminho}"
+
+
+def _infinitepay_post(url: str, payload: dict) -> dict:
+    dados = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = UrlRequest(
+        url,
+        data=dados,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"HUMIAT-Conect/{APP_VERSION}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=INFINITEPAY_TIMEOUT_SECONDS) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            obj = json.loads(body or "{}")
+            return obj if isinstance(obj, dict) else {}
+    except HTTPError as exc:
+        detalhe = exc.read().decode("utf-8", errors="replace")[:1600]
+        raise InfinitePayErro(exc.code, detalhe) from exc
+    except URLError as exc:
+        raise RuntimeError(f"Falha de conexão com a InfinitePay: {exc.reason}") from exc
+
+
+def _infinitepay_seed_taxas(db: Session, empresa_id: int):
+    for parcelas, taxa in enumerate(INFINITEPAY_TAXAS_PADRAO, start=1):
+        existe = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id, parcelas=parcelas).first()
+        if not existe:
+            db.add(InfinitePayTaxa(
+                empresa_id=empresa_id,
+                parcelas=parcelas,
+                taxa_percentual=float(taxa),
+                ativa=True,
+            ))
+    db.flush()
+
+
+def _infinitepay_taxas(db: Session, empresa_id: int) -> list[dict]:
+    _infinitepay_seed_taxas(db, empresa_id)
+    rows = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id, ativa=True).order_by(InfinitePayTaxa.parcelas).all()
+    return [{"parcelas": int(r.parcelas), "taxa": float(r.taxa_percentual or 0)} for r in rows if 1 <= int(r.parcelas or 0) <= 12]
+
+
+def _infinitepay_simulacoes(valor_base: float, taxas: list[dict]) -> list[dict]:
+    base = max(float(valor_base or 0), 0)
+    resultado = []
+    for linha in taxas:
+        parcelas = int(linha.get("parcelas") or 0)
+        taxa = float(linha.get("taxa") or 0)
+        if not base or parcelas < 1 or parcelas > 12 or taxa <= 0 or taxa >= 100:
+            continue
+        total = base / (1 - taxa / 100)
+        resultado.append({
+            "parcelas": parcelas,
+            "taxa": taxa,
+            "total": round(total, 2),
+            "parcela": round(total / parcelas, 2),
+        })
+    return resultado
+
+
+def _responsavel_contrato_dados(request: Request | None, db: Session, empresa: Empresa, item: Solicitacao, fixar: bool = False) -> tuple[str, str]:
+    nome_atual = str(getattr(item, "responsavel_contrato", "") or "").strip()
+    tel_atual = _limpar_tel_whatsapp(str(getattr(item, "responsavel_contrato_telefone", "") or ""))
+    if nome_atual and tel_atual:
+        return nome_atual, tel_atual
+
+    usuario = None
+    if request is not None:
+        usuario_id = request.session.get("usuario_empresa_id")
+        if usuario_id:
+            usuario = db.get(UsuarioEmpresa, int(usuario_id))
+            if usuario and usuario.empresa_id != empresa.id:
+                usuario = None
+
+    if not usuario and nome_atual:
+        usuario = db.query(UsuarioEmpresa).filter(
+            UsuarioEmpresa.empresa_id == empresa.id,
+            or_(UsuarioEmpresa.nome == nome_atual, UsuarioEmpresa.usuario == nome_atual),
+        ).first()
+
+    nome = nome_atual
+    telefone = tel_atual
+    if usuario:
+        nome = nome or usuario.nome or usuario.usuario
+        telefone = telefone or _limpar_tel_whatsapp(usuario.telefone or "")
+
+    if not nome and request is not None:
+        nome = (
+            request.session.get("usuario_nome")
+            or request.session.get("usuario_sistema")
+            or request.session.get("usuario")
+            or empresa.usuario_admin
+            or "Responsável"
+        )
+    telefone = telefone or _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
+
+    if fixar:
+        if nome and not item.responsavel_contrato:
+            item.responsavel_contrato = nome[:120]
+        if telefone and not item.responsavel_contrato_telefone:
+            item.responsavel_contrato_telefone = telefone[:30]
+    return nome or "Responsável", telefone
+
+
+def _url_whatsapp_registro_contrato(request: Request, db: Session, empresa: Empresa, item: Solicitacao) -> str | None:
+    responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=True)
+    if not telefone:
+        return None
+    cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
+    data_evento = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else ""
+    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
+    texto = (
+        f"Olá, {responsavel}. Sou {cliente}. Meu pagamento do contrato #{item.id} foi confirmado.\n\n"
+        f"Evento: {data_evento}\n"
+        f"Contrato: {link_pdf}\n\n"
+        "Estou enviando o contrato para registro conforme orientação do sistema."
+    )
+    return f"https://wa.me/{telefone}?text={quote(texto)}"
+
+
+def _conta_infinitepay(db: Session, empresa_id: int) -> ContaFinanceira:
+    conta = db.query(ContaFinanceira).filter(
+        ContaFinanceira.empresa_id == empresa_id,
+        func.lower(ContaFinanceira.nome) == "infinitepay",
+    ).first()
+    if conta:
+        conta.ativa = True
+        return conta
+    conta_cartao = db.query(ContaFinanceira).filter(
+        ContaFinanceira.empresa_id == empresa_id,
+        func.lower(ContaFinanceira.nome).in_(["cartão", "cartao"]),
+    ).first()
+    if conta_cartao:
+        conta_cartao.nome = "InfinitePay"
+        conta_cartao.tipo = "cartao"
+        conta_cartao.ativa = True
+        db.flush()
+        return conta_cartao
+    conta = ContaFinanceira(empresa_id=empresa_id, nome="InfinitePay", tipo="cartao", saldo_inicial=0, ativa=True)
+    db.add(conta)
+    db.flush()
+    return conta
+
+
+def _forma_pagamento_infinitepay(capture_method: str) -> str:
+    metodo = str(capture_method or "").strip().lower()
+    if "pix" in metodo:
+        return "pix"
+    if any(x in metodo for x in ("credit", "card", "credito", "cartao", "cartão")):
+        return "cartao"
+    return "infinitepay"
+
+
+def _aprovar_contrato_infinitepay(db: Session, empresa: Empresa, item: Solicitacao):
+    if item.status != "reserva_confirmada":
+        item.status = "reserva_confirmada"
+    if not item.aprovado_em:
+        item.aprovado_em = agora_utc()
+    fim_obj = item.hora_fim or (
+        somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
+        if item.produto and item.produto.duracao_minutos else None
+    )
+    item.hora_fim = fim_obj
+    criar_eventos_operacionais(db, item)
+    _processar_humiat_aceite(db, empresa, item)
+
+
+def _registrar_pagamento_infinitepay(
+    db: Session,
+    cobranca: InfinitePayCobranca,
+    transaction_nsu: str,
+    invoice_slug: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    installments: int = 0,
+    paid_amount_centavos: int = 0,
+) -> bool:
+    if cobranca.status == "PAGO" and cobranca.pagamento_id:
+        return True
+    empresa = db.get(Empresa, cobranca.empresa_id)
+    item = db.get(Solicitacao, cobranca.solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id:
+        return False
+
+    pagamento = db.get(Pagamento, cobranca.pagamento_id) if cobranca.pagamento_id else None
+    if not pagamento:
+        pagamento = Pagamento(
+            empresa_id=empresa.id,
+            solicitacao_id=item.id,
+            data_pagamento=date.today(),
+            valor=float(cobranca.valor_centavos or 0) / 100.0,
+            forma_pagamento=_forma_pagamento_infinitepay(capture_method),
+            comprovante_no_nome_cliente=True,
+            nome_comprovante=item.cliente.nome if item.cliente else "Cliente",
+            observacoes=f"InfinitePay • {cobranca.tipo_pagamento} • {cobranca.order_nsu}",
+            usuario_registro="InfinitePay",
+            conciliado_por="InfinitePay",
+            conciliado_em=agora_utc(),
+        )
+        db.add(pagamento)
+        db.flush()
+        cobranca.pagamento_id = pagamento.id
+
+    conta = _conta_infinitepay(db, empresa.id)
+    lancamento = db.query(LancamentoManualFinanceiro).filter_by(
+        empresa_id=empresa.id,
+        pagamento_id=pagamento.id,
+        tipo="real",
+    ).first()
+    if not lancamento:
+        proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(
+            empresa_id=empresa.id, conta_id=conta.id).scalar() or 0) + 1
+        cliente_nome = item.cliente.nome if item.cliente else "Cliente"
+        db.add(LancamentoManualFinanceiro(
+            empresa_id=empresa.id,
+            conta_id=conta.id,
+            data=pagamento.data_pagamento,
+            descricao=f"{cliente_nome} - InfinitePay - contrato #{item.id}",
+            valor=pagamento.valor or 0,
+            categoria="aluguel",
+            tipo="real",
+            recebido=True,
+            pagamento_id=pagamento.id,
+            ordem=proxima_ordem,
+        ))
+
+    recalcular_pagamento_solicitacao(db, item)
+    _aprovar_contrato_infinitepay(db, empresa, item)
+    cobranca.status = "PAGO"
+    cobranca.transaction_nsu = str(transaction_nsu or "")[:180] or cobranca.transaction_nsu
+    cobranca.invoice_slug = str(invoice_slug or "")[:180]
+    cobranca.receipt_url = str(receipt_url or "")[:1000]
+    cobranca.capture_method = str(capture_method or "")[:40]
+    cobranca.installments = int(installments or 0)
+    cobranca.paid_amount_centavos = int(paid_amount_centavos or cobranca.valor_centavos or 0)
+    cobranca.pago_em = cobranca.pago_em or agora_utc()
+    db.commit()
+    return True
+
+
 def _url_confirmacao_whatsapp(empresa: Empresa, item: Solicitacao, tipo: str) -> str | None:
     telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
     if not telefone:
@@ -7702,7 +8023,7 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
 
     if item.status not in ["pre_reserva", "reserva", "aguardando_aceite",
                            "contrato_enviado", "aceito", "aguardando_pagamento",
-                           "reserva_confirmada", "cancelado_cliente"]:
+                           "aceite_pagamento_pendente", "reserva_confirmada", "cancelado_cliente"]:
         raise HTTPException(404)
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
     produto = db.get(ProdutoServico, item.produto_id) if item.produto_id else None
@@ -7718,7 +8039,7 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Reque
     item = db.get(Solicitacao, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
-    if status_reserva_confirmada(item.status) or item.status == "cancelado_cliente":
+    if status_reserva_confirmada(item.status) or item.status in {"aceite_pagamento_pendente", "cancelado_cliente"}:
         return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
 
     endereco_evento = dados_endereco_solicitacao(item)
@@ -7776,7 +8097,7 @@ def salvar_dados_contrato_cliente(
     item = db.get(Solicitacao, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
-    if status_reserva_confirmada(item.status) or item.status == "cancelado_cliente":
+    if status_reserva_confirmada(item.status) or item.status in {"aceite_pagamento_pendente", "cancelado_cliente"}:
         return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
 
     cliente = item.cliente
@@ -7844,8 +8165,16 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
     aceite_registrado_agora = False
     if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
         aceite_registrado_agora = True
-        item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
         item.aceite_em = agora_utc()
+        if _infinitepay_habilitada(empresa):
+            # No fluxo InfinitePay, aceite e aprovação são etapas diferentes.
+            # A reserva só é aprovada, entra na operação e consome Humiat após o pagamento confirmado.
+            item.status = "aceite_pagamento_pendente"
+            item.aprovado_em = None
+            db.commit()
+            return RedirectResponse(f"/e/{slug}/pagamento/{solicitacao_id}", status_code=303)
+
+        item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
         item.aprovado_em = item.aceite_em
         fim_obj = item.hora_fim or (somar_minutos(item.hora_inicio,
                                                   item.produto.duracao_minutos) if item.produto and item.produto.duracao_minutos else None)
@@ -7853,11 +8182,257 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         criar_eventos_operacionais(db, item)
         _processar_humiat_aceite(db, empresa, item)
         db.commit()
-    # Todo aceite gravado deve abrir o WhatsApp, independentemente de sinal/pagamento pendente.
+    # Processo manual permanece inalterado.
     url_whatsapp = _url_confirmacao_whatsapp(empresa, item, "aceite") if aceite_registrado_agora else None
     if url_whatsapp:
         return RedirectResponse(url_whatsapp, status_code=303)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao_id}", status_code=303)
+
+
+
+@app.get("/e/{slug}/pagamento/{solicitacao_id}", response_class=HTMLResponse, name="infinitepay_escolha_pagamento")
+def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not _infinitepay_habilitada(empresa):
+        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
+
+    cobranca_paga = db.query(InfinitePayCobranca).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id, status="PAGO"
+    ).order_by(InfinitePayCobranca.id.desc()).first()
+    if cobranca_paga or item.status == "reserva_confirmada":
+        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
+        db.commit()
+        return templates.TemplateResponse("publico/pagamento_confirmado.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "cobranca": cobranca_paga, "url_whatsapp": url_whatsapp,
+        }, headers={"Cache-Control": "no-store"})
+
+    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento"}:
+        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
+
+    saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0)
+    sinal_restante = min(max(float(item.sinal or 0) - float(item.valor_pago or 0), 0), saldo)
+    taxas = _infinitepay_taxas(db, empresa.id)
+    db.commit()
+    opcoes = []
+    if sinal_restante > 0.009:
+        opcoes.append({
+            "tipo": "sinal", "titulo": "Sinal", "valor": round(sinal_restante, 2),
+            "simulacoes": _infinitepay_simulacoes(sinal_restante, taxas),
+        })
+    if saldo > 0.009:
+        opcoes.append({
+            "tipo": "integral", "titulo": "Valor integral", "valor": round(saldo, 2),
+            "simulacoes": _infinitepay_simulacoes(saldo, taxas),
+        })
+    return templates.TemplateResponse("publico/pagamento_escolha.html", {
+        "request": request, "empresa": empresa, "item": item, "opcoes": opcoes,
+        "responsavel_nome": _responsavel_contrato_dados(request, db, empresa, item)[0],
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/e/{slug}/pagamento/{solicitacao_id}/infinitepay", name="infinitepay_criar_checkout")
+def infinitepay_criar_checkout(
+    slug: str,
+    solicitacao_id: int,
+    request: Request,
+    tipo_pagamento: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not _infinitepay_habilitada(empresa):
+        raise HTTPException(400, "InfinitePay não está habilitada para esta empresa.")
+    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento"}:
+        return RedirectResponse(f"/e/{slug}/pagamento/{solicitacao_id}", status_code=303)
+
+    tipo = str(tipo_pagamento or "").strip().lower()
+    if tipo not in {"sinal", "integral"}:
+        raise HTTPException(400, "Escolha Sinal ou Valor integral.")
+
+    saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0)
+    sinal_restante = min(max(float(item.sinal or 0) - float(item.valor_pago or 0), 0), saldo)
+    valor = sinal_restante if tipo == "sinal" else saldo
+    if valor <= 0.009:
+        raise HTTPException(400, "Não há valor disponível para esta opção de pagamento.")
+    valor_centavos = int(round(valor * 100))
+
+    existente = db.query(InfinitePayCobranca).filter_by(
+        empresa_id=empresa.id,
+        solicitacao_id=item.id,
+        tipo_pagamento=tipo,
+        valor_centavos=valor_centavos,
+        status="AGUARDANDO_PAGAMENTO",
+    ).order_by(InfinitePayCobranca.id.desc()).first()
+    if existente and str(existente.checkout_url or "").startswith("https://"):
+        return RedirectResponse(existente.checkout_url, status_code=303)
+
+    order_nsu = f"CONECT-{empresa.id}-{item.id}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8].upper()}"
+    cobranca = InfinitePayCobranca(
+        empresa_id=empresa.id,
+        solicitacao_id=item.id,
+        order_nsu=order_nsu,
+        tipo_pagamento=tipo,
+        valor_centavos=valor_centavos,
+        status="AGUARDANDO_PAGAMENTO",
+    )
+    db.add(cobranca)
+    db.flush()
+
+    cliente = item.cliente
+    telefone = re.sub(r"\D", "", str((cliente.telefone or cliente.identificador or "") if cliente else ""))
+    if telefone.startswith("55") and len(telefone) >= 12:
+        telefone_infinite = "+" + telefone
+    else:
+        telefone_infinite = "+55" + telefone if telefone else ""
+    descricao = f"Contrato #{item.id} - {'Sinal' if tipo == 'sinal' else 'Valor integral'} - {empresa.nome}"[:180]
+    payload = {
+        "handle": _infinitepay_handle(empresa),
+        "order_nsu": order_nsu,
+        "redirect_url": _infinitepay_public_url(request, f"/e/{empresa.slug}/pagamento/retorno"),
+        "webhook_url": _infinitepay_public_url(request, "/api/infinitepay/webhook"),
+        "items": [{"quantity": 1, "price": valor_centavos, "description": descricao}],
+    }
+    if cliente:
+        customer = {
+            "name": str(cliente.nome or "Cliente")[:160],
+            "email": str(cliente.email or "").strip()[:180],
+            "phone_number": telefone_infinite,
+        }
+        payload["customer"] = {k: v for k, v in customer.items() if v}
+
+    endereco = dados_endereco_solicitacao(item)
+    if endereco.get("cep") or endereco.get("endereco"):
+        payload["address"] = {
+            "cep": re.sub(r"\D", "", str(endereco.get("cep") or ""))[:8],
+            "street": str(endereco.get("endereco") or "")[:180],
+            "neighborhood": str(endereco.get("bairro") or "")[:120],
+            "number": str(endereco.get("numero") or "")[:40],
+            "complement": str(endereco.get("complemento") or "")[:120],
+        }
+
+    try:
+        resposta = _infinitepay_post(INFINITEPAY_LINKS_URL, payload)
+        checkout_url = str(resposta.get("url") or "").strip()
+        if not checkout_url.startswith("https://"):
+            raise RuntimeError("InfinitePay não retornou uma URL válida de checkout.")
+        cobranca.checkout_url = checkout_url
+        db.commit()
+        return RedirectResponse(checkout_url, status_code=303)
+    except Exception as exc:
+        cobranca.status = "ERRO_CHECKOUT"
+        db.commit()
+        logger.exception("Falha ao criar checkout InfinitePay contrato %s", item.id)
+        return templates.TemplateResponse("publico/pagamento_erro.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "erro": "Não foi possível abrir o pagamento agora. Nenhuma cobrança foi realizada.",
+            "detalhe": str(exc)[:500],
+        }, status_code=502, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/infinitepay/webhook", include_in_schema=False)
+async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "message": "JSON inválido"}, status_code=400)
+    if not isinstance(payload, dict):
+        return JSONResponse({"success": False, "message": "Payload inválido"}, status_code=400)
+    order_nsu = str(payload.get("order_nsu") or "").strip()
+    transaction_nsu = str(payload.get("transaction_nsu") or "").strip()
+    if not order_nsu or not transaction_nsu:
+        return JSONResponse({"success": False, "message": "Identificadores ausentes"}, status_code=400)
+    cobranca = db.query(InfinitePayCobranca).filter_by(order_nsu=order_nsu).first()
+    if not cobranca:
+        return JSONResponse({"success": False, "message": "Cobrança não encontrada"}, status_code=400)
+    try:
+        amount = int(payload.get("amount") or 0)
+    except Exception:
+        amount = 0
+    if amount != int(cobranca.valor_centavos or 0):
+        return JSONResponse({"success": False, "message": "Valor não confere"}, status_code=400)
+    if cobranca.status == "PAGO":
+        return JSONResponse({"success": True, "message": None})
+    ok = _registrar_pagamento_infinitepay(
+        db,
+        cobranca,
+        transaction_nsu=transaction_nsu,
+        invoice_slug=str(payload.get("invoice_slug") or ""),
+        receipt_url=str(payload.get("receipt_url") or ""),
+        capture_method=str(payload.get("capture_method") or ""),
+        installments=int(payload.get("installments") or 0),
+        paid_amount_centavos=int(payload.get("paid_amount") or amount),
+    )
+    return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
+
+
+@app.get("/e/{slug}/pagamento/retorno", response_class=HTMLResponse, name="infinitepay_retorno")
+def infinitepay_retorno(
+    slug: str,
+    request: Request,
+    order_nsu: str = "",
+    transaction_nsu: str = "",
+    slug_pagamento: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    db: Session = Depends(get_db),
+):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+    # InfinitePay usa o parâmetro "slug" no retorno. FastAPI já usa slug na rota;
+    # por isso lemos diretamente da query string para não haver colisão de nomes.
+    invoice_slug = str(request.query_params.get("slug") or slug_pagamento or "").strip()
+    order_nsu = str(order_nsu or request.query_params.get("order_nsu") or "").strip()
+    transaction_nsu = str(transaction_nsu or request.query_params.get("transaction_nsu") or "").strip()
+    cobranca = db.query(InfinitePayCobranca).filter_by(order_nsu=order_nsu, empresa_id=empresa.id).first() if order_nsu else None
+    if not cobranca:
+        return templates.TemplateResponse("publico/pagamento_erro.html", {
+            "request": request, "empresa": empresa, "item": None,
+            "erro": "Não foi possível localizar esta cobrança.", "detalhe": "",
+        }, status_code=404, headers={"Cache-Control": "no-store"})
+
+    if cobranca.status != "PAGO" and transaction_nsu and invoice_slug:
+        try:
+            check = _infinitepay_post(INFINITEPAY_PAYMENT_CHECK_URL, {
+                "handle": _infinitepay_handle(empresa),
+                "order_nsu": cobranca.order_nsu,
+                "transaction_nsu": transaction_nsu,
+                "slug": invoice_slug,
+            })
+            if bool(check.get("success")) and bool(check.get("paid")):
+                amount = int(check.get("amount") or 0)
+                if amount == int(cobranca.valor_centavos or 0):
+                    _registrar_pagamento_infinitepay(
+                        db,
+                        cobranca,
+                        transaction_nsu=transaction_nsu,
+                        invoice_slug=invoice_slug,
+                        receipt_url=receipt_url,
+                        capture_method=str(check.get("capture_method") or capture_method or ""),
+                        installments=int(check.get("installments") or 0),
+                        paid_amount_centavos=int(check.get("paid_amount") or amount),
+                    )
+        except Exception:
+            logger.exception("Falha no payment_check InfinitePay %s", cobranca.order_nsu)
+
+    db.refresh(cobranca)
+    item = db.get(Solicitacao, cobranca.solicitacao_id)
+    if cobranca.status == "PAGO":
+        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
+        db.commit()
+        return templates.TemplateResponse("publico/pagamento_confirmado.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "cobranca": cobranca, "url_whatsapp": url_whatsapp,
+        }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    return templates.TemplateResponse("publico/pagamento_pendente.html", {
+        "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,
+    }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 @app.get("/e/{slug}/confirmar-whatsapp/{solicitacao_id}", response_class=HTMLResponse)

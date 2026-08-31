@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box alerta erro">
+  <h1>Não foi possível continuar</h1>
+  <p>{{ erro }}</p>
+  {% if detalhe %}<details><summary>Detalhes técnicos</summary><pre>{{ detalhe }}</pre></details>{% endif %}
+  {% if item %}<a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Tentar novamente</a>{% endif %}
+</div>
+{% endblock %}
