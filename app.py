@@ -8235,6 +8235,11 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
         else None
     )
     valor_cobranca_pendente = (float(cobranca_pendente.valor_centavos or 0) / 100.0) if cobranca_pendente else 0.0
+    taxas_infinitepay_publicas = _infinitepay_taxas(db, empresa.id) if infinitepay_habilitada else []
+    simulacoes_cobranca_pendente = (
+        _infinitepay_simulacoes(valor_cobranca_pendente, taxas_infinitepay_publicas)
+        if cobranca_pendente and valor_cobranca_pendente > 0.009 else []
+    )
     mostrar_pergunta_pagamento = (
         request.query_params.get("aceite") == "ok"
         and aceite_realizado
@@ -8246,9 +8251,18 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
     # os mesmos valores alimentam a área PIX. Depois de qualquer pagamento, só o saldo
     # restante é oferecido para evitar cobrança duplicada do valor original.
     pagamento_parcial = total_pago_publico > 0.009
+    titulo_cobranca_pendente = "Pagamento"
+    if cobranca_pendente:
+        tipo_pendente = str(cobranca_pendente.tipo_pagamento or "").strip().lower()
+        if pagamento_parcial or tipo_pendente == "restante":
+            titulo_cobranca_pendente = "Saldo restante"
+        elif tipo_pendente == "sinal":
+            titulo_cobranca_pendente = "Sinal"
+        elif tipo_pendente == "integral":
+            titulo_cobranca_pendente = "Valor do contrato"
     opcoes_pagamento = []
     if aceite_realizado and saldo_restante > 0.009 and item.status != "cancelado_cliente":
-        taxas = _infinitepay_taxas(db, empresa.id) if infinitepay_habilitada else []
+        taxas = taxas_infinitepay_publicas
         if pagamento_parcial:
             opcoes_pagamento.append({
                 "tipo": "integral", "titulo": "Saldo restante", "valor": round(saldo_restante, 2),
@@ -8282,6 +8296,8 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
         "infinitepay_habilitada": infinitepay_habilitada,
         "cobranca_pendente": cobranca_pendente,
         "valor_cobranca_pendente": valor_cobranca_pendente,
+        "simulacoes_cobranca_pendente": simulacoes_cobranca_pendente,
+        "titulo_cobranca_pendente": titulo_cobranca_pendente,
         "mostrar_pergunta_pagamento": mostrar_pergunta_pagamento,
         "pagamento_parcial": pagamento_parcial,
         "opcoes_pagamento": opcoes_pagamento,
