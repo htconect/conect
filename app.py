@@ -7592,14 +7592,66 @@ def _email_basico_valido(valor: str) -> bool:
     return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email))
 
 
-def _endereco_infinitepay_contrato(item: Solicitacao) -> dict:
-    """Monta o endereço congelado do contrato no formato aceito pela InfinitePay.
+def _endereco_infinitepay_contrato(item: Solicitacao, db: Session | None = None) -> dict:
+    """Monta o endereço da reserva no formato oficial do Checkout InfinitePay.
 
-    A integração nunca usa o endereço atual do cadastro do cliente quando a
-    solicitação já possui snapshot próprio. Assim o checkout recebe o mesmo
-    destino que consta no contrato e na operação.
+    A fonte principal continua sendo o snapshot congelado do contrato. Para
+    contratos legados em que esse snapshot ficou incompleto, tentamos completar
+    SOMENTE os campos vazios usando um endereço histórico do mesmo cliente e da
+    mesma rua/número. Isso evita pedir novamente CEP/endereço no checkout sem
+    correr o risco de misturar endereços de reservas diferentes.
     """
-    dados = dados_endereco_solicitacao(item)
+    dados = dict(dados_endereco_solicitacao(item))
+    cliente = getattr(item, "cliente", None)
+
+    def preencher_faltantes(origem) -> None:
+        if not origem:
+            return
+        mapa = {
+            "endereco": getattr(origem, "endereco", "") or "",
+            "numero": getattr(origem, "numero", "") or "",
+            "complemento": getattr(origem, "complemento", "") or "",
+            "bairro": getattr(origem, "bairro", "") or "",
+            "cidade": getattr(origem, "cidade", "") or "",
+            "estado": getattr(origem, "estado", "") or "",
+            "cep": getattr(origem, "cep", "") or "",
+        }
+        for chave, valor in mapa.items():
+            if not str(dados.get(chave) or "").strip() and str(valor or "").strip():
+                dados[chave] = str(valor).strip()
+
+    rua_contrato = _normalizar_chave_endereco(str(dados.get("endereco") or ""))
+    numero_contrato = _normalizar_chave_endereco(str(dados.get("numero") or ""))
+
+    # 1) Histórico de endereços do próprio cliente: melhor fallback para contratos
+    # antigos, porque preserva o endereço realmente utilizado em outras reservas.
+    if db is not None and cliente and rua_contrato:
+        candidatos = (
+            db.query(EnderecoCliente)
+            .filter(
+                EnderecoCliente.empresa_id == item.empresa_id,
+                EnderecoCliente.cliente_id == cliente.id,
+                EnderecoCliente.ativo == True,
+            )
+            .order_by(EnderecoCliente.atualizado_em.desc(), EnderecoCliente.id.desc())
+            .all()
+        )
+        for candidato in candidatos:
+            if _normalizar_chave_endereco(candidato.endereco) != rua_contrato:
+                continue
+            numero_candidato = _normalizar_chave_endereco(candidato.numero)
+            if numero_contrato and numero_candidato and numero_candidato != numero_contrato:
+                continue
+            preencher_faltantes(candidato)
+            break
+
+    # 2) Cadastro atual do cliente apenas quando a rua (e o número, se ambos
+    # existirem) corresponde ao endereço congelado da reserva.
+    if cliente and rua_contrato and _normalizar_chave_endereco(cliente.endereco) == rua_contrato:
+        numero_cliente = _normalizar_chave_endereco(cliente.numero)
+        if not numero_contrato or not numero_cliente or numero_cliente == numero_contrato:
+            preencher_faltantes(cliente)
+
     cep = re.sub(r"\D", "", str(dados.get("cep") or ""))[:8]
     endereco = {
         "cep": cep,
@@ -8615,9 +8667,19 @@ def infinitepay_criar_checkout(
     # O endereço do checkout é o endereço congelado no contrato/reserva. Isso
     # evita pedir novamente ao cliente um dado que o Conect já possui e impede
     # que alterações posteriores no cadastro geral troquem o endereço da cobrança.
-    endereco_checkout = _endereco_infinitepay_contrato(item)
+    endereco_checkout = _endereco_infinitepay_contrato(item, db)
     if endereco_checkout:
         payload["address"] = endereco_checkout
+        logger.info(
+            "InfinitePay contrato %s: endereço enviado ao checkout (cep=%s, rua=%s, numero=%s, bairro=%s).",
+            item.id,
+            "sim" if endereco_checkout.get("cep") else "nao",
+            "sim" if endereco_checkout.get("street") else "nao",
+            "sim" if endereco_checkout.get("number") else "nao",
+            "sim" if endereco_checkout.get("neighborhood") else "nao",
+        )
+    else:
+        logger.warning("InfinitePay contrato %s: checkout criado sem endereço disponível.", item.id)
 
     # A InfinitePay valida o bloco customer como um conjunto. Para contratos
     # antigos sem e-mail, não enviamos customer: o checkout coleta o e-mail

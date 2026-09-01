@@ -20,5 +20,17 @@
       <p>Nenhuma cláusula específica foi vinculada aos itens desta reserva.</p>
     </section>
   {% endif %}
+
+  <div class="box" style="text-align:center">
+    <button type="button" class="largura-total" onclick="fecharClausulas()">Fechar</button>
+    <p class="texto-discreto" style="margin-bottom:0">Você pode voltar ao pagamento quando quiser usando o mesmo link da reserva.</p>
+  </div>
 </div>
+<script>
+function fecharClausulas(){
+  const destino='/e/{{ empresa.slug }}/contrato/{{ item.id }}#etapa-pagamento';
+  try{window.close();}catch(e){}
+  setTimeout(function(){if(!window.closed){window.location.href=destino;}},180);
+}
+</script>
 {% endblock %}

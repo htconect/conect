@@ -1,23 +1,15 @@
-# HUMIAT Conect — Versão 1.0.11
+# HUMIAT Conect — Versão 1.0.13
 
-## Fluxo único de contrato e pagamento, mobile e PIX
+## Pagamento e consulta do contrato no celular
 
-- O link público do contrato passa a ser o link permanente da reserva: aceite, primeiro pagamento, saldo e consulta final usam a mesma URL.
-- A tela de contrato ainda não aceito foi redesenhada para celular com seções recolhíveis: dados do contrato, dados da locação, cláusulas e pagamento.
-- O botão **Aceitar contrato** fica desabilitado até o cliente marcar **Li, conferi os dados e aceito o contrato**.
-- Após o aceite, o cliente vê apenas a pergunta **Deseja passar para a etapa de pagamento?**.
-- Empresas com InfinitePay continuam usando o checkout seguro com PIX/cartão e simulação de parcelamento.
-- Empresas sem InfinitePay usam o PIX já cadastrado no Conect, com escolha de sinal/valor total e, depois de pagamento parcial, somente o saldo.
-- Foram adicionados ao cadastro da empresa **Nome que aparece no PIX** e **Banco / instituição que aparece no PIX**.
-- O preenchimento do pré-contrato não abre mais o WhatsApp automaticamente: os dados são salvos primeiro e o cliente decide se deseja avisar o responsável.
-- Toda abertura de WhatsApp para o cliente usa o padrão: **Vamos abrir o WhatsApp com sua mensagem pronta. Quando a conversa abrir, basta tocar em Enviar.**
-- O aceite não redireciona mais automaticamente para WhatsApp.
-- Após o primeiro pagamento InfinitePay, o cliente pode abrir o WhatsApp para disponibilizar o contrato ou deixar o envio para o responsável.
-- No segundo pagamento InfinitePay não há novo envio de contrato: apenas confirmação e agradecimento.
-- Ao abrir o link com o contrato totalmente quitado, o cliente vê somente **Reserva concluída**, com opção de consultar o contrato.
-- A mensagem de envio do link foi atualizada para destacar que a reserva aguarda aceite, que o cliente deve clicar no link e que ali encontrará informações de pagamento e parcelamento quando disponível.
-- Mensagens antigas que ainda estejam exatamente no antigo padrão são atualizadas automaticamente; textos personalizados pela empresa são preservados.
+- A etapa InfinitePay mostra sempre, inclusive no pagamento do saldo, as formas disponíveis: **PIX** e **Cartão**.
+- PIX e Cartão aparecem de forma visual antes do cliente continuar para o checkout; a escolha efetiva continua sendo feita na tela segura da InfinitePay.
+- Quando cadastrados na empresa, **nome do recebedor** e **banco/instituição** ficam visíveis para conferência caso o cliente escolha PIX.
+- A regra de cobrança não mudou: no segundo pagamento o Conect oferece somente o saldo restante, evitando nova cobrança de sinal ou do valor original.
+- A área “Consultar contrato aceito” ganhou o botão **Fechar**, permitindo apenas consultar e recolher a seção sem iniciar pagamento.
+- A página “Ver cláusulas” também ganhou **Fechar**; quando o navegador não permite fechar a aba, o cliente retorna ao mesmo link da reserva, na etapa de pagamento.
+- Empresas sem InfinitePay permanecem no fluxo PIX próprio já existente.
 
 Commit:
 
-`v1.0.11 - unifica aceite e pagamentos no mesmo link e melhora fluxo mobile`
+`v1.0.13 - mantém PIX e cartão visíveis no saldo e adiciona fechar nas cláusulas`
