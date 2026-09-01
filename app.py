@@ -103,6 +103,10 @@ INFINITEPAY_HANDLE_PADRAO = os.getenv("INFINITEPAY_HANDLE", "karaokerj").strip()
 INFINITEPAY_LINKS_URL = "https://api.checkout.infinitepay.io/links"
 INFINITEPAY_PAYMENT_CHECK_URL = "https://api.checkout.infinitepay.io/payment_check"
 INFINITEPAY_TIMEOUT_SECONDS = max(3, int(os.getenv("INFINITEPAY_TIMEOUT_SECONDS", "15") or 15))
+# Um checkout não pago não pode bloquear o contrato indefinidamente. A InfinitePay
+# não documenta endpoint para invalidar um checkout ainda não pago; por isso o
+# Conect expira o vínculo local e libera uma nova cobrança após este prazo.
+INFINITEPAY_CHECKOUT_TTL_HOURS = max(1, int(os.getenv("INFINITEPAY_CHECKOUT_TTL_HOURS", "24") or 24))
 INFINITEPAY_TAXAS_PADRAO = [4.20, 6.09, 7.01, 7.91, 8.80, 9.67, 12.59, 13.42, 14.25, 15.06, 15.87, 16.66]
 
 
@@ -788,25 +792,32 @@ def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: So
 
 
 def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem enviada somente depois do aceite, com o link do contrato final."""
+    """Mensagem final ao cliente: link permanente em destaque e PDF separado.
+
+    As cláusulas não precisam de um link isolado: continuam disponíveis dentro do
+    link permanente da reserva, que também acompanha aceite, pagamentos e quitação.
+    """
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    link_contrato = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
-    link_clausulas = _link_absoluto(request, "contrato_cliente_clausulas", slug=empresa.slug, solicitacao_id=item.id)
+    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
 
     linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
-    linhas.extend([
-        "",
-        "*📄 Contrato final:*",
-        link_contrato,
-        "",
-        "*📄 Cláusulas do contrato:*",
-        link_clausulas,
-        "",
-    ])
-
     mensagem_final = mensagens_empresa(empresa).get("confirmacao", "").strip()
     if mensagem_final:
-        linhas.append(mensagem_final)
+        linhas.extend(["", mensagem_final])
+
+    saldo = _saldo_contrato(item)
+    linhas.extend([
+        "",
+        "*🔗 PAGAMENTO E ACOMPANHAMENTO*",
+        ("Use este link para acompanhar a reserva e fazer o próximo pagamento:"
+         if saldo > 0.009 else
+         "Use este link para acompanhar a reserva e consultar a situação do pagamento:"),
+        link_reserva,
+        "",
+        "*📄 Contrato em PDF*",
+        link_pdf,
+    ])
 
     return "\n".join(linhas).strip()
 
@@ -981,6 +992,15 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_clique_em TIMESTAMP")
         if "whatsapp_contrato_delegado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_delegado_em TIMESTAMP")
+
+        cols_ip = {c["name"] for c in insp.get_columns("infinitepay_cobrancas")} if "infinitepay_cobrancas" in insp.get_table_names() else set()
+        if cols_ip:
+            if "cancelado_em" not in cols_ip:
+                comandos.append("ALTER TABLE infinitepay_cobrancas ADD COLUMN cancelado_em TIMESTAMP")
+            if "cancelado_por" not in cols_ip:
+                comandos.append("ALTER TABLE infinitepay_cobrancas ADD COLUMN cancelado_por VARCHAR(120)")
+            if "motivo_cancelamento" not in cols_ip:
+                comandos.append("ALTER TABLE infinitepay_cobrancas ADD COLUMN motivo_cancelamento TEXT")
         if "aceite_manual_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_em TIMESTAMP")
         if "aceite_manual_por" not in cols_sol:
@@ -3681,6 +3701,12 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     sincronizar_pagamentos_solicitacoes(db, [item])
+    if _infinitepay_habilitada(empresa):
+        _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+    cobrancas_infinitepay = (db.query(InfinitePayCobranca)
+                             .filter_by(empresa_id=empresa.id, solicitacao_id=item.id)
+                             .order_by(InfinitePayCobranca.id.desc())
+                             .limit(12).all()) if _infinitepay_habilitada(empresa) else []
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     empresas_transferencia = (
@@ -3693,7 +3719,8 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
     return templates.TemplateResponse("admin/solicitacao_detalhe.html",
                                       {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
                                        "contratos": contratos, "empresas_transferencia": empresas_transferencia,
-                                       "mensagens": mensagens})
+                                       "mensagens": mensagens, "cobrancas_infinitepay": cobrancas_infinitepay,
+                                       "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS})
 
 
 
@@ -7769,20 +7796,48 @@ def _pagamento_suficiente_para_confirmar(item: Solicitacao, empresa: Empresa | N
 
 
 def _infinitepay_cobranca_pendente_ativa(db: Session, empresa_id: int, solicitacao_id: int) -> InfinitePayCobranca | None:
-    """Retorna a única cobrança ainda reutilizável do contrato.
+    """Retorna a única cobrança InfinitePay ainda reutilizável do contrato.
 
-    Enquanto existir um checkout AGUARDANDO_PAGAMENTO com URL válida, o Conect
-    nunca gera outro link para o mesmo contrato. Isso evita duas cobranças
-    InfinitePay concorrentes quando o cliente abre o mesmo link novamente.
+    Uma cobrança em aberto deixa de bloquear o contrato após o TTL local. O
+    registro é preservado para auditoria e para aceitar um webhook tardio caso o
+    checkout antigo venha a ser pago. Como a API pública documentada da InfinitePay
+    não oferece exclusão/expiração do checkout, o cancelamento é do vínculo no Conect.
     """
     rows = (db.query(InfinitePayCobranca)
             .filter_by(empresa_id=empresa_id, solicitacao_id=solicitacao_id, status="AGUARDANDO_PAGAMENTO")
             .order_by(InfinitePayCobranca.id.desc())
             .all())
+    agora = agora_utc()
+    limite = agora - timedelta(hours=INFINITEPAY_CHECKOUT_TTL_HOURS)
+    alterou = False
+    ativa = None
+
     for row in rows:
-        if str(row.checkout_url or "").startswith("https://"):
-            return row
-    return None
+        criado = getattr(row, "criado_em", None)
+        if criado and criado < limite:
+            row.status = "EXPIRADA_LOCAL"
+            row.cancelado_em = row.cancelado_em or agora
+            row.cancelado_por = row.cancelado_por or "Sistema"
+            row.motivo_cancelamento = row.motivo_cancelamento or (
+                f"Cobrança sem pagamento por mais de {INFINITEPAY_CHECKOUT_TTL_HOURS}h; "
+                "liberada automaticamente para nova tentativa."
+            )
+            alterou = True
+            continue
+        if ativa is None and str(row.checkout_url or "").startswith("https://"):
+            ativa = row
+        elif str(row.checkout_url or "").startswith("https://"):
+            # Bases antigas podem ter mais de uma cobrança marcada como aberta.
+            # O Conect mantém somente a mais nova como reutilizável.
+            row.status = "SUBSTITUIDA_LOCAL"
+            row.cancelado_em = row.cancelado_em or agora
+            row.cancelado_por = row.cancelado_por or "Sistema"
+            row.motivo_cancelamento = row.motivo_cancelamento or "Cobrança antiga substituída por outra cobrança aberta do mesmo contrato."
+            alterou = True
+
+    if alterou:
+        db.commit()
+    return ativa
 
 
 def _email_basico_valido(valor: str) -> bool:
@@ -7913,12 +7968,16 @@ def _url_whatsapp_registro_contrato(request: Request, db: Session, empresa: Empr
         return None
     cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
     data_evento = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else ""
+    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
     link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
     texto = (
         f"Olá, {responsavel}. Sou {cliente}. Meu pagamento do contrato #{item.id} foi confirmado.\n\n"
         f"Evento: {data_evento}\n"
-        f"Contrato: {link_pdf}\n\n"
-        "Estou enviando o contrato para registro conforme orientação do sistema."
+        "Estou enviando o contrato para registro conforme orientação do sistema.\n\n"
+        "🔗 *PAGAMENTO E ACOMPANHAMENTO*\n"
+        f"{link_reserva}\n\n"
+        "📄 *Contrato em PDF*\n"
+        f"{link_pdf}"
     )
     return f"https://wa.me/{telefone}?text={quote(texto)}"
 
@@ -8050,6 +8109,23 @@ def _registrar_pagamento_infinitepay(
     cobranca.installments = int(installments or 0)
     cobranca.paid_amount_centavos = int(paid_amount_centavos or cobranca.valor_centavos or 0)
     cobranca.pago_em = cobranca.pago_em or agora_utc()
+
+    # Assim que uma cobrança é paga, nenhuma outra cobrança aberta do mesmo
+    # contrato deve continuar sendo apresentada pelo Conect. O histórico fica
+    # preservado para auditoria e para eventuais webhooks tardios.
+    outras = (db.query(InfinitePayCobranca)
+              .filter(InfinitePayCobranca.empresa_id == empresa.id,
+                      InfinitePayCobranca.solicitacao_id == item.id,
+                      InfinitePayCobranca.id != cobranca.id,
+                      InfinitePayCobranca.status == "AGUARDANDO_PAGAMENTO")
+              .all())
+    agora_fechamento = agora_utc()
+    for outra in outras:
+        outra.status = "ENCERRADA_APOS_PAGAMENTO"
+        outra.cancelado_em = outra.cancelado_em or agora_fechamento
+        outra.cancelado_por = outra.cancelado_por or "Sistema"
+        outra.motivo_cancelamento = outra.motivo_cancelamento or "Encerrada no Conect após confirmação de outro pagamento do mesmo contrato."
+
     db.commit()
     return True
 
@@ -8686,6 +8762,45 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
     # Link permanente: se o contrato já foi aceito, apenas volta ao estado atual.
     return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
 
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/infinitepay/{cobranca_id}/cancelar")
+def cancelar_cobranca_infinitepay_local(
+    solicitacao_id: int,
+    cobranca_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Libera o contrato para uma nova cobrança sem apagar o histórico.
+
+    A API pública do Checkout InfinitePay não documenta endpoint para apagar ou
+    expirar um checkout ainda não pago. Por isso o Conect encerra o vínculo
+    local. Se o checkout antigo for pago depois, o webhook continua sendo
+    processado para não perder um pagamento real.
+    """
+    item = db.get(Solicitacao, solicitacao_id)
+    cobranca = db.get(InfinitePayCobranca, cobranca_id)
+    if not item or item.empresa_id != empresa.id or not cobranca:
+        raise HTTPException(404)
+    if cobranca.empresa_id != empresa.id or cobranca.solicitacao_id != item.id:
+        raise HTTPException(404)
+    if cobranca.status == "PAGO":
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Uma cobrança já paga não pode ser cancelada.#pagamento",
+            status_code=303,
+        )
+    if cobranca.status != "AGUARDANDO_PAGAMENTO":
+        return RedirectResponse(f"/painel/solicitacao/{item.id}#pagamento", status_code=303)
+
+    usuario = (request.session.get("usuario_nome") or request.session.get("usuario_sistema")
+               or request.session.get("usuario") or empresa.usuario_admin or "Atendente")
+    cobranca.status = "CANCELADA_LOCAL"
+    cobranca.cancelado_em = agora_utc()
+    cobranca.cancelado_por = str(usuario)[:120]
+    cobranca.motivo_cancelamento = "Cancelada manualmente no Conect para liberar uma nova cobrança."
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{item.id}?infinitepay=cancelada#pagamento", status_code=303)
 
 
 def _processar_retorno_infinitepay(

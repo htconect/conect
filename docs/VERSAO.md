@@ -1,22 +1,18 @@
-# HUMIAT Conect — Versão 1.0.18
+# HUMIAT Conect — Versão 1.0.19
 
-## Fluxo público / WhatsApp
-- Pré-contrato continua sendo salvo antes de abrir o WhatsApp.
-- O botão "Agora não" foi substituído por "Deixar para o responsável".
-- O Conect registra quando o cliente clicou em "Abrir WhatsApp" e quando escolheu deixar a comunicação para o responsável.
-- O registro de clique não é tratado como envio confirmado, porque o WhatsApp não devolve essa confirmação ao Conect.
-- Após o aceite digital, a etapa de WhatsApp agora é realmente exibida.
-- A mensagem de aceite é direcionada ao responsável do contrato; se não houver responsável fixado, usa o WhatsApp de retorno da empresa.
-- O primeiro pagamento também registra se o cliente clicou no WhatsApp ou deixou o envio do contrato para o responsável.
-- As pendências e o histórico do contrato passam a mostrar essas escolhas.
+## Cobranças InfinitePay abertas
+- A tela do atendente mostra as cobranças InfinitePay do contrato com valor, tipo, status, pedido e data.
+- Uma cobrança aberta pode ser cancelada no Conect para liberar imediatamente uma nova escolha de sinal/valor total/saldo.
+- O registro não é apagado fisicamente: fica preservado para auditoria e para aceitar webhook tardio de um pagamento real.
+- Cobranças ainda abertas expiram localmente após 24 horas por padrão (configurável por `INFINITEPAY_CHECKOUT_TTL_HOURS`).
+- Depois que um pagamento é confirmado, outras cobranças ainda abertas do mesmo contrato deixam de ser reutilizadas.
+- A API pública documentada do Checkout InfinitePay não expõe endpoint de exclusão/expiração do checkout; portanto o Conect encerra o vínculo local, mas não promete revogar uma URL antiga na InfinitePay.
 
-## Aceite manual
-- O aceite manual passa a registrar usuário, motivo, data e status anterior.
-- Foi incluída a ação "Excluir aceite manual" na tela do contrato e na busca do cliente.
-- A exclusão é bloqueada se já houver pagamento, cobrança InfinitePay em andamento, contrato final marcado como enviado ou operação iniciada.
-- Ao desfazer um aceite manual seguro, o contrato volta ao status anterior, os eventos operacionais pendentes são removidos e o Humiat é estornado sem apagar o histórico.
-- Aceites manuais antigos são reconhecidos pela anotação histórica "Aceite manual por ...".
-- O aceite digital do cliente nunca é removido por essa função.
+## WhatsApp / contrato final
+- O link permanente usado no aceite passa a aparecer em destaque como **PAGAMENTO E ACOMPANHAMENTO**.
+- Esse mesmo link continua levando o cliente ao estado atual da reserva e ao próximo pagamento quando houver saldo.
+- O link separado de cláusulas foi removido da mensagem final do contrato, pois as cláusulas já ficam dentro do link permanente.
+- Ao final da mensagem permanece apenas o link do **Contrato em PDF**, separado do link de pagamento/acompanhamento.
 
 ## Commit sugerido
-`v1.0.18 - corrige WhatsApp do cliente e adiciona exclusão segura do aceite manual`
+`v1.0.19 - libera nova cobrança InfinitePay e destaca link permanente no contrato`

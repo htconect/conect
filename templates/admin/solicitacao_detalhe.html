@@ -295,6 +295,34 @@
     <p class="alerta-texto">Atenção: há R$ {{ excedente|moeda_br }} recebido acima do total. Corrija pelo financeiro.</p>
   {% endif %}
 
+  {% if empresa.infinitepay_ativa and cobrancas_infinitepay %}
+  <details class="accordion interno" {% if cobrancas_infinitepay and cobrancas_infinitepay[0].status == 'AGUARDANDO_PAGAMENTO' %}open{% endif %}>
+    <summary>Cobranças InfinitePay</summary>
+    <p class="texto-discreto">Cobranças abertas são liberadas automaticamente após {{ infinitepay_ttl_horas }}h. Cancelar aqui libera uma nova cobrança sem apagar o histórico.</p>
+    <div class="pagamentos-lista">
+      {% for c in cobrancas_infinitepay %}
+      <div class="linha-item-mobile pagamento-consulta">
+        <div>
+          <b>R$ {{ ((c.valor_centavos or 0) / 100)|moeda_br }} · {{ {'sinal':'Sinal','integral':'Valor do contrato','restante':'Saldo'}.get(c.tipo_pagamento, c.tipo_pagamento) }}</b>
+          <small>InfinitePay · {{ c.status.replace('_',' ') }}</small>
+          <div class="pagamento-detalhes-consulta">
+            <span><strong>Pedido:</strong> {{ c.order_nsu }}</span>
+            {% if c.criado_em %}<span><strong>Criada:</strong> {{ c.criado_em|datahora_local }}</span>{% endif %}
+            {% if c.cancelado_em %}<span><strong>Encerrada:</strong> {{ c.cancelado_em|datahora_local }}{% if c.cancelado_por %} · {{ c.cancelado_por }}{% endif %}</span>{% endif %}
+            {% if c.motivo_cancelamento %}<span><strong>Motivo:</strong> {{ c.motivo_cancelamento }}</span>{% endif %}
+          </div>
+        </div>
+        {% if c.status == 'AGUARDANDO_PAGAMENTO' %}
+        <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
+          <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
   <form id="formPagamento" method="post" action="/painel/solicitacao/{{ item.id }}/pagamento" class="form-mobile-simples bloco-oculto" onsubmit="return validarPagamentoReserva(this)">
     <label>Valor recebido</label>
     <input name="valor_pago" value="{{ falta|moeda_br }}" required inputmode="decimal" data-max="{{ '%.2f'|format(falta) }}" {% if falta <= 0 %}disabled{% endif %}>

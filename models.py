@@ -419,6 +419,9 @@ class InfinitePayCobranca(Base):
     installments = Column(Integer, nullable=False, default=0)
     paid_amount_centavos = Column(Integer, nullable=False, default=0)
     pago_em = Column(DateTime, nullable=True)
+    cancelado_em = Column(DateTime, nullable=True)
+    cancelado_por = Column(String(120), nullable=True)
+    motivo_cancelamento = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
