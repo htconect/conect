@@ -714,8 +714,27 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
     ]
 
 
+def _sinal_infinitepay_contrato(empresa: Empresa, item: Solicitacao) -> float:
+    """Sinal efetivo do contrato para o fluxo InfinitePay.
+
+    O valor é parametrizado por empresa. Para contratos antigos, sem o novo
+    parâmetro, preservamos o sinal já gravado no próprio contrato. Depois do
+    aceite, o valor gravado no contrato funciona como fotografia daquele acordo.
+    """
+    total = max(float(getattr(item, "valor", 0) or 0), 0.0)
+    if total <= 0.009:
+        return 0.0
+    sinal_item = max(float(getattr(item, "sinal", 0) or 0), 0.0)
+    if getattr(item, "aceite_em", None) and sinal_item > 0.009:
+        return min(sinal_item, total)
+    sinal_empresa = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
+    if sinal_empresa > 0.009:
+        return min(sinal_empresa, total)
+    return min(sinal_item, total)
+
+
 def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem para o cliente aceitar a reserva. Usa o texto do cadastro da empresa e complementos do sistema."""
+    """Mensagem curta para o cliente conferir e aceitar o contrato."""
     link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
     cliente_nome = item.cliente.nome if item.cliente else "cliente"
 
@@ -724,52 +743,31 @@ def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: So
         link=link_aceite,
         empresa=empresa.nome,
         cliente=cliente_nome,
-        valor_sinal=moeda_br(item.sinal or 0),
+        valor_sinal=moeda_br(_sinal_infinitepay_contrato(empresa, item) if _infinitepay_habilitada(empresa) else (item.sinal or 0)),
         pix=empresa.pix_copia_cola or "",
     ).strip()
 
-    linhas = [texto_base] if texto_base else []
+    linhas = [texto_base] if texto_base else [f"Olá, {cliente_nome}! Confira e aceite seu contrato: {link_aceite}"]
 
     if _infinitepay_habilitada(empresa):
         total = max(float(item.valor or 0), 0)
-        sinal = min(max(float(item.sinal or 0), 0), total)
-        linhas.extend([
-            "",
-            "Após o aceite, você será direcionado automaticamente para escolher a forma de confirmação da reserva.",
-        ])
+        sinal = _sinal_infinitepay_contrato(empresa, item)
+        linhas.extend(["", "Após o aceite, escolha como deseja pagar:"])
         if sinal > 0.009:
             linhas.append(f"• *Sinal:* R$ {moeda_br(sinal)}")
         if total > 0.009:
-            linhas.append(f"• *Valor integral:* R$ {moeda_br(total)}")
+            linhas.append(f"• *Valor do contrato:* R$ {moeda_br(total)}")
+        linhas.extend(["", "Pagamento pela InfinitePay (PIX ou cartão). A confirmação é automática."])
+        return "\n".join(linhas).strip()
+
+    if getattr(empresa, "exige_sinal", False):
         linhas.extend([
             "",
-            "O pagamento será realizado pela InfinitePay, onde você poderá escolher PIX ou cartão.",
-            "A confirmação é automática pelo sistema. Não é necessário enviar comprovante.",
-            "",
-            "Após a confirmação do pagamento, sua reserva será efetivada e o contrato será preparado para registro no WhatsApp do responsável.",
-        ])
-    elif getattr(empresa, "exige_sinal", False):
-        linhas.extend([
-            "",
-            "Para concluir a confirmação, realize o PIX do sinal para a chave abaixo e envie o comprovante.",
-            "",
+            "Para confirmar a reserva, realize o PIX do sinal e envie o comprovante.",
             f"*PIX:* {empresa.pix_copia_cola or '-'}",
-            "",
-            "Assim que o aceite do pré-contrato e a confirmação do pagamento do sinal forem concluídos, sua reserva será efetivada.",
         ])
     else:
-        linhas.extend([
-            "",
-            "Assim que o aceite do pré-contrato for concluído, sua reserva será efetivada.",
-        ])
-
-    linhas.extend([
-        "",
-        "Em seguida, você receberá:",
-        "• O resumo da reserva;",
-        "• O contrato em PDF;",
-        "• As cláusulas do contrato para sua consulta.",
-    ])
+        linhas.extend(["", "Após o aceite, sua reserva será efetivada."])
 
     return "\n".join(linhas).strip()
 
@@ -855,6 +853,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_ativa BOOLEAN DEFAULT false")
     if "infinitepay_handle" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_handle VARCHAR(80)")
+    if "infinitepay_valor_sinal" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_valor_sinal FLOAT DEFAULT 0")
     if "exige_sinal" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN exige_sinal BOOLEAN DEFAULT false")
     if "suporte_inicio" not in cols_emp:
@@ -2230,6 +2230,7 @@ def admin_criar_empresa(
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
         infinitepay_handle: str = Form(""),
+        infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -2260,6 +2261,7 @@ def admin_criar_empresa(
         whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
         infinitepay_ativa=bool(infinitepay_ativa),
         infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
+        infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
         exige_sinal=bool(exige_sinal),
         suporte_inicio=suporte_inicio.strip(),
         suporte_fim=suporte_fim.strip(),
@@ -2340,6 +2342,7 @@ def admin_salvar_empresa(
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
         infinitepay_handle: str = Form(""),
+        infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -2366,6 +2369,7 @@ def admin_salvar_empresa(
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
     empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
+    empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip()
     empresa.suporte_fim = suporte_fim.strip()
@@ -3064,6 +3068,7 @@ async def salvar_configuracoes_empresa(
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
         infinitepay_handle: str = Form(""),
+        infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
@@ -3087,6 +3092,7 @@ async def salvar_configuracoes_empresa(
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
     empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
+    empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
     _infinitepay_seed_taxas(db, empresa.id)
     form_data = await request.form()
@@ -3134,6 +3140,7 @@ async def salvar_configuracoes_empresa(
         ce.visivel = f"campo_visivel_{ce.id}" in form
         ce.obrigatorio = f"campo_obrigatorio_{ce.id}" in form
     db.commit()
+    empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/painel", status_code=303)
 
 
@@ -6938,7 +6945,7 @@ def confirmar_pagamento(
     # Se o cliente já aceitou e a empresa usa o fluxo de pagamento após aceite,
     # um recebimento lançado manualmente também pode confirmar a reserva. Assim
     # o link público reflete a mesma situação financeira, independentemente da origem.
-    if item.status in {"aceite_pagamento_pendente", "aguardando_pagamento"} and _pagamento_suficiente_para_confirmar(item):
+    if item.status in {"aceite_pagamento_pendente", "aguardando_pagamento"} and _pagamento_suficiente_para_confirmar(item, empresa):
         _aprovar_contrato_apos_pagamento(db, empresa, item)
     db.commit()
     return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
@@ -7525,23 +7532,22 @@ def _saldo_contrato(item: Solicitacao) -> float:
     return max(float(getattr(item, "valor", 0) or 0) - float(getattr(item, "valor_pago", 0) or 0), 0.0)
 
 
-def _valor_minimo_confirmacao_contrato(item: Solicitacao) -> float:
-    """Valor mínimo recebido para transformar o aceite em reserva confirmada.
-
-    Quando há sinal configurado, ele é o mínimo. Sem sinal, o contrato precisa
-    estar quitado. A regra vale igualmente para pagamento manual ou InfinitePay.
-    """
+def _valor_minimo_confirmacao_contrato(item: Solicitacao, empresa: Empresa | None = None) -> float:
+    """Valor mínimo recebido para transformar o aceite em reserva confirmada."""
     total = max(float(getattr(item, "valor", 0) or 0), 0.0)
-    sinal = max(float(getattr(item, "sinal", 0) or 0), 0.0)
     if total <= 0.009:
         return 0.0
+    if empresa is not None and _infinitepay_habilitada(empresa):
+        sinal = _sinal_infinitepay_contrato(empresa, item)
+    else:
+        sinal = max(float(getattr(item, "sinal", 0) or 0), 0.0)
     if sinal > 0.009:
         return min(sinal, total)
     return total
 
 
-def _pagamento_suficiente_para_confirmar(item: Solicitacao) -> bool:
-    minimo = _valor_minimo_confirmacao_contrato(item)
+def _pagamento_suficiente_para_confirmar(item: Solicitacao, empresa: Empresa | None = None) -> bool:
+    minimo = _valor_minimo_confirmacao_contrato(item, empresa)
     recebido = max(float(getattr(item, "valor_pago", 0) or 0), 0.0)
     return minimo <= 0.009 or recebido + 0.009 >= minimo
 
@@ -7747,7 +7753,7 @@ def _registrar_pagamento_infinitepay(
         ))
 
     recalcular_pagamento_solicitacao(db, item)
-    if _pagamento_suficiente_para_confirmar(item):
+    if _pagamento_suficiente_para_confirmar(item, empresa):
         _aprovar_contrato_apos_pagamento(db, empresa, item)
     cobranca.status = "PAGO"
     cobranca.transaction_nsu = str(transaction_nsu or "")[:180] or cobranca.transaction_nsu
@@ -8293,12 +8299,17 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         aceite_registrado_agora = True
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):
+            # Congela no contrato o sinal parametrizado da empresa no momento do aceite.
+            # Alterações futuras no cadastro da empresa não mudam este acordo.
+            sinal_configurado = _sinal_infinitepay_contrato(empresa, item)
+            if sinal_configurado > 0.009:
+                item.sinal = sinal_configurado
             # Aceite e pagamento são etapas diferentes. O aceite termina no Conect;
             # só depois o cliente decide se quer prosseguir para a InfinitePay.
             item.status = "aceite_pagamento_pendente"
             item.aprovado_em = None
             recalcular_pagamento_solicitacao(db, item)
-            pagamento_ja_confirmado = _pagamento_suficiente_para_confirmar(item)
+            pagamento_ja_confirmado = _pagamento_suficiente_para_confirmar(item, empresa)
             if pagamento_ja_confirmado:
                 # Compatibilidade com pagamentos já lançados manualmente antes do aceite.
                 _aprovar_contrato_apos_pagamento(db, empresa, item)
@@ -8379,7 +8390,7 @@ def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Reque
             "simulacoes": _infinitepay_simulacoes(saldo, taxas),
         })
     else:
-        sinal_restante = min(max(float(item.sinal or 0), 0), saldo)
+        sinal_restante = min(_sinal_infinitepay_contrato(empresa, item), saldo)
         if sinal_restante > 0.009:
             opcoes.append({
                 "tipo": "sinal", "titulo": "Sinal", "valor": round(sinal_restante, 2),
@@ -8387,7 +8398,7 @@ def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Reque
             })
         if saldo > 0.009:
             opcoes.append({
-                "tipo": "integral", "titulo": "Valor integral", "valor": round(saldo, 2),
+                "tipo": "integral", "titulo": "Valor do contrato", "valor": round(saldo, 2),
                 "simulacoes": _infinitepay_simulacoes(saldo, taxas),
             })
     db.commit()
@@ -8435,13 +8446,13 @@ def infinitepay_criar_checkout(
 
     tipo = str(tipo_pagamento or "").strip().lower()
     if tipo not in {"sinal", "integral"}:
-        raise HTTPException(400, "Escolha Sinal ou Valor integral.")
+        raise HTTPException(400, "Escolha Sinal ou Valor do contrato.")
 
     ja_pagou = float(item.valor_pago or 0) > 0.009
     if ja_pagou and tipo != "integral":
         raise HTTPException(400, "Este contrato já possui pagamento. Só é permitido cobrar o saldo restante.")
 
-    sinal_restante = min(max(float(item.sinal or 0), 0), saldo)
+    sinal_restante = min(_sinal_infinitepay_contrato(empresa, item), saldo)
     valor = saldo if ja_pagou or tipo == "integral" else sinal_restante
     if valor <= 0.009:
         raise HTTPException(400, "Não há valor disponível para esta opção de pagamento.")
@@ -8466,7 +8477,7 @@ def infinitepay_criar_checkout(
         telefone_infinite = "+" + telefone
     else:
         telefone_infinite = "+55" + telefone if telefone else ""
-    titulo_cobranca = "Restante" if ja_pagou else ("Sinal" if tipo == "sinal" else "Valor integral")
+    titulo_cobranca = "Restante" if ja_pagou else ("Sinal" if tipo == "sinal" else "Valor do contrato")
     descricao = f"Contrato #{item.id} - {titulo_cobranca} - {empresa.nome}"[:180]
     payload = {
         "handle": _infinitepay_handle(empresa),

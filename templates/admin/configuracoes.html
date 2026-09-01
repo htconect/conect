@@ -13,7 +13,9 @@
       <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
       <label>InfiniteTag / handle</label>
       <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle or 'karaokerj' }}" placeholder="karaokerj">
-      <p class="texto-discreto">Quando ativa: após o aceite o cliente escolhe somente <b>Sinal</b> ou <b>Valor integral</b>. O contrato só é aprovado quando a InfinitePay confirmar o pagamento.</p>
+      <label>Valor padrão do sinal</label>
+      <input name="infinitepay_valor_sinal" data-mascara="moeda" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa.infinitepay_valor_sinal else '0,00' }}" placeholder="100,00">
+      <p class="texto-discreto">Exemplo: sinal R$ 100,00. No primeiro pagamento o cliente verá <b>Sinal</b> e <b>Valor do contrato</b>. Após qualquer pagamento, verá somente o saldo restante.</p>
       <h3>Taxas online para simulação</h3>
       <p class="texto-discreto">Mesma tabela utilizada na Karaoke RJ/SolVoz. A simulação mostra o total e o valor das parcelas; a cobrança enviada à InfinitePay continua usando o valor-base escolhido.</p>
       <div class="grid">
@@ -83,7 +85,7 @@
     <textarea name="mensagem_reserva">{{ empresa.mensagem_reserva or mensagens_padrao.reserva }}</textarea>
 
     <label>Mensagem do aceite</label>
-    <p class="texto-discreto">Utilizada no botão "Aceite". No fluxo manual, o sistema acrescenta o PIX quando a empresa exige sinal. Com InfinitePay ativa, o cliente recebe as opções Sinal/Integral e paga pela InfinitePay, sem envio manual de comprovante.</p>
+    <p class="texto-discreto">Utilizada no botão "Aceite". No fluxo manual, o sistema acrescenta o PIX quando a empresa exige sinal. Com InfinitePay ativa, o cliente recebe uma mensagem curta com Sinal/Valor do contrato e paga pela InfinitePay, sem envio manual de comprovante.</p>
     <textarea name="mensagem_aceite">{{ empresa.mensagem_aceite or mensagens_padrao.aceite }}</textarea>
 
     <label>Mensagem de reserva confirmada</label>

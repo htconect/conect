@@ -22,6 +22,7 @@ class Empresa(Base):
     whatsapp_retorno = Column(String(30), nullable=True)
     infinitepay_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)
+    infinitepay_valor_sinal = Column(Float, default=0)
     exige_sinal = Column(Boolean, default=False)
     suporte_inicio = Column(String(5), nullable=True)
     suporte_fim = Column(String(5), nullable=True)

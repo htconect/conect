@@ -44,7 +44,9 @@
       <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa and empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
       <label>InfiniteTag / handle</label>
       <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else 'karaokerj' }}" placeholder="karaokerj">
-      <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Integral pelo checkout. A configuração é isolada por empresa.</p>
+      <label>Valor padrão do sinal</label>
+      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '0,00' }}" placeholder="100,00">
+      <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Valor do contrato pelo checkout. A configuração é isolada por empresa.</p>
     </div>
 
     <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>

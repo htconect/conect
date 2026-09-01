@@ -3,8 +3,8 @@
 <div class="box">
   <p class="mini">Contrato #{{ item.id }}</p>
   <h1>{% if pagamento_parcial %}Pagamento do restante{% else %}Escolha como deseja pagar{% endif %}</h1>
-  {% if pagamento_parcial %}<p>Já existe pagamento registrado neste contrato. Agora só é possível pagar o <b>saldo restante de R$ {{ saldo_restante|moeda_br }}</b>.</p>{% else %}<p>Seu aceite foi registrado. Para confirmar a reserva, escolha somente uma das opções abaixo.</p>{% endif %}
-  <p class="texto-discreto">Na próxima etapa, a InfinitePay permitirá concluir o pagamento por PIX ou cartão. A simulação abaixo usa a tabela InfinitePay cadastrada para {{ empresa.nome }}.</p>
+  {% if pagamento_parcial %}<p>Já existe pagamento registrado. Pague somente o <b>saldo restante de R$ {{ saldo_restante|moeda_br }}</b>.</p>{% else %}<p>Escolha o <b>sinal</b> ou o <b>valor do contrato</b>.</p>{% endif %}
+  <p class="texto-discreto">Na InfinitePay você escolhe PIX ou cartão.</p>
 </div>
 
 <form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.id }}/infinitepay" class="box" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">

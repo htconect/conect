@@ -1,17 +1,17 @@
-# HUMIAT Conect — Versão 1.0.8
+# HUMIAT Conect — Versão 1.0.9
 
-## Link permanente do contrato e aceite separado do pagamento
+## Sinal parametrizado por empresa e mensagem curta
 
-- O primeiro link de aceite passa a ser também o painel permanente do cliente para aquele contrato.
-- Mostra valor total, já pago, falta pagar e histórico de pagamentos.
-- Considera pagamentos manuais e InfinitePay no mesmo resumo.
-- Se houver saldo e InfinitePay ativa, o cliente pode pagar pelo mesmo link.
-- Se já existir checkout InfinitePay pendente, o botão reutiliza a mesma cobrança.
-- Se já estiver quitado, nenhuma nova cobrança é criada.
-- Após o aceite, pergunta “Prosseguir para pagamento?”; a InfinitePay não é aberta automaticamente pelo aceite.
-- Pagamento manual após o aceite pode confirmar a reserva ao atingir o sinal mínimo exigido.
-- Nenhuma alteração de banco e nenhuma variável de ambiente nova.
+- Novo campo por empresa: valor padrão do sinal da InfinitePay.
+- Primeiro pagamento oferece Sinal e Valor do contrato.
+- O sinal é a primeira opção e vem selecionado por padrão.
+- Depois de qualquer pagamento, o mesmo link oferece apenas o saldo restante.
+- O sinal é congelado no contrato no momento do aceite.
+- Contratos antigos preservam o sinal já gravado e continuam compatíveis.
+- Mensagem de aceite InfinitePay foi reduzida.
+- Rótulo “Valor integral” foi substituído por “Valor do contrato”.
+- Checkout continua sem endereço e com e-mail apenas quando válido/existente.
 
 Commit:
 
-`v1.0.8 - centraliza pagamentos no link do contrato e separa aceite do checkout`
+`v1.0.9 - parametriza sinal por empresa e simplifica pagamento InfinitePay`

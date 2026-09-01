@@ -37,7 +37,7 @@
     {% endif %}
     <p><b>Valor total:</b> R$ {{ item.valor|moeda_br }}</p>
     <p><b>Valor recebido:</b> R$ {{ total_pago_publico|moeda_br }}</p>
-    <p><b>Sinal previsto:</b> R$ {{ item.sinal|moeda_br }}</p>
+    <p><b>Sinal:</b> R$ {{ ((item.sinal if item.aceite_em and item.sinal else empresa.infinitepay_valor_sinal) if empresa.infinitepay_ativa else item.sinal)|moeda_br }}</p>
     <p><b>Falta:</b> R$ {{ saldo_restante|moeda_br }}</p>
   </div>
 
