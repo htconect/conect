@@ -29,6 +29,7 @@
   <p>Para proteger seus dados, confirme o CPF para carregar as informações já cadastradas.</p>
   <form method="get" action="/e/{{ empresa.slug }}/cadastro">
     <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
+    <input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">
     <label>CPF para confirmação</label>
     <input name="cpf_confirmacao" inputmode="numeric" required>
     <button>Carregar meus dados</button>
@@ -38,6 +39,7 @@
 
 <form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="Salvando pré-contrato" data-loading-text="Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp."{% endif %}>
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
+  {% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %}<input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">{% endif %}
 
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>

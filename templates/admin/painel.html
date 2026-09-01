@@ -82,13 +82,16 @@
 
 <section class="accordion">
     <h2 class="titulo-secao">Ação rápida</h2>
-    {% set link_pre_contrato = request.base_url|string ~ 'e/' ~ empresa.slug ~ '/pre-contrato' %}
     <div class="acoes empilhadas">
         <a class="botao-whats" target="_blank"
            href="https://wa.me/?text={{ mensagem_pre_contrato|urlencode }}">
-            
             <i class="bi bi-whatsapp" aria-hidden="true"></i> Compartilhar Pré-Contrato
         </a>
+        <small class="texto-discreto">Seu link pessoal está vinculado a <b>{{ responsavel_pre_contrato_nome }}</b>. Os pré-contratos preenchidos por ele já entram com você como responsável.</small>
+        <small class="texto-discreto" style="overflow-wrap:anywhere"><b>Seu link:</b> {{ link_pre_contrato }}</small>
+        {% if not responsavel_pre_contrato_telefone %}
+          <small class="texto-discreto" style="color:#a15b00">Cadastre seu WhatsApp em <a href="/painel/perfil"><b>Meu perfil</b></a> para receber diretamente o retorno do cliente. Até lá, o sistema usa o WhatsApp geral da empresa como fallback.</small>
+        {% endif %}
     </div>
 </section>
 <h2 class="titulo-secao atencao-titulo">O que precisa de atenção</h2>

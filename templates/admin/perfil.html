@@ -16,6 +16,10 @@
   <label>Usuário</label>
   <input type="text" name="usuario" value="{{ perfil_usuario }}" required>
 
+  <label>Meu WhatsApp</label>
+  <input type="tel" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ perfil_telefone or '' }}">
+  <p class="texto-discreto">Usado no seu link pessoal de pré-contrato para o cliente retornar a negociação diretamente para você.</p>
+
   <label>Empresa</label>
   <input type="text" value="{{ empresa.nome }}" disabled>
 

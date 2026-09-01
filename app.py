@@ -879,6 +879,12 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN pix_banco VARCHAR(120)")
     if "whatsapp_retorno" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN whatsapp_retorno VARCHAR(30)")
+    if "pre_contrato_token" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_token VARCHAR(64)")
+    if "pre_contrato_responsavel_nome" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_nome VARCHAR(120)")
+    if "pre_contrato_responsavel_telefone" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_telefone VARCHAR(30)")
     if "infinitepay_ativa" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_ativa BOOLEAN DEFAULT false")
     if "infinitepay_handle" not in cols_emp:
@@ -1140,6 +1146,8 @@ def garantir_colunas_novas():
         cols_usu = colunas("usuarios_empresa")
         if "telefone" not in cols_usu:
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN telefone VARCHAR(30)")
+        if "pre_contrato_token" not in cols_usu:
+            comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN pre_contrato_token VARCHAR(64)")
         novas_permissoes = {
             "acesso_agenda": "BOOLEAN DEFAULT false",
             "acesso_operacao": "BOOLEAN DEFAULT false",
@@ -2705,7 +2713,7 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
         request.session.clear()
         request.session["empresa_id"] = empresa.id
         request.session["usuario_sistema"] = usuario_limpo
-        request.session["usuario_nome"] = empresa.usuario_admin or usuario_limpo
+        request.session["usuario_nome"] = (getattr(empresa, "pre_contrato_responsavel_nome", None) or empresa.usuario_admin or usuario_limpo)
         request.session["acesso_total"] = True
         request.session["acessos"] = {}
         empresa_cache_salvar(empresa)
@@ -2966,7 +2974,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
 
     _anexar_responsaveis_exibicao(solicitacoes)
 
-    link_pre_contrato = f"{str(request.base_url).rstrip('/')}/e/{empresa.slug}/pre-contrato"
+    link_pre_contrato, responsavel_pre_contrato_nome, responsavel_pre_contrato_telefone = _url_pre_contrato_pessoal(request, db, empresa)
     mensagem_pre_contrato = aplicar_variaveis_mensagem(
         mensagens_empresa(empresa).get("reserva", ""),
         link=link_pre_contrato,
@@ -2992,6 +3000,9 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "request": request,
         "empresa": empresa,
         "mensagem_pre_contrato": mensagem_pre_contrato,
+        "link_pre_contrato": link_pre_contrato,
+        "responsavel_pre_contrato_nome": responsavel_pre_contrato_nome,
+        "responsavel_pre_contrato_telefone": responsavel_pre_contrato_telefone,
         "solicitacoes": solicitacoes,
         "pendencias_agenda": pendencias_agenda,
         "pendencias_sinal": pendencias_sinal,
@@ -3080,16 +3091,95 @@ def usuario_empresa_atual(db: Session, empresa: Empresa, request: Request):
     return "admin", empresa
 
 
+def _novo_token_pre_contrato(db: Session) -> str:
+    """Gera um token opaco e estável para identificar o atendente no link público."""
+    for _ in range(12):
+        token = uuid.uuid4().hex[:20]
+        em_usuario = db.query(UsuarioEmpresa).filter(UsuarioEmpresa.pre_contrato_token == token).first()
+        em_empresa = db.query(Empresa).filter(Empresa.pre_contrato_token == token).first()
+        if not em_usuario and not em_empresa:
+            return token
+    return uuid.uuid4().hex
+
+
+def _identidade_link_pre_contrato(request: Request, db: Session, empresa: Empresa, criar: bool = True) -> tuple[str, str, str]:
+    """Retorna token, nome e WhatsApp do responsável que compartilha o pré-contrato.
+
+    Usuários da empresa usam o próprio cadastro. O administrador principal usa
+    campos próprios na empresa para não misturar seu telefone com o WhatsApp
+    geral de retorno da empresa.
+    """
+    tipo, registro = usuario_empresa_atual(db, empresa, request)
+    alterou = False
+    if tipo == "usuario":
+        if criar and not getattr(registro, "pre_contrato_token", None):
+            registro.pre_contrato_token = _novo_token_pre_contrato(db)
+            alterou = True
+        token = str(getattr(registro, "pre_contrato_token", "") or "").strip()
+        nome = str(registro.nome or registro.usuario or "Responsável").strip()
+        telefone = _limpar_tel_whatsapp(registro.telefone or "")
+    else:
+        if criar and not getattr(empresa, "pre_contrato_token", None):
+            empresa.pre_contrato_token = _novo_token_pre_contrato(db)
+            alterou = True
+        nome_sessao = str(
+            request.session.get("usuario_nome")
+            or request.session.get("usuario_sistema")
+            or empresa.usuario_admin
+            or "Responsável"
+        ).strip()
+        if nome_sessao and not str(getattr(empresa, "pre_contrato_responsavel_nome", "") or "").strip():
+            empresa.pre_contrato_responsavel_nome = nome_sessao[:120]
+            alterou = True
+        token = str(getattr(empresa, "pre_contrato_token", "") or "").strip()
+        nome = str(getattr(empresa, "pre_contrato_responsavel_nome", "") or nome_sessao or "Responsável").strip()
+        telefone = _limpar_tel_whatsapp(getattr(empresa, "pre_contrato_responsavel_telefone", "") or "")
+    if alterou:
+        db.commit()
+    return token, nome, telefone
+
+
+def _responsavel_pre_contrato_por_token(db: Session, empresa: Empresa, token: str) -> tuple[str, str] | None:
+    token = str(token or "").strip()
+    if not token:
+        return None
+    usuario = db.query(UsuarioEmpresa).filter(
+        UsuarioEmpresa.empresa_id == empresa.id,
+        UsuarioEmpresa.pre_contrato_token == token,
+    ).first()
+    if usuario:
+        return (
+            str(usuario.nome or usuario.usuario or "Responsável").strip(),
+            _limpar_tel_whatsapp(usuario.telefone or ""),
+        )
+    if str(getattr(empresa, "pre_contrato_token", "") or "").strip() == token:
+        return (
+            str(getattr(empresa, "pre_contrato_responsavel_nome", "") or empresa.usuario_admin or "Responsável").strip(),
+            _limpar_tel_whatsapp(getattr(empresa, "pre_contrato_responsavel_telefone", "") or ""),
+        )
+    return None
+
+
+def _url_pre_contrato_pessoal(request: Request, db: Session, empresa: Empresa) -> tuple[str, str, str]:
+    token, nome, telefone = _identidade_link_pre_contrato(request, db, empresa, criar=True)
+    base = str(request.base_url).rstrip("/")
+    if token:
+        return f"{base}/e/{empresa.slug}/pre-contrato/r/{token}", nome, telefone
+    return f"{base}/e/{empresa.slug}/pre-contrato", nome, telefone
+
+
 @app.get("/painel/perfil", response_class=HTMLResponse)
 def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     tipo, usuario = usuario_empresa_atual(db, empresa, request)
-    perfil_nome = usuario.nome if tipo == "usuario" else (request.session.get("usuario_nome") or empresa.usuario_admin or "Administrador")
+    perfil_nome = usuario.nome if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_nome", "") or request.session.get("usuario_nome") or empresa.usuario_admin or "Administrador")
     perfil_usuario_valor = usuario.usuario if tipo == "usuario" else (empresa.usuario_admin or request.session.get("usuario_sistema") or "")
+    perfil_telefone = (usuario.telefone or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_telefone", "") or "")
     return templates.TemplateResponse("admin/perfil.html", {
         "request": request,
         "empresa": empresa,
         "perfil_nome": perfil_nome,
         "perfil_usuario": perfil_usuario_valor,
+        "perfil_telefone": perfil_telefone,
         "erro": request.query_params.get("erro"),
         "sucesso": request.query_params.get("sucesso"),
     })
@@ -3100,6 +3190,7 @@ def salvar_perfil_usuario(
         request: Request,
         nome: str = Form(...),
         usuario: str = Form(...),
+        telefone: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)):
     nome_limpo = nome.strip()
@@ -3123,13 +3214,20 @@ def salvar_perfil_usuario(
     if empresa_com_usuario or (usuario_com_usuario and (tipo != "usuario" or usuario_com_usuario.id != registro.id)):
         return RedirectResponse("/painel/perfil?erro=Este usuário já está em uso.", status_code=303)
 
+    if telefone and not celular_brasileiro_valido(telefone):
+        return RedirectResponse("/painel/perfil?erro=Informe um WhatsApp brasileiro válido.", status_code=303)
+    telefone_limpo = _limpar_tel_whatsapp(telefone)
+
     if tipo == "usuario":
         registro.nome = nome_limpo
         registro.usuario = usuario_limpo
+        registro.telefone = telefone_limpo
         request.session["usuario_nome"] = nome_limpo
         request.session["usuario_sistema"] = usuario_limpo
     else:
         empresa.usuario_admin = usuario_limpo
+        empresa.pre_contrato_responsavel_nome = nome_limpo[:120]
+        empresa.pre_contrato_responsavel_telefone = telefone_limpo
         request.session["usuario_nome"] = nome_limpo
         request.session["usuario_sistema"] = usuario_limpo
 
@@ -4564,9 +4662,10 @@ def excluir_aceite_manual_solicitacao(
     usuario = str(request.session.get("usuario_sistema", "Usuário") or "Usuário")
     status_anterior = str(getattr(item, "aceite_manual_status_anterior", "") or "").strip()
     if status_anterior not in (STATUS_CONTRATO_RASCUNHO | STATUS_CONTRATO_PENDENTE_ACEITE):
-        # Para aceites manuais feitos antes da v1.0.18, a existência de responsável
-        # indica que o link já foi enviado; sem responsável, o contrato volta ao rascunho.
-        status_anterior = "contrato_enviado" if (item.responsavel_contrato or item.responsavel_contrato_telefone) else "pre_reserva"
+        # Para aceites manuais legados não inferimos mais "contrato enviado" pela
+        # existência de responsável: desde a v1.0.21 o responsável já pode nascer
+        # no pré-contrato. Na dúvida, volta a rascunho e o atendente pode reenviar.
+        status_anterior = "pre_reserva"
 
     # Reverte apenas os eventos operacionais ainda pendentes gerados pelo aceite.
     for ev in eventos:
@@ -8146,16 +8245,11 @@ def _registrar_pagamento_infinitepay(
 def _url_confirmacao_whatsapp(request: Request, db: Session, empresa: Empresa, item: Solicitacao, tipo: str) -> str | None:
     """Monta a mensagem pública para WhatsApp sem fingir envio automático.
 
-    - Pré-contrato ainda não tem responsável comercial fixado, então usa o WhatsApp
-      de retorno da empresa.
-    - Aceite usa o responsável do contrato, preservando toda a negociação com a
-      mesma pessoa. Se não houver responsável fixado, cai no WhatsApp da empresa.
+    Pré-contrato e aceite usam primeiro o responsável já vinculado à negociação.
+    O WhatsApp geral da empresa só é fallback quando a solicitação veio de um
+    link público sem responsável ou quando o responsável ainda não tem telefone.
     """
-    if tipo == "aceite":
-        responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=False)
-    else:
-        responsavel = "responsável"
-        telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
+    responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=False)
     if not telefone:
         return None
     cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
@@ -8169,21 +8263,41 @@ def _url_confirmacao_whatsapp(request: Request, db: Session, empresa: Empresa, i
     return f"https://wa.me/{telefone}?text={quote(texto)}"
 
 
+def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Request, erro: str = "", responsavel_token: str = "", cliente=None, identificador: str = "", cliente_encontrado: bool = False, cpf_confirmacao: str = "", form=None):
+    contexto = {
+        "request": request, "empresa": empresa, "cliente": cliente, "identificador": identificador,
+        "cliente_encontrado": cliente_encontrado, "cpf_confirmacao": cpf_confirmacao, "erro": erro,
+        "responsavel_token": str(responsavel_token or "").strip(),
+        "campos_cfg": {ce.campo.chave: ce for ce in
+                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+    }
+    if form is not None:
+        contexto["form"] = form
+    return contexto
+
+
+@app.get("/e/{slug}/pre-contrato/r/{responsavel_token}", response_class=HTMLResponse)
+def pre_contrato_cliente_responsavel(slug: str, responsavel_token: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+    if not _responsavel_pre_contrato_por_token(db, empresa, responsavel_token):
+        raise HTTPException(404, "Link de pré-contrato inválido")
+    return templates.TemplateResponse("publico/cadastro.html",
+                                      _contexto_pre_contrato_publico(db, empresa, request, erro=erro, responsavel_token=responsavel_token))
+
+
 @app.get("/e/{slug}/pre-contrato", response_class=HTMLResponse)
 def pre_contrato_cliente(slug: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404)
-    return templates.TemplateResponse("publico/cadastro.html", {
-        "request": request, "empresa": empresa, "cliente": None, "identificador": "",
-        "cliente_encontrado": False, "cpf_confirmacao": "", "erro": erro,
-        "campos_cfg": {ce.campo.chave: ce for ce in
-                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
-    })
+    return templates.TemplateResponse("publico/cadastro.html",
+                                      _contexto_pre_contrato_publico(db, empresa, request, erro=erro))
 
 
 @app.get("/e/{slug}/cadastro", response_class=HTMLResponse)
-def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_confirmacao: str = "", erro: str = "",
+def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_confirmacao: str = "", erro: str = "", responsavel_token: str = "",
                      db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     ident = limpar_identificador(identificador)
@@ -8192,12 +8306,12 @@ def cadastro_cliente(slug: str, request: Request, identificador: str = "", cpf_c
     cpf_limpo = limpar_identificador(cpf_confirmacao)
     if cliente_encontrado and cpf_limpo and limpar_identificador(cliente_encontrado.cpf) == cpf_limpo:
         cliente = cliente_encontrado
-    return templates.TemplateResponse("publico/cadastro.html", {
-        "request": request, "empresa": empresa, "cliente": cliente, "identificador": ident,
-        "cliente_encontrado": bool(cliente_encontrado), "cpf_confirmacao": cpf_confirmacao, "erro": erro,
-        "campos_cfg": {ce.campo.chave: ce for ce in
-                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
-    })
+    return templates.TemplateResponse("publico/cadastro.html",
+                                      _contexto_pre_contrato_publico(
+                                          db, empresa, request, erro=erro, responsavel_token=responsavel_token,
+                                          cliente=cliente, identificador=ident, cliente_encontrado=bool(cliente_encontrado),
+                                          cpf_confirmacao=cpf_confirmacao
+                                      ))
 
 
 @app.post("/e/{slug}/reserva")
@@ -8212,7 +8326,7 @@ def salvar_pre_cadastro(
         local_nome: str = Form(""), acesso_local: str = Form(""), local_responsavel_nome: str = Form(""),
         local_responsavel_telefone: str = Form(""),
         data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
-        acao: str = Form("salvar"),
+        acao: str = Form("salvar"), responsavel_token: str = Form(""),
         db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -8244,11 +8358,13 @@ def salvar_pre_cadastro(
 
     def render_erro(codigo: str):
         cliente_encontrado = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=ident).first()
-        return templates.TemplateResponse("publico/cadastro.html", {
-            "request": request, "empresa": empresa, "cliente": None, "identificador": ident,
-            "cliente_encontrado": bool(cliente_encontrado), "cpf_confirmacao": "", "erro": codigo,
-            "campos_cfg": campos_empresa, "form": form_data
-        }, status_code=400)
+        contexto_erro = _contexto_pre_contrato_publico(
+            db, empresa, request, erro=codigo, responsavel_token=responsavel_token,
+            cliente=None, identificador=ident, cliente_encontrado=bool(cliente_encontrado),
+            cpf_confirmacao="", form=form_data
+        )
+        contexto_erro["campos_cfg"] = campos_empresa
+        return templates.TemplateResponse("publico/cadastro.html", contexto_erro, status_code=400)
 
     if not celular_brasileiro_valido(telefone):
         return render_erro("whatsapp_invalido")
@@ -8314,6 +8430,12 @@ def salvar_pre_cadastro(
     if rascunho_existente:
         return render_erro("rascunho_duplicado")
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
+    # Se o cliente entrou pelo link pessoal do atendente, a negociação já nasce
+    # vinculada a esse responsável. O link genérico continua existindo como fallback.
+    responsavel_pre = _responsavel_pre_contrato_por_token(db, empresa, responsavel_token)
+    responsavel_pre_nome = responsavel_pre[0] if responsavel_pre else ""
+    responsavel_pre_telefone = responsavel_pre[1] if responsavel_pre else ""
+
     # O pré-contrato público usa a duração padrão de 4 horas até que os itens sejam definidos.
     fim_obj = somar_minutos(inicio_obj, 240)
     solicitacao = Solicitacao(
@@ -8322,7 +8444,9 @@ def salvar_pre_cadastro(
         local_complemento=complemento.strip(), local_cidade=cidade.strip(), local_estado=estado.strip(),
         local_cep=cep.strip(), local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome, local_responsavel_telefone=local_responsavel_telefone,
-        acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva", aceite_em=None, aprovado_em=None
+        acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva", aceite_em=None, aprovado_em=None,
+        responsavel_contrato=(responsavel_pre_nome[:120] if responsavel_pre_nome else None),
+        responsavel_contrato_telefone=(responsavel_pre_telefone[:30] if responsavel_pre_telefone else None),
     )
     db.add(solicitacao)
     db.commit()

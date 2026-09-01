@@ -22,6 +22,9 @@ class Empresa(Base):
     pix_nome_recebedor = Column(String(160), nullable=True)
     pix_banco = Column(String(120), nullable=True)
     whatsapp_retorno = Column(String(30), nullable=True)
+    pre_contrato_token = Column(String(64), nullable=True, index=True)
+    pre_contrato_responsavel_nome = Column(String(120), nullable=True)
+    pre_contrato_responsavel_telefone = Column(String(30), nullable=True)
     infinitepay_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)
     infinitepay_valor_sinal = Column(Float, default=0)
@@ -61,6 +64,7 @@ class UsuarioEmpresa(Base):
     nome = Column(String(120), nullable=False)
     usuario = Column(String(80), nullable=False, index=True)
     telefone = Column(String(30), nullable=True)
+    pre_contrato_token = Column(String(64), nullable=True, index=True)
     senha = Column(String(120), nullable=False)
     ativo = Column(Boolean, default=True)
     # Acessos por área de trabalho. O administrador principal da empresa ignora estas marcações.
