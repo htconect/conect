@@ -1,199 +1,215 @@
 {% extends "base.html" %}
 {% block conteudo %}
 {% set contrato_pronto = contrato and itens_reserva and itens_reserva|length > 0 %}
+{% set endereco_evento = dados_endereco_solicitacao(item) %}
+{% set sinal_exibido = ((item.sinal if item.aceite_em and item.sinal else empresa.infinitepay_valor_sinal) if infinitepay_habilitada else item.sinal) %}
 
-<h1>{% if status_reserva_confirmada(item.status) %}Reserva confirmada{% elif item.status == 'aceite_pagamento_pendente' %}Aceite registrado - pagamento pendente{% else %}Pré-contrato para conferência{% endif %} - {{ empresa.nome }}</h1>
+<style>
+.fluxo-publico{max-width:820px;margin:0 auto 36px}.cabecalho-contrato{margin-bottom:14px}.cabecalho-contrato h1{margin-bottom:6px}.resumo-rapido{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.resumo-rapido>div{padding:12px;border:1px solid #e2e8f0;border-radius:14px;background:#fff}.resumo-rapido small{display:block;color:#64748b;margin-bottom:4px}.resumo-rapido b{font-size:1rem;color:#172033}.secao-recolhivel{border:1px solid #dbe3ee;border-radius:16px;background:#fff;margin:12px 0;overflow:hidden}.secao-recolhivel>summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:900;display:flex;align-items:center;justify-content:space-between;gap:12px}.secao-recolhivel>summary::-webkit-details-marker{display:none}.secao-recolhivel>summary:after{content:'+';font-size:1.35rem;color:#64748b}.secao-recolhivel[open]>summary:after{content:'–'}.secao-corpo{padding:0 18px 18px}.secao-corpo p{margin:7px 0}.clausulas-publicas{white-space:pre-wrap;font-family:inherit;font-size:.96rem;line-height:1.6;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;max-height:52vh;overflow:auto}.item-locacao{padding:12px 0;border-bottom:1px solid #eef2f7}.item-locacao:last-child{border-bottom:0}.status-pill{display:inline-flex;padding:6px 10px;border-radius:999px;background:#fff7ed;color:#9a3412;font-size:.82rem;font-weight:900}.status-pill.ok{background:#ecfdf5;color:#166534}.aceite-final{margin-top:16px}.check-aceite{display:flex;gap:10px;align-items:flex-start;padding:14px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;font-weight:800;line-height:1.4}.check-aceite input{width:22px;height:22px;min-width:22px;margin-top:1px}.pagamento-destaque{border:2px solid #bfdbfe;background:linear-gradient(180deg,#eff6ff,#fff);border-radius:18px;padding:18px;margin:14px 0}.seguranca-pagamento{padding:14px;border-radius:14px;background:#ecfdf5;border:1px solid #a7f3d0;margin-bottom:16px}.opcao-pagamento{display:block;border:1px solid #dbe3ee;border-radius:16px;padding:16px;margin:10px 0;background:#fff;cursor:pointer}.opcao-pagamento-linha{display:flex;align-items:center;gap:12px}.opcao-pagamento input{width:22px;height:22px;min-width:22px}.opcao-pagamento strong{font-size:1.25rem}.pix-dados{background:#f8fafc;border:1px solid #dbe3ee;border-radius:14px;padding:14px;margin-top:14px}.pix-codigo{width:100%;min-height:88px;resize:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85rem}.pergunta-pagamento{text-align:center;border:2px solid #bfdbfe}.pergunta-pagamento h1{margin-bottom:8px}.acoes-duplas{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}.final-reserva{text-align:center;padding:28px}.final-reserva h1{margin-bottom:8px}.consultar-links{display:flex;gap:10px;flex-wrap:wrap}.alerta-aceite{border-color:#fecaca;background:#fef2f2;color:#991b1b}.pagamento-resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.pagamento-resumo>div{background:#fff;border:1px solid #dbe3ee;border-radius:12px;padding:10px}.pagamento-resumo small{display:block;color:#64748b}.btn-pix-opcao{width:100%;margin:6px 0}.btn-pix-opcao.selecionado{outline:3px solid rgba(37,99,235,.18)}
+@media(max-width:640px){.fluxo-publico{margin-bottom:24px}.resumo-rapido,.pagamento-resumo{grid-template-columns:1fr 1fr}.resumo-rapido>div:last-child,.pagamento-resumo>div:last-child{grid-column:1/-1}.secao-recolhivel>summary{padding:15px}.secao-corpo{padding:0 15px 16px}.acoes-duplas{grid-template-columns:1fr}.aceite-final{position:sticky;bottom:8px;z-index:8;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);padding:10px;border-radius:16px;box-shadow:0 8px 26px rgba(15,23,42,.12)}.clausulas-publicas{max-height:48vh}.consultar-links{display:grid;grid-template-columns:1fr}.consultar-links .botao{width:100%}}
+</style>
 
-{% if mostrar_pergunta_pagamento %}
-<div class="box aviso" style="border-width:2px;">
-  <h2>Aceite concluído</h2>
-  <p><b>Prosseguir para pagamento?</b></p>
-  <p class="texto-discreto">O aceite já foi registrado. O pagamento é a próxima etapa e será feito separadamente pela InfinitePay.</p>
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
-    <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Sim, prosseguir para pagamento</a>
-    <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}">Agora não</a>
-  </div>
-</div>
-{% elif pagamento_ja_confirmado %}
-<div class="box aviso">
-  <b>Aceite registrado.</b> O pagamento necessário para confirmar a reserva já consta no contrato.
-</div>
-{% endif %}
-
-{% if not contrato_pronto and not status_reserva_confirmada(item.status) and item.status != "cancelado_cliente" %}
-<div class="box aviso">
-  <b>Status: contrato em preparação.</b>
-  <p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p>
-</div>
-{% endif %}
-
-<div class="contrato-visual">
-  <div class="card">
-    <h2>Resumo do evento</h2>
-    <p><b>Data do evento:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
-    <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
-    {% if item.retirada_obrigatoria %}
-      <p class="retirada-obrigatoria-mini"><b>Retirada obrigatória:</b> {{ (item.retirada_data or item.data_evento).strftime('%d/%m/%Y') if (item.retirada_data or item.data_evento) else '-' }} às {{ (item.retirada_hora or item.hora_fim or item.hora_inicio).strftime('%H:%M') if (item.retirada_hora or item.hora_fim or item.hora_inicio) else '-' }}</p>
-    {% endif %}
-    <p><b>Valor total:</b> R$ {{ item.valor|moeda_br }}</p>
-    <p><b>Valor recebido:</b> R$ {{ total_pago_publico|moeda_br }}</p>
-    <p><b>Sinal:</b> R$ {{ ((item.sinal if item.aceite_em and item.sinal else empresa.infinitepay_valor_sinal) if empresa.infinitepay_ativa else item.sinal)|moeda_br }}</p>
-    <p><b>Falta:</b> R$ {{ saldo_restante|moeda_br }}</p>
+<div class="fluxo-publico">
+{% if item.status == 'cancelado_cliente' %}
+  <div class="box final-reserva">
+    <span class="status-pill">Cancelado</span>
+    <h1>Contrato cancelado</h1>
+    <p>Esta reserva não está mais ativa.</p>
   </div>
 
-  <div class="card">
-    <h2>Cliente</h2>
-    <p><b>Nome:</b> {{ item.cliente.nome or '-' }}</p>
-    <p><b>Telefone:</b> {{ item.cliente.telefone or item.cliente.identificador or '-' }}</p>
-    <p><b>CPF:</b> {{ item.cliente.cpf or '-' }}</p>
-    <p><b>CNPJ:</b> {{ item.cliente.cnpj or '-' }}</p>
-    <p><b>Email:</b> {{ item.cliente.email or '-' }}</p>
-    <p><b>Nascimento:</b> {{ item.cliente.data_nascimento.strftime('%d/%m/%Y') if item.cliente.data_nascimento else '-' }}</p>
-  </div>
-
-  <div class="card">
-    <h2>Local do evento</h2>
-    {% set referencia_evento = endereco_referencia_solicitacao(item) %}
-    {% set endereco_evento = dados_endereco_solicitacao(item) %}
-    <p><b>Local:</b> {{ item.local_nome or referencia_evento or '-' }}</p>
-    <p><b>Endereço do evento:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
-    {% if referencia_evento and referencia_evento != item.local_nome %}<p><b>Ponto de referência:</b> {{ referencia_evento }}</p>{% endif %}
-    <p><b>Número:</b> {{ endereco_evento.numero or '-' }}</p>
-    {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
-    <p><b>Bairro:</b> {{ endereco_evento.bairro or '-' }}</p>
-    <p><b>Acesso:</b> {{ item.acesso_local or '-' }}</p>
-    <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}</p>
-    <p><b>Telefone responsável:</b> {{ item.local_responsavel_telefone or '-' }}</p>
-    <p><b>Observações da reserva:</b> {{ item.observacoes or '-' }}</p>
-  </div>
-</div>
-
-{% if aceite_realizado or pagamentos_publicos %}
-<div class="box" id="pagamento-contrato">
-  <h2>Pagamento do contrato</h2>
-  <div class="contrato-visual" style="margin-top:12px;">
-    <div class="card"><span class="texto-discreto">Valor total</span><br><b>R$ {{ item.valor|moeda_br }}</b></div>
-    <div class="card"><span class="texto-discreto">Já pago</span><br><b>R$ {{ total_pago_publico|moeda_br }}</b></div>
-    <div class="card"><span class="texto-discreto">Falta pagar</span><br><b>R$ {{ saldo_restante|moeda_br }}</b></div>
-  </div>
-
-  {% if pagamentos_publicos %}
-    <h3 style="margin-top:20px;">Pagamentos registrados</h3>
-    <div class="tabela-responsiva">
-      <table>
-        <thead><tr><th>Data</th><th>Valor</th><th>Forma</th><th>Origem</th></tr></thead>
-        <tbody>
-          {% for p in pagamentos_publicos %}
-          <tr>
-            <td>{{ p.data_pagamento.strftime('%d/%m/%Y') if p.data_pagamento else '-' }}</td>
-            <td>R$ {{ p.valor|moeda_br }}</td>
-            <td>{% if p.forma_pagamento == 'pix' %}PIX{% elif p.forma_pagamento == 'cartao' %}Cartão{% elif p.forma_pagamento == 'dinheiro' %}Dinheiro{% else %}{{ p.forma_pagamento or '-' }}{% endif %}</td>
-            <td>{% if p.usuario_registro == 'InfinitePay' %}InfinitePay{% else %}Registrado pela empresa{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+{% elif reserva_quitada %}
+  <div class="box final-reserva">
+    <span class="status-pill ok">Concluído</span>
+    <h1>Reserva concluída</h1>
+    <p>Seu contrato está aceito e o pagamento está totalmente quitado.</p>
+    <p><b>Obrigado! Sua reserva está confirmada.</b></p>
+    <div class="acoes-duplas">
+      <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}.pdf" target="_blank">Ver contrato</a>
+      <button type="button" onclick="fecharPaginaReserva()">Fechar</button>
     </div>
-  {% else %}
-    <p class="texto-discreto">Nenhum pagamento registrado até o momento.</p>
-  {% endif %}
-
-  {% if saldo_restante <= 0.009 %}
-    <div class="aviso" style="margin-top:16px;"><b>Pagamento concluído.</b> Não há saldo pendente neste contrato.</div>
-  {% elif empresa.infinitepay_ativa and aceite_realizado and item.status != 'cancelado_cliente' %}
-    {% if cobranca_pendente %}
-      <div class="aviso" style="margin-top:16px;">
-        <b>Pagamento em aberto: R$ {{ valor_cobranca_pendente|moeda_br }}</b>
-        <p class="texto-discreto">Já existe uma solicitação InfinitePay para este contrato. O botão abaixo reutiliza a mesma cobrança; não cria outra.</p>
-      </div>
-      <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar R$ {{ valor_cobranca_pendente|moeda_br }}</a>
-    {% elif not mostrar_pergunta_pagamento %}
-      {% if total_pago_publico > 0.009 %}
-        <p><b>Saldo restante:</b> R$ {{ saldo_restante|moeda_br }}</p>
-        <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar restante</a>
-      {% else %}
-        <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar</a>
-      {% endif %}
-    {% endif %}
-  {% elif aceite_realizado %}
-    <p class="texto-discreto">Os pagamentos lançados manualmente pela empresa aparecerão automaticamente neste resumo.</p>
-  {% endif %}
-</div>
-{% endif %}
-
-<div class="box">
-  <h2>Produtos e serviços</h2>
-  {% if itens_reserva %}
-    <table>
-      <thead><tr><th>Item</th><th>Qtd.</th><th>Unitário</th><th>Total</th></tr></thead>
-      <tbody>
-      {% for it in itens_reserva %}
-        <tr>
-          <td>{{ it.nome }}<br><span class="texto-discreto">{{ it.descricao or "" }}</span></td>
-          <td>{{ it.quantidade }}</td>
-          <td>R$ {{ it.valor_unitario|moeda_br }}</td>
-          <td>R$ {{ it.valor_total|moeda_br }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p><b>Itens ainda não informados.</b></p>
-    <p class="texto-discreto">Este contrato ainda está em preparação pela empresa.</p>
-  {% endif %}
-</div>
-
-{% if empresa.mostrar_suporte_contrato and (empresa.suporte_inicio or empresa.suporte_fim) %}
-<div class="box">
-  <h2>Suporte</h2>
-  <p>Atendimento de suporte: {{ empresa.suporte_inicio or '--:--' }} às {{ empresa.suporte_fim or '--:--' }}.</p>
-</div>
-{% endif %}
-
-<div class="box contrato">
-  <h2>{{ contrato.nome if contrato else "Cláusulas" }}</h2>
-  {% if contrato and contrato.descricao %}
-    <p><b>Descrição:</b> {{ contrato.descricao }}</p>
-  {% endif %}
-  <pre>{{ contrato.clausulas if contrato else "Contrato ainda não configurado." }}</pre>
-</div>
-
-<div class="box">
-  <h2>Linha do tempo</h2>
-  <div class="timeline">
-    <div><b>Preparado em:</b> {{ item.criado_em|datahora_local }}</div>
-    <div><b>Aprovado em:</b> {{ (item.aprovado_em or item.aceite_em)|datahora_local if (item.aprovado_em or item.aceite_em) and status_reserva_confirmada(item.status) else '-' }}</div>
-    <div><b>Cancelado em:</b> {{ item.cancelado_em|datahora_local }}</div>
-    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif saldo_restante <= 0.009 and aceite_realizado %}Pagamento concluído{% elif status_reserva_confirmada(item.status) and saldo_restante > 0.009 %}Reserva confirmada · saldo pendente{% elif status_reserva_confirmada(item.status) %}Reserva confirmada{% elif item.status == 'aceite_pagamento_pendente' %}Aceite registrado · aguardando pagamento{% else %}Aguardando aceite{% endif %}</div>
+    <p id="avisoFechar" class="texto-discreto" hidden>Você já pode fechar esta página.</p>
   </div>
+
+{% elif not aceite_realizado %}
+  <div class="cabecalho-contrato">
+    <span class="status-pill">Aguardando aceite</span>
+    <h1>Contrato da sua reserva</h1>
+    <p class="texto-discreto">Abra somente as seções que deseja conferir. Antes de aceitar, revise os dados e leia as cláusulas.</p>
+    <div class="resumo-rapido">
+      <div><small>Evento</small><b>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</b></div>
+      <div><small>Horário</small><b>{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</b></div>
+      <div><small>Valor</small><b>R$ {{ item.valor|moeda_br }}</b></div>
+    </div>
+  </div>
+
+  {% if erro_aceite %}<div class="box aviso alerta-aceite"><b>Marque “Li, conferi os dados e aceito o contrato” para continuar.</b></div>{% endif %}
+  {% if not contrato_pronto %}
+    <div class="box aviso"><b>Contrato em preparação.</b><p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p></div>
+  {% endif %}
+
+  <details class="secao-recolhivel">
+    <summary>Dados do contrato</summary>
+    <div class="secao-corpo">
+      <p><b>Cliente:</b> {{ item.cliente.nome or '-' }}</p>
+      <p><b>WhatsApp:</b> {{ item.cliente.telefone or item.cliente.identificador or '-' }}</p>
+      {% if item.cliente.cpf %}<p><b>CPF:</b> {{ item.cliente.cpf }}</p>{% endif %}
+      {% if item.cliente.cnpj %}<p><b>CNPJ:</b> {{ item.cliente.cnpj }}</p>{% endif %}
+      {% if item.cliente.email %}<p><b>E-mail:</b> {{ item.cliente.email }}</p>{% endif %}
+      {% if empresa.mostrar_suporte_contrato and (empresa.suporte_inicio or empresa.suporte_fim) %}<p><b>Suporte:</b> {{ empresa.suporte_inicio or '--:--' }} às {{ empresa.suporte_fim or '--:--' }}</p>{% endif %}
+    </div>
+  </details>
+
+  <details class="secao-recolhivel">
+    <summary>Dados da locação</summary>
+    <div class="secao-corpo">
+      <p><b>Data:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
+      <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
+      <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
+      <p><b>Endereço:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
+      {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
+      <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</p>
+      {% if item.acesso_local %}<p><b>Acesso:</b> {{ item.acesso_local }}</p>{% endif %}
+      {% if item.observacoes %}<p><b>Observações:</b> {{ item.observacoes }}</p>{% endif %}
+      <h3 style="margin-top:16px">Produtos e serviços</h3>
+      {% for it in itens_reserva %}
+        <div class="item-locacao"><b>{{ it.nome }}</b>{% if it.descricao %}<div class="texto-discreto">{{ it.descricao }}</div>{% endif %}<div>{{ it.quantidade }} × R$ {{ it.valor_unitario|moeda_br }} = <b>R$ {{ it.valor_total|moeda_br }}</b></div></div>
+      {% else %}<p class="texto-discreto">Itens ainda não informados.</p>{% endfor %}
+    </div>
+  </details>
+
+  <details class="secao-recolhivel">
+    <summary>Cláusulas do contrato</summary>
+    <div class="secao-corpo">
+      {% if contrato and contrato.descricao %}<p><b>{{ contrato.nome }}</b> — {{ contrato.descricao }}</p>{% endif %}
+      <div class="clausulas-publicas">{{ contrato.clausulas if contrato else 'Contrato ainda não configurado.' }}</div>
+    </div>
+  </details>
+
+  <details class="secao-recolhivel">
+    <summary>Pagamento</summary>
+    <div class="secao-corpo">
+      <p><b>Valor do contrato:</b> R$ {{ item.valor|moeda_br }}</p>
+      {% if sinal_exibido and sinal_exibido > 0 %}<p><b>Sinal:</b> R$ {{ sinal_exibido|moeda_br }}</p>{% endif %}
+      {% if infinitepay_habilitada %}
+        <p><b>Pagamento seguro pela InfinitePay.</b> Após o aceite, você poderá escolher PIX ou cartão e consultar as opções de parcelamento disponíveis.</p>
+      {% else %}
+        <p><b>Pagamento por PIX.</b> Após o aceite, você poderá escolher o sinal ou o valor total{% if sinal_exibido and sinal_exibido > 0 %}, conforme as opções da reserva{% endif %}.</p>
+        {% if empresa.pix_nome_recebedor %}<p><b>Nome que aparecerá no PIX:</b> {{ empresa.pix_nome_recebedor }}</p>{% endif %}
+        {% if empresa.pix_banco %}<p><b>Banco / instituição:</b> {{ empresa.pix_banco }}</p>{% endif %}
+      {% endif %}
+    </div>
+  </details>
+
+  {% if contrato_pronto %}
+    <div class="box">
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar">Editar meus dados</a>
+      <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento.">
+        <label class="check-aceite"><input id="aceiteContrato" type="checkbox" name="aceite" value="sim" required><span>Li, conferi os dados e aceito o contrato.</span></label>
+        <button id="botaoAceitarContrato" class="largura-total" type="submit" disabled style="margin-top:10px">Aceitar contrato</button>
+      </form>
+      <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar este contrato?');" style="margin-top:12px"><button class="perigo largura-total" type="submit">Cancelar</button></form>
+    </div>
+  {% endif %}
+
+{% else %}
+  {% if mostrar_pergunta_pagamento %}
+    <div id="perguntaPagamento" class="box pergunta-pagamento">
+      <span class="status-pill ok">Contrato aceito</span>
+      <h1>Obrigado! Contrato aceito com sucesso.</h1>
+      <p><b>Deseja passar para a etapa de pagamento?</b></p>
+      <div class="acoes-duplas">
+        <button type="button" onclick="mostrarEtapaPagamento()">Sim, prosseguir</button>
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}">Agora não</a>
+      </div>
+      <p class="texto-discreto">Você poderá usar este mesmo link para pagar depois.</p>
+    </div>
+  {% endif %}
+
+  <section id="etapa-pagamento" {% if mostrar_pergunta_pagamento %}hidden{% endif %}>
+    <div class="pagamento-destaque">
+      <span class="status-pill ok">Contrato aceito</span>
+      <h1>{% if pagamento_parcial %}Pagamento do saldo{% else %}Confirmação da reserva{% endif %}</h1>
+      <div class="pagamento-resumo">
+        <div><small>Valor do contrato</small><b>R$ {{ item.valor|moeda_br }}</b></div>
+        <div><small>Já pago</small><b>R$ {{ total_pago_publico|moeda_br }}</b></div>
+        <div><small>Falta pagar</small><b>R$ {{ saldo_restante|moeda_br }}</b></div>
+      </div>
+
+      {% if infinitepay_habilitada %}
+        <div class="seguranca-pagamento">
+          <b>🔒 Pagamento seguro pela InfinitePay</b>
+          <p style="margin:6px 0 0">Esta é uma etapa segura, processada pela InfinitePay. Você poderá pagar por PIX ou cartão e, quando disponível, escolher o parcelamento apresentado no checkout.</p>
+        </div>
+        {% if cobranca_pendente %}
+          <div class="box aviso"><b>Pagamento já iniciado: R$ {{ valor_cobranca_pendente|moeda_br }}</b><p class="texto-discreto">Para evitar cobrança duplicada, o botão abaixo abre a mesma cobrança já criada.</p></div>
+          <a class="botao largura-total" href="{{ cobranca_pendente.checkout_url }}">Continuar pagamento</a>
+        {% else %}
+          <form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.id }}/infinitepay" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
+            {% for opcao in opcoes_pagamento %}
+              <label class="opcao-pagamento">
+                <div class="opcao-pagamento-linha">
+                  <input type="radio" name="tipo_pagamento" value="{{ opcao.tipo }}" {% if loop.first %}checked{% endif %} required>
+                  <div><b>{{ opcao.titulo }}</b><br><strong>R$ {{ opcao.valor|moeda_br }}</strong></div>
+                </div>
+                {% if opcao.simulacoes %}
+                  <details style="margin-top:12px"><summary>Ver opções de parcelamento</summary>
+                    <div class="secao-corpo" style="padding:10px 0 0">
+                    {% for sim in opcao.simulacoes %}<p>{{ sim.parcelas }}x de aproximadamente R$ {{ sim.parcela|moeda_br }} · total aproximado R$ {{ sim.total|moeda_br }}</p>{% endfor %}
+                    </div>
+                  </details>
+                {% endif %}
+              </label>
+            {% endfor %}
+            {% if opcoes_pagamento %}<button class="largura-total" type="submit">Continuar para a InfinitePay</button>{% endif %}
+          </form>
+        {% endif %}
+      {% else %}
+        <div class="seguranca-pagamento">
+          <b>Pagamento por PIX</b>
+          <p style="margin:6px 0 0">Escolha o valor e confira os dados abaixo antes de concluir o PIX no seu banco.</p>
+        </div>
+        {% if opcoes_pagamento|length > 1 %}
+          <p><b>Como deseja pagar?</b></p>
+          {% for opcao in opcoes_pagamento %}<button type="button" class="botao secundario btn-pix-opcao" data-pix-titulo="{{ opcao.titulo }}" data-pix-valor="{{ opcao.valor|moeda_br }}" onclick="selecionarPix(this)">{{ opcao.titulo }} — R$ {{ opcao.valor|moeda_br }}</button>{% endfor %}
+        {% endif %}
+        <div id="painelPix" class="pix-dados" {% if opcoes_pagamento|length > 1 %}hidden{% endif %}>
+          <h2 id="tituloPix">{% if opcoes_pagamento %}{{ opcoes_pagamento[0].titulo }}{% else %}Pagamento{% endif %}</h2>
+          <p>Valor: <b id="valorPix">R$ {% if opcoes_pagamento %}{{ opcoes_pagamento[0].valor|moeda_br }}{% else %}{{ saldo_restante|moeda_br }}{% endif %}</b></p>
+          {% if empresa.pix_nome_recebedor %}<p><b>Nome que aparecerá no PIX:</b> {{ empresa.pix_nome_recebedor }}</p>{% endif %}
+          {% if empresa.pix_banco %}<p><b>Banco / instituição:</b> {{ empresa.pix_banco }}</p>{% endif %}
+          {% if empresa.pix_copia_cola %}
+            <label>PIX copia e cola</label>
+            <textarea id="codigoPix" class="pix-codigo" readonly>{{ empresa.pix_copia_cola }}</textarea>
+            <button type="button" class="largura-total" onclick="copiarPix()">Copiar PIX</button>
+            <p id="pixCopiado" class="texto-discreto" hidden>PIX copiado. Agora abra o aplicativo do seu banco e conclua o pagamento.</p>
+          {% else %}
+            <div class="aviso"><b>Dados PIX ainda não cadastrados.</b><p class="texto-discreto">Entre em contato com o responsável pela reserva para receber os dados de pagamento.</p></div>
+          {% endif %}
+        </div>
+        <p class="texto-discreto">Após o pagamento, a confirmação será registrada pelo responsável. Não é necessário abrir o WhatsApp por esta tela.</p>
+      {% endif %}
+    </div>
+
+    <details class="secao-recolhivel">
+      <summary>Consultar contrato aceito</summary>
+      <div class="secao-corpo consultar-links">
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}.pdf" target="_blank">Ver contrato</a>
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/clausulas" target="_blank">Ver cláusulas</a>
+      </div>
+    </details>
+  </section>
+{% endif %}
 </div>
 
-<div class="box">
-  {% if item.status == 'aceite_pagamento_pendente' %}
-    <p><b>Seu aceite foi registrado.</b> O resumo de pagamentos acima será atualizado tanto para pagamentos manuais quanto para InfinitePay.</p>
-  {% elif status_reserva_confirmada(item.status) %}
-    <p><b>Contrato aceito.</b> A reserva está confirmada. Consulte o quadro <b>Pagamento do contrato</b> para acompanhar o que já foi pago e o saldo.</p>
-    <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar esta reserva?');">
-      <button class="perigo" type="submit">Cancelar</button>
-    </form>
-  {% elif item.status == "cancelado_cliente" %}
-    <p><b>Contrato cancelado.</b></p>
-  {% else %}
-    {% if contrato_pronto %}
-      <div class="acoes-contrato-publico">
-        <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar"><i class="bi bi-pencil-square"></i> Editar meus dados</a>
-        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. {% if empresa.infinitepay_ativa %}Depois do aceite, você poderá decidir se deseja prosseguir para o pagamento.{% else %}Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.{% endif %}">
-          <label class="check"><input type="checkbox" name="aceite" value="sim" required> Li, conferi os dados e aceito o contrato.</label>
-          <button>Aceitar</button>
-        </form>
-        <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar este contrato?');">
-          <button class="perigo" type="submit">Cancelar</button>
-        </form>
-      </div>
-    {% else %}
-      <p><b>Contrato em preparação.</b></p>
-      <p class="texto-discreto">O aceite ficará disponível depois que a empresa incluir os itens e configurar as cláusulas.</p>
-    {% endif %}
-  {% endif %}
-</div>
+<script>
+(function(){
+  const check=document.getElementById('aceiteContrato');
+  const botao=document.getElementById('botaoAceitarContrato');
+  if(check&&botao){const atualizar=()=>{botao.disabled=!check.checked;};check.addEventListener('change',atualizar);atualizar();}
+})();
+function mostrarEtapaPagamento(){const p=document.getElementById('perguntaPagamento');const e=document.getElementById('etapa-pagamento');if(p)p.hidden=true;if(e){e.hidden=false;e.scrollIntoView({behavior:'smooth',block:'start'});}}
+function selecionarPix(botao){document.querySelectorAll('.btn-pix-opcao').forEach(b=>b.classList.remove('selecionado'));botao.classList.add('selecionado');const painel=document.getElementById('painelPix');const titulo=document.getElementById('tituloPix');const valor=document.getElementById('valorPix');if(titulo)titulo.textContent=botao.dataset.pixTitulo||'Pagamento';if(valor)valor.textContent='R$ '+(botao.dataset.pixValor||'');if(painel)painel.hidden=false;}
+async function copiarPix(){const campo=document.getElementById('codigoPix');if(!campo)return;try{await navigator.clipboard.writeText(campo.value);}catch(e){campo.select();document.execCommand('copy');}const ok=document.getElementById('pixCopiado');if(ok)ok.hidden=false;}
+function fecharPaginaReserva(){try{window.close();}catch(e){}const a=document.getElementById('avisoFechar');if(a)a.hidden=false;}
+</script>
 {% endblock %}

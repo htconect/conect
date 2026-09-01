@@ -1,20 +1,17 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="box pequeno sucesso">
-  {% if status_reserva_confirmada(solicitacao.status) %}
+<div class="box pequeno sucesso" style="max-width:720px;margin:24px auto;text-align:center;">
+  {% if solicitacao.status == 'pre_reserva' %}
+    <h1>Pré-contrato recebido</h1>
+    <p>Seus dados foram registrados com sucesso e já estão disponíveis para o responsável.</p>
+    <p class="texto-discreto">Você pode fechar esta página.</p>
+  {% elif status_reserva_confirmada(solicitacao.status) or solicitacao.status == 'aceite_pagamento_pendente' %}
     <h1>Contrato aceito</h1>
-    {% if solicitacao.sinal and solicitacao.sinal > 0 %}
-      <p>Agora envie o sinal de R$ {{ solicitacao.sinal|moeda_br }} para confirmar a reserva.</p>
-      {% if empresa.pix_copia_cola %}
-      <textarea readonly onclick="this.select()">{{ empresa.pix_copia_cola }}</textarea>
-      {% endif %}
-    {% else %}
-      <p>Sua reserva foi registrada.</p>
-    {% endif %}
+    <p>Seu aceite já foi registrado. Use o mesmo link do contrato para consultar a reserva e os pagamentos.</p>
   {% else %}
-    <h1>Contrato enviado</h1>
-    <p>Recebemos suas informações. A empresa vai validar o combinado e preparar o contrato para aceite.</p>
+    <h1>Informações registradas</h1>
+    <p>O responsável dará continuidade ao atendimento.</p>
   {% endif %}
-  <a class="botao" href="/e/{{ empresa.slug }}">Voltar</a>
+  <button type="button" onclick="try{window.close()}catch(e){}">Fechar</button>
 </div>
 {% endblock %}

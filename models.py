@@ -19,6 +19,8 @@ class Empresa(Base):
     senha_admin = Column(String(120), nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     pix_copia_cola = Column(Text, nullable=True)
+    pix_nome_recebedor = Column(String(160), nullable=True)
+    pix_banco = Column(String(120), nullable=True)
     whatsapp_retorno = Column(String(30), nullable=True)
     infinitepay_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)

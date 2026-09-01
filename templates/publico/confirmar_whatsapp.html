@@ -1,18 +1,32 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<section class="card card-formulario">
-  <h1>Tudo certo!</h1>
-  <p>Seus dados foram registrados com sucesso.</p>
-
-  <div class="aviso aviso-info">
-    Agora será aberta uma mensagem no WhatsApp para avisar nosso atendente.<br>
-    <strong>Por favor, clique em “Enviar” no WhatsApp para concluir a confirmação.</strong>
-  </div>
-
-  {% if url_whatsapp %}
-    <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Continuar para o WhatsApp</a>
+<div class="box" style="max-width:720px;margin:24px auto;padding:26px;">
+  {% if tipo == 'pre_contrato' %}
+    <h1>Pré-contrato recebido com sucesso</h1>
+    <p>Seus dados foram salvos e já estão disponíveis para o responsável.</p>
+    <div class="aviso" style="margin-top:18px;">
+      <h2>Deseja avisar o responsável agora?</h2>
+      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;">
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Agora não</a>
+      {% if url_whatsapp %}
+        <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
+      {% else %}
+        <a class="botao largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Continuar</a>
+      {% endif %}
+    </div>
   {% else %}
-    <a class="botao largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Continuar</a>
+    <h1>Contrato aceito com sucesso</h1>
+    <p>Seu aceite já foi registrado.</p>
+    <div class="aviso" style="margin-top:18px;">
+      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;">
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}">Agora não</a>
+      {% if url_whatsapp %}<a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>{% endif %}
+    </div>
   {% endif %}
-</section>
+</div>
+<style>@media(max-width:560px){.box>div[style*="grid-template-columns"]{grid-template-columns:1fr!important}}</style>
 {% endblock %}

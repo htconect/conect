@@ -4,12 +4,8 @@
   <p class="mini">Contrato #{{ item.id }}</p>
   <h1>Confirmando seu pagamento</h1>
   <p>Estamos aguardando a confirmação da InfinitePay.</p>
-  <p class="texto-discreto">Assim que o pagamento for confirmado, o contrato será aprovado e o WhatsApp do responsável será aberto automaticamente.</p>
-  <p><b>Você não precisa clicar em nada nesta tela.</b></p>
+  <p class="texto-discreto">Assim que a confirmação chegar, esta tela será atualizada automaticamente.</p>
+  <p><b>Você não precisa clicar em nada.</b></p>
 </div>
-<script>
-  window.setTimeout(function () {
-    window.location.reload();
-  }, 2500);
-</script>
+<script>window.setTimeout(function(){window.location.reload();},2500);</script>
 {% endblock %}

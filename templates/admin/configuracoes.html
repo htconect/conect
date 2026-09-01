@@ -30,6 +30,17 @@
 
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola or '' }}</textarea>
+    <div class="grid duas">
+      <div>
+        <label>Nome que aparece no PIX</label>
+        <input name="pix_nome_recebedor" value="{{ empresa.pix_nome_recebedor or '' }}" placeholder="Ex.: Débora Maria dos Santos Rabello">
+      </div>
+      <div>
+        <label>Banco / instituição que aparece no PIX</label>
+        <input name="pix_banco" value="{{ empresa.pix_banco or '' }}" placeholder="Ex.: Santander">
+      </div>
+    </div>
+    <p class="texto-discreto">Esses dados serão mostrados ao cliente para conferência antes do pagamento por PIX.</p>
     <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
 
     <div class="linha">
@@ -85,7 +96,7 @@
     <textarea name="mensagem_reserva">{{ empresa.mensagem_reserva or mensagens_padrao.reserva }}</textarea>
 
     <label>Mensagem do aceite</label>
-    <p class="texto-discreto">Utilizada no botão "Aceite". No fluxo manual, o sistema acrescenta o PIX quando a empresa exige sinal. Com InfinitePay ativa, o cliente recebe uma mensagem curta com Sinal/Valor do contrato e paga pela InfinitePay, sem envio manual de comprovante.</p>
+    <p class="texto-discreto">Utilizada no botão "Aceite". O mesmo link acompanha o cliente no aceite, pagamento e consulta da reserva. O texto não depende de InfinitePay e informa parcelamento apenas quando disponível.</p>
     <textarea name="mensagem_aceite">{{ empresa.mensagem_aceite or mensagens_padrao.aceite }}</textarea>
 
     <label>Mensagem de reserva confirmada</label>
