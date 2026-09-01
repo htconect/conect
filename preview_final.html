@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{{ titulo or "HUMIAT Conect" }}</title>
+  <title>HUMIAT Conect</title>
   <link rel="manifest" href="/static/manifest.webmanifest?v=4">
   <meta name="theme-color" content="#0F3D91">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png?v=4">
@@ -11,47 +11,90 @@
   <link rel="shortcut icon" href="/static/favicon.ico?v=4">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=4">
   <link rel="stylesheet" href="/static/css/style.css?v=20260725-intel2">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  {% block head_extra %}{% endblock %}
+  
+  
 </head>
-<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% if not request.session.get('empresa_id') and not request.session.get('admin_geral') %}publico-cliente{% endif %} {% block body_class %}{% endblock %}">
+<body class="tema-global-azul publico-cliente ">
 <header class="topo-app">
-  <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
-    {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
+  <a class="marca-app" href="/">
+    
     <span class="marca-app-texto">
-      <span class="marca-app-nome">{{ empresa.nome if empresa is defined and empresa else "Conect" }}</span>
-      <small class="marca-app-versao">Versão do app {{ APP_VERSION }}</small>
+      <span class="marca-app-nome">Karaokê RJ</span>
+      <small class="marca-app-versao">Versão do app 1.0.16</small>
     </span>
   </a>
-  {% if request.session.get('empresa_id') %}
-    <div class="usuario-topo">
-      <span>{{ request.session.get('usuario_nome') or request.session.get('usuario') or 'Usuário' }}</span>
-      <details class="menu-topo">
-        <summary aria-label="Abrir menu"><i class="bi bi-list"></i></summary>
-        <div class="menu-topo-card">
-          <strong>Cadastros</strong>
-          <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
-          <a href="/painel/produtos"><i class="bi bi-box-seam"></i> Itens de locação</a>
-          <a href="/painel/configuracoes"><i class="bi bi-building"></i> Empresa e campos</a>
-          <strong>Consultas</strong>
-          <a href="/painel/relatorios"><i class="bi bi-bar-chart-line"></i> Relatórios</a>
-          <strong>Conta</strong>
-          <a href="/painel/perfil"><i class="bi bi-person"></i> Meu perfil</a>
-          <a href="/painel/alterar-senha"><i class="bi bi-shield-lock"></i> Alterar senha</a>
-          <button type="button" id="instalar-conect" class="menu-instalar" hidden><i class="bi bi-phone"></i> Instalar Conect</button>
-          <a class="menu-sair" href="/empresa/sair"><i class="bi bi-box-arrow-right"></i> Sair</a>
-        </div>
-      </details>
-    </div>
-  {% elif request.session.get('admin_geral') %}
-    <a class="sair-app" href="/admin/sair">Sair</a>
-  {% else %}
+  
     <a class="sair-app" href="/empresa/login">Entrar</a>
-  {% endif %}
+  
 </header>
 
 <main class="container-app">
-  {% block conteudo %}{% endblock %}
+  
+
+
+
+<style>
+.pagamento-confirmado-pagina{max-width:720px;margin:0 auto 30px;min-width:0}
+.confirmacao-card{padding:24px;text-align:center}
+.confirmacao-status{display:inline-flex;padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:900;font-size:.82rem}
+.confirmacao-card h1{font-size:clamp(1.8rem,7vw,2.55rem);line-height:1.08;margin:16px 0 10px;overflow-wrap:anywhere}
+.confirmacao-card h2{margin:8px 0 6px}
+.confirmacao-valores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0 0;text-align:left}
+.confirmacao-valores>div{border:1px solid #dbe3ee;border-radius:14px;padding:12px;background:#f8fafc;min-width:0}
+.confirmacao-valores small{display:block;color:#64748b;margin-bottom:4px}
+.confirmacao-valores b{display:block;font-size:1.08rem;overflow-wrap:anywhere}
+.confirmacao-valores.um>div{grid-column:1/-1;text-align:center}
+.entrega-contrato-card{padding:22px}
+.entrega-contrato-card h2{font-size:1.35rem;line-height:1.2;margin-top:0}
+.entrega-contrato-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.confirmacao-fechar{margin-top:18px}
+.confirmacao-fechar .largura-total{width:100%}
+#avisoFecharPagamento{text-align:center;margin:9px 0 0}
+@media(max-width:560px){
+  .pagamento-confirmado-pagina{margin-bottom:20px}
+  .confirmacao-card,.entrega-contrato-card{padding:18px}
+  .confirmacao-card h1{font-size:1.9rem}
+  .confirmacao-valores{grid-template-columns:1fr}
+  .confirmacao-valores>div{grid-column:auto!important;text-align:left!important}
+  .entrega-contrato-grid{grid-template-columns:1fr}
+}
+</style>
+
+<div class="pagamento-confirmado-pagina">
+  
+    <div class="box confirmacao-card">
+      <span class="confirmacao-status">Pagamento concluído</span>
+      
+        <h1>Seu contrato está quitado.</h1>
+        <p>O pagamento final foi registrado com sucesso.</p>
+      
+
+      <div class="confirmacao-valores um">
+        <div>
+          <small>Valor pago agora</small>
+          <b>R$ 100,00</b>
+        </div>
+        
+      </div>
+
+      <p style="margin:16px 0 0"><b>Obrigado pelo pagamento!</b></p>
+      <div class="confirmacao-fechar">
+        <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
+        <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
+      </div>
+    </div>
+  
+</div>
+
+<script>
+function deixarResponsavel(){
+  const a=document.getElementById('entregaContrato');
+  const b=document.getElementById('responsavelEnvia');
+  if(a)a.hidden=true;
+  if(b){b.hidden=false;b.scrollIntoView({behavior:'smooth',block:'start'});}
+}
+</script>
+
 </main>
 
 
@@ -141,28 +184,7 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
 </div>
 
 
-{% if request.session.get('empresa_id') %}
-<nav class="nav-inferior nav-fluxo" aria-label="Navegação principal">
-  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel">
-    <i class="bi bi-house"></i><span>Início</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">
-    <i class="bi bi-calendar3"></i><span>Disponibilidade</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">
-    <i class="bi bi-file-earmark-text"></i><span>Contratos</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas">
-    <i class="bi bi-truck"></i><span>Operação</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') %}ativo{% endif %}" href="/painel/financeiro">
-    <i class="bi bi-bank"></i><span>Financeiro</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/inteligencia-logistica') %}ativo{% endif %}" href="/painel/inteligencia-logistica">
-    <i class="bi bi-stars"></i><span>Inteligência</span>
-  </a>
-</nav>
-{% endif %}
+
 
 <script>
 (function () {

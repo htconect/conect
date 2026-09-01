@@ -1,46 +1,117 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="box" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">
-  <span style="display:inline-flex;padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:900;font-size:.82rem;">Pagamento confirmado</span>
-  <h1 style="margin-bottom:8px;">Sua reserva foi efetuada com sucesso.</h1>
-  {% if cobranca %}
-    <p><b>{{ 'Sinal' if cobranca.tipo_pagamento == 'sinal' else 'Saldo' if cobranca.tipo_pagamento == 'restante' else 'Pagamento' }}:</b> R$ {{ (cobranca.valor_centavos / 100)|moeda_br }}</p>
-  {% endif %}
-  {% if saldo_restante is defined and saldo_restante > 0.009 %}<p><b>Saldo restante:</b> R$ {{ saldo_restante|moeda_br }}</p>{% else %}<p><b>Pagamento do contrato concluído.</b></p>{% endif %}
-</div>
+{% set pagamento_quitado = saldo_restante is defined and saldo_restante <= 0.009 %}
+{% set valor_pago_agora = (cobranca.valor_centavos / 100) if cobranca else 0 %}
 
-{% if primeiro_pagamento %}
-<div id="entregaContrato" class="box aviso" style="max-width:720px;margin:24px auto;padding:28px;">
-  <h2>Agora vamos disponibilizar seu contrato no WhatsApp.</h2>
-  <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
-  <div class="entrega-contrato-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px;">
-    {% if url_whatsapp %}
-      <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
-    {% else %}
-      <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
-    {% endif %}
-    <button type="button" class="botao secundario largura-total" onclick="deixarResponsavel()">Deixar para o responsável enviar</button>
-  </div>
-  {% if not url_whatsapp %}<p class="texto-discreto" style="margin-top:12px;">O responsável ficará encarregado de enviar o contrato.</p>{% endif %}
+<style>
+.pagamento-confirmado-pagina{max-width:720px;margin:0 auto 30px;min-width:0}
+.confirmacao-card{padding:24px;text-align:center}
+.confirmacao-status{display:inline-flex;padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:900;font-size:.82rem}
+.confirmacao-card h1{font-size:clamp(1.8rem,7vw,2.55rem);line-height:1.08;margin:16px 0 10px;overflow-wrap:anywhere}
+.confirmacao-card h2{margin:8px 0 6px}
+.confirmacao-valores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0 0;text-align:left}
+.confirmacao-valores>div{border:1px solid #dbe3ee;border-radius:14px;padding:12px;background:#f8fafc;min-width:0}
+.confirmacao-valores small{display:block;color:#64748b;margin-bottom:4px}
+.confirmacao-valores b{display:block;font-size:1.08rem;overflow-wrap:anywhere}
+.confirmacao-valores.um>div{grid-column:1/-1;text-align:center}
+.entrega-contrato-card{padding:22px}
+.entrega-contrato-card h2{font-size:1.35rem;line-height:1.2;margin-top:0}
+.entrega-contrato-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.confirmacao-fechar{margin-top:18px}
+.confirmacao-fechar .largura-total{width:100%}
+#avisoFecharPagamento{text-align:center;margin:9px 0 0}
+@media(max-width:560px){
+  .pagamento-confirmado-pagina{margin-bottom:20px}
+  .confirmacao-card,.entrega-contrato-card{padding:18px}
+  .confirmacao-card h1{font-size:1.9rem}
+  .confirmacao-valores{grid-template-columns:1fr}
+  .confirmacao-valores>div{grid-column:auto!important;text-align:left!important}
+  .entrega-contrato-grid{grid-template-columns:1fr}
+}
+</style>
+
+<div class="pagamento-confirmado-pagina">
+  {% if primeiro_pagamento %}
+    <div class="box confirmacao-card">
+      <span class="confirmacao-status">Pagamento confirmado</span>
+      <h1>Sua reserva foi efetuada com sucesso.</h1>
+      <div class="confirmacao-valores {% if pagamento_quitado %}um{% endif %}">
+        <div>
+          <small>{% if cobranca and cobranca.tipo_pagamento == 'sinal' %}Sinal pago{% else %}Valor pago{% endif %}</small>
+          <b>R$ {{ valor_pago_agora|moeda_br }}</b>
+        </div>
+        {% if not pagamento_quitado %}
+        <div>
+          <small>Saldo restante</small>
+          <b>R$ {{ saldo_restante|moeda_br }}</b>
+        </div>
+        {% endif %}
+      </div>
+      {% if pagamento_quitado %}<p style="margin:16px 0 0"><b>Pagamento do contrato concluído.</b></p>{% endif %}
+    </div>
+
+    <div id="entregaContrato" class="box aviso entrega-contrato-card">
+      <h2>Agora vamos disponibilizar seu contrato no WhatsApp.</h2>
+      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
+      <div class="entrega-contrato-grid">
+        {% if url_whatsapp %}
+          <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
+        {% else %}
+          <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
+        {% endif %}
+        <button type="button" class="botao secundario largura-total" onclick="deixarResponsavel()">Deixar para o responsável enviar</button>
+      </div>
+      {% if not url_whatsapp %}<p class="texto-discreto" style="margin:12px 0 0">O responsável ficará encarregado de enviar o contrato.</p>{% endif %}
+    </div>
+
+    <div id="responsavelEnvia" class="box confirmacao-card" hidden>
+      <span class="confirmacao-status">Tudo certo</span>
+      <h2>O responsável enviará o contrato.</h2>
+      <p>Sua reserva já está confirmada.</p>
+      <div class="confirmacao-fechar">
+        <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
+        <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
+      </div>
+    </div>
+  {% else %}
+    <div class="box confirmacao-card">
+      <span class="confirmacao-status">{% if pagamento_quitado %}Pagamento concluído{% else %}Pagamento confirmado{% endif %}</span>
+      {% if pagamento_quitado %}
+        <h1>Seu contrato está quitado.</h1>
+        <p>O pagamento final foi registrado com sucesso.</p>
+      {% else %}
+        <h1>Pagamento registrado com sucesso.</h1>
+        <p>O valor recebido já foi atualizado no contrato.</p>
+      {% endif %}
+
+      <div class="confirmacao-valores {% if pagamento_quitado %}um{% endif %}">
+        <div>
+          <small>Valor pago agora</small>
+          <b>R$ {{ valor_pago_agora|moeda_br }}</b>
+        </div>
+        {% if not pagamento_quitado %}
+        <div>
+          <small>Saldo restante</small>
+          <b>R$ {{ saldo_restante|moeda_br }}</b>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if pagamento_quitado %}<p style="margin:16px 0 0"><b>Obrigado pelo pagamento!</b></p>{% endif %}
+      <div class="confirmacao-fechar">
+        <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
+        <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
+      </div>
+    </div>
+  {% endif %}
 </div>
-<div id="responsavelEnvia" class="box" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;" hidden>
-  <h2>Tudo certo.</h2>
-  <p>O responsável ficará encarregado de enviar o contrato.</p>
-  <button type="button" class="largura-total" onclick="fecharPagamento()">Fechar</button>
-  <p id="avisoFecharPagamento" class="texto-discreto" hidden>Você já pode fechar esta página.</p>
-</div>
-{% else %}
-<div class="box" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">
-  <h2>Obrigado pelo pagamento!</h2>
-  <p>O pagamento foi registrado com sucesso.</p>
-  <button type="button" class="largura-total" onclick="fecharPagamento()">Fechar</button>
-  <p id="avisoFecharPagamento" class="texto-discreto" hidden>Você já pode fechar esta página.</p>
-</div>
-{% endif %}
 
 <script>
-function deixarResponsavel(){const a=document.getElementById('entregaContrato');const b=document.getElementById('responsavelEnvia');if(a)a.hidden=true;if(b)b.hidden=false;}
-function fecharPagamento(){try{window.close();}catch(e){}const a=document.getElementById('avisoFecharPagamento');if(a)a.hidden=false;}
+function deixarResponsavel(){
+  const a=document.getElementById('entregaContrato');
+  const b=document.getElementById('responsavelEnvia');
+  if(a)a.hidden=true;
+  if(b){b.hidden=false;b.scrollIntoView({behavior:'smooth',block:'start'});}
+}
 </script>
-<style>@media(max-width:560px){.entrega-contrato-grid{grid-template-columns:1fr!important}}</style>
 {% endblock %}

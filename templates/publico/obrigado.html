@@ -1,10 +1,9 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="box pequeno sucesso" style="max-width:720px;margin:24px auto;text-align:center;">
+<div class="box pequeno sucesso" style="max-width:720px;margin:24px auto;text-align:center;min-width:0">
   {% if solicitacao.status == 'pre_reserva' %}
     <h1>Pré-contrato recebido</h1>
     <p>Seus dados foram registrados com sucesso e já estão disponíveis para o responsável.</p>
-    <p class="texto-discreto">Você pode fechar esta página.</p>
   {% elif status_reserva_confirmada(solicitacao.status) or solicitacao.status == 'aceite_pagamento_pendente' %}
     <h1>Contrato aceito</h1>
     <p>Seu aceite já foi registrado. Use o mesmo link do contrato para consultar a reserva e os pagamentos.</p>
@@ -12,6 +11,7 @@
     <h1>Informações registradas</h1>
     <p>O responsável dará continuidade ao atendimento.</p>
   {% endif %}
-  <button type="button" onclick="try{window.close()}catch(e){}">Fechar</button>
+  <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharObrigado')">Fechar</button>
+  <p id="avisoFecharObrigado" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
 </div>
 {% endblock %}

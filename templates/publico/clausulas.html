@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block conteudo %}
-<div class="contrato-publico">
+<div class="contrato-publico" style="max-width:820px;margin:0 auto 30px;min-width:0">
   <h1>{{ empresa.nome }}</h1>
   <h2>Cláusulas da reserva #{{ item.id }}</h2>
   <p><b>Cliente:</b> {{ item.cliente.nome or '-' }}</p>
@@ -11,7 +11,7 @@
       <section class="box">
         <h3>{{ contrato.nome }}</h3>
         {% if contrato.descricao %}<p>{{ contrato.descricao }}</p>{% endif %}
-        <div style="white-space: pre-wrap; line-height: 1.5;">{{ contrato.clausulas }}</div>
+        <div style="white-space:pre-wrap;line-height:1.5;overflow-wrap:anywhere">{{ contrato.clausulas }}</div>
       </section>
     {% endfor %}
   {% else %}
@@ -22,15 +22,8 @@
   {% endif %}
 
   <div class="box" style="text-align:center">
-    <button type="button" class="largura-total" onclick="fecharClausulas()">Fechar</button>
-    <p class="texto-discreto" style="margin-bottom:0">Você pode voltar ao pagamento quando quiser usando o mesmo link da reserva.</p>
+    <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharClausulas')">Fechar</button>
+    <p id="avisoFecharClausulas" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
   </div>
 </div>
-<script>
-function fecharClausulas(){
-  const destino='/e/{{ empresa.slug }}/contrato/{{ item.id }}#etapa-pagamento';
-  try{window.close();}catch(e){}
-  setTimeout(function(){if(!window.closed){window.location.href=destino;}},180);
-}
-</script>
 {% endblock %}
