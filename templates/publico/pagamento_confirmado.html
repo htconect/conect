@@ -5,8 +5,9 @@
   <h1>Pagamento autorizado!</h1>
   <p>Seu pagamento foi confirmado e o contrato já foi aprovado.</p>
   {% if cobranca %}
-    <p><b>Pagamento:</b> {{ 'Sinal' if cobranca.tipo_pagamento == 'sinal' else 'Valor integral' }} · R$ {{ (cobranca.valor_centavos / 100)|moeda_br }}</p>
+    <p><b>Pagamento:</b> {{ 'Sinal' if cobranca.tipo_pagamento == 'sinal' else 'Restante' if cobranca.tipo_pagamento == 'restante' else 'Valor integral' }} · R$ {{ (cobranca.valor_centavos / 100)|moeda_br }}</p>
   {% endif %}
+  {% if saldo_restante is defined and saldo_restante > 0.009 %}<p><b>Saldo restante:</b> R$ {{ saldo_restante|moeda_br }}</p>{% endif %}
 </div>
 
 <div class="box aviso" style="max-width:720px;margin:24px auto;text-align:center;padding:28px;">

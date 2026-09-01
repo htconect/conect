@@ -729,7 +729,25 @@ def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: So
 
     linhas = [texto_base] if texto_base else []
 
-    if getattr(empresa, "exige_sinal", False):
+    if _infinitepay_habilitada(empresa):
+        total = max(float(item.valor or 0), 0)
+        sinal = min(max(float(item.sinal or 0), 0), total)
+        linhas.extend([
+            "",
+            "Após o aceite, você será direcionado automaticamente para escolher a forma de confirmação da reserva.",
+        ])
+        if sinal > 0.009:
+            linhas.append(f"• *Sinal:* R$ {moeda_br(sinal)}")
+        if total > 0.009:
+            linhas.append(f"• *Valor integral:* R$ {moeda_br(total)}")
+        linhas.extend([
+            "",
+            "O pagamento será realizado pela InfinitePay, onde você poderá escolher PIX ou cartão.",
+            "A confirmação é automática pelo sistema. Não é necessário enviar comprovante.",
+            "",
+            "Após a confirmação do pagamento, sua reserva será efetivada e o contrato será preparado para registro no WhatsApp do responsável.",
+        ])
+    elif getattr(empresa, "exige_sinal", False):
         linhas.extend([
             "",
             "Para concluir a confirmação, realize o PIX do sinal para a chave abaixo e envie o comprovante.",
@@ -7497,6 +7515,34 @@ def _infinitepay_simulacoes(valor_base: float, taxas: list[dict]) -> list[dict]:
     return resultado
 
 
+def _saldo_contrato(item: Solicitacao) -> float:
+    return max(float(getattr(item, "valor", 0) or 0) - float(getattr(item, "valor_pago", 0) or 0), 0.0)
+
+
+def _infinitepay_cobranca_pendente_ativa(db: Session, empresa_id: int, solicitacao_id: int) -> InfinitePayCobranca | None:
+    """Retorna a única cobrança ainda reutilizável do contrato.
+
+    Enquanto existir um checkout AGUARDANDO_PAGAMENTO com URL válida, o Conect
+    nunca gera outro link para o mesmo contrato. Isso evita duas cobranças
+    InfinitePay concorrentes quando o cliente abre o mesmo link novamente.
+    """
+    rows = (db.query(InfinitePayCobranca)
+            .filter_by(empresa_id=empresa_id, solicitacao_id=solicitacao_id, status="AGUARDANDO_PAGAMENTO")
+            .order_by(InfinitePayCobranca.id.desc())
+            .all())
+    for row in rows:
+        if str(row.checkout_url or "").startswith("https://"):
+            return row
+    return None
+
+
+def _email_basico_valido(valor: str) -> bool:
+    email = str(valor or "").strip()
+    if not email or len(email) > 160:
+        return False
+    return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email))
+
+
 def _responsavel_contrato_dados(request: Request | None, db: Session, empresa: Empresa, item: Solicitacao, fixar: bool = False) -> tuple[str, str]:
     nome_atual = str(getattr(item, "responsavel_contrato", "") or "").strip()
     tel_atual = _limpar_tel_whatsapp(str(getattr(item, "responsavel_contrato_telefone", "") or ""))
@@ -7789,6 +7835,11 @@ def salvar_pre_cadastro(
         return render_erro("cnpj_invalido")
     if tipo_pessoa == "juridica" and campo_obrigatorio("cnpj") and not cnpj_limpo:
         return render_erro("cnpj_invalido")
+    email_limpo = str(email or "").strip()
+    if campo_obrigatorio("email") and not email_limpo:
+        return render_erro("email_obrigatorio")
+    if email_limpo and not _email_basico_valido(email_limpo):
+        return render_erro("email_invalido")
     cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=ident).first()
     if not cliente:
         cliente = Cliente(empresa_id=empresa.id, identificador=ident)
@@ -7798,7 +7849,7 @@ def salvar_pre_cadastro(
     cliente.telefone = telefone_limpo or telefone
     cliente.cpf = cpf_limpo
     cliente.cnpj = cnpj_limpo
-    cliente.email = email
+    cliente.email = email_limpo
     cliente.endereco = endereco
     cliente.numero = numero
     cliente.complemento = complemento
@@ -8199,38 +8250,70 @@ def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Reque
     if not _infinitepay_habilitada(empresa):
         return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
 
+    saldo = _saldo_contrato(item)
     cobranca_paga = db.query(InfinitePayCobranca).filter_by(
         empresa_id=empresa.id, solicitacao_id=item.id, status="PAGO"
     ).order_by(InfinitePayCobranca.id.desc()).first()
-    if cobranca_paga or item.status == "reserva_confirmada":
-        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
+
+    # Só encerra o fluxo de cobrança quando o contrato estiver integralmente quitado.
+    # Um sinal aprovado confirma a reserva, mas o mesmo link pode ser usado depois
+    # para cobrar exclusivamente o saldo restante.
+    if saldo <= 0.009:
+        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item) if cobranca_paga else None
         db.commit()
         return templates.TemplateResponse("publico/pagamento_confirmado.html", {
             "request": request, "empresa": empresa, "item": item,
-            "cobranca": cobranca_paga, "url_whatsapp": url_whatsapp,
+            "cobranca": cobranca_paga, "url_whatsapp": url_whatsapp, "saldo_restante": 0.0,
         }, headers={"Cache-Control": "no-store"})
 
-    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento"}:
+    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento", "reserva_confirmada"}:
         return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
 
-    saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0)
-    sinal_restante = min(max(float(item.sinal or 0) - float(item.valor_pago or 0), 0), saldo)
+    # Se já há checkout ativo, reutiliza exatamente a mesma cobrança. Não cria
+    # outra InfinitePay apenas porque o cliente abriu o link novamente.
+    pendente = _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+    if pendente:
+        valor_pendente = float(pendente.valor_centavos or 0) / 100.0
+        ja_pagou = float(item.valor_pago or 0) > 0.009
+        # Sem pagamento anterior, qualquer opção que o cliente já tenha escolhido
+        # permanece válida. Com pagamento parcial, só reutilizamos se a cobrança
+        # corresponder exatamente ao saldo atual.
+        if (not ja_pagou) or abs(valor_pendente - saldo) <= 0.009:
+            return RedirectResponse(str(pendente.checkout_url), status_code=303)
+        # Não gera uma segunda cobrança concorrente se o saldo mudou por outra via.
+        return templates.TemplateResponse("publico/pagamento_erro.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "erro": "Já existe uma cobrança InfinitePay ativa para este contrato.",
+            "detalhe": "Para evitar cobrança em duplicidade, desabilite a cobrança anterior antes de gerar outra para o saldo restante.",
+        }, status_code=409, headers={"Cache-Control": "no-store"})
+
     taxas = _infinitepay_taxas(db, empresa.id)
-    db.commit()
+    ja_pagou = float(item.valor_pago or 0) > 0.009
     opcoes = []
-    if sinal_restante > 0.009:
+    if ja_pagou:
+        # Depois de qualquer pagamento, nunca volta a oferecer valor total original:
+        # o único valor possível é o que ainda falta no contrato.
         opcoes.append({
-            "tipo": "sinal", "titulo": "Sinal", "valor": round(sinal_restante, 2),
-            "simulacoes": _infinitepay_simulacoes(sinal_restante, taxas),
-        })
-    if saldo > 0.009:
-        opcoes.append({
-            "tipo": "integral", "titulo": "Valor integral", "valor": round(saldo, 2),
+            "tipo": "integral", "titulo": "Restante", "valor": round(saldo, 2),
             "simulacoes": _infinitepay_simulacoes(saldo, taxas),
         })
+    else:
+        sinal_restante = min(max(float(item.sinal or 0), 0), saldo)
+        if sinal_restante > 0.009:
+            opcoes.append({
+                "tipo": "sinal", "titulo": "Sinal", "valor": round(sinal_restante, 2),
+                "simulacoes": _infinitepay_simulacoes(sinal_restante, taxas),
+            })
+        if saldo > 0.009:
+            opcoes.append({
+                "tipo": "integral", "titulo": "Valor integral", "valor": round(saldo, 2),
+                "simulacoes": _infinitepay_simulacoes(saldo, taxas),
+            })
+    db.commit()
     return templates.TemplateResponse("publico/pagamento_escolha.html", {
         "request": request, "empresa": empresa, "item": item, "opcoes": opcoes,
         "responsavel_nome": _responsavel_contrato_dados(request, db, empresa, item)[0],
+        "pagamento_parcial": ja_pagou, "saldo_restante": saldo,
     }, headers={"Cache-Control": "no-store"})
 
 
@@ -8248,36 +8331,48 @@ def infinitepay_criar_checkout(
         raise HTTPException(404)
     if not _infinitepay_habilitada(empresa):
         raise HTTPException(400, "InfinitePay não está habilitada para esta empresa.")
-    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento"}:
+
+    saldo = _saldo_contrato(item)
+    if saldo <= 0.009:
         return RedirectResponse(f"/e/{slug}/pagamento/{solicitacao_id}", status_code=303)
+    if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento", "reserva_confirmada"}:
+        return RedirectResponse(f"/e/{slug}/pagamento/{solicitacao_id}", status_code=303)
+
+    # Regra de idempotência do checkout: enquanto existir uma cobrança ativa,
+    # abrir o link novamente sempre retorna à mesma InfinitePay.
+    pendente = _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+    if pendente:
+        valor_pendente = float(pendente.valor_centavos or 0) / 100.0
+        ja_pagou = float(item.valor_pago or 0) > 0.009
+        if (not ja_pagou) or abs(valor_pendente - saldo) <= 0.009:
+            return RedirectResponse(str(pendente.checkout_url), status_code=303)
+        return templates.TemplateResponse("publico/pagamento_erro.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "erro": "Já existe uma cobrança InfinitePay ativa para este contrato.",
+            "detalhe": "Para evitar cobrança em duplicidade, desabilite a cobrança anterior antes de gerar outra para o saldo restante.",
+        }, status_code=409, headers={"Cache-Control": "no-store"})
 
     tipo = str(tipo_pagamento or "").strip().lower()
     if tipo not in {"sinal", "integral"}:
         raise HTTPException(400, "Escolha Sinal ou Valor integral.")
 
-    saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0)
-    sinal_restante = min(max(float(item.sinal or 0) - float(item.valor_pago or 0), 0), saldo)
-    valor = sinal_restante if tipo == "sinal" else saldo
+    ja_pagou = float(item.valor_pago or 0) > 0.009
+    if ja_pagou and tipo != "integral":
+        raise HTTPException(400, "Este contrato já possui pagamento. Só é permitido cobrar o saldo restante.")
+
+    sinal_restante = min(max(float(item.sinal or 0), 0), saldo)
+    valor = saldo if ja_pagou or tipo == "integral" else sinal_restante
     if valor <= 0.009:
         raise HTTPException(400, "Não há valor disponível para esta opção de pagamento.")
     valor_centavos = int(round(valor * 100))
 
-    existente = db.query(InfinitePayCobranca).filter_by(
-        empresa_id=empresa.id,
-        solicitacao_id=item.id,
-        tipo_pagamento=tipo,
-        valor_centavos=valor_centavos,
-        status="AGUARDANDO_PAGAMENTO",
-    ).order_by(InfinitePayCobranca.id.desc()).first()
-    if existente and str(existente.checkout_url or "").startswith("https://"):
-        return RedirectResponse(existente.checkout_url, status_code=303)
-
     order_nsu = f"CONECT-{empresa.id}-{item.id}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8].upper()}"
+    tipo_registro = "restante" if ja_pagou else tipo
     cobranca = InfinitePayCobranca(
         empresa_id=empresa.id,
         solicitacao_id=item.id,
         order_nsu=order_nsu,
-        tipo_pagamento=tipo,
+        tipo_pagamento=tipo_registro,
         valor_centavos=valor_centavos,
         status="AGUARDANDO_PAGAMENTO",
     )
@@ -8290,7 +8385,8 @@ def infinitepay_criar_checkout(
         telefone_infinite = "+" + telefone
     else:
         telefone_infinite = "+55" + telefone if telefone else ""
-    descricao = f"Contrato #{item.id} - {'Sinal' if tipo == 'sinal' else 'Valor integral'} - {empresa.nome}"[:180]
+    titulo_cobranca = "Restante" if ja_pagou else ("Sinal" if tipo == "sinal" else "Valor integral")
+    descricao = f"Contrato #{item.id} - {titulo_cobranca} - {empresa.nome}"[:180]
     payload = {
         "handle": _infinitepay_handle(empresa),
         "order_nsu": order_nsu,
@@ -8306,16 +8402,7 @@ def infinitepay_criar_checkout(
         }
         payload["customer"] = {k: v for k, v in customer.items() if v}
 
-    endereco = dados_endereco_solicitacao(item)
-    if endereco.get("cep") or endereco.get("endereco"):
-        payload["address"] = {
-            "cep": re.sub(r"\D", "", str(endereco.get("cep") or ""))[:8],
-            "street": str(endereco.get("endereco") or "")[:180],
-            "neighborhood": str(endereco.get("bairro") or "")[:120],
-            "number": str(endereco.get("numero") or "")[:40],
-            "complement": str(endereco.get("complemento") or "")[:120],
-        }
-
+    # Endereço fica somente no Conect; não é enviado ao checkout da InfinitePay.
     try:
         resposta = _infinitepay_post(INFINITEPAY_LINKS_URL, payload)
         checkout_url = str(resposta.get("url") or "").strip()
@@ -8429,6 +8516,7 @@ def infinitepay_retorno(
         return templates.TemplateResponse("publico/pagamento_confirmado.html", {
             "request": request, "empresa": empresa, "item": item,
             "cobranca": cobranca, "url_whatsapp": url_whatsapp,
+            "saldo_restante": _saldo_contrato(item),
         }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     return templates.TemplateResponse("publico/pagamento_pendente.html", {
         "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,

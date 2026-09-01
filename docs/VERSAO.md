@@ -1,19 +1,17 @@
-# HUMIAT Conect — Versão 1.0.3
+# HUMIAT Conect — Versão 1.0.6
 
-Data: 31/08/2026
+## InfinitePay e compatibilidade de clientes antigos
 
-## Alterações
-- Integração InfinitePay por empresa, com opção de ativar/desativar no cadastro/configuração da empresa.
-- Karaoke RJ reaproveita a mesma InfiniteTag/conta InfinitePay utilizada no SolVoz.
-- Após o aceite, o cliente escolhe somente **Sinal** ou **Valor integral**; não existe valor livre.
-- Pré-tela exibe simulação de 1x a 12x usando a tabela de taxas InfinitePay cadastrada por empresa.
-- Confirmação de pagamento por webhook e conferência complementar via `payment_check`.
-- Pagamento confirmado cria automaticamente o pagamento do contrato e o lançamento financeiro na conta **InfinitePay**, já vinculado e conciliado.
-- A conta financeira antiga **Cartão** é reaproveitada/renomeada para **InfinitePay** quando aplicável; PIX e cartão recebidos pela integração entram nessa mesma conta financeira.
-- O fluxo manual de aprovação e pagamento permanece disponível.
-- O primeiro usuário que envia o contrato para aceite fica registrado como responsável comercial do contrato, incluindo o WhatsApp do responsável.
-- Após pagamento autorizado, o cliente vê apenas a mensagem de preparação; o sistema abre automaticamente o WhatsApp do responsável com o contrato pronto e o cliente só precisa tocar em **Enviar**.
-- Se a confirmação da InfinitePay ainda estiver propagando, a tela consulta novamente automaticamente, sem exigir atualização manual do cliente.
+- E-mail visível/obrigatório passa a ser validado no servidor somente nos novos envios do pré-contrato.
+- Registros antigos continuam podendo ser abertos mesmo quando ainda não possuem e-mail; o banco não recebeu restrição NOT NULL.
+- Cliente antigo sem e-mail pode informar o e-mail ao reutilizar o cadastro; o campo não fica travado vazio.
+- Se o contrato já tiver qualquer pagamento, a InfinitePay oferece somente o saldo restante, nunca o valor total original.
+- Enquanto houver uma cobrança InfinitePay com status AGUARDANDO_PAGAMENTO e URL válida, o Conect reutiliza o mesmo checkout e não cria outro.
+- Nova cobrança só é criada quando não existe checkout ativo local (por exemplo, tentativa anterior em ERRO_CHECKOUT).
+- Contrato aprovado com saldo pendente passa a exibir botão para pagar somente o restante pela InfinitePay.
+- Endereço continua somente no Conect e não é enviado ao checkout.
+- Fluxo manual permanece disponível.
 
-## Commit padrão
-`v1.0.3 - integra InfinitePay no Conect com pagamento e financeiro automáticos`
+Commit:
+
+`v1.0.6 - protege cobrancas InfinitePay e compatibilidade de email`

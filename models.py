@@ -390,7 +390,7 @@ class InfinitePayCobranca(Base):
     solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=False, index=True)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True, index=True)
     order_nsu = Column(String(120), nullable=False, unique=True, index=True)
-    tipo_pagamento = Column(String(20), nullable=False)  # sinal | integral
+    tipo_pagamento = Column(String(20), nullable=False)  # sinal | integral | restante
     valor_centavos = Column(Integer, nullable=False, default=0)
     status = Column(String(30), nullable=False, default="AGUARDANDO_PAGAMENTO")
     checkout_url = Column(Text, nullable=True)
