@@ -269,7 +269,12 @@
 <section class="card-reserva" id="pagamento">
   <div class="card-reserva-head">
     <h2>Pagamento</h2>
-    <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+      <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
+      {% if contrato_aceito and link_contrato_whatsapp %}
+        <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Enviar contrato</a>
+      {% endif %}
+    </div>
   </div>
 
   <div class="resumo-financeiro-mobile">

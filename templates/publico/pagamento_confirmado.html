@@ -17,8 +17,8 @@
     <p><b>Na próxima tela, basta clicar em Enviar.</b></p>
     <p class="texto-discreto">Não feche esta tela enquanto o WhatsApp é aberto.</p>
 
-    <a id="fallbackWhatsapp" class="botao botao-whats largura-total" href="{{ url_whatsapp }}" style="display:none;margin-top:18px;">
-      <i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp
+    <a id="fallbackWhatsapp" class="botao botao-whats largura-total" href="{{ url_whatsapp }}" style="margin-top:18px;">
+      <i class="bi bi-whatsapp" aria-hidden="true"></i> Enviar contrato pelo WhatsApp
     </a>
 
     <script>
@@ -29,11 +29,8 @@
           window.location.replace(destino);
         }, 900);
 
-        // Se o navegador impedir a navegação automática, oferece recuperação manual.
-        window.setTimeout(function () {
-          const fallback = document.getElementById('fallbackWhatsapp');
-          if (fallback) fallback.style.display = 'inline-flex';
-        }, 5000);
+        // O botão manual permanece visível para permitir nova tentativa se o
+        // navegador ou o aplicativo do WhatsApp não abrir automaticamente.
       })();
     </script>
   {% else %}

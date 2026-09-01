@@ -7576,6 +7576,25 @@ def _email_basico_valido(valor: str) -> bool:
     return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email))
 
 
+def _endereco_infinitepay_contrato(item: Solicitacao) -> dict:
+    """Monta o endereço congelado do contrato no formato aceito pela InfinitePay.
+
+    A integração nunca usa o endereço atual do cadastro do cliente quando a
+    solicitação já possui snapshot próprio. Assim o checkout recebe o mesmo
+    destino que consta no contrato e na operação.
+    """
+    dados = dados_endereco_solicitacao(item)
+    cep = re.sub(r"\D", "", str(dados.get("cep") or ""))[:8]
+    endereco = {
+        "cep": cep,
+        "street": str(dados.get("endereco") or "").strip()[:200],
+        "neighborhood": str(dados.get("bairro") or "").strip()[:120],
+        "number": str(dados.get("numero") or "").strip()[:30],
+        "complement": str(dados.get("complemento") or "").strip()[:120],
+    }
+    return {chave: valor for chave, valor in endereco.items() if valor}
+
+
 def _responsavel_contrato_dados(request: Request | None, db: Session, empresa: Empresa, item: Solicitacao, fixar: bool = False) -> tuple[str, str]:
     nome_atual = str(getattr(item, "responsavel_contrato", "") or "").strip()
     tel_atual = _limpar_tel_whatsapp(str(getattr(item, "responsavel_contrato_telefone", "") or ""))
@@ -8333,6 +8352,117 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
 
 
 
+def _processar_retorno_infinitepay(
+    slug: str,
+    request: Request,
+    order_nsu: str = "",
+    transaction_nsu: str = "",
+    slug_pagamento: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    db: Session = None,
+):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+
+    # A InfinitePay usa o parâmetro ``slug`` no retorno e algumas versões do
+    # checkout já expuseram ``transaction_id``. Aceitamos os dois nomes sem
+    # misturar com o slug da empresa presente na rota.
+    invoice_slug = str(
+        request.query_params.get("slug")
+        or request.query_params.get("invoice_slug")
+        or slug_pagamento
+        or ""
+    ).strip()
+    order_nsu = str(order_nsu or request.query_params.get("order_nsu") or "").strip()
+    transaction_nsu = str(
+        transaction_nsu
+        or request.query_params.get("transaction_nsu")
+        or request.query_params.get("transaction_id")
+        or ""
+    ).strip()
+    receipt_url = str(receipt_url or request.query_params.get("receipt_url") or "").strip()
+    capture_method = str(capture_method or request.query_params.get("capture_method") or "").strip()
+
+    cobranca = None
+    if order_nsu:
+        cobranca = db.query(InfinitePayCobranca).filter_by(
+            order_nsu=order_nsu, empresa_id=empresa.id
+        ).first()
+    # Se o webhook chegou antes do navegador, a transação já está gravada e
+    # conseguimos recuperar a cobrança mesmo que o retorno venha sem order_nsu.
+    if not cobranca and transaction_nsu:
+        cobranca = db.query(InfinitePayCobranca).filter_by(
+            transaction_nsu=transaction_nsu, empresa_id=empresa.id
+        ).first()
+
+    if not cobranca:
+        return templates.TemplateResponse("publico/pagamento_erro.html", {
+            "request": request, "empresa": empresa, "item": None,
+            "erro": "Não foi possível localizar esta cobrança.", "detalhe": "",
+        }, status_code=404, headers={"Cache-Control": "no-store"})
+
+    if cobranca.status != "PAGO" and transaction_nsu and invoice_slug:
+        try:
+            check = _infinitepay_post(INFINITEPAY_PAYMENT_CHECK_URL, {
+                "handle": _infinitepay_handle(empresa),
+                "order_nsu": cobranca.order_nsu,
+                "transaction_nsu": transaction_nsu,
+                "slug": invoice_slug,
+            })
+            if bool(check.get("success")) and bool(check.get("paid")):
+                amount = int(check.get("amount") or 0)
+                if amount == int(cobranca.valor_centavos or 0):
+                    _registrar_pagamento_infinitepay(
+                        db,
+                        cobranca,
+                        transaction_nsu=transaction_nsu,
+                        invoice_slug=invoice_slug,
+                        receipt_url=receipt_url,
+                        capture_method=str(check.get("capture_method") or capture_method or ""),
+                        installments=int(check.get("installments") or 0),
+                        paid_amount_centavos=int(check.get("paid_amount") or amount),
+                    )
+        except Exception:
+            logger.exception("Falha no payment_check InfinitePay %s", cobranca.order_nsu)
+
+    db.refresh(cobranca)
+    item = db.get(Solicitacao, cobranca.solicitacao_id)
+    if cobranca.status == "PAGO":
+        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
+        db.commit()
+        return templates.TemplateResponse("publico/pagamento_confirmado.html", {
+            "request": request, "empresa": empresa, "item": item,
+            "cobranca": cobranca, "url_whatsapp": url_whatsapp,
+            "saldo_restante": _saldo_contrato(item),
+        }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+    return templates.TemplateResponse("publico/pagamento_pendente.html", {
+        "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,
+    }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+
+# Compatibilidade: esta rota precisa ser registrada ANTES da rota dinâmica
+# /pagamento/{solicitacao_id}; caso contrário o texto "retorno" é interpretado
+# como solicitacao_id e o FastAPI responde com erro de int_parsing.
+@app.get("/e/{slug}/pagamento/retorno", response_class=HTMLResponse, include_in_schema=False, name="infinitepay_retorno_compat")
+@app.get("/e/{slug}/pagamento-retorno", response_class=HTMLResponse, name="infinitepay_retorno")
+def infinitepay_retorno(
+    slug: str,
+    request: Request,
+    order_nsu: str = "",
+    transaction_nsu: str = "",
+    slug_pagamento: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    db: Session = Depends(get_db),
+):
+    return _processar_retorno_infinitepay(
+        slug=slug, request=request, order_nsu=order_nsu, transaction_nsu=transaction_nsu,
+        slug_pagamento=slug_pagamento, receipt_url=receipt_url, capture_method=capture_method, db=db
+    )
+
+
 @app.get("/e/{slug}/pagamento/{solicitacao_id}", response_class=HTMLResponse, name="infinitepay_escolha_pagamento")
 def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -8482,10 +8612,18 @@ def infinitepay_criar_checkout(
     payload = {
         "handle": _infinitepay_handle(empresa),
         "order_nsu": order_nsu,
-        "redirect_url": _infinitepay_public_url(request, f"/e/{empresa.slug}/pagamento/retorno"),
+        "redirect_url": _infinitepay_public_url(request, f"/e/{empresa.slug}/pagamento-retorno"),
         "webhook_url": _infinitepay_public_url(request, "/api/infinitepay/webhook"),
         "items": [{"quantity": 1, "price": valor_centavos, "description": descricao}],
     }
+
+    # O endereço do checkout é o endereço congelado no contrato/reserva. Isso
+    # evita pedir novamente ao cliente um dado que o Conect já possui e impede
+    # que alterações posteriores no cadastro geral troquem o endereço da cobrança.
+    endereco_checkout = _endereco_infinitepay_contrato(item)
+    if endereco_checkout:
+        payload["address"] = endereco_checkout
+
     # A InfinitePay valida o bloco customer como um conjunto. Para contratos
     # antigos sem e-mail, não enviamos customer: o checkout coleta o e-mail
     # diretamente do comprador e o contrato continua abrindo sem erro.
@@ -8505,7 +8643,7 @@ def infinitepay_criar_checkout(
             item.id,
         )
 
-    # Endereço fica somente no Conect; não é enviado ao checkout da InfinitePay.
+    # CEP/logradouro/número/bairro/complemento seguem no bloco address.
     try:
         resposta = _infinitepay_post(INFINITEPAY_LINKS_URL, payload)
         checkout_url = str(resposta.get("url") or "").strip()
@@ -8559,71 +8697,6 @@ async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
         paid_amount_centavos=int(payload.get("paid_amount") or amount),
     )
     return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
-
-
-@app.get("/e/{slug}/pagamento/retorno", response_class=HTMLResponse, name="infinitepay_retorno")
-def infinitepay_retorno(
-    slug: str,
-    request: Request,
-    order_nsu: str = "",
-    transaction_nsu: str = "",
-    slug_pagamento: str = "",
-    receipt_url: str = "",
-    capture_method: str = "",
-    db: Session = Depends(get_db),
-):
-    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa:
-        raise HTTPException(404)
-    # InfinitePay usa o parâmetro "slug" no retorno. FastAPI já usa slug na rota;
-    # por isso lemos diretamente da query string para não haver colisão de nomes.
-    invoice_slug = str(request.query_params.get("slug") or slug_pagamento or "").strip()
-    order_nsu = str(order_nsu or request.query_params.get("order_nsu") or "").strip()
-    transaction_nsu = str(transaction_nsu or request.query_params.get("transaction_nsu") or "").strip()
-    cobranca = db.query(InfinitePayCobranca).filter_by(order_nsu=order_nsu, empresa_id=empresa.id).first() if order_nsu else None
-    if not cobranca:
-        return templates.TemplateResponse("publico/pagamento_erro.html", {
-            "request": request, "empresa": empresa, "item": None,
-            "erro": "Não foi possível localizar esta cobrança.", "detalhe": "",
-        }, status_code=404, headers={"Cache-Control": "no-store"})
-
-    if cobranca.status != "PAGO" and transaction_nsu and invoice_slug:
-        try:
-            check = _infinitepay_post(INFINITEPAY_PAYMENT_CHECK_URL, {
-                "handle": _infinitepay_handle(empresa),
-                "order_nsu": cobranca.order_nsu,
-                "transaction_nsu": transaction_nsu,
-                "slug": invoice_slug,
-            })
-            if bool(check.get("success")) and bool(check.get("paid")):
-                amount = int(check.get("amount") or 0)
-                if amount == int(cobranca.valor_centavos or 0):
-                    _registrar_pagamento_infinitepay(
-                        db,
-                        cobranca,
-                        transaction_nsu=transaction_nsu,
-                        invoice_slug=invoice_slug,
-                        receipt_url=receipt_url,
-                        capture_method=str(check.get("capture_method") or capture_method or ""),
-                        installments=int(check.get("installments") or 0),
-                        paid_amount_centavos=int(check.get("paid_amount") or amount),
-                    )
-        except Exception:
-            logger.exception("Falha no payment_check InfinitePay %s", cobranca.order_nsu)
-
-    db.refresh(cobranca)
-    item = db.get(Solicitacao, cobranca.solicitacao_id)
-    if cobranca.status == "PAGO":
-        url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
-        db.commit()
-        return templates.TemplateResponse("publico/pagamento_confirmado.html", {
-            "request": request, "empresa": empresa, "item": item,
-            "cobranca": cobranca, "url_whatsapp": url_whatsapp,
-            "saldo_restante": _saldo_contrato(item),
-        }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
-    return templates.TemplateResponse("publico/pagamento_pendente.html", {
-        "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,
-    }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 @app.get("/e/{slug}/confirmar-whatsapp/{solicitacao_id}", response_class=HTMLResponse)

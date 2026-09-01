@@ -1,17 +1,15 @@
-# HUMIAT Conect — Versão 1.0.9
+# HUMIAT Conect — Versão 1.0.10
 
-## Sinal parametrizado por empresa e mensagem curta
+## Retorno InfinitePay, endereço do contrato e reenvio do contrato
 
-- Novo campo por empresa: valor padrão do sinal da InfinitePay.
-- Primeiro pagamento oferece Sinal e Valor do contrato.
-- O sinal é a primeira opção e vem selecionado por padrão.
-- Depois de qualquer pagamento, o mesmo link oferece apenas o saldo restante.
-- O sinal é congelado no contrato no momento do aceite.
-- Contratos antigos preservam o sinal já gravado e continuam compatíveis.
-- Mensagem de aceite InfinitePay foi reduzida.
-- Rótulo “Valor integral” foi substituído por “Valor do contrato”.
-- Checkout continua sem endereço e com e-mail apenas quando válido/existente.
+- Corrigida a colisão da rota `/pagamento/retorno` com `/pagamento/{solicitacao_id}` que gerava `int_parsing` com `solicitacao_id = retorno`.
+- Novos checkouts usam a rota segura `/pagamento-retorno`.
+- A rota antiga continua aceita e agora é registrada antes da rota dinâmica para compatibilidade com cobranças já criadas.
+- O retorno aceita `transaction_nsu` e também `transaction_id` como compatibilidade.
+- O checkout InfinitePay recebe o endereço congelado do contrato: CEP, logradouro, bairro, número e complemento.
+- Após o pagamento confirmado, o WhatsApp continua abrindo automaticamente e o botão manual **Enviar contrato pelo WhatsApp** fica sempre visível para nova tentativa.
+- Na tela interna da solicitação, a área Pagamento ganhou a ação **Enviar contrato** para reenvio manual.
 
 Commit:
 
-`v1.0.9 - parametriza sinal por empresa e simplifica pagamento InfinitePay`
+`v1.0.10 - corrige retorno InfinitePay e adiciona reenvio do contrato`
