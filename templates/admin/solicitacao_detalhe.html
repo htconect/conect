@@ -46,7 +46,7 @@
       <small>Itens</small><b>{% if tem_itens %}{{ item.itens|length }}{% else %}Pendente{% endif %}</b>
     </div>
     <div class="status-pill {% if contrato_aceito %}ok{% elif contrato_pendente or em_credito %}alerta{% else %}pendente{% endif %}">
-      <small>Contrato</small><b>{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Enviado{% elif em_credito %}Crédito{% else %}Rascunho{% endif %}</b>
+      <small>Contrato</small><b>{% if contrato_aceito and aceite_manual_ativo(item) %}Aceito manualmente{% elif contrato_aceito %}Aceito{% elif contrato_pendente %}Enviado{% elif em_credito %}Crédito{% else %}Rascunho{% endif %}</b>
     </div>
     <div class="status-pill {% if pago > 0 %}ok{% else %}neutro{% endif %}">
       <small>Pagamento</small><b>{% if pago > 0 %}R$ {{ pago|moeda_br }}{% else %}Opcional{% endif %}</b>
@@ -128,8 +128,8 @@
 {% elif contrato_aceito %}
 <section class="proxima-acao ok-acao">
   <small>Status</small>
-  <b>{% if item.status == "aceite_pagamento_pendente" and pago <= 0 %}Contrato aceito — aguardando pagamento{% else %}Contrato aceito{% endif %}</b>
-  {% if item.aceite_em %}<p class="texto-discreto">Aceite registrado em {{ item.aceite_em|datahora_local }}.</p>{% endif %}
+  <b>{% if aceite_manual_ativo(item) %}Contrato aceito manualmente{% elif item.status == "aceite_pagamento_pendente" and pago <= 0 %}Contrato aceito — aguardando pagamento{% else %}Contrato aceito{% endif %}</b>
+  {% if item.aceite_em %}<p class="texto-discreto">Aceite registrado em {{ item.aceite_em|datahora_local }}{% if aceite_manual_ativo(item) and item.aceite_manual_por %} por {{ item.aceite_manual_por }}{% endif %}.</p>{% endif %}
   <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
   {% if pago > 0 or item.status != "aceite_pagamento_pendente" %}
     <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
@@ -354,7 +354,7 @@
 <section class="card-reserva">
   <div class="card-reserva-head">
     <h2>Contrato</h2>
-    <span class="status">{% if contrato_aceito %}Aceito{% elif contrato_pendente %}Aguardando aceite{% else %}Rascunho{% endif %}</span>
+    <span class="status">{% if contrato_aceito and aceite_manual_ativo(item) %}Aceito manualmente{% elif contrato_aceito %}Aceito{% elif contrato_pendente %}Aguardando aceite{% else %}Rascunho{% endif %}</span>
   </div>
 
   {% if tem_itens %}
@@ -376,6 +376,17 @@
     <button class="largura-total">Confirmar aceite manual</button>
   </form>
 
+  {% if aceite_manual_ativo(item) %}
+    <div class="aviso" style="margin-top:14px">
+      <b>Aceite manual ativo</b>
+      <p class="texto-discreto">Use a opção abaixo somente se o aceite manual foi registrado por engano. O aceite digital feito pelo cliente não pode ser removido por este botão.</p>
+      {% if item.aceite_manual_motivo %}<p class="texto-discreto"><b>Motivo informado:</b> {{ item.aceite_manual_motivo }}</p>{% endif %}
+      <form method="post" action="/painel/solicitacao/{{ item.id }}/aceite-manual/excluir" onsubmit="return confirm('Excluir o aceite manual e voltar este contrato ao estado anterior? Esta ação só será concluída se não houver pagamento, cobrança InfinitePay em andamento, contrato final enviado ou operação iniciada.')">
+        <button class="botao-perigo largura-total" type="submit">Excluir aceite manual</button>
+      </form>
+    </div>
+  {% endif %}
+
   <form method="post" action="/painel/solicitacao/{{ item.id }}/excluir" class="form-excluir-contrato" onsubmit="return confirm('Deseja excluir este contrato/reserva? Isso apaga reserva, itens, pagamentos não conciliados e agenda. Se houver pagamento conciliado, o sistema não vai excluir.')">
     <button class="botao-perigo largura-total" type="submit">Excluir contrato</button>
   </form>
@@ -387,7 +398,14 @@
   {% for p in item.pagamentos %}
     <div class="linha-historico"><div><b>Pagamento informado</b><small>{{ p.usuario_registro or 'Usuário' }} · R$ {{ p.valor|moeda_br }} · {{ p.forma_pagamento }}</small></div></div>
   {% endfor %}
-  {% if item.aprovado_em %}<div class="linha-historico"><div><b>Contrato aceito</b><small>{{ item.aprovado_em|datahora_local }}</small></div></div>{% endif %}
+  {% if item.aprovado_em %}<div class="linha-historico"><div><b>{% if aceite_manual_ativo(item) %}Contrato aceito manualmente{% else %}Contrato aceito{% endif %}</b><small>{{ item.aprovado_em|datahora_local }}{% if aceite_manual_ativo(item) and item.aceite_manual_por %} · {{ item.aceite_manual_por }}{% endif %}</small></div></div>{% endif %}
+  {% if item.aceite_manual_desfeito_em %}<div class="linha-historico"><div><b>Aceite manual desfeito</b><small>{{ item.aceite_manual_desfeito_em|datahora_local }}{% if item.aceite_manual_desfeito_por %} · {{ item.aceite_manual_desfeito_por }}{% endif %}</small></div></div>{% endif %}
+  {% if item.whatsapp_pre_contrato_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp após o pré-contrato</b><small>{{ item.whatsapp_pre_contrato_clique_em|datahora_local }} · o Conect não consegue confirmar se a mensagem foi enviada</small></div></div>{% endif %}
+  {% if item.whatsapp_pre_contrato_delegado_em %}<div class="linha-historico"><div><b>Pré-contrato: cliente deixou o aviso para o responsável</b><small>{{ item.whatsapp_pre_contrato_delegado_em|datahora_local }}</small></div></div>{% endif %}
+  {% if item.whatsapp_aceite_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp após o aceite</b><small>{{ item.whatsapp_aceite_clique_em|datahora_local }} · o Conect não consegue confirmar se a mensagem foi enviada</small></div></div>{% endif %}
+  {% if item.whatsapp_aceite_delegado_em %}<div class="linha-historico"><div><b>Aceite: cliente deixou o aviso para o responsável</b><small>{{ item.whatsapp_aceite_delegado_em|datahora_local }}</small></div></div>{% endif %}
+  {% if item.whatsapp_contrato_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp para registrar o contrato</b><small>{{ item.whatsapp_contrato_clique_em|datahora_local }} · o Conect não consegue confirmar se a mensagem foi enviada</small></div></div>{% endif %}
+  {% if item.whatsapp_contrato_delegado_em %}<div class="linha-historico"><div><b>Contrato: cliente deixou o envio para o responsável</b><small>{{ item.whatsapp_contrato_delegado_em|datahora_local }}</small></div></div>{% endif %}
 </details>
 
 <script>

@@ -55,7 +55,7 @@
       <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
       <div class="entrega-contrato-grid">
         {% if url_whatsapp %}
-          <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
+          <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}" onclick="registrarWhatsAppContrato('clique')"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
         {% else %}
           <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
         {% endif %}
@@ -107,7 +107,16 @@
 </div>
 
 <script>
+function registrarWhatsAppContrato(acao){
+  try{
+    const dados=new FormData();
+    dados.append('tipo','contrato');
+    dados.append('acao',acao);
+    navigator.sendBeacon('/e/{{ empresa.slug }}/whatsapp-evento/{{ item.id }}',dados);
+  }catch(e){}
+}
 function deixarResponsavel(){
+  registrarWhatsAppContrato('delegado');
   const a=document.getElementById('entregaContrato');
   const b=document.getElementById('responsavelEnvia');
   if(a)a.hidden=true;

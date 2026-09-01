@@ -297,6 +297,21 @@ class Solicitacao(Base):
     itens = relationship("ReservaItem", back_populates="solicitacao", cascade="all, delete-orphan")
     aprovado_em = Column(DateTime, nullable=True)
     contrato_enviado_em = Column(DateTime, nullable=True)
+    # Auditoria do fluxo público de WhatsApp. O clique indica apenas que o cliente
+    # acionou o botão no Conect; o WhatsApp não confirma ao site se a mensagem foi enviada.
+    whatsapp_pre_contrato_clique_em = Column(DateTime, nullable=True)
+    whatsapp_pre_contrato_delegado_em = Column(DateTime, nullable=True)
+    whatsapp_aceite_clique_em = Column(DateTime, nullable=True)
+    whatsapp_aceite_delegado_em = Column(DateTime, nullable=True)
+    whatsapp_contrato_clique_em = Column(DateTime, nullable=True)
+    whatsapp_contrato_delegado_em = Column(DateTime, nullable=True)
+    # Aceite manual precisa ser reversível sem confundir com o aceite feito pelo cliente.
+    aceite_manual_em = Column(DateTime, nullable=True)
+    aceite_manual_por = Column(String(120), nullable=True)
+    aceite_manual_motivo = Column(Text, nullable=True)
+    aceite_manual_status_anterior = Column(String(30), nullable=True)
+    aceite_manual_desfeito_em = Column(DateTime, nullable=True)
+    aceite_manual_desfeito_por = Column(String(120), nullable=True)
     # Responsáveis de comunicação: contrato/comercial e operação/logística.
     responsavel_contrato = Column(String(120), nullable=True)
     responsavel_contrato_telefone = Column(String(30), nullable=True)

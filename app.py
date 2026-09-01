@@ -236,6 +236,21 @@ def status_reserva_confirmada(status: str) -> bool:
     return (status or "") in STATUS_CONTRATO_APROVADO
 
 
+def aceite_manual_ativo(item: Solicitacao | None) -> bool:
+    """Distingue aceite manual ativo de aceite digital do cliente.
+
+    Registros anteriores à v1.0.18 são reconhecidos pela anotação histórica,
+    permitindo desfazer um aceite manual feito por engano sem afetar aceites digitais.
+    """
+    if not item or not status_contrato_aceito(getattr(item, "status", "")):
+        return False
+    if getattr(item, "aceite_manual_desfeito_em", None):
+        return False
+    if getattr(item, "aceite_manual_em", None):
+        return True
+    return "Aceite manual por " in str(getattr(item, "observacoes", "") or "")
+
+
 def contrato_aprovado_para_operacao(item: Solicitacao | None) -> bool:
     """Somente contratos efetivamente aprovados podem entrar na Operação/Inteligência."""
     return bool(item and status_reserva_confirmada(item.status) and reserva_tem_itens(item))
@@ -441,6 +456,7 @@ def moeda_br(valor) -> str:
 templates.env.filters["moeda_br"] = moeda_br
 templates.env.globals["status_contrato_aceito"] = status_contrato_aceito
 templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
+templates.env.globals["aceite_manual_ativo"] = aceite_manual_ativo
 templates.env.globals["status_em_contrato"] = status_em_contrato
 templates.env.globals["janela_uma_hora"] = janela_uma_hora
 templates.env.globals["ajustar_hora_texto"] = ajustar_hora_texto
@@ -953,6 +969,30 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN aprovado_em TIMESTAMP")
         if "contrato_enviado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_enviado_em TIMESTAMP")
+        if "whatsapp_pre_contrato_clique_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_pre_contrato_clique_em TIMESTAMP")
+        if "whatsapp_pre_contrato_delegado_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_pre_contrato_delegado_em TIMESTAMP")
+        if "whatsapp_aceite_clique_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_aceite_clique_em TIMESTAMP")
+        if "whatsapp_aceite_delegado_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_aceite_delegado_em TIMESTAMP")
+        if "whatsapp_contrato_clique_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_clique_em TIMESTAMP")
+        if "whatsapp_contrato_delegado_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_delegado_em TIMESTAMP")
+        if "aceite_manual_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_em TIMESTAMP")
+        if "aceite_manual_por" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_por VARCHAR(120)")
+        if "aceite_manual_motivo" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_motivo TEXT")
+        if "aceite_manual_status_anterior" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_status_anterior VARCHAR(30)")
+        if "aceite_manual_desfeito_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_desfeito_em TIMESTAMP")
+        if "aceite_manual_desfeito_por" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN aceite_manual_desfeito_por VARCHAR(120)")
         if "responsavel_contrato" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN responsavel_contrato VARCHAR(120)")
         if "responsavel_contrato_telefone" not in cols_sol:
@@ -4426,9 +4466,16 @@ def aceite_manual_solicitacao(
         raise HTTPException(400, "Informe o motivo do aceite manual.")
 
     usuario = request.session.get("usuario_sistema", "Usuário")
+    status_anterior = item.status or "aguardando_aceite"
     item.status = "reserva_confirmada"
     item.aceite_em = agora_utc()
     item.aprovado_em = item.aceite_em
+    item.aceite_manual_em = item.aceite_em
+    item.aceite_manual_por = str(usuario or "Usuário")[:120]
+    item.aceite_manual_motivo = motivo
+    item.aceite_manual_status_anterior = status_anterior[:30]
+    item.aceite_manual_desfeito_em = None
+    item.aceite_manual_desfeito_por = None
     registro = f"Aceite manual por {usuario}: {motivo}"
     item.observacoes = (item.observacoes + "\n\n" if item.observacoes else "") + registro
 
@@ -4436,6 +4483,100 @@ def aceite_manual_solicitacao(
         item.hora_fim = somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
     criar_eventos_operacionais(db, item)
     _processar_humiat_aceite(db, empresa, item)
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/aceite-manual/excluir")
+def excluir_aceite_manual_solicitacao(
+    request: Request,
+    solicitacao_id: int,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Desfaz somente um aceite manual, com proteções contra perda de histórico.
+
+    O aceite digital do cliente nunca passa por esta rota. Se já houver pagamento,
+    checkout InfinitePay em andamento, contrato final enviado ou operação iniciada,
+    o desfazer é bloqueado para evitar reabrir uma reserva já executada.
+    """
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not aceite_manual_ativo(item):
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Este contrato não possui um aceite manual ativo para excluir.",
+            status_code=303,
+        )
+
+    if db.query(Pagamento).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count() > 0:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Não é possível excluir o aceite manual porque já existe pagamento registrado.",
+            status_code=303,
+        )
+
+    if _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id):
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Não é possível excluir o aceite manual enquanto existir uma cobrança InfinitePay em andamento.",
+            status_code=303,
+        )
+
+    if item.contrato_enviado_em:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Não é possível excluir o aceite manual porque o contrato final já foi marcado como enviado.",
+            status_code=303,
+        )
+
+    eventos = db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    if any(bool(getattr(ev, "roteirizado", False)) or str(getattr(ev, "status_operacional", "") or "").lower() not in {"", "pendente"} for ev in eventos):
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Não é possível excluir o aceite manual porque a operação desta reserva já foi iniciada.",
+            status_code=303,
+        )
+
+    usuario = str(request.session.get("usuario_sistema", "Usuário") or "Usuário")
+    status_anterior = str(getattr(item, "aceite_manual_status_anterior", "") or "").strip()
+    if status_anterior not in (STATUS_CONTRATO_RASCUNHO | STATUS_CONTRATO_PENDENTE_ACEITE):
+        # Para aceites manuais feitos antes da v1.0.18, a existência de responsável
+        # indica que o link já foi enviado; sem responsável, o contrato volta ao rascunho.
+        status_anterior = "contrato_enviado" if (item.responsavel_contrato or item.responsavel_contrato_telefone) else "pre_reserva"
+
+    # Reverte apenas os eventos operacionais ainda pendentes gerados pelo aceite.
+    for ev in eventos:
+        db.delete(ev)
+
+    # Estorna o Humiat sem apagar o extrato. Gratuitos e pendentes apenas voltam
+    # a ficar disponíveis; se houve débito comprado, registramos movimento positivo.
+    if item.humiat_processado:
+        custo = max(0, int(item.humiat_custo or 0))
+        if item.humiat_status == "debitado" and custo > 0:
+            estorno_existente = db.query(HumiatMovimento).filter(
+                HumiatMovimento.empresa_id == empresa.id,
+                HumiatMovimento.solicitacao_id == item.id,
+                HumiatMovimento.tipo == "estorno_aceite_manual",
+            ).first()
+            if not estorno_existente:
+                _registrar_movimento_humiat(
+                    db, empresa, custo, "estorno_aceite_manual",
+                    f"Contrato #{item.id} - aceite manual desfeito",
+                    observacao="Estorno automático ao excluir aceite manual.",
+                    usuario=usuario, solicitacao_id=item.id,
+                )
+        item.humiat_processado = False
+        item.humiat_competencia = None
+        item.humiat_custo = 0
+        item.humiat_status = None
+
+    agora = agora_utc()
+    item.status = status_anterior
+    item.aceite_em = None
+    item.aprovado_em = None
+    item.pagamento_confirmado_em = None
+    item.sinal_recebido = False
+    item.aceite_manual_desfeito_em = agora
+    item.aceite_manual_desfeito_por = usuario[:120]
+    registro = f"Aceite manual desfeito por {usuario}. Contrato voltou para {status_anterior}."
+    item.observacoes = (item.observacoes + "\n\n" if item.observacoes else "") + registro
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -7913,8 +8054,19 @@ def _registrar_pagamento_infinitepay(
     return True
 
 
-def _url_confirmacao_whatsapp(empresa: Empresa, item: Solicitacao, tipo: str) -> str | None:
-    telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
+def _url_confirmacao_whatsapp(request: Request, db: Session, empresa: Empresa, item: Solicitacao, tipo: str) -> str | None:
+    """Monta a mensagem pública para WhatsApp sem fingir envio automático.
+
+    - Pré-contrato ainda não tem responsável comercial fixado, então usa o WhatsApp
+      de retorno da empresa.
+    - Aceite usa o responsável do contrato, preservando toda a negociação com a
+      mesma pessoa. Se não houver responsável fixado, cai no WhatsApp da empresa.
+    """
+    if tipo == "aceite":
+        responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=False)
+    else:
+        responsavel = "responsável"
+        telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
     if not telefone:
         return None
     cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
@@ -7923,7 +8075,7 @@ def _url_confirmacao_whatsapp(empresa: Empresa, item: Solicitacao, tipo: str) ->
         texto = (f"Olá, sou {cliente}. Acabei de preencher meu pré-contrato "
                  f"para o evento do dia {data}. Solicitação #{item.id}.")
     else:
-        texto = (f"Olá, sou {cliente}. Confirmo o aceite do contrato #{item.id} "
+        texto = (f"Olá, {responsavel}. Sou {cliente}. Confirmo o aceite do contrato #{item.id} "
                  f"referente ao evento do dia {data}.")
     return f"https://wa.me/{telefone}?text={quote(texto)}"
 
@@ -8524,7 +8676,12 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)
         db.commit()
-        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}?aceite=ok", status_code=303)
+        # Depois do aceite, o cliente escolhe explicitamente se avisa o responsável
+        # pelo WhatsApp ou se deixa essa comunicação para o atendente.
+        return RedirectResponse(
+            f"/e/{slug}/confirmar-whatsapp/{solicitacao_id}?tipo=aceite",
+            status_code=303,
+        )
 
     # Link permanente: se o contrato já foi aceito, apenas volta ao estado atual.
     return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
@@ -8840,6 +8997,44 @@ async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
     return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
 
 
+@app.post("/e/{slug}/whatsapp-evento/{solicitacao_id}", status_code=204)
+def registrar_evento_whatsapp_publico(
+    slug: str,
+    solicitacao_id: int,
+    tipo: str = Form(...),
+    acao: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Registra apenas a ação ocorrida dentro do Conect.
+
+    ``clique`` significa que o cliente acionou o botão que leva ao WhatsApp; não
+    significa que a mensagem foi enviada, pois o WhatsApp não devolve essa confirmação.
+    ``delegado`` significa que o cliente escolheu deixar a comunicação para o responsável.
+    """
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = db.get(Solicitacao, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    tipo = str(tipo or "").strip().lower()
+    acao = str(acao or "").strip().lower()
+    campos = {
+        ("pre_contrato", "clique"): "whatsapp_pre_contrato_clique_em",
+        ("pre_contrato", "delegado"): "whatsapp_pre_contrato_delegado_em",
+        ("aceite", "clique"): "whatsapp_aceite_clique_em",
+        ("aceite", "delegado"): "whatsapp_aceite_delegado_em",
+        ("contrato", "clique"): "whatsapp_contrato_clique_em",
+        ("contrato", "delegado"): "whatsapp_contrato_delegado_em",
+    }
+    campo = campos.get((tipo, acao))
+    if not campo:
+        raise HTTPException(400, "Evento de WhatsApp inválido")
+    if getattr(item, campo, None) is None:
+        setattr(item, campo, agora_utc())
+        db.commit()
+    return Response(status_code=204)
+
+
 @app.get("/e/{slug}/confirmar-whatsapp/{solicitacao_id}", response_class=HTMLResponse)
 def confirmar_whatsapp(slug: str, solicitacao_id: int, request: Request, tipo: str = "pre_contrato", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -8847,7 +9042,7 @@ def confirmar_whatsapp(slug: str, solicitacao_id: int, request: Request, tipo: s
     if not empresa or not solicitacao or solicitacao.empresa_id != empresa.id:
         raise HTTPException(404)
     tipo_confirmacao = "aceite" if tipo == "aceite" else "pre_contrato"
-    url_whatsapp = _url_confirmacao_whatsapp(empresa, solicitacao, tipo_confirmacao)
+    url_whatsapp = _url_confirmacao_whatsapp(request, db, empresa, solicitacao, tipo_confirmacao)
     return templates.TemplateResponse("publico/confirmar_whatsapp.html", {
         "request": request,
         "empresa": empresa,

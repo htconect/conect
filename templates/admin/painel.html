@@ -137,6 +137,8 @@
                         <b>{{ i.cliente.nome }}</b>
                         <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or '-' }}</small>
                         {% if i.responsavel_contrato_exibicao %}<small class="responsavel-card-mini">Resp.: {{ i.responsavel_contrato_exibicao }}</small>{% endif %}
+                        {% if i.whatsapp_pre_contrato_delegado_em and not i.whatsapp_pre_contrato_clique_em %}<small class="responsavel-card-mini">Cliente deixou o aviso do pré-contrato para o responsável.</small>{% endif %}
+                        {% if i.whatsapp_aceite_delegado_em and not i.whatsapp_aceite_clique_em %}<small class="responsavel-card-mini">Cliente deixou o aviso do aceite para o responsável.</small>{% endif %}
                     </div>
                     <strong>R$ {{ i.valor|moeda_br }}</strong>
                 </a>
@@ -152,6 +154,7 @@
                     <a class="card-contrato-info" href="/painel/solicitacao/{{ i.id }}">
                         <b>{{ i.cliente.nome }}</b>
                         <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or '-' }}</small>
+                        {% if i.whatsapp_contrato_delegado_em and not i.whatsapp_contrato_clique_em %}<small>Cliente deixou o envio para o responsável.</small>{% endif %}
                     </a>
                     <a class="botao-enviar-contrato" target="_blank"
                        href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">

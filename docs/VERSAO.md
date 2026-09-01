@@ -1,23 +1,22 @@
-# HUMIAT Conect — Versão 1.0.17
+# HUMIAT Conect — Versão 1.0.18
 
-## Correção de estado de aceite e primeiro pagamento
+## Fluxo público / WhatsApp
+- Pré-contrato continua sendo salvo antes de abrir o WhatsApp.
+- O botão "Agora não" foi substituído por "Deixar para o responsável".
+- O Conect registra quando o cliente clicou em "Abrir WhatsApp" e quando escolheu deixar a comunicação para o responsável.
+- O registro de clique não é tratado como envio confirmado, porque o WhatsApp não devolve essa confirmação ao Conect.
+- Após o aceite digital, a etapa de WhatsApp agora é realmente exibida.
+- A mensagem de aceite é direcionada ao responsável do contrato; se não houver responsável fixado, usa o WhatsApp de retorno da empresa.
+- O primeiro pagamento também registra se o cliente clicou no WhatsApp ou deixou o envio do contrato para o responsável.
+- As pendências e o histórico do contrato passam a mostrar essas escolhas.
 
-- O painel administrativo não usa mais um `else` genérico para declarar **Contrato aceito**. Somente estados explicitamente aceitos recebem esse rótulo.
-- O estado `aceite_pagamento_pendente` aparece como **Contrato aceito — aguardando pagamento**.
-- Rascunho e aguardando aceite nunca exibem ações de contrato final.
-- Corrigido o campo `aceite_em`, que em bases anteriores podia receber data automaticamente ao criar o rascunho. O PostgreSQL perde esse `DEFAULT` e rascunhos/contratos aguardando aceite têm o timestamp limpo.
-- O primeiro pagamento InfinitePay volta a priorizar o **sinal configurado na empresa**. Contratos legados em que o sinal ficou igual ao total deixam de esconder a opção de sinal quando existe um sinal válido menor configurado.
-- Após qualquer pagamento, permanece somente o saldo restante.
-- Ao selecionar **PIX**, a simulação de parcelas fica escondida. Ao selecionar **Cartão**, a simulação aparece.
-- O item enviado à InfinitePay agora identifica melhor a venda com **contrato, tipo de cobrança, nome do cliente, data do evento e empresa**.
-- A proteção de cobrança pendente continua ativa para evitar duas cobranças simultâneas.
+## Aceite manual
+- O aceite manual passa a registrar usuário, motivo, data e status anterior.
+- Foi incluída a ação "Excluir aceite manual" na tela do contrato e na busca do cliente.
+- A exclusão é bloqueada se já houver pagamento, cobrança InfinitePay em andamento, contrato final marcado como enviado ou operação iniciada.
+- Ao desfazer um aceite manual seguro, o contrato volta ao status anterior, os eventos operacionais pendentes são removidos e o Humiat é estornado sem apagar o histórico.
+- Aceites manuais antigos são reconhecidos pela anotação histórica "Aceite manual por ...".
+- O aceite digital do cliente nunca é removido por essa função.
 
-## Fluxos preservados
-
-- Empresa com InfinitePay: aceite → sinal/total → checkout → primeiro pagamento → contrato → saldo → quitação.
-- Empresa sem InfinitePay: aceite → PIX da empresa.
-- O mesmo link continua atendendo aceite, pagamento, saldo e consulta final.
-
-Commit sugerido:
-
-`v1.0.17 - corrige estados de aceite, sinal InfinitePay e identificação da cobrança`
+## Commit sugerido
+`v1.0.18 - corrige WhatsApp do cliente e adiciona exclusão segura do aceite manual`

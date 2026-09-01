@@ -5,35 +5,57 @@
 .whatsapp-confirmacao h1{font-size:clamp(1.75rem,6vw,2.3rem);line-height:1.12;margin-top:0;overflow-wrap:anywhere}
 .whatsapp-confirmacao .whatsapp-acoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
 .whatsapp-confirmacao .aviso{margin-top:16px}
+.whatsapp-confirmacao .continuar-fluxo{margin-top:12px}
 @media(max-width:560px){.whatsapp-confirmacao{padding:18px}.whatsapp-confirmacao .whatsapp-acoes{grid-template-columns:1fr}}
 </style>
 
 <div class="box whatsapp-confirmacao">
   {% if tipo == 'pre_contrato' %}
-    <h1>Pré-contrato recebido com sucesso</h1>
-    <p>Seus dados foram salvos e já estão disponíveis para o responsável.</p>
+    <h1>Pré-contrato recebido</h1>
+    <p>Seus dados já foram salvos no Conect.</p>
     <div class="aviso">
-      <h2>Deseja avisar o responsável agora?</h2>
-      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
+      <h2>Avisar o responsável</h2>
+      <p>Toque em <b>Abrir WhatsApp</b>. A mensagem já estará pronta; no WhatsApp, basta tocar em <b>Enviar</b>.</p>
     </div>
     <div class="whatsapp-acoes">
-      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Agora não</a>
       {% if url_whatsapp %}
-        <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
+        <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}" onclick="registrarWhatsApp('pre_contrato','clique')"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
       {% else %}
-        <a class="botao largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}">Continuar</a>
+        <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
       {% endif %}
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}" onclick="registrarWhatsApp('pre_contrato','delegado')">Deixar para o responsável</a>
     </div>
+    <p class="texto-discreto" style="margin:12px 0 0">Se você deixar para o responsável, seus dados continuam salvos normalmente.</p>
   {% else %}
     <h1>Contrato aceito com sucesso</h1>
     <p>Seu aceite já foi registrado.</p>
     <div class="aviso">
-      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
+      <h2>Avisar o responsável da negociação</h2>
+      <p>Toque em <b>Abrir WhatsApp</b>. A mensagem de aceite já estará pronta; no WhatsApp, basta tocar em <b>Enviar</b>.</p>
     </div>
     <div class="whatsapp-acoes">
-      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}">Agora não</a>
-      {% if url_whatsapp %}<a class="botao botao-whats largura-total" href="{{ url_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>{% endif %}
+      {% if url_whatsapp %}
+        <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}" onclick="registrarWhatsApp('aceite','clique')"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
+      {% else %}
+        <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
+      {% endif %}
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}?aceite=ok" onclick="registrarWhatsApp('aceite','delegado')">Deixar para o responsável</a>
     </div>
+    <div class="continuar-fluxo">
+      <a class="botao largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}?aceite=ok">Continuar para pagamento</a>
+    </div>
+    <p class="texto-discreto" style="margin:12px 0 0">Se abrir o WhatsApp, depois volte a esta tela para continuar o pagamento.</p>
   {% endif %}
 </div>
+
+<script>
+function registrarWhatsApp(tipo, acao){
+  try{
+    const dados=new FormData();
+    dados.append('tipo',tipo);
+    dados.append('acao',acao);
+    navigator.sendBeacon('/e/{{ empresa.slug }}/whatsapp-evento/{{ solicitacao.id }}',dados);
+  }catch(e){}
+}
+</script>
 {% endblock %}

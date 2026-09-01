@@ -41,6 +41,10 @@
           <input type="hidden" name="observacao_aceite" value="Aceite manual registrado pela busca do cliente.">
           <button class="secundario" type="submit" onclick="return confirm('Registrar aceite manual desta reserva?')">Aceite manual</button>
         </form>
+      {% elif aceite_manual_ativo(i) %}
+        <form method="post" action="/painel/solicitacao/{{ i.id }}/aceite-manual/excluir">
+          <button class="perigo" type="submit" onclick="return confirm('Excluir o aceite manual e voltar este contrato ao estado anterior?')">Excluir aceite manual</button>
+        </form>
       {% endif %}
       <form method="post" action="/painel/solicitacao/{{ i.id }}/status">
         <input type="hidden" name="status" value="cancelada">
