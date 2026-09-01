@@ -1,23 +1,22 @@
-# HUMIAT Conect — Versão 1.0.14
+# HUMIAT Conect — Versão 1.0.15
 
-## InfinitePay — escolha visível e parcelamento também no saldo
+## Pagamento mobile — correção de quebra e legibilidade
 
-- Empresas com InfinitePay continuam usando a integração normalmente.
-- A etapa de pagamento mostra sempre **PIX** e **Cartão**, tanto no primeiro pagamento quanto no pagamento do saldo.
-- O cliente pode marcar visualmente como pretende pagar; a confirmação final da forma de pagamento continua sendo feita no checkout seguro da InfinitePay.
-- Ao escolher Cartão, a área de **Simular parcelas** fica destacada.
-- Quando já existe uma cobrança InfinitePay em andamento, o Conect reutiliza o mesmo checkout para impedir cobrança duplicada, mas mantém visíveis PIX, Cartão e a simulação de parcelas do valor daquela cobrança.
-- Os dados para conferência do PIX continuam disponíveis: **nome do recebedor** e **banco/instituição**, quando cadastrados na empresa.
-- Empresas sem InfinitePay permanecem no fluxo de PIX próprio, sem alteração da regra existente.
+- Corrigido o estouro horizontal da etapa de pagamento em celulares.
+- Os botões PIX e Cartão não recebem mais ícones automáticos do tema global.
+- Textos dos métodos foram encurtados para **PIX / À vista** e **Cartão / Parcelar**.
+- Em telas estreitas, PIX e Cartão ficam empilhados para não ultrapassar a largura disponível.
+- Nome do recebedor e instituição passam a quebrar linha corretamente, inclusive nomes longos.
+- Título, resumo financeiro, simulador e cards de pagamento receberam limites responsivos.
+- O simulador de parcelas continua disponível e sua tabela rola apenas dentro do próprio bloco quando necessário.
+- Botão **Fechar** permanece logo abaixo do pagamento e continua tentando fechar apenas a aba atual.
 
-## Fechar
+## InfinitePay e CEP
 
-- O botão **Fechar** saiu de dentro de “Consultar contrato aceito”.
-- Ele agora fica logo abaixo da etapa de pagamento.
-- O botão tenta fechar somente a aba atual do navegador.
-- Quando o navegador bloqueia o fechamento automático de uma aba aberta diretamente pelo cliente, o Conect informa que a aba pode ser fechada pelo seletor de abas.
-- “Ver contrato” e “Ver cláusulas” continuam disponíveis na área recolhível de consulta.
+- Mantido o envio automático do CEP e endereço do contrato em todo checkout novo.
+- Cobranças InfinitePay que já estavam iniciadas continuam reutilizando o mesmo checkout para evitar duplicidade; por isso um checkout criado antes da inclusão do endereço não é alterado retroativamente.
+- Nenhuma cobrança pendente antiga é recriada automaticamente, evitando deixar dois links de pagamento ativos para o mesmo saldo.
 
 Commit:
 
-`v1.0.14 - restaura escolha PIX/cartão e simulador no saldo e reposiciona fechar`
+`v1.0.15 - corrige layout mobile do pagamento e preserva checkout InfinitePay pendente`
