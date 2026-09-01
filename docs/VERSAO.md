@@ -1,27 +1,23 @@
-# HUMIAT Conect — Versão 1.0.16
+# HUMIAT Conect — Versão 1.0.17
 
-## Pente-fino do fluxo público de pagamento
+## Correção de estado de aceite e primeiro pagamento
 
-- O primeiro pagamento mantém a confirmação **Sua reserva foi efetuada com sucesso** e a etapa de disponibilização do contrato no WhatsApp.
-- O pagamento final agora usa mensagem própria: **Seu contrato está quitado**, sem repetir a mensagem de criação da reserva.
-- No pagamento final o valor da cobrança é identificado como **Valor pago agora**, evitando confundir o cliente com a palavra “Saldo”.
-- A confirmação final fica em um único card, mais curto e adequado para celular.
-- O botão **Fechar** do pagamento confirmado passou a usar exatamente a mesma rotina de fechamento usada no link permanente da reserva.
-- Fechamento de cláusulas e demais telas públicas foi centralizado na mesma função; quando o navegador impede o fechamento automático, aparece apenas uma orientação curta.
-- O padrão global de botões do Conect foi revisado: **Fechar**, **Agora não**, **Sim, prosseguir**, **Tentar novamente**, **Ver cláusulas**, **Copiar PIX**, **Enviar reserva** e ações de pagamento recebem ícone, cor e formato coerentes.
-- Removido o ícone genérico em círculo de ações como **Fechar**.
-- Botões públicos agora podem quebrar texto de forma controlada em telas estreitas, sem estourar horizontalmente a página.
-- PIX e Cartão mantêm botões próprios, compactos e sem interferência do decorador automático.
-- A tela de WhatsApp do pré-contrato/aceite recebeu o mesmo tratamento responsivo dos demais passos.
-- Texto legado da tela antiga de escolha de pagamento foi corrigido para não afirmar abertura automática do WhatsApp.
+- O painel administrativo não usa mais um `else` genérico para declarar **Contrato aceito**. Somente estados explicitamente aceitos recebem esse rótulo.
+- O estado `aceite_pagamento_pendente` aparece como **Contrato aceito — aguardando pagamento**.
+- Rascunho e aguardando aceite nunca exibem ações de contrato final.
+- Corrigido o campo `aceite_em`, que em bases anteriores podia receber data automaticamente ao criar o rascunho. O PostgreSQL perde esse `DEFAULT` e rascunhos/contratos aguardando aceite têm o timestamp limpo.
+- O primeiro pagamento InfinitePay volta a priorizar o **sinal configurado na empresa**. Contratos legados em que o sinal ficou igual ao total deixam de esconder a opção de sinal quando existe um sinal válido menor configurado.
+- Após qualquer pagamento, permanece somente o saldo restante.
+- Ao selecionar **PIX**, a simulação de parcelas fica escondida. Ao selecionar **Cartão**, a simulação aparece.
+- O item enviado à InfinitePay agora identifica melhor a venda com **contrato, tipo de cobrança, nome do cliente, data do evento e empresa**.
+- A proteção de cobrança pendente continua ativa para evitar duas cobranças simultâneas.
 
 ## Fluxos preservados
 
-- Empresa com InfinitePay: aceite → sinal/total → checkout → primeiro pagamento com envio do contrato → saldo → quitação.
-- Empresa sem InfinitePay: aceite → PIX da empresa, sem alteração da rotina já existente.
-- Mesmo link da reserva continua atendendo aceite, pagamento, saldo e consulta final.
-- Cobrança InfinitePay pendente continua idempotente para evitar duplicidade.
+- Empresa com InfinitePay: aceite → sinal/total → checkout → primeiro pagamento → contrato → saldo → quitação.
+- Empresa sem InfinitePay: aceite → PIX da empresa.
+- O mesmo link continua atendendo aceite, pagamento, saldo e consulta final.
 
 Commit sugerido:
 
-`v1.0.16 - revisa confirmação final, fechamento e padrão de botões do fluxo público`
+`v1.0.17 - corrige estados de aceite, sinal InfinitePay e identificação da cobrança`

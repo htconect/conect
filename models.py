@@ -287,7 +287,7 @@ class Solicitacao(Base):
     repasse_pago_por = Column(String(120), nullable=True)
     observacoes = Column(Text)
     status = Column(String(30), default="pre_reserva")  # pre_reserva, aprovada, rejeitada, alteracao
-    aceite_em = Column(DateTime, server_default=func.now())
+    aceite_em = Column(DateTime, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
 
     cliente = relationship("Cliente", back_populates="solicitacoes")

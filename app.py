@@ -220,7 +220,16 @@ def validar_total_pagamentos(item: Solicitacao, total_pago: float):
         raise HTTPException(400, "A soma dos pagamentos não pode ser maior que o total do contrato.")
 
 
+STATUS_CONTRATO_RASCUNHO = {"pre_reserva", "reserva"}
+STATUS_CONTRATO_PENDENTE_ACEITE = {"aguardando_aceite", "contrato_enviado"}
+# Aceite já aconteceu, embora a reserva possa ainda aguardar o primeiro pagamento.
+STATUS_CONTRATO_ACEITO = {"aceite_pagamento_pendente", "aceito", "aguardando_pagamento", "reserva_confirmada"}
+# Estados liberados para operação. O aceite sem pagamento da InfinitePay não entra aqui.
 STATUS_CONTRATO_APROVADO = {"aceito", "aguardando_pagamento", "reserva_confirmada"}
+
+
+def status_contrato_aceito(status: str) -> bool:
+    return (status or "") in STATUS_CONTRATO_ACEITO
 
 
 def status_reserva_confirmada(status: str) -> bool:
@@ -233,7 +242,7 @@ def contrato_aprovado_para_operacao(item: Solicitacao | None) -> bool:
 
 
 def status_em_contrato(status: str) -> bool:
-    return status in {"pre_reserva", "aguardando_aceite", "contrato_enviado"}
+    return status in (STATUS_CONTRATO_RASCUNHO | STATUS_CONTRATO_PENDENTE_ACEITE)
 
 
 def reserva_tem_itens(item) -> bool:
@@ -430,6 +439,7 @@ def moeda_br(valor) -> str:
 
 
 templates.env.filters["moeda_br"] = moeda_br
+templates.env.globals["status_contrato_aceito"] = status_contrato_aceito
 templates.env.globals["status_reserva_confirmada"] = status_reserva_confirmada
 templates.env.globals["status_em_contrato"] = status_em_contrato
 templates.env.globals["janela_uma_hora"] = janela_uma_hora
@@ -717,17 +727,28 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
 def _sinal_infinitepay_contrato(empresa: Empresa, item: Solicitacao) -> float:
     """Sinal efetivo do contrato para o fluxo InfinitePay.
 
-    O valor é parametrizado por empresa. Para contratos antigos, sem o novo
-    parâmetro, preservamos o sinal já gravado no próprio contrato. Depois do
-    aceite, o valor gravado no contrato funciona como fotografia daquele acordo.
+    A fonte principal é o sinal configurado na empresa antes do aceite. No aceite
+    ele é congelado em ``item.sinal``. Nunca usamos apenas ``aceite_em`` como prova
+    de aceite, pois versões antigas criavam esse timestamp indevidamente no rascunho.
     """
     total = max(float(getattr(item, "valor", 0) or 0), 0.0)
     if total <= 0.009:
         return 0.0
     sinal_item = max(float(getattr(item, "sinal", 0) or 0), 0.0)
-    if getattr(item, "aceite_em", None) and sinal_item > 0.009:
-        return min(sinal_item, total)
     sinal_empresa = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
+
+    # Se o contrato já foi realmente aceito e há um sinal válido congelado,
+    # preserva o acordo. Um valor igual ao total não é tratado como sinal quando
+    # a empresa possui um sinal menor configurado — isso corrige contratos que
+    # herdaram valor incorreto em versões anteriores.
+    if status_contrato_aceito(getattr(item, "status", "")):
+        if 0.009 < sinal_item < total - 0.009:
+            return sinal_item
+        if 0.009 < sinal_empresa < total - 0.009:
+            return sinal_empresa
+        if sinal_item > 0.009:
+            return min(sinal_item, total)
+
     if sinal_empresa > 0.009:
         return min(sinal_empresa, total)
     return min(sinal_item, total)
@@ -1470,6 +1491,39 @@ def migrar_enderecos_contratos_legados():
     finally:
         db.close()
 
+def migrar_aceite_em_rascunhos():
+    """Corrige o legado em que ``aceite_em`` recebia CURRENT_TIMESTAMP no INSERT.
+
+    Não altera contratos aceitos. Limpa somente estados que, por definição, ainda
+    não tiveram aceite e remove o DEFAULT no PostgreSQL para impedir recorrência.
+    """
+    chave_migracao = "20260901_aceite_em_sem_default_v1"
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    chave VARCHAR(120) PRIMARY KEY,
+                    executado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            ja = conn.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave_migracao}).first()
+            if ja:
+                return
+
+            if engine.dialect.name == "postgresql":
+                conn.execute(text("ALTER TABLE solicitacoes ALTER COLUMN aceite_em DROP DEFAULT"))
+
+            conn.execute(text("""
+                UPDATE solicitacoes
+                   SET aceite_em = NULL, aprovado_em = NULL
+                 WHERE status IN ('pre_reserva','reserva','aguardando_aceite','contrato_enviado')
+            """))
+            conn.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave_migracao})
+        logger.info("Migração de aceite_em concluída: rascunhos/pendentes sem timestamp automático.")
+    except Exception:
+        logger.exception("Falha na migração de aceite_em de rascunhos")
+
+
 def migrar_vinculos_repasse_legados():
     """Converte vínculos antigos 1:1 para o novo rateio N:N sem duplicar dados."""
     db = SessionLocal()
@@ -1691,6 +1745,7 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
 def startup():
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
+    migrar_aceite_em_rascunhos()
     migrar_enderecos_contratos_legados()
     migrar_vinculos_repasse_legados()
     atualizar_mensagem_previsao_padrao()
@@ -5026,6 +5081,8 @@ def usar_solicitacao_como_base(
         sinal_recebido=False,
         observacoes=origem.observacoes,
         status="pre_reserva",
+        aceite_em=None,
+        aprovado_em=None,
     )
     db.add(nova)
     db.flush()
@@ -5160,7 +5217,9 @@ def criar_pre_reserva_rapida(
         valor=texto_para_float(valor),
         sinal=texto_para_float(sinal),
         observacoes=observacoes,
-        status="aguardando_aceite"
+        status="aguardando_aceite",
+        aceite_em=None,
+        aprovado_em=None
     )
     db.add(item)
     db.commit()
@@ -8022,7 +8081,7 @@ def salvar_pre_cadastro(
         local_complemento=complemento.strip(), local_cidade=cidade.strip(), local_estado=estado.strip(),
         local_cep=cep.strip(), local_nome=local_nome.strip(),
         local_responsavel_nome=local_responsavel_nome, local_responsavel_telefone=local_responsavel_telefone,
-        acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva"
+        acesso_local=acesso_local, observacoes=observacoes, status="pre_reserva", aceite_em=None, aprovado_em=None
     )
     db.add(solicitacao)
     db.commit()
@@ -8223,9 +8282,7 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
     total_pago_publico = sum(float(p.valor or 0) for p in pagamentos_publicos)
     total_contrato_publico = max(float(item.valor or 0), 0.0)
     saldo_restante = max(total_contrato_publico - total_pago_publico, 0.0)
-    aceite_realizado = item.status in {
-        "aceite_pagamento_pendente", "aguardando_pagamento", "aceito", "reserva_confirmada"
-    } or status_reserva_confirmada(item.status)
+    aceite_realizado = status_contrato_aceito(item.status)
     reserva_quitada = bool(aceite_realizado and saldo_restante <= 0.009)
     infinitepay_habilitada = _infinitepay_habilitada(empresa)
 
@@ -8251,6 +8308,10 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
     # os mesmos valores alimentam a área PIX. Depois de qualquer pagamento, só o saldo
     # restante é oferecido para evitar cobrança duplicada do valor original.
     pagamento_parcial = total_pago_publico > 0.009
+    sinal_primeiro_pagamento = (
+        _sinal_infinitepay_contrato(empresa, item)
+        if infinitepay_habilitada else max(float(item.sinal or 0), 0.0)
+    )
     titulo_cobranca_pendente = "Pagamento"
     if cobranca_pendente:
         tipo_pendente = str(cobranca_pendente.tipo_pagamento or "").strip().lower()
@@ -8300,6 +8361,7 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
         "titulo_cobranca_pendente": titulo_cobranca_pendente,
         "mostrar_pergunta_pagamento": mostrar_pergunta_pagamento,
         "pagamento_parcial": pagamento_parcial,
+        "sinal_primeiro_pagamento": sinal_primeiro_pagamento,
         "opcoes_pagamento": opcoes_pagamento,
         "erro_aceite": request.query_params.get("erro") == "aceite",
     }, headers={"Cache-Control": "no-store"})
@@ -8671,7 +8733,13 @@ def infinitepay_criar_checkout(
     else:
         telefone_infinite = "+55" + telefone if telefone else ""
     titulo_cobranca = "Restante" if ja_pagou else ("Sinal" if tipo == "sinal" else "Valor do contrato")
-    descricao = f"Contrato #{item.id} - {titulo_cobranca} - {empresa.nome}"[:180]
+    nome_cliente_checkout = str((item.cliente.nome if item.cliente else "Cliente") or "Cliente").strip()
+    data_checkout = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else ""
+    descricao_partes = [f"Contrato #{item.id}", titulo_cobranca, nome_cliente_checkout]
+    if data_checkout:
+        descricao_partes.append(data_checkout)
+    descricao_partes.append(empresa.nome)
+    descricao = " - ".join(descricao_partes)[:180]
     payload = {
         "handle": _infinitepay_handle(empresa),
         "order_nsu": order_nsu,

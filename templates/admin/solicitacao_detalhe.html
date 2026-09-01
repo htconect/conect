@@ -12,7 +12,7 @@
 {% set link_aceite_whatsapp = request.url_for('compartilhar_aceite_whatsapp', solicitacao_id=item.id) %}
 {% set link_contrato_whatsapp = request.url_for('compartilhar_contrato_whatsapp', solicitacao_id=item.id) %}
 {% set tem_itens = item.itens and item.itens|length > 0 %}
-{% set contrato_aceito = status_reserva_confirmada(item.status) %}
+{% set contrato_aceito = status_contrato_aceito(item.status) %}
 {% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
 {% set em_credito = item.status == "aguardando_nova_data" %}
 {% set em_rascunho = item.status in ["pre_reserva", "reserva"] %}
@@ -125,12 +125,21 @@
   <small>Status</small>
   <b>Contrato cancelado</b>
 </section>
-{% else %}
+{% elif contrato_aceito %}
 <section class="proxima-acao ok-acao">
   <small>Status</small>
-  <b>Contrato aceito</b>
+  <b>{% if item.status == "aceite_pagamento_pendente" and pago <= 0 %}Contrato aceito — aguardando pagamento{% else %}Contrato aceito{% endif %}</b>
+  {% if item.aceite_em %}<p class="texto-discreto">Aceite registrado em {{ item.aceite_em|datahora_local }}.</p>{% endif %}
   <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
-  <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
+  {% if pago > 0 or item.status != "aceite_pagamento_pendente" %}
+    <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
+  {% endif %}
+</section>
+{% else %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Contrato ainda não aceito</b>
+  <p class="texto-discreto">O sistema não encontrou um estado de aceite válido. Revise o contrato antes de cobrar ou enviar o contrato final.</p>
 </section>
 {% endif %}
 
