@@ -728,7 +728,7 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
         "",
         f"*Cliente:* {item.cliente.nome if item.cliente else '-'}",
         "",
-        "*📅 Entrega*",
+        "*📅 Início do evento*",
         f"{data_txt} às {hora_txt}",
         "",
         "*📍 Local*",
@@ -7963,22 +7963,35 @@ def _responsavel_contrato_dados(request: Request | None, db: Session, empresa: E
 
 
 def _url_whatsapp_registro_contrato(request: Request, db: Session, empresa: Empresa, item: Solicitacao) -> str | None:
-    responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=True)
+    """Monta o WhatsApp de registro do contrato para o responsável da negociação.
+
+    Mantém o resumo completo da reserva (cliente, início do evento, local,
+    equipamentos e financeiro) e, ao final, os dois links realmente necessários:
+    acompanhamento/pagamento e PDF.
+    """
+    _responsavel, telefone = _responsavel_contrato_dados(request, db, empresa, item, fixar=True)
     if not telefone:
         return None
-    cliente = item.cliente.nome if item.cliente and item.cliente.nome else "Cliente"
-    data_evento = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else ""
+
+    itens_reserva = db.query(ReservaItem).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).all()
     link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
     link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
-    texto = (
-        f"Olá, {responsavel}. Sou {cliente}. Meu pagamento do contrato #{item.id} foi confirmado.\n\n"
-        f"Evento: {data_evento}\n"
-        "Estou enviando o contrato para registro conforme orientação do sistema.\n\n"
-        "🔗 *PAGAMENTO E ACOMPANHAMENTO*\n"
-        f"{link_reserva}\n\n"
-        "📄 *Contrato em PDF*\n"
-        f"{link_pdf}"
-    )
+
+    linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
+    linhas.extend([
+        "",
+        "*✅ Pagamento confirmado*",
+        f"Contrato #{item.id}",
+        "",
+        "*🔗 PAGAMENTO E ACOMPANHAMENTO*",
+        link_reserva,
+        "",
+        "*📄 Contrato em PDF*",
+        link_pdf,
+    ])
+    texto = "\n".join(linhas).strip()
     return f"https://wa.me/{telefone}?text={quote(texto)}"
 
 
