@@ -4,6 +4,22 @@
 
 <h1>{% if status_reserva_confirmada(item.status) %}Reserva confirmada{% elif item.status == 'aceite_pagamento_pendente' %}Aceite registrado - pagamento pendente{% else %}Pré-contrato para conferência{% endif %} - {{ empresa.nome }}</h1>
 
+{% if mostrar_pergunta_pagamento %}
+<div class="box aviso" style="border-width:2px;">
+  <h2>Aceite concluído</h2>
+  <p><b>Prosseguir para pagamento?</b></p>
+  <p class="texto-discreto">O aceite já foi registrado. O pagamento é a próxima etapa e será feito separadamente pela InfinitePay.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+    <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Sim, prosseguir para pagamento</a>
+    <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}">Agora não</a>
+  </div>
+</div>
+{% elif pagamento_ja_confirmado %}
+<div class="box aviso">
+  <b>Aceite registrado.</b> O pagamento necessário para confirmar a reserva já consta no contrato.
+</div>
+{% endif %}
+
 {% if not contrato_pronto and not status_reserva_confirmada(item.status) and item.status != "cancelado_cliente" %}
 <div class="box aviso">
   <b>Status: contrato em preparação.</b>
@@ -20,9 +36,9 @@
       <p class="retirada-obrigatoria-mini"><b>Retirada obrigatória:</b> {{ (item.retirada_data or item.data_evento).strftime('%d/%m/%Y') if (item.retirada_data or item.data_evento) else '-' }} às {{ (item.retirada_hora or item.hora_fim or item.hora_inicio).strftime('%H:%M') if (item.retirada_hora or item.hora_fim or item.hora_inicio) else '-' }}</p>
     {% endif %}
     <p><b>Valor total:</b> R$ {{ item.valor|moeda_br }}</p>
-    <p><b>Valor recebido:</b> R$ {{ item.valor_pago|moeda_br }}</p>
+    <p><b>Valor recebido:</b> R$ {{ total_pago_publico|moeda_br }}</p>
     <p><b>Sinal previsto:</b> R$ {{ item.sinal|moeda_br }}</p>
-    <p><b>Falta:</b> R$ {{ (((item.valor or 0) - (item.valor_pago or 0)) if ((item.valor or 0) - (item.valor_pago or 0)) > 0 else 0)|moeda_br }}</p>
+    <p><b>Falta:</b> R$ {{ saldo_restante|moeda_br }}</p>
   </div>
 
   <div class="card">
@@ -51,6 +67,59 @@
     <p><b>Observações da reserva:</b> {{ item.observacoes or '-' }}</p>
   </div>
 </div>
+
+{% if aceite_realizado or pagamentos_publicos %}
+<div class="box" id="pagamento-contrato">
+  <h2>Pagamento do contrato</h2>
+  <div class="contrato-visual" style="margin-top:12px;">
+    <div class="card"><span class="texto-discreto">Valor total</span><br><b>R$ {{ item.valor|moeda_br }}</b></div>
+    <div class="card"><span class="texto-discreto">Já pago</span><br><b>R$ {{ total_pago_publico|moeda_br }}</b></div>
+    <div class="card"><span class="texto-discreto">Falta pagar</span><br><b>R$ {{ saldo_restante|moeda_br }}</b></div>
+  </div>
+
+  {% if pagamentos_publicos %}
+    <h3 style="margin-top:20px;">Pagamentos registrados</h3>
+    <div class="tabela-responsiva">
+      <table>
+        <thead><tr><th>Data</th><th>Valor</th><th>Forma</th><th>Origem</th></tr></thead>
+        <tbody>
+          {% for p in pagamentos_publicos %}
+          <tr>
+            <td>{{ p.data_pagamento.strftime('%d/%m/%Y') if p.data_pagamento else '-' }}</td>
+            <td>R$ {{ p.valor|moeda_br }}</td>
+            <td>{% if p.forma_pagamento == 'pix' %}PIX{% elif p.forma_pagamento == 'cartao' %}Cartão{% elif p.forma_pagamento == 'dinheiro' %}Dinheiro{% else %}{{ p.forma_pagamento or '-' }}{% endif %}</td>
+            <td>{% if p.usuario_registro == 'InfinitePay' %}InfinitePay{% else %}Registrado pela empresa{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="texto-discreto">Nenhum pagamento registrado até o momento.</p>
+  {% endif %}
+
+  {% if saldo_restante <= 0.009 %}
+    <div class="aviso" style="margin-top:16px;"><b>Pagamento concluído.</b> Não há saldo pendente neste contrato.</div>
+  {% elif empresa.infinitepay_ativa and aceite_realizado and item.status != 'cancelado_cliente' %}
+    {% if cobranca_pendente %}
+      <div class="aviso" style="margin-top:16px;">
+        <b>Pagamento em aberto: R$ {{ valor_cobranca_pendente|moeda_br }}</b>
+        <p class="texto-discreto">Já existe uma solicitação InfinitePay para este contrato. O botão abaixo reutiliza a mesma cobrança; não cria outra.</p>
+      </div>
+      <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar R$ {{ valor_cobranca_pendente|moeda_br }}</a>
+    {% elif not mostrar_pergunta_pagamento %}
+      {% if total_pago_publico > 0.009 %}
+        <p><b>Saldo restante:</b> R$ {{ saldo_restante|moeda_br }}</p>
+        <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar restante</a>
+      {% else %}
+        <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar</a>
+      {% endif %}
+    {% endif %}
+  {% elif aceite_realizado %}
+    <p class="texto-discreto">Os pagamentos lançados manualmente pela empresa aparecerão automaticamente neste resumo.</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="box">
   <h2>Produtos e serviços</h2>
@@ -95,21 +164,15 @@
     <div><b>Preparado em:</b> {{ item.criado_em|datahora_local }}</div>
     <div><b>Aprovado em:</b> {{ (item.aprovado_em or item.aceite_em)|datahora_local if (item.aprovado_em or item.aceite_em) and status_reserva_confirmada(item.status) else '-' }}</div>
     <div><b>Cancelado em:</b> {{ item.cancelado_em|datahora_local }}</div>
-    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif status_reserva_confirmada(item.status) %}Reserva{% elif item.status == 'aceite_pagamento_pendente' %}Aguardando pagamento{% else %}Aguardando aceite{% endif %}</div>
+    <div><b>Status:</b> {% if item.status == 'cancelado_cliente' %}Cancelado{% elif saldo_restante <= 0.009 and aceite_realizado %}Pagamento concluído{% elif status_reserva_confirmada(item.status) and saldo_restante > 0.009 %}Reserva confirmada · saldo pendente{% elif status_reserva_confirmada(item.status) %}Reserva confirmada{% elif item.status == 'aceite_pagamento_pendente' %}Aceite registrado · aguardando pagamento{% else %}Aguardando aceite{% endif %}</div>
   </div>
 </div>
 
 <div class="box">
   {% if item.status == 'aceite_pagamento_pendente' %}
-    <p><b>Seu aceite foi registrado.</b> Agora escolha Sinal ou Valor integral para confirmar a reserva.</p>
-    <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Escolher pagamento</a>
+    <p><b>Seu aceite foi registrado.</b> O resumo de pagamentos acima será atualizado tanto para pagamentos manuais quanto para InfinitePay.</p>
   {% elif status_reserva_confirmada(item.status) %}
-    {% set saldo_restante = ((item.valor or 0) - (item.valor_pago or 0)) if ((item.valor or 0) - (item.valor_pago or 0)) > 0 else 0 %}
-    <p><b>Contrato aceito.</b> A partir deste ponto ele passa a ser tratado como reserva.</p>
-    {% if empresa.infinitepay_ativa and saldo_restante > 0.009 %}
-      <p><b>Saldo restante:</b> R$ {{ saldo_restante|moeda_br }}</p>
-      <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.id }}">Pagar restante pela InfinitePay</a>
-    {% endif %}
+    <p><b>Contrato aceito.</b> A reserva está confirmada. Consulte o quadro <b>Pagamento do contrato</b> para acompanhar o que já foi pago e o saldo.</p>
     <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar esta reserva?');">
       <button class="perigo" type="submit">Cancelar</button>
     </form>
@@ -119,7 +182,7 @@
     {% if contrato_pronto %}
       <div class="acoes-contrato-publico">
         <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar"><i class="bi bi-pencil-square"></i> Editar meus dados</a>
-        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. {% if empresa.infinitepay_ativa %}Em seguida você escolherá Sinal ou Valor integral para pagar pela InfinitePay.{% else %}Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.{% endif %}">
+        <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. {% if empresa.infinitepay_ativa %}Depois do aceite, você poderá decidir se deseja prosseguir para o pagamento.{% else %}Em seguida, o WhatsApp será aberto com uma mensagem pronta; basta tocar em Enviar para avisar o atendente.{% endif %}">
           <label class="check"><input type="checkbox" name="aceite" value="sim" required> Li, conferi os dados e aceito o contrato.</label>
           <button>Aceitar</button>
         </form>

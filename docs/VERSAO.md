@@ -1,17 +1,17 @@
-# HUMIAT Conect — Versão 1.0.6
+# HUMIAT Conect — Versão 1.0.8
 
-## InfinitePay e compatibilidade de clientes antigos
+## Link permanente do contrato e aceite separado do pagamento
 
-- E-mail visível/obrigatório passa a ser validado no servidor somente nos novos envios do pré-contrato.
-- Registros antigos continuam podendo ser abertos mesmo quando ainda não possuem e-mail; o banco não recebeu restrição NOT NULL.
-- Cliente antigo sem e-mail pode informar o e-mail ao reutilizar o cadastro; o campo não fica travado vazio.
-- Se o contrato já tiver qualquer pagamento, a InfinitePay oferece somente o saldo restante, nunca o valor total original.
-- Enquanto houver uma cobrança InfinitePay com status AGUARDANDO_PAGAMENTO e URL válida, o Conect reutiliza o mesmo checkout e não cria outro.
-- Nova cobrança só é criada quando não existe checkout ativo local (por exemplo, tentativa anterior em ERRO_CHECKOUT).
-- Contrato aprovado com saldo pendente passa a exibir botão para pagar somente o restante pela InfinitePay.
-- Endereço continua somente no Conect e não é enviado ao checkout.
-- Fluxo manual permanece disponível.
+- O primeiro link de aceite passa a ser também o painel permanente do cliente para aquele contrato.
+- Mostra valor total, já pago, falta pagar e histórico de pagamentos.
+- Considera pagamentos manuais e InfinitePay no mesmo resumo.
+- Se houver saldo e InfinitePay ativa, o cliente pode pagar pelo mesmo link.
+- Se já existir checkout InfinitePay pendente, o botão reutiliza a mesma cobrança.
+- Se já estiver quitado, nenhuma nova cobrança é criada.
+- Após o aceite, pergunta “Prosseguir para pagamento?”; a InfinitePay não é aberta automaticamente pelo aceite.
+- Pagamento manual após o aceite pode confirmar a reserva ao atingir o sinal mínimo exigido.
+- Nenhuma alteração de banco e nenhuma variável de ambiente nova.
 
 Commit:
 
-`v1.0.6 - protege cobrancas InfinitePay e compatibilidade de email`
+`v1.0.8 - centraliza pagamentos no link do contrato e separa aceite do checkout`

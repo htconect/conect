@@ -569,6 +569,7 @@ def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     endereco = dados["endereco"]
     numero = dados["numero"]
     bairro = dados["bairro"]
+    complemento = dados["complemento"]
     cidade = dados["cidade"]
     estado = dados["estado"]
     cep = dados["cep"]
@@ -6910,8 +6911,9 @@ def confirmar_pagamento(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
-    # Pagamento é opcional e independente do aceite.
-    # Pode ser informado antes ou depois do contrato aceito; ele apenas gera o lançamento financeiro.
+    # Pagamento pode ser informado antes ou depois do aceite.
+    # Depois do aceite, ao atingir o sinal mínimo exigido, o lançamento manual também
+    # confirma a reserva; antes do aceite ele permanece apenas como registro financeiro.
     valor = texto_para_float(valor_pago)
     if valor <= 0:
         return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
@@ -6933,7 +6935,11 @@ def confirmar_pagamento(
     db.add(pagamento)
     db.flush()
     recalcular_pagamento_solicitacao(db, item)
-    # Não altera aceite do contrato. Pagamento muda apenas o resumo financeiro.
+    # Se o cliente já aceitou e a empresa usa o fluxo de pagamento após aceite,
+    # um recebimento lançado manualmente também pode confirmar a reserva. Assim
+    # o link público reflete a mesma situação financeira, independentemente da origem.
+    if item.status in {"aceite_pagamento_pendente", "aguardando_pagamento"} and _pagamento_suficiente_para_confirmar(item):
+        _aprovar_contrato_apos_pagamento(db, empresa, item)
     db.commit()
     return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -7519,6 +7525,27 @@ def _saldo_contrato(item: Solicitacao) -> float:
     return max(float(getattr(item, "valor", 0) or 0) - float(getattr(item, "valor_pago", 0) or 0), 0.0)
 
 
+def _valor_minimo_confirmacao_contrato(item: Solicitacao) -> float:
+    """Valor mínimo recebido para transformar o aceite em reserva confirmada.
+
+    Quando há sinal configurado, ele é o mínimo. Sem sinal, o contrato precisa
+    estar quitado. A regra vale igualmente para pagamento manual ou InfinitePay.
+    """
+    total = max(float(getattr(item, "valor", 0) or 0), 0.0)
+    sinal = max(float(getattr(item, "sinal", 0) or 0), 0.0)
+    if total <= 0.009:
+        return 0.0
+    if sinal > 0.009:
+        return min(sinal, total)
+    return total
+
+
+def _pagamento_suficiente_para_confirmar(item: Solicitacao) -> bool:
+    minimo = _valor_minimo_confirmacao_contrato(item)
+    recebido = max(float(getattr(item, "valor_pago", 0) or 0), 0.0)
+    return minimo <= 0.009 or recebido + 0.009 >= minimo
+
+
 def _infinitepay_cobranca_pendente_ativa(db: Session, empresa_id: int, solicitacao_id: int) -> InfinitePayCobranca | None:
     """Retorna a única cobrança ainda reutilizável do contrato.
 
@@ -7636,7 +7663,12 @@ def _forma_pagamento_infinitepay(capture_method: str) -> str:
     return "infinitepay"
 
 
-def _aprovar_contrato_infinitepay(db: Session, empresa: Empresa, item: Solicitacao):
+def _aprovar_contrato_apos_pagamento(db: Session, empresa: Empresa, item: Solicitacao):
+    """Confirma a reserva após o valor mínimo ter sido recebido.
+
+    É propositalmente independente da origem do pagamento: lançamento manual e
+    InfinitePay passam pela mesma regra operacional.
+    """
     if item.status != "reserva_confirmada":
         item.status = "reserva_confirmada"
     if not item.aprovado_em:
@@ -7648,6 +7680,11 @@ def _aprovar_contrato_infinitepay(db: Session, empresa: Empresa, item: Solicitac
     item.hora_fim = fim_obj
     criar_eventos_operacionais(db, item)
     _processar_humiat_aceite(db, empresa, item)
+
+
+def _aprovar_contrato_infinitepay(db: Session, empresa: Empresa, item: Solicitacao):
+    # Alias mantido para compatibilidade com chamadas antigas.
+    _aprovar_contrato_apos_pagamento(db, empresa, item)
 
 
 def _registrar_pagamento_infinitepay(
@@ -7710,7 +7747,8 @@ def _registrar_pagamento_infinitepay(
         ))
 
     recalcular_pagamento_solicitacao(db, item)
-    _aprovar_contrato_infinitepay(db, empresa, item)
+    if _pagamento_suficiente_para_confirmar(item):
+        _aprovar_contrato_apos_pagamento(db, empresa, item)
     cobranca.status = "PAGO"
     cobranca.transaction_nsu = str(transaction_nsu or "")[:180] or cobranca.transaction_nsu
     cobranca.invoice_slug = str(invoice_slug or "")[:180]
@@ -8079,9 +8117,46 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
     produto = db.get(ProdutoServico, item.produto_id) if item.produto_id else None
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    return templates.TemplateResponse("publico/contrato.html",
-                                      {"request": request, "empresa": empresa, "item": item, "contrato": contrato,
-                                       "produto": produto, "itens_reserva": itens_reserva})
+
+    # O primeiro link de aceite vira a página permanente do cliente para o contrato.
+    # Pagamentos manuais e InfinitePay usam a mesma fonte de verdade (pagamentos).
+    pagamentos_publicos = (db.query(Pagamento)
+                            .filter_by(empresa_id=empresa.id, solicitacao_id=item.id)
+                            .order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc())
+                            .all())
+    total_pago_publico = sum(float(p.valor or 0) for p in pagamentos_publicos)
+    total_contrato_publico = max(float(item.valor or 0), 0.0)
+    saldo_restante = max(total_contrato_publico - total_pago_publico, 0.0)
+    aceite_realizado = item.status in {
+        "aceite_pagamento_pendente", "aguardando_pagamento", "aceito", "reserva_confirmada"
+    } or status_reserva_confirmada(item.status)
+    cobranca_pendente = (
+        _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+        if _infinitepay_habilitada(empresa) and aceite_realizado and saldo_restante > 0.009
+        else None
+    )
+    valor_cobranca_pendente = (float(cobranca_pendente.valor_centavos or 0) / 100.0) if cobranca_pendente else 0.0
+    mostrar_pergunta_pagamento = (
+        request.query_params.get("aceite") == "ok"
+        and _infinitepay_habilitada(empresa)
+        and aceite_realizado
+        and saldo_restante > 0.009
+        and item.status != "cancelado_cliente"
+    )
+    pagamento_ja_confirmado = request.query_params.get("pagamento") == "confirmado"
+
+    return templates.TemplateResponse("publico/contrato.html", {
+        "request": request, "empresa": empresa, "item": item, "contrato": contrato,
+        "produto": produto, "itens_reserva": itens_reserva,
+        "pagamentos_publicos": pagamentos_publicos,
+        "total_pago_publico": total_pago_publico,
+        "saldo_restante": saldo_restante,
+        "aceite_realizado": aceite_realizado,
+        "cobranca_pendente": cobranca_pendente,
+        "valor_cobranca_pendente": valor_cobranca_pendente,
+        "mostrar_pergunta_pagamento": mostrar_pergunta_pagamento,
+        "pagamento_ja_confirmado": pagamento_ja_confirmado,
+    }, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}/editar", response_class=HTMLResponse)
@@ -8218,12 +8293,18 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
         aceite_registrado_agora = True
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):
-            # No fluxo InfinitePay, aceite e aprovação são etapas diferentes.
-            # A reserva só é aprovada, entra na operação e consome Humiat após o pagamento confirmado.
+            # Aceite e pagamento são etapas diferentes. O aceite termina no Conect;
+            # só depois o cliente decide se quer prosseguir para a InfinitePay.
             item.status = "aceite_pagamento_pendente"
             item.aprovado_em = None
+            recalcular_pagamento_solicitacao(db, item)
+            pagamento_ja_confirmado = _pagamento_suficiente_para_confirmar(item)
+            if pagamento_ja_confirmado:
+                # Compatibilidade com pagamentos já lançados manualmente antes do aceite.
+                _aprovar_contrato_apos_pagamento(db, empresa, item)
             db.commit()
-            return RedirectResponse(f"/e/{slug}/pagamento/{solicitacao_id}", status_code=303)
+            sufixo = "?aceite=ok&pagamento=confirmado" if pagamento_ja_confirmado else "?aceite=ok"
+            return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}{sufixo}", status_code=303)
 
         item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
         item.aprovado_em = item.aceite_em
@@ -8394,13 +8475,24 @@ def infinitepay_criar_checkout(
         "webhook_url": _infinitepay_public_url(request, "/api/infinitepay/webhook"),
         "items": [{"quantity": 1, "price": valor_centavos, "description": descricao}],
     }
-    if cliente:
+    # A InfinitePay valida o bloco customer como um conjunto. Para contratos
+    # antigos sem e-mail, não enviamos customer: o checkout coleta o e-mail
+    # diretamente do comprador e o contrato continua abrindo sem erro.
+    # Quando o contrato possui e-mail válido, enviamos os dados para deixar o
+    # checkout pré-preenchido. E-mails legados inválidos também são omitidos.
+    email_cliente = str((cliente.email if cliente else "") or "").strip()[:180]
+    if cliente and _email_basico_valido(email_cliente):
         customer = {
             "name": str(cliente.nome or "Cliente")[:160],
-            "email": str(cliente.email or "").strip()[:180],
+            "email": email_cliente,
             "phone_number": telefone_infinite,
         }
         payload["customer"] = {k: v for k, v in customer.items() if v}
+    elif email_cliente:
+        logger.warning(
+            "Contrato %s possui e-mail legado inválido; customer não será enviado à InfinitePay.",
+            item.id,
+        )
 
     # Endereço fica somente no Conect; não é enviado ao checkout da InfinitePay.
     try:
