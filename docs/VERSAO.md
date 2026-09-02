@@ -1,14 +1,11 @@
-# HUMIAT Conect — Versão 1.0.21
+# HUMIAT Conect — Versão 1.0.22
 
-## Link pessoal por atendente
-
-- O botão **Compartilhar Pré-Contrato** passa a usar um link fixo e exclusivo do usuário logado.
-- O cliente que preencher por esse link já entra com o atendente como responsável da negociação.
-- O retorno do pré-contrato pelo WhatsApp vai para o WhatsApp do responsável quando cadastrado.
-- O WhatsApp geral da empresa é usado somente como fallback.
-- O link genérico antigo continua válido para divulgações sem responsável definido.
-- **Meu perfil** agora permite cadastrar o WhatsApp pessoal usado nesse retorno.
+## Alterações
+- Sinal InfinitePay passa a ser calculado por quantidade de equipamentos.
+- O valor configurado na empresa representa o sinal por equipamento (ex.: R$ 100,00 por unidade).
+- O valor total do sinal é congelado no aceite do contrato.
+- Na tela principal, abaixo de Compartilhar Pré-Contrato, a mensagem informativa foi removida.
+- O aviso permanece somente quando o usuário não possui WhatsApp cadastrado.
 
 ## Commit
-
-`v1.0.21 - cria link pessoal de pre-contrato por atendente e fixa responsavel da negociacao`
+`v1.0.22 - calcula sinal por equipamento e simplifica aviso do pre-contrato`

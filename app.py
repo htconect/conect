@@ -744,33 +744,50 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
     ]
 
 
+def _quantidade_equipamentos_contrato(item: Solicitacao) -> int:
+    """Quantidade de equipamentos/itens contratados usada no cálculo do sinal.
+
+    Cada unidade de ``ReservaItem`` conta uma vez. Em contratos legados sem a lista
+    de itens, o produto principal conta como uma unidade para preservar compatibilidade.
+    """
+    itens = list(getattr(item, "itens", None) or [])
+    if itens:
+        total_qtd = 0
+        for ri in itens:
+            try:
+                qtd = int(getattr(ri, "quantidade", 1) or 1)
+            except (TypeError, ValueError):
+                qtd = 1
+            total_qtd += max(qtd, 1)
+        return max(total_qtd, 1)
+    return 1 if getattr(item, "produto_id", None) else 1
+
+
 def _sinal_infinitepay_contrato(empresa: Empresa, item: Solicitacao) -> float:
     """Sinal efetivo do contrato para o fluxo InfinitePay.
 
-    A fonte principal é o sinal configurado na empresa antes do aceite. No aceite
-    ele é congelado em ``item.sinal``. Nunca usamos apenas ``aceite_em`` como prova
-    de aceite, pois versões antigas criavam esse timestamp indevidamente no rascunho.
+    O valor configurado na empresa é tratado como *sinal por equipamento*. Assim,
+    uma empresa configurada com R$ 100,00 cobra R$ 100,00 para 1 equipamento,
+    R$ 200,00 para 2, e assim por diante. No aceite esse total é congelado em
+    ``item.sinal`` para não mudar depois que a negociação já foi aceita.
     """
     total = max(float(getattr(item, "valor", 0) or 0), 0.0)
     if total <= 0.009:
         return 0.0
+
     sinal_item = max(float(getattr(item, "sinal", 0) or 0), 0.0)
-    sinal_empresa = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
+    sinal_por_equipamento = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
+    qtd_equipamentos = _quantidade_equipamentos_contrato(item)
+    sinal_calculado = sinal_por_equipamento * qtd_equipamentos
 
-    # Se o contrato já foi realmente aceito e há um sinal válido congelado,
-    # preserva o acordo. Um valor igual ao total não é tratado como sinal quando
-    # a empresa possui um sinal menor configurado — isso corrige contratos que
-    # herdaram valor incorreto em versões anteriores.
-    if status_contrato_aceito(getattr(item, "status", "")):
-        if 0.009 < sinal_item < total - 0.009:
-            return sinal_item
-        if 0.009 < sinal_empresa < total - 0.009:
-            return sinal_empresa
-        if sinal_item > 0.009:
-            return min(sinal_item, total)
+    # Contrato já aceito: preserva o valor congelado no momento do aceite. Isso evita
+    # alterar uma negociação já confirmada em versões anteriores. Novos aceites passam
+    # a congelar automaticamente o cálculo por quantidade de equipamentos.
+    if status_contrato_aceito(getattr(item, "status", "")) and sinal_item > 0.009:
+        return min(sinal_item, total)
 
-    if sinal_empresa > 0.009:
-        return min(sinal_empresa, total)
+    if sinal_calculado > 0.009:
+        return min(sinal_calculado, total)
     return min(sinal_item, total)
 
 
