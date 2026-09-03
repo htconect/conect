@@ -50,24 +50,14 @@
       {% if pagamento_quitado %}<p style="margin:16px 0 0"><b>Pagamento do contrato concluído.</b></p>{% endif %}
     </div>
 
-    <div id="entregaContrato" class="box aviso entrega-contrato-card">
-      <h2>Agora vamos disponibilizar seu contrato no WhatsApp.</h2>
-      <p><b>Vamos abrir o WhatsApp com sua mensagem pronta.</b><br>Quando a conversa abrir, basta tocar em <b>Enviar</b>.</p>
-      <div class="entrega-contrato-grid">
-        {% if url_whatsapp %}
-          <a class="botao botao-whats largura-total" href="{{ url_whatsapp }}" onclick="registrarWhatsAppContrato('clique')"><i class="bi bi-whatsapp" aria-hidden="true"></i> Abrir WhatsApp</a>
-        {% else %}
-          <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
-        {% endif %}
-        <button type="button" class="botao secundario largura-total" onclick="deixarResponsavel()">Deixar para o responsável enviar</button>
-      </div>
-      {% if not url_whatsapp %}<p class="texto-discreto" style="margin:12px 0 0">O responsável ficará encarregado de enviar o contrato.</p>{% endif %}
-    </div>
-
-    <div id="responsavelEnvia" class="box confirmacao-card" hidden>
-      <span class="confirmacao-status">Tudo certo</span>
-      <h2>O responsável enviará o contrato.</h2>
-      <p>Sua reserva já está confirmada.</p>
+    <div class="box aviso entrega-contrato-card">
+      {% if whatsapp_acionado %}
+        <h2>WhatsApp acionado.</h2>
+        <p>O Conect já encaminhou esta etapa para o WhatsApp do responsável.</p>
+      {% else %}
+        <h2>Seu pagamento foi confirmado.</h2>
+        <p>Não foi possível encaminhar o WhatsApp automaticamente. O responsável ficará com a pendência de enviar seu contrato.</p>
+      {% endif %}
       <div class="confirmacao-fechar">
         <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
         <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
@@ -106,21 +96,5 @@
   {% endif %}
 </div>
 
-<script>
-function registrarWhatsAppContrato(acao){
-  try{
-    const dados=new FormData();
-    dados.append('tipo','contrato');
-    dados.append('acao',acao);
-    navigator.sendBeacon('/e/{{ empresa.slug }}/whatsapp-evento/{{ item.id }}',dados);
-  }catch(e){}
-}
-function deixarResponsavel(){
-  registrarWhatsAppContrato('delegado');
-  const a=document.getElementById('entregaContrato');
-  const b=document.getElementById('responsavelEnvia');
-  if(a)a.hidden=true;
-  if(b){b.hidden=false;b.scrollIntoView({behavior:'smooth',block:'start'});}
-}
-</script>
+
 {% endblock %}

@@ -281,7 +281,22 @@
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
       <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
       {% if contrato_aceito and link_contrato_whatsapp %}
-        <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Enviar contrato</a>
+        {% if fluxo_infinitepay %}
+          {% if pago > 0 %}
+            {% if item.whatsapp_contrato_acionado_em %}
+              <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Reenviar contrato</a>
+              {% if not item.contrato_recebido_em %}
+              <form method="post" action="/painel/solicitacao/{{ item.id }}/confirmar-recebimento-contrato" style="margin:0" onsubmit="return confirm('Confirmar que o cliente recebeu o contrato?')">
+                <button class="link-botao" type="submit">Confirmar contrato recebido</button>
+              </form>
+              {% endif %}
+            {% else %}
+              <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Enviar contrato</a>
+            {% endif %}
+          {% endif %}
+        {% else %}
+          <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Enviar contrato</a>
+        {% endif %}
       {% endif %}
     </div>
   </div>
@@ -293,6 +308,21 @@
   </div>
   {% if excedente > 0 %}
     <p class="alerta-texto">Atenção: há R$ {{ excedente|moeda_br }} recebido acima do total. Corrija pelo financeiro.</p>
+  {% endif %}
+
+  {% if fluxo_infinitepay and pago > 0 and contrato_aceito %}
+    <div class="box" style="margin:14px 0;padding:14px">
+      {% if item.contrato_recebido_em %}
+        <b>Contrato recebido pelo cliente</b>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Confirmado em {{ item.contrato_recebido_em|datahora_local }}{% if item.contrato_recebido_por %} por {{ item.contrato_recebido_por }}{% endif %}.</small>
+      {% elif item.whatsapp_contrato_acionado_em %}
+        <b>WhatsApp acionado — aguardando confirmação de recebimento</b>
+        <small class="texto-discreto" style="display:block;margin-top:4px">O Conect encaminhou o contrato ao WhatsApp em {{ item.whatsapp_contrato_acionado_em|datahora_local }}. Isso não confirma o toque em Enviar.</small>
+      {% else %}
+        <b>Pagamento confirmado — contrato aguardando envio</b>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Se o cliente não retornou da InfinitePay ao Conect, use “Enviar contrato”.</small>
+      {% endif %}
+    </div>
   {% endif %}
 
   {% if empresa.infinitepay_ativa and cobrancas_infinitepay %}
@@ -432,8 +462,10 @@
   {% if item.whatsapp_pre_contrato_delegado_em %}<div class="linha-historico"><div><b>Pré-contrato: cliente deixou o aviso para o responsável</b><small>{{ item.whatsapp_pre_contrato_delegado_em|datahora_local }}</small></div></div>{% endif %}
   {% if item.whatsapp_aceite_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp após o aceite</b><small>{{ item.whatsapp_aceite_clique_em|datahora_local }} · o Conect não consegue confirmar se a mensagem foi enviada</small></div></div>{% endif %}
   {% if item.whatsapp_aceite_delegado_em %}<div class="linha-historico"><div><b>Aceite: cliente deixou o aviso para o responsável</b><small>{{ item.whatsapp_aceite_delegado_em|datahora_local }}</small></div></div>{% endif %}
-  {% if item.whatsapp_contrato_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp para registrar o contrato</b><small>{{ item.whatsapp_contrato_clique_em|datahora_local }} · o Conect não consegue confirmar se a mensagem foi enviada</small></div></div>{% endif %}
+  {% if item.whatsapp_contrato_clique_em %}<div class="linha-historico"><div><b>Cliente clicou em Abrir WhatsApp para registrar o contrato</b><small>{{ item.whatsapp_contrato_clique_em|datahora_local }} · registro de versão anterior</small></div></div>{% endif %}
   {% if item.whatsapp_contrato_delegado_em %}<div class="linha-historico"><div><b>Contrato: cliente deixou o envio para o responsável</b><small>{{ item.whatsapp_contrato_delegado_em|datahora_local }}</small></div></div>{% endif %}
+  {% if item.whatsapp_contrato_acionado_em %}<div class="linha-historico"><div><b>WhatsApp do contrato acionado</b><small>{{ item.whatsapp_contrato_acionado_em|datahora_local }} · o Conect não confirma o envio dentro do WhatsApp</small></div></div>{% endif %}
+  {% if item.contrato_recebido_em %}<div class="linha-historico"><div><b>Contrato recebido pelo cliente</b><small>{{ item.contrato_recebido_em|datahora_local }}{% if item.contrato_recebido_por %} · confirmado por {{ item.contrato_recebido_por }}{% endif %}</small></div></div>{% endif %}
 </details>
 
 <script>

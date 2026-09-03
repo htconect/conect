@@ -309,6 +309,13 @@ class Solicitacao(Base):
     whatsapp_aceite_delegado_em = Column(DateTime, nullable=True)
     whatsapp_contrato_clique_em = Column(DateTime, nullable=True)
     whatsapp_contrato_delegado_em = Column(DateTime, nullable=True)
+    # InfinitePay: registra que o Conect encaminhou o fluxo ao WhatsApp. Isso não
+    # comprova o toque final em Enviar dentro do aplicativo.
+    whatsapp_contrato_acionado_em = Column(DateTime, nullable=True)
+    # Confirmação operacional feita pelo atendente após constatar que o cliente
+    # recebeu/tem o contrato.
+    contrato_recebido_em = Column(DateTime, nullable=True)
+    contrato_recebido_por = Column(String(120), nullable=True)
     # Aceite manual precisa ser reversível sem confundir com o aceite feito pelo cliente.
     aceite_manual_em = Column(DateTime, nullable=True)
     aceite_manual_por = Column(String(120), nullable=True)

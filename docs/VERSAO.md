@@ -1,11 +1,15 @@
-# HUMIAT Conect — Versão 1.0.22
+# HUMIAT Conect — Versão 1.0.23
 
 ## Alterações
-- Sinal InfinitePay passa a ser calculado por quantidade de equipamentos.
-- O valor configurado na empresa representa o sinal por equipamento (ex.: R$ 100,00 por unidade).
-- O valor total do sinal é congelado no aceite do contrato.
-- Na tela principal, abaixo de Compartilhar Pré-Contrato, a mensagem informativa foi removida.
-- O aviso permanece somente quando o usuário não possui WhatsApp cadastrado.
+- Fluxo novo exclusivo para empresas com InfinitePay.
+- No primeiro pagamento InfinitePay confirmado, o retorno do checkout encaminha diretamente ao WhatsApp do responsável, sem botão intermediário.
+- O Conect registra `whatsapp_contrato_acionado_em`, sem presumir que o cliente tocou em Enviar no WhatsApp.
+- Se o pagamento for confirmado por webhook e o cliente não voltar ao Conect, permanece a pendência “Enviar contrato”.
+- Após o WhatsApp ser acionado, a pendência muda para “Confirmar recebimento”.
+- Atendente pode confirmar “Contrato recebido pelo cliente”, registrando data/hora e usuário.
+- “Reenviar contrato” permanece disponível como contingência.
+- Segundo/pagamento final não repete WhatsApp; apenas confirma/quita e permite fechar.
+- Empresas sem InfinitePay mantêm integralmente o fluxo anterior.
 
 ## Commit
-`v1.0.22 - calcula sinal por equipamento e simplifica aviso do pre-contrato`
+`v1.0.23 - automatiza WhatsApp apos primeiro pagamento InfinitePay e confirma recebimento`

@@ -871,6 +871,7 @@ def garantir_colunas_novas():
         return {c["name"] for c in insp.get_columns(tabela)}
 
     comandos = []
+    nova_col_whatsapp_contrato_acionado = False
 
     if "usuarios_empresa" not in tabelas:
         comandos.append("""
@@ -1015,6 +1016,13 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_clique_em TIMESTAMP")
         if "whatsapp_contrato_delegado_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_delegado_em TIMESTAMP")
+        nova_col_whatsapp_contrato_acionado = "whatsapp_contrato_acionado_em" not in cols_sol
+        if nova_col_whatsapp_contrato_acionado:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_acionado_em TIMESTAMP")
+        if "contrato_recebido_em" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_recebido_em TIMESTAMP")
+        if "contrato_recebido_por" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_recebido_por VARCHAR(120)")
 
         cols_ip = {c["name"] for c in insp.get_columns("infinitepay_cobrancas")} if "infinitepay_cobrancas" in insp.get_table_names() else set()
         if cols_ip:
@@ -1357,6 +1365,16 @@ def garantir_colunas_novas():
         with engine.begin() as conn:
             for comando in comandos:
                 conn.execute(text(comando))
+
+    # Preserva a auditoria das versões anteriores sem presumir recebimento.
+    if nova_col_whatsapp_contrato_acionado and "solicitacoes" in tabelas:
+        with engine.begin() as conn:
+            conn.execute(text("""
+                UPDATE solicitacoes
+                   SET whatsapp_contrato_acionado_em = COALESCE(whatsapp_contrato_clique_em, contrato_enviado_em)
+                 WHERE whatsapp_contrato_acionado_em IS NULL
+                   AND (whatsapp_contrato_clique_em IS NOT NULL OR contrato_enviado_em IS NOT NULL)
+            """))
 
     # As paradas inteligentes preservam o histórico da rota mesmo quando um
     # registro operacional da Agenda é limpo ou recriado. No PostgreSQL, a FK
@@ -2934,20 +2952,49 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
                 .all()
             )
 
-        pendencias_envio_contrato = (
-            db.query(Solicitacao)
-            .options(joinedload(Solicitacao.cliente))
-            .filter(
+        # Acompanhamento novo somente no fluxo InfinitePay. Sem InfinitePay, a
+        # pendência antiga permanece exatamente como era.
+        pendencias_confirmar_recebimento = []
+        if _infinitepay_habilitada(empresa):
+            base_contrato_ip = (
                 Solicitacao.empresa_id == empresa.id,
                 Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
                 Solicitacao.contrato_id.isnot(None),
-                Solicitacao.contrato_enviado_em.is_(None),
                 Solicitacao.cancelado_em.is_(None),
+                Solicitacao.valor_pago > 0.009,
+                Solicitacao.contrato_recebido_em.is_(None),
             )
-            .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-            .limit(12)
-            .all()
-        )
+            pendencias_envio_contrato = (
+                db.query(Solicitacao)
+                .options(joinedload(Solicitacao.cliente))
+                .filter(*base_contrato_ip, Solicitacao.whatsapp_contrato_acionado_em.is_(None))
+                .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+                .limit(12)
+                .all()
+            )
+            pendencias_confirmar_recebimento = (
+                db.query(Solicitacao)
+                .options(joinedload(Solicitacao.cliente))
+                .filter(*base_contrato_ip, Solicitacao.whatsapp_contrato_acionado_em.isnot(None))
+                .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+                .limit(12)
+                .all()
+            )
+        else:
+            pendencias_envio_contrato = (
+                db.query(Solicitacao)
+                .options(joinedload(Solicitacao.cliente))
+                .filter(
+                    Solicitacao.empresa_id == empresa.id,
+                    Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                    Solicitacao.contrato_id.isnot(None),
+                    Solicitacao.contrato_enviado_em.is_(None),
+                    Solicitacao.cancelado_em.is_(None),
+                )
+                .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
+                .limit(12)
+                .all()
+            )
 
     with perf_stage("home.pendencias_financeiro_operacao"):
         pendencias_a_receber = (
@@ -3024,6 +3071,8 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "pendencias_agenda": pendencias_agenda,
         "pendencias_sinal": pendencias_sinal,
         "pendencias_envio_contrato": pendencias_envio_contrato,
+        "pendencias_confirmar_recebimento": pendencias_confirmar_recebimento,
+        "fluxo_infinitepay": _infinitepay_habilitada(empresa),
         "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
@@ -3835,7 +3884,8 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                       {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
                                        "contratos": contratos, "empresas_transferencia": empresas_transferencia,
                                        "mensagens": mensagens, "cobrancas_infinitepay": cobrancas_infinitepay,
-                                       "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS})
+                                       "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS,
+                                       "fluxo_infinitepay": _infinitepay_habilitada(empresa)})
 
 
 
@@ -4141,16 +4191,62 @@ def compartilhar_contrato_whatsapp(
 
     texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
 
-    # O clique no envio pelo WhatsApp conclui a pendência do painel.
-    # Mantemos o status da reserva intacto para não interferir na agenda/financeiro.
+    # Sem InfinitePay, preserva o comportamento antigo. Com InfinitePay, abrir
+    # o WhatsApp passa a significar apenas "WhatsApp acionado"; o recebimento é
+    # confirmado separadamente pelo atendente.
+    agora = agora_utc()
+    alterou = False
     if not item.contrato_enviado_em:
-        item.contrato_enviado_em = agora_utc()
+        item.contrato_enviado_em = agora
+        alterou = True
+    if _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
+        item.whatsapp_contrato_acionado_em = agora
+        alterou = True
+    if alterou:
         db.commit()
 
     return RedirectResponse(
         f"https://wa.me/{telefone}?text={quote(texto)}",
         status_code=303,
     )
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/confirmar-recebimento-contrato")
+def confirmar_recebimento_contrato(
+    solicitacao_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Confirma operacionalmente que o cliente recebeu/tem o contrato.
+
+    Exclusivo do fluxo InfinitePay. O WhatsApp não informa ao Conect se a
+    mensagem foi efetivamente enviada ou entregue.
+    """
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not _infinitepay_habilitada(empresa):
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}#pagamento", status_code=303)
+    if float(item.valor_pago or 0) <= 0.009:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Confirme o recebimento somente depois do primeiro pagamento.#pagamento",
+            status_code=303,
+        )
+    if not item.whatsapp_contrato_acionado_em and not item.contrato_enviado_em:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Primeiro encaminhe o contrato pelo WhatsApp.#pagamento",
+            status_code=303,
+        )
+    if not item.contrato_recebido_em:
+        usuario = (request.session.get("usuario_nome") or request.session.get("usuario_sistema")
+                   or request.session.get("usuario") or empresa.usuario_admin or "Atendente")
+        item.contrato_recebido_em = agora_utc()
+        item.contrato_recebido_por = str(usuario)[:120]
+        item.contrato_enviado_em = item.contrato_enviado_em or item.whatsapp_contrato_acionado_em or item.contrato_recebido_em
+        db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?contrato=recebido#pagamento", status_code=303)
+
 
 @app.get("/painel/solicitacao/{solicitacao_id}/cliente", response_class=HTMLResponse)
 def editar_cliente_da_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
@@ -9035,23 +9131,38 @@ def _processar_retorno_infinitepay(
     db.refresh(cobranca)
     item = db.get(Solicitacao, cobranca.solicitacao_id)
     if cobranca.status == "PAGO":
-        qtd_pagamentos = db.query(Pagamento).filter_by(
-            empresa_id=empresa.id, solicitacao_id=item.id
-        ).count()
-        primeiro_pagamento = qtd_pagamentos == 1
-        # O contrato é oferecido ao cliente somente após o primeiro pagamento.
-        # No segundo pagamento o fluxo termina apenas com o agradecimento.
-        url_whatsapp = (
-            _url_whatsapp_registro_contrato(request, db, empresa, item)
-            if primeiro_pagamento else None
-        )
+        # Primeiro pagamento = antes desta cobrança não havia valor recebido.
+        # Evita depender da quantidade de lançamentos, que pode conter ajustes
+        # manuais ou registros legados.
+        valor_pago_agora = max(float(cobranca.valor_centavos or 0) / 100.0, 0.0)
+        valor_pago_total = max(float(item.valor_pago or 0), 0.0)
+        valor_antes_desta_cobranca = max(valor_pago_total - valor_pago_agora, 0.0)
+        primeiro_pagamento = valor_antes_desta_cobranca <= 0.009
+
+        # Exclusivo do InfinitePay: no primeiro pagamento, se o cliente voltou do
+        # checkout, encaminha direto ao WhatsApp do responsável. Não existe botão
+        # intermediário. O timestamp registra somente o acionamento do WhatsApp.
+        if (primeiro_pagamento and _infinitepay_habilitada(empresa)
+                and not item.contrato_recebido_em
+                and not item.whatsapp_contrato_acionado_em):
+            url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
+            if url_whatsapp:
+                item.whatsapp_contrato_acionado_em = agora_utc()
+                db.commit()
+                return RedirectResponse(
+                    url_whatsapp,
+                    status_code=303,
+                    headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+                )
+
         db.commit()
         return templates.TemplateResponse("publico/pagamento_confirmado.html", {
             "request": request, "empresa": empresa, "item": item,
-            "cobranca": cobranca, "url_whatsapp": url_whatsapp,
+            "cobranca": cobranca,
             "primeiro_pagamento": primeiro_pagamento,
             "saldo_restante": _saldo_contrato(item),
             "link_reserva": f"/e/{empresa.slug}/contrato/{item.id}",
+            "whatsapp_acionado": bool(item.whatsapp_contrato_acionado_em),
         }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     return templates.TemplateResponse("publico/pagamento_pendente.html", {
         "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,
@@ -9298,8 +9409,15 @@ def registrar_evento_whatsapp_publico(
     campo = campos.get((tipo, acao))
     if not campo:
         raise HTTPException(400, "Evento de WhatsApp inválido")
+    agora = agora_utc()
+    alterou = False
     if getattr(item, campo, None) is None:
-        setattr(item, campo, agora_utc())
+        setattr(item, campo, agora)
+        alterou = True
+    if tipo == "contrato" and acao == "clique" and _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
+        item.whatsapp_contrato_acionado_em = agora
+        alterou = True
+    if alterou:
         db.commit()
     return Response(status_code=204)
 

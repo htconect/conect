@@ -93,7 +93,7 @@
     </div>
 </section>
 <h2 class="titulo-secao atencao-titulo">O que precisa de atenção</h2>
-{% set qtd_contratos = (pendencias_agenda|length) + (pendencias_envio_contrato|length) + ((pendencias_sinal|length) if empresa.exige_sinal else 0) %}
+{% set qtd_contratos = (pendencias_agenda|length) + (pendencias_envio_contrato|length) + (pendencias_confirmar_recebimento|length) + ((pendencias_sinal|length) if empresa.exige_sinal else 0) %}
 {% set qtd_operacao = pendencias_operacao|length %}
 {% set qtd_financeiro = (pendencias_a_receber|length) + (pendencias_financeiras|length) %}
 
@@ -108,6 +108,7 @@
                     {% if empresa.exige_sinal and pendencias_sinal|length %}{{ pendencias_sinal|length }} sinal{% if pendencias_sinal|length != 1 %}is{% endif %}{% endif %}
                     {% if pendencias_agenda|length %}{% if empresa.exige_sinal and pendencias_sinal|length %} · {% endif %}{{ pendencias_agenda|length }} pendência{% if pendencias_agenda|length != 1 %}s{% endif %}{% endif %}
                     {% if pendencias_envio_contrato|length %}{% if (empresa.exige_sinal and pendencias_sinal|length) or pendencias_agenda|length %} · {% endif %}{{ pendencias_envio_contrato|length }} aguardando envio{% endif %}
+                    {% if pendencias_confirmar_recebimento|length %}{% if (empresa.exige_sinal and pendencias_sinal|length) or pendencias_agenda|length or pendencias_envio_contrato|length %} · {% endif %}{{ pendencias_confirmar_recebimento|length }} confirmar recebimento{% endif %}
                 </small>
             </span>
             <b class="pendencia-grupo-contador">{{ qtd_contratos }}</b>
@@ -161,6 +162,23 @@
                        href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">
                         Enviar contrato
                     </a>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if pendencias_confirmar_recebimento|length %}
+            <h3>Confirmar recebimento</h3>
+            <div class="lista-mobile">
+                {% for i in pendencias_confirmar_recebimento %}
+                <div class="card-lista card-contrato-envio">
+                    <a class="card-contrato-info" href="/painel/solicitacao/{{ i.id }}">
+                        <b>{{ i.cliente.nome }}</b>
+                        <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · WhatsApp acionado</small>
+                    </a>
+                    <form method="post" action="/painel/solicitacao/{{ i.id }}/confirmar-recebimento-contrato" style="margin:0" onsubmit="return confirm('Confirmar que o cliente recebeu o contrato?')">
+                        <button class="botao-enviar-contrato" type="submit">Confirmar recebido</button>
+                    </form>
                 </div>
                 {% endfor %}
             </div>
