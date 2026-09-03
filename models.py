@@ -367,6 +367,31 @@ class HumiatMovimento(Base):
     solicitacao = relationship("Solicitacao")
 
 
+class HumiatCompra(Base):
+    __tablename__ = "humiat_compras"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    order_nsu = Column(String(140), nullable=False, unique=True, index=True)
+    quantidade = Column(Integer, nullable=False)
+    valor_centavos = Column(Integer, nullable=False, default=0)
+    valor_unitario_centavos = Column(Integer, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="AGUARDANDO_PAGAMENTO", index=True)
+    checkout_url = Column(Text, nullable=True)
+    transaction_nsu = Column(String(180), nullable=True, unique=True, index=True)
+    invoice_slug = Column(String(180), nullable=True)
+    receipt_url = Column(Text, nullable=True)
+    capture_method = Column(String(40), nullable=True)
+    installments = Column(Integer, nullable=False, default=0)
+    paid_amount_centavos = Column(Integer, nullable=False, default=0)
+    pago_em = Column(DateTime, nullable=True)
+    creditado_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    empresa = relationship("Empresa")
+
+
 class ReservaItem(Base):
     __tablename__ = "reserva_itens"
 

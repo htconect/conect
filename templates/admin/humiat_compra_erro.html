@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="humiat-return-page">
+  <div class="humiat-return-card erro">
+    <div class="humiat-return-icon">!</div>
+    <h1>Não foi possível abrir o pagamento</h1>
+    <p>{{ erro }}</p>
+    {% if detalhe %}<details><summary>Detalhes técnicos</summary><pre>{{ detalhe }}</pre></details>{% endif %}
+    <a class="botao largura-total" href="/painel/humiats/comprar">Voltar aos pacotes</a>
+  </div>
+</section>
+{% endblock %}

@@ -37,7 +37,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -108,6 +108,19 @@ INFINITEPAY_TIMEOUT_SECONDS = max(3, int(os.getenv("INFINITEPAY_TIMEOUT_SECONDS"
 # Conect expira o vínculo local e libera uma nova cobrança após este prazo.
 INFINITEPAY_CHECKOUT_TTL_HOURS = max(1, int(os.getenv("INFINITEPAY_CHECKOUT_TTL_HOURS", "24") or 24))
 INFINITEPAY_TAXAS_PADRAO = [4.20, 6.09, 7.01, 7.91, 8.80, 9.67, 12.59, 13.42, 14.25, 15.06, 15.87, 16.66]
+
+# Venda de Humiats é uma operação da plataforma HUMIAT, independente da
+# InfinitePay configurada (ou não) na empresa compradora. Por padrão utiliza
+# a mesma conta/conexão já usada pela plataforma, com possibilidade de separar
+# o handle futuramente apenas por variável de ambiente, sem alterar o fluxo.
+HUMIAT_INFINITEPAY_HANDLE = (os.getenv("HUMIAT_INFINITEPAY_HANDLE", "").strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO)
+HUMIAT_PACOTES = {
+    5: 3500,
+    10: 6500,
+    25: 15000,
+    50: 27500,
+    100: 50000,
+}
 
 
 def agora_utc() -> datetime:
@@ -3137,11 +3150,99 @@ def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empr
     gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
     custo = 1
     gratis_restantes = max(0, gratis_limite - min(aceitos_mes, gratis_limite))
+    pacotes = []
+    for quantidade, valor_centavos in HUMIAT_PACOTES.items():
+        pacotes.append({
+            "quantidade": quantidade,
+            "valor": valor_centavos / 100.0,
+            "valor_unitario": (valor_centavos / quantidade) / 100.0,
+            "destaque": "mais_escolhido" if quantidade == 25 else ("melhor_valor" if quantidade == 100 else ""),
+        })
+    compras = (db.query(HumiatCompra)
+               .filter_by(empresa_id=empresa.id)
+               .order_by(HumiatCompra.id.desc())
+               .limit(10).all())
     return templates.TemplateResponse("admin/humiat_comprar.html", {
         "request": request, "empresa": empresa,
         "gratis_restantes": gratis_restantes, "custo": custo,
+        "pacotes": pacotes, "compras": compras,
+        "compra_ok": request.query_params.get("compra") == "ok",
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
     })
+
+
+@app.post("/painel/humiats/comprar")
+def painel_humiats_criar_checkout(
+    request: Request,
+    quantidade: int = Form(...),
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    quantidade = int(quantidade or 0)
+    valor_centavos = HUMIAT_PACOTES.get(quantidade)
+    if not valor_centavos:
+        raise HTTPException(400, "Pacote de Humiats inválido.")
+    if not HUMIAT_INFINITEPAY_HANDLE:
+        raise HTTPException(503, "Compra de Humiats temporariamente indisponível.")
+
+    # Reutiliza o checkout recente do mesmo pacote para evitar múltiplas cobranças
+    # se o usuário tocar duas vezes ou voltar para a página antes de pagar.
+    limite = agora_utc() - timedelta(hours=INFINITEPAY_CHECKOUT_TTL_HOURS)
+    pendente = (db.query(HumiatCompra)
+                .filter(HumiatCompra.empresa_id == empresa.id,
+                        HumiatCompra.quantidade == quantidade,
+                        HumiatCompra.status == "AGUARDANDO_PAGAMENTO",
+                        HumiatCompra.checkout_url.isnot(None),
+                        HumiatCompra.criado_em >= limite)
+                .order_by(HumiatCompra.id.desc()).first())
+    if pendente and str(pendente.checkout_url or "").startswith("https://"):
+        return RedirectResponse(str(pendente.checkout_url), status_code=303)
+
+    valor_unitario_centavos = int(valor_centavos // quantidade)
+    order_nsu = f"HUMIAT-{empresa.id}-{quantidade}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8].upper()}"
+    compra = HumiatCompra(
+        empresa_id=empresa.id,
+        order_nsu=order_nsu,
+        quantidade=quantidade,
+        valor_centavos=valor_centavos,
+        valor_unitario_centavos=valor_unitario_centavos,
+        status="AGUARDANDO_PAGAMENTO",
+    )
+    db.add(compra)
+    db.flush()
+
+    # Esta cobrança é SEMPRE da HUMIAT. Ela não depende de a empresa compradora
+    # ter InfinitePay habilitada para seus próprios contratos.
+    descricao = f"HUMIAT - {empresa.nome} - {quantidade} Humiats"[:180]
+    payload = {
+        "handle": HUMIAT_INFINITEPAY_HANDLE,
+        "order_nsu": order_nsu,
+        "redirect_url": _infinitepay_public_url(request, "/humiats/pagamento-retorno"),
+        "webhook_url": _infinitepay_public_url(request, "/api/infinitepay/webhook"),
+        "items": [{
+            "quantity": quantidade,
+            "price": valor_unitario_centavos,
+            "description": descricao,
+        }],
+    }
+
+    try:
+        resposta = _infinitepay_post(INFINITEPAY_LINKS_URL, payload)
+        checkout_url = str(resposta.get("url") or "").strip()
+        if not checkout_url.startswith("https://"):
+            raise RuntimeError("InfinitePay não retornou uma URL válida de checkout.")
+        compra.checkout_url = checkout_url
+        db.commit()
+        return RedirectResponse(checkout_url, status_code=303)
+    except Exception as exc:
+        compra.status = "ERRO_CHECKOUT"
+        db.commit()
+        logger.exception("Falha ao criar checkout de Humiats empresa=%s pacote=%s", empresa.id, quantidade)
+        return templates.TemplateResponse("admin/humiat_compra_erro.html", {
+            "request": request, "empresa": empresa,
+            "erro": "Não foi possível abrir o pagamento agora. Nenhuma compra foi realizada.",
+            "detalhe": str(exc)[:500],
+        }, status_code=502, headers={"Cache-Control": "no-store"})
 
 
 def usuario_empresa_atual(db: Session, empresa: Empresa, request: Request):
@@ -7962,6 +8063,140 @@ def _infinitepay_post(url: str, payload: dict) -> dict:
         raise RuntimeError(f"Falha de conexão com a InfinitePay: {exc.reason}") from exc
 
 
+def _registrar_pagamento_compra_humiat(
+    db: Session,
+    compra: HumiatCompra,
+    transaction_nsu: str = "",
+    invoice_slug: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    installments: int = 0,
+    paid_amount_centavos: int = 0,
+) -> bool:
+    """Confirma uma compra de Humiats uma única vez e credita a carteira.
+
+    Webhook e retorno do navegador podem chegar quase juntos. O bloqueio da linha
+    da compra e da empresa evita crédito duplicado e também protege o saldo quando
+    duas compras da mesma empresa são confirmadas simultaneamente.
+    """
+    compra_id = int(compra.id)
+    compra_db = (db.query(HumiatCompra)
+                 .filter(HumiatCompra.id == compra_id)
+                 .with_for_update()
+                 .first())
+    if not compra_db:
+        return False
+
+    # Atualiza os metadados mesmo quando o webhook chegou antes do retorno.
+    compra_db.transaction_nsu = str(transaction_nsu or compra_db.transaction_nsu or "")[:180] or None
+    compra_db.invoice_slug = str(invoice_slug or compra_db.invoice_slug or "")[:180] or None
+    compra_db.receipt_url = str(receipt_url or compra_db.receipt_url or "")[:1000] or None
+    compra_db.capture_method = str(capture_method or compra_db.capture_method or "")[:40] or None
+    compra_db.installments = int(installments or compra_db.installments or 0)
+    compra_db.paid_amount_centavos = int(paid_amount_centavos or compra_db.paid_amount_centavos or compra_db.valor_centavos or 0)
+    compra_db.pago_em = compra_db.pago_em or agora_utc()
+    compra_db.status = "PAGO"
+
+    if not compra_db.creditado_em:
+        empresa = (db.query(Empresa)
+                   .filter(Empresa.id == compra_db.empresa_id)
+                   .with_for_update()
+                   .first())
+        if not empresa:
+            db.rollback()
+            return False
+        qtd = int(compra_db.quantidade or 0)
+        _registrar_movimento_humiat(
+            db, empresa, qtd, "compra_infinitepay",
+            f"Compra InfinitePay - {qtd} Humiats",
+            observacao=f"Pedido {compra_db.order_nsu} • {empresa.nome}",
+            usuario="InfinitePay",
+        )
+        compra_db.creditado_em = agora_utc()
+        # Se havia contratos aguardando saldo, os Humiats recém-comprados quitam
+        # essas pendências automaticamente, preservando a regra atual da carteira.
+        _quitar_humiats_pendentes(db, empresa)
+
+    db.commit()
+    return True
+
+
+def _processar_retorno_compra_humiat(
+    request: Request,
+    order_nsu: str = "",
+    transaction_nsu: str = "",
+    slug_pagamento: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    db: Session = None,
+):
+    invoice_slug = str(
+        request.query_params.get("slug")
+        or request.query_params.get("invoice_slug")
+        or slug_pagamento
+        or ""
+    ).strip()
+    order_nsu = str(order_nsu or request.query_params.get("order_nsu") or "").strip()
+    transaction_nsu = str(
+        transaction_nsu
+        or request.query_params.get("transaction_nsu")
+        or request.query_params.get("transaction_id")
+        or ""
+    ).strip()
+    receipt_url = str(receipt_url or request.query_params.get("receipt_url") or "").strip()
+    capture_method = str(capture_method or request.query_params.get("capture_method") or "").strip()
+
+    compra = None
+    if order_nsu:
+        compra = db.query(HumiatCompra).filter_by(order_nsu=order_nsu).first()
+    if not compra and transaction_nsu:
+        compra = db.query(HumiatCompra).filter_by(transaction_nsu=transaction_nsu).first()
+    if not compra:
+        return templates.TemplateResponse("publico/humiat_pagamento_retorno.html", {
+            "request": request, "empresa": None, "compra": None,
+            "status_retorno": "erro",
+            "mensagem": "Não foi possível localizar esta compra de Humiats.",
+        }, status_code=404, headers={"Cache-Control": "no-store"})
+
+    empresa = db.get(Empresa, compra.empresa_id)
+    if compra.status != "PAGO" and transaction_nsu and invoice_slug:
+        try:
+            check = _infinitepay_post(INFINITEPAY_PAYMENT_CHECK_URL, {
+                "handle": HUMIAT_INFINITEPAY_HANDLE,
+                "order_nsu": compra.order_nsu,
+                "transaction_nsu": transaction_nsu,
+                "slug": invoice_slug,
+            })
+            if bool(check.get("success")) and bool(check.get("paid")):
+                amount = int(check.get("amount") or 0)
+                if amount == int(compra.valor_centavos or 0):
+                    _registrar_pagamento_compra_humiat(
+                        db, compra, transaction_nsu=transaction_nsu, invoice_slug=invoice_slug,
+                        receipt_url=receipt_url,
+                        capture_method=str(check.get("capture_method") or capture_method or ""),
+                        installments=int(check.get("installments") or 0),
+                        paid_amount_centavos=int(check.get("paid_amount") or amount),
+                    )
+        except Exception:
+            logger.exception("Falha no payment_check da compra Humiat %s", compra.order_nsu)
+
+    db.refresh(compra)
+    if empresa:
+        db.refresh(empresa)
+    if compra.status == "PAGO" and compra.creditado_em:
+        return templates.TemplateResponse("publico/humiat_pagamento_retorno.html", {
+            "request": request, "empresa": empresa, "compra": compra,
+            "status_retorno": "pago",
+            "mensagem": f"{int(compra.quantidade or 0)} Humiats foram creditados com sucesso.",
+        }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+    return templates.TemplateResponse("publico/humiat_pagamento_retorno.html", {
+        "request": request, "empresa": empresa, "compra": compra,
+        "status_retorno": "pendente",
+        "mensagem": "O pagamento ainda está sendo confirmado. Se já pagou, aguarde alguns instantes e atualize esta página.",
+    }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+
 def _infinitepay_seed_taxas(db: Session, empresa_id: int):
     for parcelas, taxa in enumerate(INFINITEPAY_TAXAS_PADRAO, start=1):
         existe = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id, parcelas=parcelas).first()
@@ -9069,6 +9304,28 @@ def cancelar_cobranca_infinitepay_local(
     return RedirectResponse(f"/painel/solicitacao/{item.id}?infinitepay=cancelada#pagamento", status_code=303)
 
 
+@app.get("/humiats/pagamento-retorno", response_class=HTMLResponse, name="humiat_infinitepay_retorno")
+def humiat_infinitepay_retorno(
+    request: Request,
+    order_nsu: str = "",
+    transaction_nsu: str = "",
+    slug_pagamento: str = "",
+    receipt_url: str = "",
+    capture_method: str = "",
+    db: Session = Depends(get_db),
+):
+    """Retorno exclusivo da compra de Humiats.
+
+    É separado do retorno de contratos para que a confirmação da compra nunca
+    execute regras de reserva, contrato ou WhatsApp do cliente final.
+    """
+    return _processar_retorno_compra_humiat(
+        request=request, order_nsu=order_nsu, transaction_nsu=transaction_nsu,
+        slug_pagamento=slug_pagamento, receipt_url=receipt_url,
+        capture_method=capture_method, db=db,
+    )
+
+
 def _processar_retorno_infinitepay(
     slug: str,
     request: Request,
@@ -9372,13 +9629,34 @@ async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
     transaction_nsu = str(payload.get("transaction_nsu") or "").strip()
     if not order_nsu or not transaction_nsu:
         return JSONResponse({"success": False, "message": "Identificadores ausentes"}, status_code=400)
-    cobranca = db.query(InfinitePayCobranca).filter_by(order_nsu=order_nsu).first()
-    if not cobranca:
-        return JSONResponse({"success": False, "message": "Cobrança não encontrada"}, status_code=400)
     try:
         amount = int(payload.get("amount") or 0)
     except Exception:
         amount = 0
+
+    # Compras de Humiats usam o mesmo webhook/conexão InfinitePay, mas têm
+    # registro e conciliação próprios. Assim todas as empresas compram da
+    # HUMIAT mesmo quando não usam InfinitePay em seus contratos.
+    compra_humiat = db.query(HumiatCompra).filter_by(order_nsu=order_nsu).first()
+    if compra_humiat:
+        if amount != int(compra_humiat.valor_centavos or 0):
+            return JSONResponse({"success": False, "message": "Valor não confere"}, status_code=400)
+        if compra_humiat.status == "PAGO" and compra_humiat.creditado_em:
+            return JSONResponse({"success": True, "message": None})
+        ok = _registrar_pagamento_compra_humiat(
+            db, compra_humiat,
+            transaction_nsu=transaction_nsu,
+            invoice_slug=str(payload.get("invoice_slug") or payload.get("slug") or ""),
+            receipt_url=str(payload.get("receipt_url") or ""),
+            capture_method=str(payload.get("capture_method") or ""),
+            installments=int(payload.get("installments") or 0),
+            paid_amount_centavos=int(payload.get("paid_amount") or amount),
+        )
+        return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao creditar Humiats"}, status_code=200 if ok else 500)
+
+    cobranca = db.query(InfinitePayCobranca).filter_by(order_nsu=order_nsu).first()
+    if not cobranca:
+        return JSONResponse({"success": False, "message": "Cobrança não encontrada"}, status_code=400)
     if amount != int(cobranca.valor_centavos or 0):
         return JSONResponse({"success": False, "message": "Valor não confere"}, status_code=400)
     if cobranca.status == "PAGO":

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="humiat-return-page">
+  <div class="humiat-return-card {{ status_retorno }}">
+    {% if status_retorno == 'pago' %}
+      <div class="humiat-return-icon">✓</div>
+      <span class="humiat-return-badge">Pagamento confirmado</span>
+      <h1>Humiats liberados!</h1>
+      <p>{{ mensagem }}</p>
+      {% if empresa and compra %}
+      <div class="humiat-return-details">
+        <div><small>Empresa</small><strong>{{ empresa.nome }}</strong></div>
+        <div><small>Pacote</small><strong>{{ compra.quantidade }} Humiats</strong></div>
+        <div><small>Valor</small><strong>R$ {{ (compra.valor_centavos / 100)|moeda_br }}</strong></div>
+        <div><small>Saldo atual</small><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
+      </div>
+      {% endif %}
+      <a class="botao largura-total" href="/painel/humiats/comprar?compra=ok">Voltar ao Conect</a>
+    {% elif status_retorno == 'pendente' %}
+      <div class="humiat-return-icon">…</div>
+      <span class="humiat-return-badge">Confirmando pagamento</span>
+      <h1>Estamos conferindo sua compra.</h1>
+      <p>{{ mensagem }}</p>
+      <button type="button" class="largura-total" onclick="location.reload()">Atualizar confirmação</button>
+      <a class="humiat-return-link" href="/painel/humiats/comprar">Voltar ao Conect</a>
+    {% else %}
+      <div class="humiat-return-icon">!</div>
+      <span class="humiat-return-badge">Retorno não localizado</span>
+      <h1>Não foi possível localizar a compra.</h1>
+      <p>{{ mensagem }}</p>
+      <a class="botao largura-total" href="/painel/humiats/comprar">Voltar ao Conect</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
