@@ -312,6 +312,11 @@ class Solicitacao(Base):
     # InfinitePay: registra que o Conect encaminhou o fluxo ao WhatsApp. Isso não
     # comprova o toque final em Enviar dentro do aplicativo.
     whatsapp_contrato_acionado_em = Column(DateTime, nullable=True)
+    # Controle operacional criado na v1.0.24. Somente contratos que passarem
+    # pelo NOVO fluxo a partir desta versão entram na fila "Confirmar recebimento".
+    # Registros antigos permanecem fora da fila mesmo que possuam histórico de
+    # WhatsApp/contrato enviado de versões anteriores.
+    whatsapp_contrato_confirmacao_pendente = Column(Boolean, nullable=False, default=False)
     # Confirmação operacional feita pelo atendente após constatar que o cliente
     # recebeu/tem o contrato.
     contrato_recebido_em = Column(DateTime, nullable=True)

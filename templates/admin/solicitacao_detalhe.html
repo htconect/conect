@@ -283,13 +283,15 @@
       {% if contrato_aceito and link_contrato_whatsapp %}
         {% if fluxo_infinitepay %}
           {% if pago > 0 %}
-            {% if item.whatsapp_contrato_acionado_em %}
+            {% if item.whatsapp_contrato_confirmacao_pendente %}
               <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Reenviar contrato</a>
               {% if not item.contrato_recebido_em %}
               <form method="post" action="/painel/solicitacao/{{ item.id }}/confirmar-recebimento-contrato" style="margin:0" onsubmit="return confirm('Confirmar que o cliente recebeu o contrato?')">
                 <button class="link-botao" type="submit">Confirmar contrato recebido</button>
               </form>
               {% endif %}
+            {% elif item.whatsapp_contrato_acionado_em %}
+              <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Reenviar contrato</a>
             {% else %}
               <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">Enviar contrato</a>
             {% endif %}
@@ -315,9 +317,12 @@
       {% if item.contrato_recebido_em %}
         <b>Contrato recebido pelo cliente</b>
         <small class="texto-discreto" style="display:block;margin-top:4px">Confirmado em {{ item.contrato_recebido_em|datahora_local }}{% if item.contrato_recebido_por %} por {{ item.contrato_recebido_por }}{% endif %}.</small>
-      {% elif item.whatsapp_contrato_acionado_em %}
+      {% elif item.whatsapp_contrato_confirmacao_pendente and item.whatsapp_contrato_acionado_em %}
         <b>WhatsApp acionado — aguardando confirmação de recebimento</b>
         <small class="texto-discreto" style="display:block;margin-top:4px">O Conect encaminhou o contrato ao WhatsApp em {{ item.whatsapp_contrato_acionado_em|datahora_local }}. Isso não confirma o toque em Enviar.</small>
+      {% elif item.whatsapp_contrato_acionado_em %}
+        <b>Contrato encaminhado anteriormente</b>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Este registro é anterior ao novo acompanhamento de recebimento e não gera pendência.</small>
       {% else %}
         <b>Pagamento confirmado — contrato aguardando envio</b>
         <small class="texto-discreto" style="display:block;margin-top:4px">Se o cliente não retornou da InfinitePay ao Conect, use “Enviar contrato”.</small>

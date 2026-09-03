@@ -1019,6 +1019,8 @@ def garantir_colunas_novas():
         nova_col_whatsapp_contrato_acionado = "whatsapp_contrato_acionado_em" not in cols_sol
         if nova_col_whatsapp_contrato_acionado:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_acionado_em TIMESTAMP")
+        if "whatsapp_contrato_confirmacao_pendente" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN whatsapp_contrato_confirmacao_pendente BOOLEAN DEFAULT false NOT NULL")
         if "contrato_recebido_em" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN contrato_recebido_em TIMESTAMP")
         if "contrato_recebido_por" not in cols_sol:
@@ -2975,7 +2977,11 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             pendencias_confirmar_recebimento = (
                 db.query(Solicitacao)
                 .options(joinedload(Solicitacao.cliente))
-                .filter(*base_contrato_ip, Solicitacao.whatsapp_contrato_acionado_em.isnot(None))
+                .filter(
+                    *base_contrato_ip,
+                    Solicitacao.whatsapp_contrato_confirmacao_pendente.is_(True),
+                    Solicitacao.whatsapp_contrato_acionado_em.isnot(None),
+                )
                 .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
                 .limit(12)
                 .all()
@@ -4202,6 +4208,15 @@ def compartilhar_contrato_whatsapp(
     if _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
         item.whatsapp_contrato_acionado_em = agora
         alterou = True
+    # A nova fila "Confirmar recebimento" começa na v1.0.24. Só marcamos a
+    # pendência quando ESTE fluxo efetivamente aciona o WhatsApp após pagamento.
+    # Assim, contratos antigos não são inferidos pelo histórico anterior.
+    if (_infinitepay_habilitada(empresa)
+            and float(item.valor_pago or 0) > 0.009
+            and not item.contrato_recebido_em
+            and not item.whatsapp_contrato_confirmacao_pendente):
+        item.whatsapp_contrato_confirmacao_pendente = True
+        alterou = True
     if alterou:
         db.commit()
 
@@ -4233,9 +4248,9 @@ def confirmar_recebimento_contrato(
             f"/painel/solicitacao/{solicitacao_id}?erro=Confirme o recebimento somente depois do primeiro pagamento.#pagamento",
             status_code=303,
         )
-    if not item.whatsapp_contrato_acionado_em and not item.contrato_enviado_em:
+    if not item.whatsapp_contrato_confirmacao_pendente:
         return RedirectResponse(
-            f"/painel/solicitacao/{solicitacao_id}?erro=Primeiro encaminhe o contrato pelo WhatsApp.#pagamento",
+            f"/painel/solicitacao/{solicitacao_id}?erro=Não há confirmação de recebimento pendente para este contrato.#pagamento",
             status_code=303,
         )
     if not item.contrato_recebido_em:
@@ -4243,6 +4258,7 @@ def confirmar_recebimento_contrato(
                    or request.session.get("usuario") or empresa.usuario_admin or "Atendente")
         item.contrato_recebido_em = agora_utc()
         item.contrato_recebido_por = str(usuario)[:120]
+        item.whatsapp_contrato_confirmacao_pendente = False
         item.contrato_enviado_em = item.contrato_enviado_em or item.whatsapp_contrato_acionado_em or item.contrato_recebido_em
         db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?contrato=recebido#pagamento", status_code=303)
@@ -9148,6 +9164,9 @@ def _processar_retorno_infinitepay(
             url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
             if url_whatsapp:
                 item.whatsapp_contrato_acionado_em = agora_utc()
+                # Marco explícito do NOVO fluxo. Contratos anteriores à v1.0.24
+                # não recebem este sinalizador e, portanto, não entram na fila.
+                item.whatsapp_contrato_confirmacao_pendente = True
                 db.commit()
                 return RedirectResponse(
                     url_whatsapp,
@@ -9416,6 +9435,12 @@ def registrar_evento_whatsapp_publico(
         alterou = True
     if tipo == "contrato" and acao == "clique" and _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
         item.whatsapp_contrato_acionado_em = agora
+        alterou = True
+    if (tipo == "contrato" and acao == "clique" and _infinitepay_habilitada(empresa)
+            and float(item.valor_pago or 0) > 0.009
+            and not item.contrato_recebido_em
+            and not item.whatsapp_contrato_confirmacao_pendente):
+        item.whatsapp_contrato_confirmacao_pendente = True
         alterou = True
     if alterou:
         db.commit()
