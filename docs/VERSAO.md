@@ -1,13 +1,15 @@
-# HUMIAT Conect — Versão 1.0.24
+# HUMIAT Conect — Versão 1.0.25
 
-## Alterações
-- Corrige a fila **Confirmar recebimento** para considerar somente ocorrências do novo fluxo a partir desta versão.
-- Adiciona o marcador explícito `whatsapp_contrato_confirmacao_pendente`, evitando inferência por histórico antigo.
-- Contratos anteriores permanecem fora da nova fila mesmo que tenham `whatsapp_contrato_acionado_em` ou `contrato_enviado_em` de versões passadas.
-- O marcador é ativado apenas quando o WhatsApp do contrato é realmente acionado no fluxo InfinitePay atual.
-- Ao confirmar o recebimento, a pendência é encerrada sem apagar o histórico de envio.
-- A tela do contrato não oferece mais “Confirmar contrato recebido” para registros antigos que não pertencem ao novo acompanhamento.
+## Alteração principal
+
+- No primeiro pagamento via InfinitePay, a tela do Conect mostra um aviso grande antes de abrir o checkout.
+- O aviso orienta o cliente a tocar em **Continuar** na tela da InfinitePay após concluir o pagamento.
+- Explica que esse retorno é necessário para o Conect abrir automaticamente o WhatsApp com o contrato pronto para envio.
+- O aviso aparece tanto para cobrança nova quanto para cobrança já iniciada, mas somente no primeiro pagamento.
+- Pagamento de saldo não recebe esse texto para não sugerir novo envio do contrato.
+- O retorno continua passando pelo Conect e redirecionando diretamente ao WhatsApp do responsável, sem botão intermediário.
 - Empresas sem InfinitePay permanecem sem alteração.
 
-## Commit
-`v1.0.24 - limita confirmacao de recebimento ao novo fluxo InfinitePay`
+Commit sugerido:
+
+`v1.0.25 - destaca retorno da InfinitePay e orienta envio automatico do contrato`
