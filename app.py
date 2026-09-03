@@ -916,6 +916,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_nome VARCHAR(120)")
     if "pre_contrato_responsavel_telefone" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_telefone VARCHAR(30)")
+    if "pre_contrato_responsavel_email" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_email VARCHAR(160)")
     if "infinitepay_ativa" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_ativa BOOLEAN DEFAULT false")
     if "infinitepay_handle" not in cols_emp:
@@ -1149,6 +1151,15 @@ def garantir_colunas_novas():
         comandos.append("CREATE INDEX IF NOT EXISTS ix_humiat_movimentos_empresa_id ON humiat_movimentos (empresa_id)")
         comandos.append("CREATE INDEX IF NOT EXISTS ix_humiat_movimentos_solicitacao_id ON humiat_movimentos (solicitacao_id)")
 
+    if "humiat_compras" in tabelas:
+        cols_hc = colunas("humiat_compras")
+        if "comprador_nome" not in cols_hc:
+            comandos.append("ALTER TABLE humiat_compras ADD COLUMN comprador_nome VARCHAR(160)")
+        if "comprador_email" not in cols_hc:
+            comandos.append("ALTER TABLE humiat_compras ADD COLUMN comprador_email VARCHAR(180)")
+        if "comprador_telefone" not in cols_hc:
+            comandos.append("ALTER TABLE humiat_compras ADD COLUMN comprador_telefone VARCHAR(30)")
+
     if "pagamentos" in tabelas:
         cols_pag = colunas("pagamentos")
         if "usuario_registro" not in cols_pag:
@@ -1186,6 +1197,8 @@ def garantir_colunas_novas():
         cols_usu = colunas("usuarios_empresa")
         if "telefone" not in cols_usu:
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN telefone VARCHAR(30)")
+        if "email" not in cols_usu:
+            comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN email VARCHAR(160)")
         if "pre_contrato_token" not in cols_usu:
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN pre_contrato_token VARCHAR(64)")
         novas_permissoes = {
@@ -3139,8 +3152,55 @@ def painel_humiats_extrato(request: Request, db: Session = Depends(get_db), empr
     })
 
 
-@app.get("/painel/humiats/comprar", response_class=HTMLResponse)
-def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+def _dados_comprador_humiat(db: Session, empresa: Empresa, request: Request) -> dict:
+    """Dados do responsável pela compra para pré-preencher o Checkout InfinitePay."""
+    tipo, registro = usuario_empresa_atual(db, empresa, request)
+    if tipo == "usuario":
+        nome = str(registro.nome or registro.usuario or empresa.nome or "Comprador").strip()
+        telefone = str(registro.telefone or empresa.whatsapp_retorno or "").strip()
+        email = str(getattr(registro, "email", "") or "").strip().lower()
+        if not email and _email_basico_valido(str(registro.usuario or "").strip()):
+            email = str(registro.usuario or "").strip().lower()
+    else:
+        nome = str(
+            getattr(empresa, "pre_contrato_responsavel_nome", "")
+            or request.session.get("usuario_nome")
+            or empresa.usuario_admin
+            or empresa.nome
+            or "Comprador"
+        ).strip()
+        telefone = str(
+            getattr(empresa, "pre_contrato_responsavel_telefone", "")
+            or empresa.whatsapp_retorno
+            or ""
+        ).strip()
+        email = str(getattr(empresa, "pre_contrato_responsavel_email", "") or "").strip().lower()
+        if not email and _email_basico_valido(str(empresa.usuario_admin or "").strip()):
+            email = str(empresa.usuario_admin or "").strip().lower()
+    return {
+        "nome": nome[:160],
+        "telefone": _limpar_tel_whatsapp(telefone),
+        "email": email[:180],
+    }
+
+
+def _salvar_dados_comprador_humiat(db: Session, empresa: Empresa, request: Request, nome: str, telefone: str, email: str):
+    """Guarda contato no perfil para as próximas compras já abrirem preenchidas."""
+    tipo, registro = usuario_empresa_atual(db, empresa, request)
+    telefone_limpo = _limpar_tel_whatsapp(telefone)
+    email_limpo = str(email or "").strip().lower()[:180]
+    if tipo == "usuario":
+        registro.telefone = telefone_limpo or registro.telefone
+        registro.email = email_limpo or getattr(registro, "email", None)
+    else:
+        if nome:
+            empresa.pre_contrato_responsavel_nome = str(nome).strip()[:120]
+        empresa.pre_contrato_responsavel_telefone = telefone_limpo or empresa.pre_contrato_responsavel_telefone
+        empresa.pre_contrato_responsavel_email = email_limpo or getattr(empresa, "pre_contrato_responsavel_email", None)
+    db.flush()
+
+
+def _contexto_compra_humiat(request: Request, db: Session, empresa: Empresa, erro_contato: str = "", comprador: dict | None = None):
     competencia = agora_utc().strftime("%Y-%m")
     aceitos_mes = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
@@ -3148,7 +3208,6 @@ def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empr
         Solicitacao.humiat_competencia == competencia,
     ).count()
     gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
-    custo = 1
     gratis_restantes = max(0, gratis_limite - min(aceitos_mes, gratis_limite))
     pacotes = []
     for quantidade, valor_centavos in HUMIAT_PACOTES.items():
@@ -3162,19 +3221,32 @@ def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empr
                .filter_by(empresa_id=empresa.id)
                .order_by(HumiatCompra.id.desc())
                .limit(10).all())
-    return templates.TemplateResponse("admin/humiat_comprar.html", {
-        "request": request, "empresa": empresa,
-        "gratis_restantes": gratis_restantes, "custo": custo,
-        "pacotes": pacotes, "compras": compras,
+    return {
+        "request": request,
+        "empresa": empresa,
+        "gratis_restantes": gratis_restantes,
+        "custo": 1,
+        "pacotes": pacotes,
+        "compras": compras,
         "compra_ok": request.query_params.get("compra") == "ok",
         "usuario_online": request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário",
-    })
+        "comprador": comprador or _dados_comprador_humiat(db, empresa, request),
+        "erro_contato": erro_contato,
+    }
+
+
+@app.get("/painel/humiats/comprar", response_class=HTMLResponse)
+def painel_humiats_comprar(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/humiat_comprar.html", _contexto_compra_humiat(request, db, empresa))
 
 
 @app.post("/painel/humiats/comprar")
 def painel_humiats_criar_checkout(
     request: Request,
     quantidade: int = Form(...),
+    comprador_nome: str = Form(""),
+    comprador_email: str = Form(""),
+    comprador_telefone: str = Form(""),
     db: Session = Depends(get_db),
     empresa: Empresa = Depends(empresa_logada),
 ):
@@ -3185,17 +3257,40 @@ def painel_humiats_criar_checkout(
     if not HUMIAT_INFINITEPAY_HANDLE:
         raise HTTPException(503, "Compra de Humiats temporariamente indisponível.")
 
-    # Reutiliza o checkout recente do mesmo pacote para evitar múltiplas cobranças
-    # se o usuário tocar duas vezes ou voltar para a página antes de pagar.
+    nome = str(comprador_nome or "").strip()[:160]
+    email = str(comprador_email or "").strip().lower()[:180]
+    telefone = _limpar_tel_whatsapp(comprador_telefone)
+    comprador = {"nome": nome, "email": email, "telefone": telefone}
+    if not nome:
+        return templates.TemplateResponse("admin/humiat_comprar.html", _contexto_compra_humiat(
+            request, db, empresa, "Informe o nome do comprador.", comprador
+        ), status_code=400)
+    if not _email_basico_valido(email):
+        return templates.TemplateResponse("admin/humiat_comprar.html", _contexto_compra_humiat(
+            request, db, empresa, "Informe um e-mail válido para preencher o checkout da InfinitePay.", comprador
+        ), status_code=400)
+    if not celular_brasileiro_valido(telefone):
+        return templates.TemplateResponse("admin/humiat_comprar.html", _contexto_compra_humiat(
+            request, db, empresa, "Informe um WhatsApp brasileiro válido para preencher o checkout da InfinitePay.", comprador
+        ), status_code=400)
+
+    _salvar_dados_comprador_humiat(db, empresa, request, nome, telefone, email)
+
+    # Só reutiliza checkout recente quando ele já foi criado com os mesmos dados
+    # do comprador. Checkouts antigos da v1.0.26, que não tinham customer, não são
+    # reaproveitados; assim a correção passa a valer já na primeira tentativa.
     limite = agora_utc() - timedelta(hours=INFINITEPAY_CHECKOUT_TTL_HOURS)
     pendente = (db.query(HumiatCompra)
                 .filter(HumiatCompra.empresa_id == empresa.id,
                         HumiatCompra.quantidade == quantidade,
                         HumiatCompra.status == "AGUARDANDO_PAGAMENTO",
                         HumiatCompra.checkout_url.isnot(None),
+                        HumiatCompra.comprador_email == email,
+                        HumiatCompra.comprador_telefone == telefone,
                         HumiatCompra.criado_em >= limite)
                 .order_by(HumiatCompra.id.desc()).first())
     if pendente and str(pendente.checkout_url or "").startswith("https://"):
+        db.commit()
         return RedirectResponse(str(pendente.checkout_url), status_code=303)
 
     valor_unitario_centavos = int(valor_centavos // quantidade)
@@ -3207,6 +3302,9 @@ def painel_humiats_criar_checkout(
         valor_centavos=valor_centavos,
         valor_unitario_centavos=valor_unitario_centavos,
         status="AGUARDANDO_PAGAMENTO",
+        comprador_nome=nome,
+        comprador_email=email,
+        comprador_telefone=telefone,
     )
     db.add(compra)
     db.flush()
@@ -3219,6 +3317,11 @@ def painel_humiats_criar_checkout(
         "order_nsu": order_nsu,
         "redirect_url": _infinitepay_public_url(request, "/humiats/pagamento-retorno"),
         "webhook_url": _infinitepay_public_url(request, "/api/infinitepay/webhook"),
+        "customer": {
+            "name": nome,
+            "email": email,
+            "phone_number": "+" + telefone,
+        },
         "items": [{
             "quantity": quantidade,
             "price": valor_unitario_centavos,
@@ -3347,12 +3450,14 @@ def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Emp
     perfil_nome = usuario.nome if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_nome", "") or request.session.get("usuario_nome") or empresa.usuario_admin or "Administrador")
     perfil_usuario_valor = usuario.usuario if tipo == "usuario" else (empresa.usuario_admin or request.session.get("usuario_sistema") or "")
     perfil_telefone = (usuario.telefone or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_telefone", "") or "")
+    perfil_email = (getattr(usuario, "email", "") or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_email", "") or "")
     return templates.TemplateResponse("admin/perfil.html", {
         "request": request,
         "empresa": empresa,
         "perfil_nome": perfil_nome,
         "perfil_usuario": perfil_usuario_valor,
         "perfil_telefone": perfil_telefone,
+        "perfil_email": perfil_email,
         "erro": request.query_params.get("erro"),
         "sucesso": request.query_params.get("sucesso"),
     })
@@ -3364,6 +3469,7 @@ def salvar_perfil_usuario(
         nome: str = Form(...),
         usuario: str = Form(...),
         telefone: str = Form(""),
+        email: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)):
     nome_limpo = nome.strip()
@@ -3389,18 +3495,23 @@ def salvar_perfil_usuario(
 
     if telefone and not celular_brasileiro_valido(telefone):
         return RedirectResponse("/painel/perfil?erro=Informe um WhatsApp brasileiro válido.", status_code=303)
+    email_limpo = str(email or "").strip().lower()
+    if email_limpo and not _email_basico_valido(email_limpo):
+        return RedirectResponse("/painel/perfil?erro=Informe um e-mail válido.", status_code=303)
     telefone_limpo = _limpar_tel_whatsapp(telefone)
 
     if tipo == "usuario":
         registro.nome = nome_limpo
         registro.usuario = usuario_limpo
         registro.telefone = telefone_limpo
+        registro.email = email_limpo or None
         request.session["usuario_nome"] = nome_limpo
         request.session["usuario_sistema"] = usuario_limpo
     else:
         empresa.usuario_admin = usuario_limpo
         empresa.pre_contrato_responsavel_nome = nome_limpo[:120]
         empresa.pre_contrato_responsavel_telefone = telefone_limpo
+        empresa.pre_contrato_responsavel_email = email_limpo or None
         request.session["usuario_nome"] = nome_limpo
         request.session["usuario_sistema"] = usuario_limpo
 

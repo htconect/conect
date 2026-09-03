@@ -1720,3 +1720,32 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
 .humiat-return-page{max-width:680px;margin:20px auto 40px}.humiat-return-card{background:#fff;border:1px solid #e5e7eb;border-radius:20px;padding:26px;text-align:center;box-shadow:0 10px 30px rgba(15,23,42,.08)}.humiat-return-icon{width:72px;height:72px;border-radius:50%;display:grid;place-items:center;margin:0 auto 12px;background:#ecfdf5;color:#166534;font-size:36px;font-weight:1000}.humiat-return-card.pendente .humiat-return-icon{background:#fff7ed;color:#9a3412}.humiat-return-card.erro .humiat-return-icon{background:#fef2f2;color:#991b1b}.humiat-return-badge{display:inline-flex;padding:5px 9px;border-radius:999px;background:#f1f5f9;color:#334155;font-weight:900;font-size:.78rem}.humiat-return-card h1{margin:12px 0 7px}.humiat-return-card p{color:#475569;line-height:1.5}.humiat-return-details{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left;margin:18px 0}.humiat-return-details>div{background:#f8fafc;border:1px solid #e5e7eb;border-radius:13px;padding:11px}.humiat-return-details small,.humiat-return-details strong{display:block}.humiat-return-details small{color:#64748b;margin-bottom:3px}.humiat-return-link{display:block;margin-top:12px;font-weight:800;text-decoration:none}
 @media(max-width:900px){.humiat-packages{grid-template-columns:repeat(2,minmax(0,1fr))}.humiat-package-card:last-child{grid-column:1/-1}}
 @media(max-width:560px){.humiat-buy-summary{align-items:flex-start}.humiat-buy-summary .humiat-buy-icon{width:58px;height:58px;font-size:28px}.humiat-packages{grid-template-columns:1fr;gap:14px}.humiat-package-card:last-child{grid-column:auto}.humiat-package-card{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;gap:4px 12px;padding:16px}.humiat-package-card.destaque{padding-top:20px}.humiat-package-qty{justify-content:flex-start}.humiat-package-price{margin:0;text-align:right}.humiat-package-card>small{grid-column:1/-1;min-height:0}.humiat-package-card form{grid-column:1/-1;margin-top:8px}.humiat-purchase-row{align-items:flex-start;flex-direction:column}.humiat-return-card{padding:20px 16px}.humiat-return-details{grid-template-columns:1fr}}
+
+
+/* Humiat v1.0.27 - checkout pre-preenchido e grade responsiva */
+.humiat-checkout-form{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.humiat-buyer-card{background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:18px;box-shadow:0 8px 24px rgba(15,23,42,.05)}
+.humiat-section-title{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+.humiat-section-title h2{margin:0 0 4px;font-size:18px}.humiat-section-title p{margin:0;color:#64748b;font-size:14px;line-height:1.4}
+.humiat-secure-pill{flex:0 0 auto;background:#ecfdf5;color:#166534;border:1px solid #bbf7d0;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:900}
+.humiat-buyer-grid{display:grid;grid-template-columns:1.2fr .9fr 1.2fr;gap:12px}
+.humiat-buyer-grid label{margin:0;font-size:13px;color:#334155}.humiat-buyer-grid input{margin-top:6px;background:#f8fafc}
+.humiat-buyer-help{display:block;margin-top:10px;color:#64748b;line-height:1.4}
+.humiat-contact-error{max-width:980px;margin:0 auto 16px}
+.humiat-buy-summary{display:grid;grid-template-columns:auto 1fr auto;align-items:center}
+.humiat-buy-summary-copy{min-width:0}.humiat-free-balance{padding:10px 14px;border-radius:14px;background:#f8fafc;border:1px solid #e5e7eb;text-align:right;min-width:130px}
+.humiat-free-balance small,.humiat-free-balance strong{display:block}.humiat-free-balance small{color:#64748b;font-size:12px}.humiat-free-balance strong{margin-top:2px;font-size:20px;color:#0f172a}
+.humiat-packages{width:100%;max-width:none;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}
+.humiat-package-card{display:flex;flex-direction:column;justify-content:flex-start;min-height:220px;padding:22px 16px 16px}
+.humiat-package-card.destaque{padding-top:24px}.humiat-package-price{white-space:nowrap;font-size:1.35rem;margin:14px 0 4px}
+.humiat-package-card>small{min-height:34px}.humiat-package-button{margin-top:auto;white-space:nowrap;min-height:46px;padding-left:10px;padding-right:10px}
+.humiat-buy-actions .humiat-buy-extrato{display:flex;justify-content:center}
+@media(max-width:760px){
+  .humiat-buyer-grid{grid-template-columns:1fr 1fr}.humiat-buyer-grid label:last-child{grid-column:1/-1}
+  .humiat-buy-summary{grid-template-columns:auto 1fr}.humiat-free-balance{grid-column:1/-1;text-align:left;display:flex;align-items:center;justify-content:space-between;min-width:0}
+}
+@media(max-width:520px){
+  .humiat-section-title{flex-direction:column}.humiat-buyer-grid{grid-template-columns:1fr}.humiat-buyer-grid label:last-child{grid-column:auto}
+  .humiat-packages{grid-template-columns:1fr 1fr;gap:12px}.humiat-package-card{min-height:205px;padding:20px 12px 12px}.humiat-package-qty strong{font-size:1.7rem}.humiat-package-price{font-size:1.08rem}.humiat-package-button{font-size:13px}
+}
+@media(max-width:380px){.humiat-packages{grid-template-columns:1fr}}

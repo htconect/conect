@@ -4,7 +4,7 @@
   <div>
     <a href="/painel" class="humiat-back">← Voltar</a>
     <h1>Comprar Humiats</h1>
-    <p>Escolha um pacote. O pagamento é feito pela InfinitePay da HUMIAT e os créditos entram automaticamente após a confirmação.</p>
+    <p>Escolha o pacote e pague com segurança pela InfinitePay da HUMIAT.</p>
   </div>
   <div class="humiat-page-balance"><small>Saldo comprado</small><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
 </section>
@@ -12,39 +12,63 @@
 {% if compra_ok %}
 <div class="humiat-success"><b>Compra confirmada.</b> Seu saldo de Humiats já foi atualizado.</div>
 {% endif %}
+{% if erro_contato %}
+<div class="alerta erro humiat-contact-error">{{ erro_contato }}</div>
+{% endif %}
 
 <section class="humiat-buy-summary">
   <div class="humiat-buy-icon">H</div>
-  <div>
+  <div class="humiat-buy-summary-copy">
     <h2>Créditos Humiat</h2>
-    <p>Você ainda possui <b>{{ gratis_restantes }} Humiats grátis</b> neste mês. Cada contrato aceito utiliza <b>1 Humiat</b>. Os Humiats comprados não expiram.</p>
+    <p>Cada contrato aceito utiliza <b>1 Humiat</b>. Os créditos comprados <b>não expiram</b>.</p>
   </div>
+  <div class="humiat-free-balance"><small>Grátis neste mês</small><strong>{{ gratis_restantes }} H</strong></div>
 </section>
 
-<section class="humiat-packages" aria-label="Pacotes de Humiats">
-  {% for pacote in pacotes %}
-  <article class="humiat-package-card {% if pacote.destaque %}destaque{% endif %}">
-    {% if pacote.destaque == 'mais_escolhido' %}<span class="humiat-package-badge">Mais escolhido</span>{% endif %}
-    {% if pacote.destaque == 'melhor_valor' %}<span class="humiat-package-badge">Melhor valor</span>{% endif %}
-    <div class="humiat-package-qty"><strong>{{ pacote.quantidade }}</strong><span>Humiats</span></div>
-    <div class="humiat-package-price">R$ {{ pacote.valor|moeda_br }}</div>
-    <small>R$ {{ pacote.valor_unitario|moeda_br }} por Humiat</small>
-    <form method="post" action="/painel/humiats/comprar">
-      <input type="hidden" name="quantidade" value="{{ pacote.quantidade }}">
-      <button type="submit" class="humiat-package-button">Comprar {{ pacote.quantidade }} H</button>
-    </form>
-  </article>
-  {% endfor %}
-</section>
+<form method="post" action="/painel/humiats/comprar" class="humiat-checkout-form">
+  <section class="humiat-buyer-card">
+    <div class="humiat-section-title">
+      <div>
+        <h2>Dados do comprador</h2>
+        <p>Estes dados irão preenchidos para a InfinitePay, como já acontece nos pagamentos de contratos.</p>
+      </div>
+      <span class="humiat-secure-pill">Checkout InfinitePay</span>
+    </div>
+    <div class="humiat-buyer-grid">
+      <label>Nome
+        <input type="text" name="comprador_nome" autocomplete="name" value="{{ comprador.nome or '' }}" required>
+      </label>
+      <label>WhatsApp
+        <input type="tel" name="comprador_telefone" inputmode="tel" autocomplete="tel" placeholder="(21) 99999-9999" value="{{ comprador.telefone or '' }}" required>
+      </label>
+      <label>E-mail
+        <input type="email" name="comprador_email" autocomplete="email" placeholder="voce@empresa.com.br" value="{{ comprador.email or '' }}" required>
+      </label>
+    </div>
+    <small class="humiat-buyer-help">O Conect salva estes dados no seu perfil para que as próximas compras já abram preenchidas.</small>
+  </section>
+
+  <section class="humiat-packages" aria-label="Pacotes de Humiats">
+    {% for pacote in pacotes %}
+    <article class="humiat-package-card {% if pacote.destaque %}destaque{% endif %}">
+      {% if pacote.destaque == 'mais_escolhido' %}<span class="humiat-package-badge">Mais escolhido</span>{% endif %}
+      {% if pacote.destaque == 'melhor_valor' %}<span class="humiat-package-badge">Melhor valor</span>{% endif %}
+      <div class="humiat-package-qty"><strong>{{ pacote.quantidade }}</strong><span>Humiats</span></div>
+      <div class="humiat-package-price">R$ {{ pacote.valor|moeda_br }}</div>
+      <small>R$ {{ pacote.valor_unitario|moeda_br }} por Humiat</small>
+      <button type="submit" name="quantidade" value="{{ pacote.quantidade }}" class="botao largura-total humiat-package-button">Comprar {{ pacote.quantidade }} H</button>
+    </article>
+    {% endfor %}
+  </section>
+</form>
 
 <section class="humiat-infinitepay-note">
   <b>Pagamento seguro pela InfinitePay</b>
-  <span>A cobrança será identificada na InfinitePay com o nome da empresa <strong>{{ empresa.nome }}</strong> e a quantidade de Humiats comprada.</span>
-  <span>Depois de pagar, toque em <strong>Continuar</strong> na InfinitePay para voltar ao Conect e visualizar a confirmação. O webhook também libera os créditos automaticamente quando o pagamento é confirmado.</span>
+  <span>Na cobrança aparecerá <strong>{{ empresa.nome }}</strong> e a quantidade de Humiats comprada. Os créditos são liberados automaticamente pelo webhook após a confirmação.</span>
 </section>
 
 <div class="humiat-buy-actions">
-  <a href="/painel/humiats/extrato" class="humiat-btn-statement humiat-buy-extrato">Ver meu extrato</a>
+  <a href="/painel/humiats/extrato" class="botao secundario largura-total humiat-buy-extrato">Ver meu extrato</a>
 </div>
 
 {% if compras %}

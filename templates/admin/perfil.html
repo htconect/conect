@@ -20,6 +20,10 @@
   <input type="tel" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ perfil_telefone or '' }}">
   <p class="texto-discreto">Usado no seu link pessoal de pré-contrato para o cliente retornar a negociação diretamente para você.</p>
 
+  <label>Meu e-mail</label>
+  <input type="email" name="email" autocomplete="email" placeholder="voce@empresa.com.br" value="{{ perfil_email or '' }}">
+  <p class="texto-discreto">Também é usado para pré-preencher suas compras de Humiats na InfinitePay.</p>
+
   <label>Empresa</label>
   <input type="text" value="{{ empresa.nome }}" disabled>
 
