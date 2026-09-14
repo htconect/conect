@@ -145,7 +145,7 @@
             {% endif %}
 
             <div class="linha">
-                <div><label>Equipe</label><select name="equipe_id" required><option value="">Selecione</option>{% for e in equipes %}<option value="{{ e.id }}" {% if a.equipe_id == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></div>
+                <div><label>Equipe</label><select name="equipe_id" data-required-functional="1" data-required-message="Selecione a equipe para continuar."><option value="">Selecione</option>{% for e in equipes %}<option value="{{ e.id }}" {% if a.equipe_id == e.id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></div>
                 <div>
                     <label>{{ 'Data da busca' if tipo == 'retirada' else 'Data da entrega' }}</label>
                     <input type="date" name="data_operacao" value="{{ data_entrega }}" {% if retirada_obrigatoria %}readonly disabled{% endif %}>

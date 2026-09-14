@@ -131,6 +131,278 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
 </style>
 
 
+<style id="validacao-global-estilos">
+  .campo-validacao-invalido{
+    border-color:#dc2626 !important;
+    background:#fff7f7 !important;
+    box-shadow:0 0 0 3px rgba(220,38,38,.10) !important;
+    outline:none !important;
+  }
+  .mensagem-validacao-campo{
+    display:block;
+    margin:5px 2px 0;
+    color:#b91c1c;
+    font-size:12px;
+    font-weight:800;
+    line-height:1.25;
+  }
+  .aviso-validacao-global{
+    position:fixed;
+    z-index:99999;
+    left:50%;
+    top:76px;
+    transform:translateX(-50%);
+    width:min(92vw,520px);
+    box-sizing:border-box;
+    padding:11px 14px;
+    border:1px solid #fecaca;
+    border-radius:12px;
+    background:#fff1f2;
+    color:#991b1b;
+    box-shadow:0 12px 28px rgba(15,23,42,.16);
+    font-size:13px;
+    font-weight:850;
+    text-align:center;
+  }
+  @media(max-width:520px){
+    .aviso-validacao-global{top:66px;width:calc(100vw - 24px)}
+  }
+</style>
+
+<script id="validacao-global-formularios">
+(function(){
+  const CLASSE_ERRO = 'campo-validacao-invalido';
+  const CLASSE_MSG = 'mensagem-validacao-campo';
+
+  function nomesDeclarados(valor){
+    return (valor || '').split(',').map(v => v.trim()).filter(Boolean);
+  }
+
+  function rotuloCampo(form, campo){
+    let label = null;
+    if(campo.id){
+      try { label = form.querySelector(`label[for="${CSS.escape(campo.id)}"]`); } catch (_) {}
+    }
+    if(!label) label = campo.closest('label');
+    if(!label){
+      const anterior = campo.previousElementSibling;
+      if(anterior && anterior.tagName === 'LABEL') label = anterior;
+    }
+    if(!label){
+      const pai = campo.closest('div, td, section');
+      if(pai) label = pai.querySelector('label');
+    }
+    const texto = (campo.dataset.fieldLabel || (label ? label.textContent : '') || campo.name || 'campo')
+      .replace(/\s*\*\s*$/, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return texto || 'campo';
+  }
+
+  function valorVazio(form, campo){
+    const tipo = (campo.type || '').toLowerCase();
+    if(tipo === 'checkbox') return !campo.checked;
+    if(tipo === 'radio'){
+      if(!campo.name) return !campo.checked;
+      return !Array.from(form.elements).some(el => el.name === campo.name && el.type === 'radio' && el.checked);
+    }
+    return String(campo.value ?? '').trim() === '';
+  }
+
+  function mensagemObrigatorio(form, campo){
+    if(campo.dataset.requiredMessage) return campo.dataset.requiredMessage;
+    const rotulo = rotuloCampo(form, campo);
+    const tag = campo.tagName.toLowerCase();
+    const tipo = (campo.type || '').toLowerCase();
+    if(tag === 'select' || tipo === 'radio' || tipo === 'checkbox') return `Selecione ${rotulo.toLowerCase()} para continuar.`;
+    return `Informe ${rotulo.toLowerCase()} para continuar.`;
+  }
+
+  function mensagemInvalido(form, campo){
+    if(campo.dataset.invalidMessage) return campo.dataset.invalidMessage;
+    const rotulo = rotuloCampo(form, campo);
+    const v = campo.validity;
+    if(v && v.typeMismatch && (campo.type || '').toLowerCase() === 'email') return 'Informe um e-mail válido.';
+    if(v && v.patternMismatch) return `Verifique ${rotulo.toLowerCase()}.`;
+    if(v && v.tooShort) return `${rotulo} está incompleto.`;
+    if(v && v.tooLong) return `${rotulo} ultrapassou o tamanho permitido.`;
+    if(v && v.rangeUnderflow) return `${rotulo} está abaixo do valor permitido.`;
+    if(v && v.rangeOverflow) return `${rotulo} está acima do valor permitido.`;
+    return `Verifique ${rotulo.toLowerCase()} para continuar.`;
+  }
+
+  function removerErro(campo){
+    if(!campo) return;
+    campo.classList.remove(CLASSE_ERRO);
+    campo.removeAttribute('aria-invalid');
+    const idMsg = campo.dataset.validationMessageId;
+    if(idMsg){
+      const msg = document.getElementById(idMsg);
+      if(msg) msg.remove();
+      delete campo.dataset.validationMessageId;
+    } else {
+      const proximo = campo.nextElementSibling;
+      if(proximo && proximo.classList.contains(CLASSE_MSG)) proximo.remove();
+    }
+  }
+
+  function marcarErro(campo, mensagem){
+    removerErro(campo);
+    campo.classList.add(CLASSE_ERRO);
+    campo.setAttribute('aria-invalid', 'true');
+    const msg = document.createElement('small');
+    const id = `validacao-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+    msg.id = id;
+    msg.className = CLASSE_MSG;
+    msg.textContent = mensagem;
+    campo.dataset.validationMessageId = id;
+    const labelEnvolvente = campo.closest('label');
+    if(labelEnvolvente && labelEnvolvente.contains(campo)) labelEnvolvente.insertAdjacentElement('afterend', msg);
+    else campo.insertAdjacentElement('afterend', msg);
+  }
+
+  function abrirContainers(campo){
+    let atual = campo.parentElement;
+    while(atual){
+      if(atual.tagName === 'DETAILS') atual.open = true;
+      atual = atual.parentElement;
+    }
+  }
+
+  let timerAviso = null;
+  function mostrarAviso(mensagem){
+    let aviso = document.getElementById('aviso-validacao-global');
+    if(!aviso){
+      aviso = document.createElement('div');
+      aviso.id = 'aviso-validacao-global';
+      aviso.className = 'aviso-validacao-global';
+      aviso.setAttribute('role','alert');
+      document.body.appendChild(aviso);
+    }
+    aviso.textContent = mensagem;
+    aviso.hidden = false;
+    clearTimeout(timerAviso);
+    timerAviso = setTimeout(() => { aviso.hidden = true; }, 4200);
+  }
+
+  function camposParaValidar(form, submitter){
+    const obrigatoriosPorFuncao = new Set([
+      ...nomesDeclarados(form.dataset.requiredFields),
+      ...nomesDeclarados(submitter && submitter.dataset ? submitter.dataset.requiredFields : '')
+    ]);
+    const lista = [];
+    Array.from(form.elements || []).forEach(campo => {
+      if(!campo || !campo.tagName || campo.disabled) return;
+      const tag = campo.tagName.toLowerCase();
+      if(!['input','select','textarea'].includes(tag)) return;
+      const tipo = (campo.type || '').toLowerCase();
+      if(['hidden','submit','button','reset','image'].includes(tipo)) return;
+      const funcional = campo.dataset.requiredFunctional === '1' || (campo.name && obrigatoriosPorFuncao.has(campo.name));
+      const validarNativo = campo.willValidate && ((campo.required || String(campo.value || '').trim() !== '') || funcional);
+      if(funcional || validarNativo) lista.push({campo, funcional});
+    });
+    return lista;
+  }
+
+  function validarFormulario(form, submitter){
+    if(!form || form.dataset.skipGlobalValidation === '1') return true;
+    if(submitter && submitter.formNoValidate) return true;
+
+    Array.from(form.querySelectorAll('.' + CLASSE_ERRO)).forEach(removerErro);
+    let primeiroErro = null;
+    let primeiraMensagem = '';
+    const radiosProcessados = new Set();
+
+    camposParaValidar(form, submitter).forEach(item => {
+      const campo = item.campo;
+      const tipo = (campo.type || '').toLowerCase();
+      if(tipo === 'radio' && campo.name){
+        if(radiosProcessados.has(campo.name)) return;
+        radiosProcessados.add(campo.name);
+      }
+
+      const obrigatorio = campo.required || item.funcional;
+      let mensagem = '';
+      if(obrigatorio && valorVazio(form, campo)){
+        mensagem = mensagemObrigatorio(form, campo);
+      } else if(campo.willValidate && !campo.checkValidity()){
+        mensagem = mensagemInvalido(form, campo);
+      }
+
+      if(mensagem){
+        marcarErro(campo, mensagem);
+        if(!primeiroErro){
+          primeiroErro = campo;
+          primeiraMensagem = mensagem;
+        }
+      }
+    });
+
+    if(!primeiroErro) return true;
+    abrirContainers(primeiroErro);
+    mostrarAviso(primeiraMensagem || 'Revise o campo destacado para continuar.');
+    if(window.fecharCarregando) window.fecharCarregando();
+    setTimeout(() => {
+      try { primeiroErro.scrollIntoView({behavior:'smooth', block:'center'}); } catch (_) {}
+      try { primeiroErro.focus({preventScroll:true}); } catch (_) { try { primeiroErro.focus(); } catch(__){} }
+    }, 60);
+    return false;
+  }
+
+  window.validarFormularioGlobal = validarFormulario;
+
+  // Desativa a bolha nativa do navegador para usar uma mensagem visual única no sistema.
+  function prepararFormulario(form){
+    if(form && form.dataset.nativeValidation !== '1') form.noValidate = true;
+  }
+  document.querySelectorAll('form').forEach(prepararFormulario);
+
+  // Mantém a validação global também em formulários inseridos dinamicamente.
+  const observadorFormularios = new MutationObserver(function(mudancas){
+    mudancas.forEach(function(mudanca){
+      mudanca.addedNodes.forEach(function(no){
+        if(!(no instanceof Element)) return;
+        if(no.matches && no.matches('form')) prepararFormulario(no);
+        if(no.querySelectorAll) no.querySelectorAll('form').forEach(prepararFormulario);
+      });
+    });
+  });
+  observadorFormularios.observe(document.documentElement, {childList:true, subtree:true});
+
+  document.addEventListener('submit', function(e){
+    const form = e.target;
+    if(!(form instanceof HTMLFormElement)) return;
+    if(!validarFormulario(form, e.submitter || null)){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  // Também pode ser usado por links/botões que executam uma função sem submeter o formulário:
+  // data-validate-form="id-do-form" data-required-fields="campo1,campo2".
+  document.addEventListener('click', function(e){
+    const acao = e.target.closest('[data-validate-form]');
+    if(!acao) return;
+    const idForm = acao.dataset.validateForm;
+    const form = idForm ? document.getElementById(idForm) : acao.closest('form');
+    if(form && !validarFormulario(form, acao)){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }, true);
+
+  document.addEventListener('input', function(e){
+    const campo = e.target;
+    if(campo && campo.classList && campo.classList.contains(CLASSE_ERRO)) removerErro(campo);
+  }, true);
+  document.addEventListener('change', function(e){
+    const campo = e.target;
+    if(campo && campo.classList && campo.classList.contains(CLASSE_ERRO)) removerErro(campo);
+  }, true);
+})();
+</script>
+
+
 <div id="app-loading" class="app-loading" aria-live="polite" aria-hidden="true">
   <div class="app-loading-card">
     <div class="app-loading-spinner"></div>
