@@ -9312,7 +9312,7 @@ def cancelar_contrato(slug: str, solicitacao_id: int, db: Session = Depends(get_
 
 
 @app.post("/e/{slug}/aceitar/{solicitacao_id}")
-def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = Form(None), db: Session = Depends(get_db)):
+def aceitar_contrato(slug: str, solicitacao_id: int, request: Request, aceite: Optional[str] = Form(None), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = db.get(Solicitacao, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
@@ -9324,15 +9324,23 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
     if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):
-            # Congela no contrato o sinal parametrizado da empresa no momento do aceite.
+            # O aceite confirma a reserva independentemente do pagamento.
+            # A InfinitePay é a cobrança automática logo em seguida; se o checkout
+            # falhar ou o cliente não concluir, a reserva continua confirmada para
+            # permitir cobrança posterior pelo responsável.
             sinal_configurado = _sinal_infinitepay_contrato(empresa, item)
             if sinal_configurado > 0.009:
                 item.sinal = sinal_configurado
-            item.status = "aceite_pagamento_pendente"
-            item.aprovado_em = None
+            item.status = "reserva_confirmada"
+            item.aprovado_em = item.aceite_em
+            fim_obj = item.hora_fim or (
+                somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
+                if item.produto and item.produto.duracao_minutos else None
+            )
+            item.hora_fim = fim_obj
+            criar_eventos_operacionais(db, item)
+            _processar_humiat_aceite(db, empresa, item)
             recalcular_pagamento_solicitacao(db, item)
-            if _pagamento_suficiente_para_confirmar(item, empresa):
-                _aprovar_contrato_apos_pagamento(db, empresa, item)
         else:
             # Preserva a regra operacional existente das empresas sem InfinitePay.
             # A interface passa a oferecer o PIX no mesmo link, sem abrir WhatsApp.
@@ -9346,8 +9354,28 @@ def aceitar_contrato(slug: str, solicitacao_id: int, aceite: Optional[str] = For
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)
         db.commit()
-        # Depois do aceite, o cliente escolhe explicitamente se avisa o responsável
-        # pelo WhatsApp ou se deixa essa comunicação para o atendente.
+
+        # Após o aceite, empresas com InfinitePay seguem AUTOMATICAMENTE para
+        # o checkout do SINAL. A reserva já está confirmada neste ponto; portanto,
+        # se a InfinitePay falhar ou o cliente abandonar o checkout, o contrato
+        # continua reservado e pode ser cobrado posteriormente pelo responsável.
+        # A confirmação de aceite por WhatsApp não participa deste caminho.
+        if _infinitepay_habilitada(empresa):
+            sinal_checkout = min(_sinal_infinitepay_contrato(empresa, item), _saldo_contrato(item))
+            if sinal_checkout > 0.009:
+                return infinitepay_criar_checkout(
+                    slug=slug,
+                    solicitacao_id=solicitacao_id,
+                    request=request,
+                    tipo_pagamento="sinal",
+                    db=db,
+                )
+            return RedirectResponse(
+                f"/e/{slug}/contrato/{solicitacao_id}#etapa-pagamento",
+                status_code=303,
+            )
+
+        # Mantém o comportamento anterior das empresas sem InfinitePay.
         return RedirectResponse(
             f"/e/{slug}/confirmar-whatsapp/{solicitacao_id}?tipo=aceite",
             status_code=303,

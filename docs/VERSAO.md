@@ -1,12 +1,12 @@
-# HUMIAT Conect — Versão 1.0.28
+# HUMIAT Conect — Versão 1.0.30
 
-## Alterações
+## Correção — aceite e pagamento automático do sinal InfinitePay
 
-- Compra de Humiats agora envia `customer` para a InfinitePay com nome, e-mail e WhatsApp do comprador.
-- Dados do comprador ficam salvos no perfil para os próximos checkouts.
-- Checkouts antigos sem dados do comprador não são reutilizados.
-- Página Comprar Humiats refeita com grade responsiva, preços sem quebra e botões no padrão Conect.
-- Meu perfil passa a permitir cadastrar e-mail.
-- Compra de Humiats continua usando a conexão InfinitePay da HUMIAT, independente da configuração da empresa.
+- O aceite do cliente confirma a reserva imediatamente, sem depender do pagamento.
+- Empresas com InfinitePay habilitada não desviam mais o cliente para a confirmação de aceite por WhatsApp.
+- Após o aceite, o Conect cria automaticamente a cobrança do **Sinal** e redireciona para o checkout InfinitePay.
+- Se já existir uma cobrança pendente válida, o sistema reaproveita o mesmo checkout para evitar duplicidade.
+- Se a InfinitePay falhar ou o cliente não concluir o pagamento, a reserva permanece confirmada para cobrança posterior.
+- Empresas sem InfinitePay mantêm o fluxo existente.
 
-`v1.0.28 - simplifica pós-pagamento e restaura pendência de envio do contrato`
+`v1.0.30 - restaura pagamento automatico do sinal InfinitePay apos aceite`
