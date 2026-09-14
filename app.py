@@ -2980,33 +2980,21 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
                 .all()
             )
 
-        # Acompanhamento novo somente no fluxo InfinitePay. Sem InfinitePay, a
-        # pendência antiga permanece exatamente como era.
-        pendencias_confirmar_recebimento = []
+        # Após pagamento InfinitePay, o envio do contrato volta a ser uma ação
+        # interna do atendente em Pendências. O cliente não precisa retornar do
+        # checkout, abrir WhatsApp ou confirmar recebimento para concluir a reserva.
+        pendencias_confirmar_recebimento = []  # legado; mantido no contexto por compatibilidade
         if _infinitepay_habilitada(empresa):
-            base_contrato_ip = (
-                Solicitacao.empresa_id == empresa.id,
-                Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
-                Solicitacao.contrato_id.isnot(None),
-                Solicitacao.cancelado_em.is_(None),
-                Solicitacao.valor_pago > 0.009,
-                Solicitacao.contrato_recebido_em.is_(None),
-            )
             pendencias_envio_contrato = (
                 db.query(Solicitacao)
                 .options(joinedload(Solicitacao.cliente))
-                .filter(*base_contrato_ip, Solicitacao.whatsapp_contrato_acionado_em.is_(None))
-                .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
-                .limit(12)
-                .all()
-            )
-            pendencias_confirmar_recebimento = (
-                db.query(Solicitacao)
-                .options(joinedload(Solicitacao.cliente))
                 .filter(
-                    *base_contrato_ip,
-                    Solicitacao.whatsapp_contrato_confirmacao_pendente.is_(True),
-                    Solicitacao.whatsapp_contrato_acionado_em.isnot(None),
+                    Solicitacao.empresa_id == empresa.id,
+                    Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
+                    Solicitacao.contrato_id.isnot(None),
+                    Solicitacao.cancelado_em.is_(None),
+                    Solicitacao.valor_pago > 0.009,
+                    Solicitacao.contrato_enviado_em.is_(None),
                 )
                 .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
                 .limit(12)
@@ -4409,9 +4397,9 @@ def compartilhar_contrato_whatsapp(
 
     texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
 
-    # Sem InfinitePay, preserva o comportamento antigo. Com InfinitePay, abrir
-    # o WhatsApp passa a significar apenas "WhatsApp acionado"; o recebimento é
-    # confirmado separadamente pelo atendente.
+    # O botão "Enviar contrato" volta a seguir a rotina antiga: ao acionar o
+    # WhatsApp, registramos o contrato como enviado e encerramos esta pendência.
+    # Não existe mais uma etapa operacional de "confirmar recebimento".
     agora = agora_utc()
     alterou = False
     if not item.contrato_enviado_em:
@@ -4420,14 +4408,8 @@ def compartilhar_contrato_whatsapp(
     if _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
         item.whatsapp_contrato_acionado_em = agora
         alterou = True
-    # A nova fila "Confirmar recebimento" começa na v1.0.24. Só marcamos a
-    # pendência quando ESTE fluxo efetivamente aciona o WhatsApp após pagamento.
-    # Assim, contratos antigos não são inferidos pelo histórico anterior.
-    if (_infinitepay_habilitada(empresa)
-            and float(item.valor_pago or 0) > 0.009
-            and not item.contrato_recebido_em
-            and not item.whatsapp_contrato_confirmacao_pendente):
-        item.whatsapp_contrato_confirmacao_pendente = True
+    if item.whatsapp_contrato_confirmacao_pendente:
+        item.whatsapp_contrato_confirmacao_pendente = False
         alterou = True
     if alterou:
         db.commit()
@@ -9523,25 +9505,9 @@ def _processar_retorno_infinitepay(
         valor_antes_desta_cobranca = max(valor_pago_total - valor_pago_agora, 0.0)
         primeiro_pagamento = valor_antes_desta_cobranca <= 0.009
 
-        # Exclusivo do InfinitePay: no primeiro pagamento, se o cliente voltou do
-        # checkout, encaminha direto ao WhatsApp do responsável. Não existe botão
-        # intermediário. O timestamp registra somente o acionamento do WhatsApp.
-        if (primeiro_pagamento and _infinitepay_habilitada(empresa)
-                and not item.contrato_recebido_em
-                and not item.whatsapp_contrato_acionado_em):
-            url_whatsapp = _url_whatsapp_registro_contrato(request, db, empresa, item)
-            if url_whatsapp:
-                item.whatsapp_contrato_acionado_em = agora_utc()
-                # Marco explícito do NOVO fluxo. Contratos anteriores à v1.0.24
-                # não recebem este sinalizador e, portanto, não entram na fila.
-                item.whatsapp_contrato_confirmacao_pendente = True
-                db.commit()
-                return RedirectResponse(
-                    url_whatsapp,
-                    status_code=303,
-                    headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
-                )
-
+        # O retorno da InfinitePay é apenas confirmação para o cliente. O envio
+        # do contrato não depende mais de nenhuma ação do navegador/cliente: após
+        # o pagamento, o contrato aparece em Pendências > Aguardando envio.
         db.commit()
         return templates.TemplateResponse("publico/pagamento_confirmado.html", {
             "request": request, "empresa": empresa, "item": item,

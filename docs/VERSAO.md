@@ -1,4 +1,4 @@
-# HUMIAT Conect — Versão 1.0.27
+# HUMIAT Conect — Versão 1.0.28
 
 ## Alterações
 
@@ -9,4 +9,4 @@
 - Meu perfil passa a permitir cadastrar e-mail.
 - Compra de Humiats continua usando a conexão InfinitePay da HUMIAT, independente da configuração da empresa.
 
-`v1.0.27 - preenche checkout InfinitePay e melhora tela de compra de Humiats`
+`v1.0.28 - simplifica pós-pagamento e restaura pendência de envio do contrato`

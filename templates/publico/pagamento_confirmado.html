@@ -8,93 +8,55 @@
 .confirmacao-card{padding:24px;text-align:center}
 .confirmacao-status{display:inline-flex;padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#166534;font-weight:900;font-size:.82rem}
 .confirmacao-card h1{font-size:clamp(1.8rem,7vw,2.55rem);line-height:1.08;margin:16px 0 10px;overflow-wrap:anywhere}
-.confirmacao-card h2{margin:8px 0 6px}
 .confirmacao-valores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0 0;text-align:left}
 .confirmacao-valores>div{border:1px solid #dbe3ee;border-radius:14px;padding:12px;background:#f8fafc;min-width:0}
 .confirmacao-valores small{display:block;color:#64748b;margin-bottom:4px}
 .confirmacao-valores b{display:block;font-size:1.08rem;overflow-wrap:anywhere}
 .confirmacao-valores.um>div{grid-column:1/-1;text-align:center}
-.entrega-contrato-card{padding:22px}
-.entrega-contrato-card h2{font-size:1.35rem;line-height:1.2;margin-top:0}
-.entrega-contrato-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
-.confirmacao-fechar{margin-top:18px}
+.confirmacao-fechar{margin-top:20px}
 .confirmacao-fechar .largura-total{width:100%}
 #avisoFecharPagamento{text-align:center;margin:9px 0 0}
 @media(max-width:560px){
   .pagamento-confirmado-pagina{margin-bottom:20px}
-  .confirmacao-card,.entrega-contrato-card{padding:18px}
+  .confirmacao-card{padding:18px}
   .confirmacao-card h1{font-size:1.9rem}
   .confirmacao-valores{grid-template-columns:1fr}
   .confirmacao-valores>div{grid-column:auto!important;text-align:left!important}
-  .entrega-contrato-grid{grid-template-columns:1fr}
 }
 </style>
 
 <div class="pagamento-confirmado-pagina">
-  {% if primeiro_pagamento %}
-    <div class="box confirmacao-card">
-      <span class="confirmacao-status">Pagamento confirmado</span>
-      <h1>Sua reserva foi efetuada com sucesso.</h1>
-      <div class="confirmacao-valores {% if pagamento_quitado %}um{% endif %}">
-        <div>
-          <small>{% if cobranca and cobranca.tipo_pagamento == 'sinal' %}Sinal pago{% else %}Valor pago{% endif %}</small>
-          <b>R$ {{ valor_pago_agora|moeda_br }}</b>
-        </div>
-        {% if not pagamento_quitado %}
-        <div>
-          <small>Saldo restante</small>
-          <b>R$ {{ saldo_restante|moeda_br }}</b>
-        </div>
-        {% endif %}
-      </div>
-      {% if pagamento_quitado %}<p style="margin:16px 0 0"><b>Pagamento do contrato concluído.</b></p>{% endif %}
-    </div>
+  <div class="box confirmacao-card">
+    <span class="confirmacao-status">{% if pagamento_quitado %}Pagamento concluído{% else %}Pagamento confirmado{% endif %}</span>
 
-    <div class="box aviso entrega-contrato-card">
-      {% if whatsapp_acionado %}
-        <h2>WhatsApp acionado.</h2>
-        <p>O Conect já encaminhou esta etapa para o WhatsApp do responsável.</p>
-      {% else %}
-        <h2>Seu pagamento foi confirmado.</h2>
-        <p>Não foi possível encaminhar o WhatsApp automaticamente. O responsável ficará com a pendência de enviar seu contrato.</p>
+    {% if primeiro_pagamento %}
+      <h1>Muito obrigado! Sua reserva está confirmada.</h1>
+      <p>Seu pagamento foi registrado com sucesso. O responsável enviará o contrato pelo WhatsApp.</p>
+    {% elif pagamento_quitado %}
+      <h1>Muito obrigado pelo pagamento!</h1>
+      <p>Seu contrato está quitado e o pagamento final foi registrado com sucesso.</p>
+    {% else %}
+      <h1>Pagamento registrado com sucesso.</h1>
+      <p>O valor recebido já foi atualizado no contrato.</p>
+    {% endif %}
+
+    <div class="confirmacao-valores {% if pagamento_quitado %}um{% endif %}">
+      <div>
+        <small>{% if primeiro_pagamento and cobranca and cobranca.tipo_pagamento == 'sinal' %}Sinal pago{% else %}Valor pago agora{% endif %}</small>
+        <b>R$ {{ valor_pago_agora|moeda_br }}</b>
+      </div>
+      {% if not pagamento_quitado %}
+      <div>
+        <small>Saldo restante</small>
+        <b>R$ {{ saldo_restante|moeda_br }}</b>
+      </div>
       {% endif %}
-      <div class="confirmacao-fechar">
-        <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
-        <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
-      </div>
     </div>
-  {% else %}
-    <div class="box confirmacao-card">
-      <span class="confirmacao-status">{% if pagamento_quitado %}Pagamento concluído{% else %}Pagamento confirmado{% endif %}</span>
-      {% if pagamento_quitado %}
-        <h1>Seu contrato está quitado.</h1>
-        <p>O pagamento final foi registrado com sucesso.</p>
-      {% else %}
-        <h1>Pagamento registrado com sucesso.</h1>
-        <p>O valor recebido já foi atualizado no contrato.</p>
-      {% endif %}
 
-      <div class="confirmacao-valores {% if pagamento_quitado %}um{% endif %}">
-        <div>
-          <small>Valor pago agora</small>
-          <b>R$ {{ valor_pago_agora|moeda_br }}</b>
-        </div>
-        {% if not pagamento_quitado %}
-        <div>
-          <small>Saldo restante</small>
-          <b>R$ {{ saldo_restante|moeda_br }}</b>
-        </div>
-        {% endif %}
-      </div>
-
-      {% if pagamento_quitado %}<p style="margin:16px 0 0"><b>Obrigado pelo pagamento!</b></p>{% endif %}
-      <div class="confirmacao-fechar">
-        <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
-        <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
-      </div>
+    <div class="confirmacao-fechar">
+      <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
+      <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>
     </div>
-  {% endif %}
+  </div>
 </div>
-
-
 {% endblock %}

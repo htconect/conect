@@ -181,11 +181,6 @@
           </div>
           <div class="aviso-pagamento-iniciado"><b>Pagamento em andamento</b><p class="texto-discreto">Continuaremos na mesma cobrança para evitar duplicidade.</p></div>
           {% if (item.valor_pago or 0) <= 0.009 %}
-          <div class="aviso-retorno-infinitepay" role="note" aria-label="Instrução importante após o pagamento">
-            <strong>⚠️ IMPORTANTE: após concluir o pagamento, toque em <span class="destaque-continuar">CONTINUAR</span> na tela da InfinitePay.</strong>
-            <p>Esse passo é necessário para iniciar automaticamente o envio do contrato pelo WhatsApp.</p>
-            <p class="linha-final">Não feche a InfinitePay antes disso. Quando o WhatsApp abrir, toque em <b>Enviar</b>.</p>
-          </div>
           {% endif %}
           <a class="botao largura-total" href="{{ cobranca_pendente.checkout_url }}">Ir para pagamento</a>
         {% else %}
@@ -214,11 +209,6 @@
             {% endfor %}
             {% if opcoes_pagamento %}
               {% if (item.valor_pago or 0) <= 0.009 %}
-              <div class="aviso-retorno-infinitepay" role="note" aria-label="Instrução importante após o pagamento">
-                <strong>⚠️ IMPORTANTE: após concluir o pagamento, toque em <span class="destaque-continuar">CONTINUAR</span> na tela da InfinitePay.</strong>
-                <p>Esse passo é necessário para iniciar automaticamente o envio do contrato pelo WhatsApp.</p>
-                <p class="linha-final">Não feche a InfinitePay antes disso. Quando o WhatsApp abrir, toque em <b>Enviar</b>.</p>
-              </div>
               {% endif %}
               <button class="largura-total" type="submit">Ir para pagamento</button>
             {% endif %}
