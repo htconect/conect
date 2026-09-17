@@ -1,7 +1,7 @@
 import os
 
 APP_NOME = "HUMIAT Conect"
-APP_VERSION = "1.0.30"
+APP_VERSION = "1.0.31"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conect.db")
 
@@ -17,3 +17,6 @@ ADMIN_SENHA = os.getenv("CONECT_ADMIN_SENHA", "humiat123")
 # Diagnóstico temporário de performance. Desative no Render após a otimização.
 PERFORMANCE_MONITORING = os.getenv("PERFORMANCE_MONITORING", "true")
 PERFORMANCE_DETAIL = os.getenv("PERFORMANCE_DETAIL", "slow")
+
+# Integração NFS-e: o Conect apenas entrega os dados operacionais ao Organiza.
+ORGANIZA_NFSE_URL = os.getenv("ORGANIZA_NFSE_URL", "https://humiat.com.br/organiza/nfse/importar-connect")

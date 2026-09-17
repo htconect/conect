@@ -32,7 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
 
-from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA
+from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
@@ -4063,6 +4063,88 @@ def solicitacoes(request: Request, busca: str = "", db: Session = Depends(get_db
     return templates.TemplateResponse("admin/solicitacoes.html",
                                       {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
 
+
+
+
+def _texto_nfse_equipamentos(item: Solicitacao) -> str:
+    linhas = []
+    for ri in (item.itens or []):
+        nome = (ri.nome or ri.descricao or "Equipamento").strip()
+        qtd = max(int(ri.quantidade or 1), 1)
+        texto = f"{qtd}x {nome}" if qtd > 1 else nome
+        if texto and texto not in linhas:
+            linhas.append(texto)
+    if not linhas and getattr(item, "produto", None):
+        nome = (item.produto.nome or item.produto.descricao or "Equipamento").strip()
+        if nome:
+            linhas.append(nome)
+    return "\n".join(linhas)
+
+
+def _endereco_evento_igual_cliente_nfse(item: Solicitacao) -> bool:
+    c = item.cliente
+    def norm(v):
+        return "".join(ch.lower() for ch in str(v or "").strip() if ch.isalnum())
+    pares = [
+        (item.local_cep, c.cep),
+        (item.local, c.endereco),
+        (item.local_numero, c.numero),
+        (item.local_complemento, c.complemento),
+        (item.bairro, c.bairro),
+        (item.local_cidade, c.cidade),
+        (item.local_estado, c.estado),
+    ]
+    comparados = [(norm(a), norm(b)) for a,b in pares if norm(a) or norm(b)]
+    return bool(comparados) and all(a == b for a,b in comparados)
+
+
+@app.get("/painel/solicitacao/{solicitacao_id}/nfse-organiza")
+def gerar_nfse_no_organiza(
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    cliente = item.cliente
+    if not cliente:
+        raise HTTPException(400, "Contrato sem cliente.")
+    documento = limpar_identificador(cliente.cnpj or cliente.cpf or "")
+    if len(documento) not in (11, 14):
+        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe CPF/CNPJ do cliente antes de gerar a NFS-e.", status_code=303)
+    if not item.data_evento:
+        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe a data do evento antes de gerar a NFS-e.", status_code=303)
+    params = {
+        "origem": "connect",
+        "connect_empresa_id": str(empresa.id),
+        "connect_contrato_id": str(item.id),
+        "cliente_nome": cliente.nome or "",
+        "cliente_documento": documento,
+        "cliente_email": cliente.email or "",
+        "cliente_telefone": cliente.telefone or cliente.identificador or "",
+        "cliente_cep": cliente.cep or "",
+        "cliente_logradouro": cliente.endereco or "",
+        "cliente_numero": cliente.numero or "",
+        "cliente_complemento": cliente.complemento or "",
+        "cliente_bairro": cliente.bairro or "",
+        "cliente_municipio": cliente.cidade or "",
+        "cliente_uf": cliente.estado or "",
+        "evento_data_inicio": item.data_evento.isoformat(),
+        "evento_data_fim": (item.retirada_data or item.data_evento).isoformat(),
+        "evento_descricao": _texto_nfse_equipamentos(item) or "Aluguel de Karaokê",
+        "evento_endereco_igual_cliente": "1" if _endereco_evento_igual_cliente_nfse(item) else "0",
+        "evento_cep": item.local_cep or "",
+        "evento_logradouro": item.local or "",
+        "evento_numero": item.local_numero or "",
+        "evento_complemento": item.local_complemento or "",
+        "evento_bairro": item.bairro or "",
+        "evento_municipio": item.local_cidade or "",
+        "evento_uf": item.local_estado or "",
+        "valor_total": f"{float(item.valor or 0):.2f}",
+    }
+    destino = f"{ORGANIZA_NFSE_URL}?{urlencode(params)}"
+    return RedirectResponse(destino, status_code=303)
 
 @app.get("/painel/solicitacao/{solicitacao_id}", response_class=HTMLResponse)
 def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),

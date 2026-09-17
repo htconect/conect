@@ -432,6 +432,16 @@
   <form method="post" action="/painel/solicitacao/{{ item.id }}/excluir" class="form-excluir-contrato" onsubmit="return confirm('Deseja excluir este contrato/reserva? Isso apaga reserva, itens, pagamentos não conciliados e agenda. Se houver pagamento conciliado, o sistema não vai excluir.')">
     <button class="botao-perigo largura-total" type="submit">Excluir contrato</button>
   </form>
+
+  <div class="box" style="margin-top:12px">
+    <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+      <div>
+        <b>NFS-e de serviço</b>
+        <small class="texto-discreto" style="display:block">Envia ao Organiza somente os dados do contrato necessários para preparar a NFS-e de aluguel.</small>
+      </div>
+      <a class="botao btn-krj-primary" href="/painel/solicitacao/{{ item.id }}/nfse-organiza">Gerar NFS-e no Organiza</a>
+    </div>
+  </div>
 </section>
 
 <details class="accordion">
