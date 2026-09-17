@@ -54,6 +54,12 @@
       <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Valor do contrato pelo checkout. A configuração é isolada por empresa.</p>
     </div>
 
+    <div class="box-mini" style="margin-top:14px">
+      <h3>NFS-e</h3>
+      <label class="check"><input type="checkbox" name="nfse_ativa" value="1" {% if empresa and empresa.nfse_ativa %}checked{% endif %}> Permitir gerar NFS-e no Organiza</label>
+      <p class="texto-discreto">Quando desativado, o botão de NFS-e não aparece nos contratos desta empresa. Inicialmente somente a Karaokê RJ fica habilitada.</p>
+    </div>
+
     <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
 
     <div class="linha">

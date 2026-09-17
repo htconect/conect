@@ -1,12 +1,11 @@
-# HUMIAT Conect — Versão 1.0.30
+# HUMIAT Conect — Versão 1.0.32
 
-## Correção — aceite e pagamento automático do sinal InfinitePay
+## Controle de NFS-e por empresa
 
-- O aceite do cliente confirma a reserva imediatamente, sem depender do pagamento.
-- Empresas com InfinitePay habilitada não desviam mais o cliente para a confirmação de aceite por WhatsApp.
-- Após o aceite, o Conect cria automaticamente a cobrança do **Sinal** e redireciona para o checkout InfinitePay.
-- Se já existir uma cobrança pendente válida, o sistema reaproveita o mesmo checkout para evitar duplicidade.
-- Se a InfinitePay falhar ou o cliente não concluir o pagamento, a reserva permanece confirmada para cobrança posterior.
-- Empresas sem InfinitePay mantêm o fluxo existente.
+- Adicionado o campo **Permitir gerar NFS-e no Organiza** no cadastro da empresa.
+- O botão **Gerar NFS-e no Organiza** só aparece em contratos de empresas com a opção habilitada.
+- A rota também valida a permissão no servidor, impedindo acesso direto pela URL quando a empresa não possui NFS-e.
+- Na migração inicial, somente **Karaokê RJ** fica habilitada; as demais empresas permanecem desabilitadas.
+- Novas empresas começam com NFS-e desabilitada e podem ser liberadas pelo administrador geral.
 
-`v1.0.30 - restaura pagamento automatico do sinal InfinitePay apos aceite`
+`v1.0.32 - controle de acesso NFS-e por empresa`

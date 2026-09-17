@@ -433,6 +433,7 @@
     <button class="botao-perigo largura-total" type="submit">Excluir contrato</button>
   </form>
 
+  {% if empresa.nfse_ativa %}
   <div class="box" style="margin-top:12px">
     <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap">
       <div>
@@ -442,6 +443,7 @@
       <a class="botao btn-krj-primary" href="/painel/solicitacao/{{ item.id }}/nfse-organiza">Gerar NFS-e no Organiza</a>
     </div>
   </div>
+  {% endif %}
 </section>
 
 <details class="accordion">

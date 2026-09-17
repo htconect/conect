@@ -920,6 +920,12 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_email VARCHAR(160)")
     if "infinitepay_ativa" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_ativa BOOLEAN DEFAULT false")
+    if "nfse_ativa" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN nfse_ativa BOOLEAN DEFAULT false")
+        # Libera a integração inicialmente apenas para a Karaokê RJ.
+        # Como este UPDATE só roda quando a coluna é criada, uma desativação futura
+        # feita pelo administrador não será revertida no próximo startup.
+        comandos.append("UPDATE empresas SET nfse_ativa = true WHERE lower(slug) IN ('karaokerj', 'karaoke-rj') OR lower(nome) IN ('karaokê rj', 'karaoke rj')")
     if "infinitepay_handle" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN infinitepay_handle VARCHAR(80)")
     if "infinitepay_valor_sinal" not in cols_emp:
@@ -2421,6 +2427,7 @@ def admin_criar_empresa(
         pix_banco: str = Form(""),
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
+        nfse_ativa: Optional[str] = Form(None),
         infinitepay_handle: str = Form(""),
         infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
@@ -2454,6 +2461,7 @@ def admin_criar_empresa(
         pix_banco=pix_banco.strip(),
         whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
         infinitepay_ativa=bool(infinitepay_ativa),
+        nfse_ativa=bool(nfse_ativa),
         infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
         infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
         exige_sinal=bool(exige_sinal),
@@ -2537,6 +2545,7 @@ def admin_salvar_empresa(
         pix_banco: str = Form(""),
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
+        nfse_ativa: Optional[str] = Form(None),
         infinitepay_handle: str = Form(""),
         infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
@@ -2566,6 +2575,7 @@ def admin_salvar_empresa(
     empresa.pix_banco = pix_banco.strip()
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
+    empresa.nfse_ativa = bool(nfse_ativa)
     empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
     empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
@@ -4107,6 +4117,8 @@ def gerar_nfse_no_organiza(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    if not bool(getattr(empresa, "nfse_ativa", False)):
+        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=NFS-e não está habilitada para esta empresa.", status_code=303)
     cliente = item.cliente
     if not cliente:
         raise HTTPException(400, "Contrato sem cliente.")

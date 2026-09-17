@@ -27,6 +27,7 @@ class Empresa(Base):
     pre_contrato_responsavel_telefone = Column(String(30), nullable=True)
     pre_contrato_responsavel_email = Column(String(160), nullable=True)
     infinitepay_ativa = Column(Boolean, default=False)
+    nfse_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)
     infinitepay_valor_sinal = Column(Float, default=0)
     exige_sinal = Column(Boolean, default=False)
