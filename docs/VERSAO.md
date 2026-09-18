@@ -1,11 +1,13 @@
-# HUMIAT Conect — Versão 1.0.32
+# HUMIAT Conect — Versão 1.0.33
 
-## Controle de NFS-e por empresa
+## Estoque de itens compartilhados por produto/serviço
 
-- Adicionado o campo **Permitir gerar NFS-e no Organiza** no cadastro da empresa.
-- O botão **Gerar NFS-e no Organiza** só aparece em contratos de empresas com a opção habilitada.
-- A rota também valida a permissão no servidor, impedindo acesso direto pela URL quando a empresa não possui NFS-e.
-- Na migração inicial, somente **Karaokê RJ** fica habilitada; as demais empresas permanecem desabilitadas.
-- Novas empresas começam com NFS-e desabilitada e podem ser liberadas pelo administrador geral.
+- Criado cadastro de itens de estoque por empresa.
+- Itens iniciais para todas as empresas, com estoque 0: TV, Som JBL, BOMBOX JBL, Microfone sem fio, Pedestal, Mesa de apoio, Spot de LED e Mesa de som.
+- Cada produto/serviço pode informar quais itens utiliza e quantas unidades consome por unidade do produto.
+- O contrato calcula os recursos necessários e permite desmarcar ou ajustar quantidades somente naquela locação.
+- A disponibilidade considera tanto a quantidade do produto quanto o estoque compartilhado dos itens auxiliares.
+- O contrato exibe alerta quando a data escolhida possui falta de algum recurso.
+- A tela de novo contrato consulta a disponibilidade do item principal na data selecionada.
 
-`v1.0.32 - controle de acesso NFS-e por empresa`
+`v1.0.33 - estoque compartilhado por produto e contrato`

@@ -2,13 +2,43 @@
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Itens de locação</h1>
-<p class="texto-discreto">Item de locação é o equipamento ou serviço contratado no aluguel. O contrato padrão marcado aqui será trazido automaticamente ao adicionar o item na reserva.</p>
+<p class="texto-discreto">Cadastre os produtos/serviços e os recursos físicos que cada um consome. O estoque dos recursos também entra no cálculo de disponibilidade.</p>
+
+<div class="box" id="estoque-recursos">
+  <h2>Itens do Produto/Serviço</h2>
+  <p class="texto-discreto">Estoque compartilhado entre os produtos. Os itens padrão foram criados com quantidade 0 para você informar o estoque real de cada empresa.</p>
+  <form method="post" action="/painel/itens-estoque/salvar">
+    <div class="grid">
+      {% for item in itens_estoque %}
+      <div class="card" style="padding:14px">
+        <input type="hidden" name="item_id" value="{{ item.id }}">
+        <label>{{ item.nome }}</label>
+        <input name="quantidade_estoque" type="number" min="0" value="{{ item.quantidade_estoque or 0 }}" aria-label="Quantidade em estoque de {{ item.nome }}">
+        <small class="texto-discreto">Quantidade total em estoque</small>
+      </div>
+      {% endfor %}
+    </div>
+    <button class="largura-total" type="submit">Salvar quantidades de estoque</button>
+  </form>
+
+  <details class="accordion interno" style="margin-top:12px">
+    <summary>+ Adicionar outro item de estoque</summary>
+    <form method="post" action="/painel/itens-estoque/novo" class="form-mobile-simples">
+      <label>Nome do item</label>
+      <input name="nome" required placeholder="Ex.: Cabo HDMI">
+      <label>Quantidade em estoque</label>
+      <input name="quantidade_estoque" type="number" min="0" value="0">
+      <button type="submit">Adicionar item</button>
+    </form>
+  </details>
+</div>
 
 <div class="box">
 <form method="post">
   {% if produto %}
   <input type="hidden" name="produto_id" value="{{ produto.id }}">
   {% endif %}
+  <h2>{% if produto %}Editar produto/serviço{% else %}Novo produto/serviço{% endif %}</h2>
   <label>Nome</label><input name="nome" value="{{ produto.nome if produto else '' }}" required>
   <label>Descrição / itens inclusos</label><textarea name="descricao">{{ produto.descricao if produto else '' }}</textarea>
   <label>Contrato padrão deste item</label>
@@ -21,7 +51,7 @@
   <div class="linha">
     <div>
       <label>Quantidade disponível</label>
-      <input name="quantidade_disponivel" type="number" min="1" value="{{ produto.quantidade_disponivel if produto else 1 }}">
+      <input name="quantidade_disponivel" type="number" min="0" value="{{ produto.quantidade_disponivel if produto else 1 }}">
     </div>
     <div>
       <label>Duração padrão</label>
@@ -52,9 +82,32 @@
       <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
     </div>
   </div>
+
+  <div class="box" style="margin-top:16px">
+    <h3>Recursos que este produto utiliza</h3>
+    <p class="texto-discreto">Marque somente o que normalmente acompanha 1 unidade deste produto e informe quantas unidades são consumidas.</p>
+    {% for item in itens_estoque %}
+      {% set qtd_recurso = recursos_produto.get(item.id, 0) %}
+      <div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:8px 0">
+        <div>
+          <input type="hidden" name="recurso_item_id" value="{{ item.id }}">
+          <input type="hidden" name="recurso_utiliza" value="{{ 1 if qtd_recurso else 0 }}" class="recurso-utiliza">
+          <label class="check" style="margin:0">
+            <input type="checkbox" {% if qtd_recurso %}checked{% endif %} onchange="alternarRecursoProduto(this)">
+            {{ item.nome }}
+          </label>
+          <small class="texto-discreto">Estoque atual: {{ item.quantidade_estoque or 0 }}</small>
+        </div>
+        <div>
+          <label>Qtd. por unidade</label>
+          <input class="recurso-quantidade" name="recurso_quantidade" type="number" min="1" value="{{ qtd_recurso if qtd_recurso else 1 }}">
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
   <input type="hidden" name="volume_logistico" value="1">
   <input type="hidden" name="carga_pontos" value="1">
-  </div>
   <button>{% if produto %}Atualizar{% else %}Salvar{% endif %}</button>
 </form>
 </div>
@@ -65,9 +118,27 @@
   <h3>{{ p.nome }}</h3>
   <p>{{ p.descricao }}</p>
   <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
-  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p><p>Perfil de transporte definido na Inteligência Logística por veículo.</p><p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p><p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
+  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p>
+  <p>Quantidade do produto: {{ p.quantidade_disponivel or 0 }}</p>
+  <p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p>
+  <p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
+  {% if p.recursos_estoque_resumo %}
+    <p><b>Recursos:</b> {{ p.recursos_estoque_resumo|join(' · ') }}</p>
+  {% else %}
+    <p class="texto-discreto">Sem recursos de estoque vinculados.</p>
+  {% endif %}
   <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
 </div>
 {% endfor %}
 </div>
+
+<script>
+function alternarRecursoProduto(check){
+  const linha = check.closest('.linha');
+  const hidden = linha.querySelector('.recurso-utiliza');
+  const qtd = linha.querySelector('.recurso-quantidade');
+  hidden.value = check.checked ? '1' : '0';
+  if(check.checked && (!qtd.value || Number(qtd.value) < 1)) qtd.value = '1';
+}
+</script>
 {% endblock %}

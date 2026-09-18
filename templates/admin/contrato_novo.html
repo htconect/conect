@@ -115,6 +115,7 @@
       <option value="">Selecionar depois</option>
       {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
     </select>
+    <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
     <label>Modelo de contrato</label>
     <select name="contrato_id">
       <option value="">Selecionar depois</option>
@@ -176,13 +177,36 @@ async function buscarCEP(){
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target?.name === 'produto_id') aplicarContratoPadrao(ev.target);
+  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); consultarEstoqueProduto(); }
   if(ev.target?.name === 'modo_criacao') alternarEtapas();
   if(ev.target?.name === 'data_evento'){
     const dr=document.querySelector('input[name="retirada_data"]'); if(dr && !dr.value) dr.value=ev.target.value;
+    consultarEstoqueProduto();
   }
   if(ev.target?.name === 'endereco') document.querySelector('input[name="local"]').value=ev.target.value;
 });
+
+async function consultarEstoqueProduto(){
+  const produto=document.querySelector('select[name="produto_id"]');
+  const data=document.querySelector('input[name="data_evento"]');
+  const box=document.getElementById('avisoEstoqueProduto');
+  if(!produto || !data || !box || !produto.value || !data.value){ if(box) box.hidden=true; return; }
+  try{
+    const r=await fetch(`/api/estoque/produto/${encodeURIComponent(produto.value)}?data=${encodeURIComponent(data.value)}`);
+    if(!r.ok){ box.hidden=true; return; }
+    const d=await r.json();
+    const problemas=[];
+    if(d.disponiveis <= 0) problemas.push(`<b>Sem disponibilidade real para ${d.produto} nesta data.</b>`);
+    else if(d.limitado_recursos) problemas.push(`<b>Atenção: o estoque de itens de apoio limita ${d.produto} a ${d.disponiveis} unidade(s).</b>`);
+    (d.recursos||[]).forEach(x=>{
+      if(x.capacidade_produto < d.disponivel_fisico){
+        problemas.push(`${x.nome}: estoque ${x.estoque_total}, comprometido ${x.comprometido}, livre ${x.disponivel}, usa ${x.por_unidade} por produto.`);
+      }
+    });
+    if(problemas.length){ box.innerHTML=problemas.map(x=>`<div>${x}</div>`).join(''); box.hidden=false; }
+    else box.hidden=true;
+  }catch(e){ box.hidden=true; }
+}
 
 let timerBuscaCliente=null;
 function somenteDigitos(v){return (v||'').replace(/\D/g,'');}
@@ -228,7 +252,7 @@ async function consultarClientePorTelefone(){
 
 document.addEventListener('DOMContentLoaded', function(){
   const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
-  alternarTipoTelefone(); alternarEtapas();
+  alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto();
   const tel=document.getElementById('telefoneCliente');
   if(tel){
     tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});

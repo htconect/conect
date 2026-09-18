@@ -19,8 +19,29 @@
   <div class="resumo-disponibilidade">
     <div><small>Total</small><b>{{ produto_selecionado.total }}</b></div>
     <div><small>Alugados</small><b>{{ produto_selecionado.alugados }}</b></div>
-    <div><small>Disponíveis</small><b>{{ produto_selecionado.disponiveis }}</b></div>
+    <div><small>Disponíveis reais</small><b>{{ produto_selecionado.disponiveis }}</b></div>
   </div>
+  {% if produto_selecionado.limitado_recursos %}
+    <div class="box aviso">
+      <b>Disponibilidade limitada por item de estoque</b>
+      <p class="texto-discreto">Ainda existem unidades do produto, mas um recurso necessário reduz a quantidade que pode ser fechada nesta data.</p>
+    </div>
+  {% endif %}
+
+  {% if produto_selecionado.recursos %}
+  <details class="accordion interno" open>
+    <summary>Itens de estoque necessários</summary>
+    {% for recurso in produto_selecionado.recursos %}
+      <div class="linha-local">
+        <div>
+          <b>{{ recurso.nome }} · {{ recurso.por_unidade }} por produto</b>
+          <small>Estoque {{ recurso.estoque_total }} · comprometido {{ recurso.comprometido }} · livre {{ recurso.disponivel }} · suporta mais {{ recurso.capacidade_produto }}</small>
+        </div>
+        <span>{% if recurso.capacidade_produto == 0 %}Falta{% else %}OK{% endif %}</span>
+      </div>
+    {% endfor %}
+  </details>
+  {% endif %}
 
   <details class="accordion interno" open>
     <summary>Onde está nessa data</summary>
@@ -66,6 +87,7 @@
     <div>
       <b>{{ item.produto.nome }}</b>
       <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
+      {% if item.limitado_recursos %}<small>Limitado por item de estoque</small>{% endif %}
     </div>
     <strong>{% if item.status == 'disponivel' %}<i class="bi bi-check-circle status-disponivel"></i>{% elif item.status == 'atencao' %}<i class="bi bi-exclamation-circle status-atencao"></i>{% elif item.status == 'conflito' %}<i class="bi bi-exclamation-triangle status-conflito"></i>{% else %}<i class="bi bi-x-circle status-indisponivel"></i>{% endif %}</strong>
   </a>

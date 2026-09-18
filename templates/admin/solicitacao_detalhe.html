@@ -20,6 +20,17 @@
 
 {% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
 
+{% if analise_estoque and analise_estoque.tem_conflito %}
+<div class="box aviso" id="alerta-estoque-contrato">
+  <b>Problema de estoque para esta data</b>
+  <p class="texto-discreto">Os equipamentos podem existir, mas faltam itens de apoio necessários para esta locação.</p>
+  {% for conflito in analise_estoque.conflitos %}
+    <p><b>{{ conflito.nome }}</b> · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>faltam {{ conflito.falta }}</strong></p>
+  {% endfor %}
+  <p class="texto-discreto">Se esta locação não usar algum item, desmarque-o em “Recursos desta locação” abaixo.</p>
+</div>
+{% endif %}
+
 <section class="reserva-mobile-topo">
   <a class="voltar" href="/painel/reservas">← Minhas reservas</a>
 
@@ -219,6 +230,38 @@
     {% endfor %}
   {% else %}
     <p class="texto-discreto">Nenhum equipamento adicionado.</p>
+  {% endif %}
+
+  {% if recursos_contrato %}
+  <div class="box" id="estoque-recursos-contrato" style="margin-top:14px">
+    <h3>Recursos desta locação</h3>
+    <p class="texto-discreto">Vêm marcados conforme o cadastro do produto. Para este contrato você pode desmarcar um item ou alterar a quantidade sem mudar o padrão do produto.</p>
+    <form method="post" action="/painel/solicitacao/{{ item.id }}/recursos">
+      {% for recurso in recursos_contrato %}
+      <div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
+        <div>
+          <input type="hidden" name="recurso_item_id" value="{{ recurso.id }}">
+          <input type="hidden" name="recurso_ativo" value="{{ 1 if recurso.ativo_no_contrato else 0 }}" class="recurso-ativo-contrato">
+          <label class="check" style="margin:0">
+            <input type="checkbox" {% if recurso.ativo_no_contrato %}checked{% endif %} onchange="alternarRecursoContrato(this)">
+            {{ recurso.nome }}
+          </label>
+          <small class="texto-discreto">Estoque {{ recurso.estoque_total }} · outros contratos {{ recurso.comprometido_outros }} · livre antes deste contrato {{ recurso.disponivel_antes }}</small>
+          {% if recurso.conflito %}<small style="display:block;font-weight:700">Faltam {{ recurso.falta }} unidade(s)</small>{% endif %}
+          {% if recurso.ajustado %}<small class="texto-discreto">Ajustado especificamente neste contrato.</small>{% endif %}
+        </div>
+        <div>
+          <label>Qtd. nesta locação</label>
+          <input name="recurso_quantidade" type="number" min="0" value="{{ recurso.necessario if recurso.necessario > 0 else recurso.padrao }}">
+        </div>
+      </div>
+      {% endfor %}
+      <button type="submit" class="largura-total">Salvar recursos desta locação</button>
+    </form>
+    <form method="post" action="/painel/solicitacao/{{ item.id }}/recursos/padrao" style="margin-top:8px">
+      <button type="submit" class="secundario largura-total">Restaurar padrão dos produtos</button>
+    </form>
+  </div>
   {% endif %}
 
   <form id="formEquipamentos" method="post" action="/painel/solicitacao/{{ item.id }}/preparar" class="form-mobile-simples bloco-oculto">
@@ -465,6 +508,11 @@
 </details>
 
 <script>
+function alternarRecursoContrato(check){
+  const linha = check.closest('.linha');
+  const hidden = linha ? linha.querySelector('.recurso-ativo-contrato') : null;
+  if(hidden) hidden.value = check.checked ? '1' : '0';
+}
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
   const contrato = document.getElementById('contratoAutomatico');

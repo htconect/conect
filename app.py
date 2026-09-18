@@ -37,7 +37,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga
+    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -78,7 +78,7 @@ class ControleAcessoMiddleware:
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/"):
             return "relatorios"
         prefixos_cadastro = (
-            "/painel/configuracoes", "/painel/produtos", "/painel/produto/",
+            "/painel/configuracoes", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -2483,6 +2483,7 @@ def admin_criar_empresa(
     db.add(empresa)
     db.commit()
     db.refresh(empresa)
+    garantir_itens_estoque_padrao(db, empresa.id)
 
     # Logo no cadastro inicial da empresa.
     if logo_arquivo and logo_arquivo.filename:
@@ -2847,8 +2848,260 @@ def configurar_campos_empresa(db: Session, empresa_id: int):
     db.commit()
 
 
+ITENS_ESTOQUE_PADRAO = (
+    "TV",
+    "Som JBL",
+    "BOMBOX JBL",
+    "Microfone sem fio",
+    "Pedestal",
+    "Mesa de apoio",
+    "Spot de LED",
+    "Mesa de som",
+)
+
+STATUS_ESTOQUE_IGNORADOS = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
+
+
+def garantir_itens_estoque_padrao(db: Session, empresa_id: int):
+    """Cria os recursos padrão da empresa sem alterar quantidades já cadastradas.
+
+    A primeira carga nasce com estoque zero para que cada empresa informe o estoque
+    real antes de o recurso limitar uma locação.
+    """
+    existentes = {
+        str(item.nome or "").strip().casefold(): item
+        for item in db.query(ItemProdutoServicoEstoque).filter_by(empresa_id=empresa_id).all()
+    }
+    criou = False
+    for nome in ITENS_ESTOQUE_PADRAO:
+        chave = nome.casefold()
+        if chave not in existentes:
+            db.add(ItemProdutoServicoEstoque(
+                empresa_id=empresa_id,
+                nome=nome,
+                quantidade_estoque=0,
+                ativo=True,
+            ))
+            criou = True
+    if criou:
+        db.commit()
+    return _itens_estoque_empresa(db, empresa_id)
+
+
+def _itens_estoque_empresa(db: Session, empresa_id: int, somente_ativos: bool = True):
+    q = db.query(ItemProdutoServicoEstoque).filter_by(empresa_id=empresa_id)
+    if somente_ativos:
+        q = q.filter(ItemProdutoServicoEstoque.ativo == True)
+    itens = q.order_by(ItemProdutoServicoEstoque.nome.asc()).all()
+    ordem = {nome.casefold(): idx for idx, nome in enumerate(ITENS_ESTOQUE_PADRAO)}
+    return sorted(itens, key=lambda x: (ordem.get((x.nome or "").casefold(), 999), (x.nome or "").casefold()))
+
+
+def _mapa_recursos_produtos(db: Session, empresa_id: int) -> dict[int, dict[int, int]]:
+    mapa: dict[int, dict[int, int]] = {}
+    for vinculo in db.query(ProdutoServicoRecurso).filter_by(empresa_id=empresa_id).all():
+        mapa.setdefault(int(vinculo.produto_id), {})[int(vinculo.item_estoque_id)] = max(
+            1, int(vinculo.quantidade_por_unidade or 1)
+        )
+    return mapa
+
+
+def _requisitos_solicitacao_padrao(item: Solicitacao, mapa_produtos: dict[int, dict[int, int]]) -> dict[int, int]:
+    requisitos: dict[int, int] = {}
+    for ri in list(getattr(item, "itens", []) or []):
+        if not ri.produto_id:
+            continue
+        qtd_produto = max(1, int(ri.quantidade or 1))
+        for item_estoque_id, qtd_por_unidade in mapa_produtos.get(int(ri.produto_id), {}).items():
+            requisitos[item_estoque_id] = requisitos.get(item_estoque_id, 0) + (qtd_produto * qtd_por_unidade)
+    return requisitos
+
+
+def _requisitos_solicitacao_efetivos(
+        db: Session,
+        item: Solicitacao,
+        mapa_produtos: dict[int, dict[int, int]] | None = None,
+) -> tuple[dict[int, int], dict[int, int], set[int]]:
+    mapa_produtos = mapa_produtos or _mapa_recursos_produtos(db, item.empresa_id)
+    padrao = _requisitos_solicitacao_padrao(item, mapa_produtos)
+    efetivo = dict(padrao)
+    ajustes = {
+        int(row.item_estoque_id): max(0, int(row.quantidade or 0))
+        for row in db.query(SolicitacaoRecurso).filter_by(
+            empresa_id=item.empresa_id, solicitacao_id=item.id
+        ).all()
+    }
+    for item_estoque_id in list(padrao.keys()):
+        if item_estoque_id in ajustes:
+            efetivo[item_estoque_id] = ajustes[item_estoque_id]
+    return padrao, efetivo, set(ajustes.keys())
+
+
+def _reservas_ativas_na_data(db: Session, empresa_id: int, data_consulta: date, excluir_solicitacao_id: int | None = None):
+    q = (
+        db.query(Solicitacao)
+        .options(selectinload(Solicitacao.itens))
+        .filter(Solicitacao.empresa_id == empresa_id)
+        .filter(Solicitacao.data_evento == data_consulta)
+        .filter(~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)))
+    )
+    if excluir_solicitacao_id:
+        q = q.filter(Solicitacao.id != excluir_solicitacao_id)
+    return q.all()
+
+
+def _comprometimento_recursos_data(
+        db: Session,
+        empresa_id: int,
+        data_consulta: date,
+        excluir_solicitacao_id: int | None = None,
+) -> dict[int, int]:
+    mapa_produtos = _mapa_recursos_produtos(db, empresa_id)
+    totais: dict[int, int] = {}
+    for reserva in _reservas_ativas_na_data(db, empresa_id, data_consulta, excluir_solicitacao_id):
+        _, efetivo, _ = _requisitos_solicitacao_efetivos(db, reserva, mapa_produtos)
+        for item_estoque_id, qtd in efetivo.items():
+            if qtd <= 0:
+                continue
+            totais[item_estoque_id] = totais.get(item_estoque_id, 0) + qtd
+    return totais
+
+
+def _analise_estoque_solicitacao(db: Session, item: Solicitacao) -> dict:
+    if not item or not item.data_evento:
+        return {"recursos": [], "conflitos": [], "tem_conflito": False}
+    mapa_produtos = _mapa_recursos_produtos(db, item.empresa_id)
+    padrao, efetivo, ajustados = _requisitos_solicitacao_efetivos(db, item, mapa_produtos)
+    ids = set(padrao.keys())
+    if not ids:
+        return {"recursos": [], "conflitos": [], "tem_conflito": False}
+
+    comprometido_outros = _comprometimento_recursos_data(
+        db, item.empresa_id, item.data_evento, excluir_solicitacao_id=item.id
+    )
+    recursos_db = {
+        r.id: r for r in db.query(ItemProdutoServicoEstoque).filter(
+            ItemProdutoServicoEstoque.empresa_id == item.empresa_id,
+            ItemProdutoServicoEstoque.id.in_(ids),
+        ).all()
+    }
+    linhas = []
+    for recurso in _itens_estoque_empresa(db, item.empresa_id, somente_ativos=False):
+        if recurso.id not in ids:
+            continue
+        qtd_padrao = max(0, int(padrao.get(recurso.id, 0)))
+        necessario = max(0, int(efetivo.get(recurso.id, qtd_padrao)))
+        estoque_total = max(0, int(recurso.quantidade_estoque or 0))
+        outros = max(0, int(comprometido_outros.get(recurso.id, 0)))
+        disponivel_antes = max(estoque_total - outros, 0)
+        falta = max(necessario - disponivel_antes, 0)
+        linhas.append({
+            "id": recurso.id,
+            "nome": recurso.nome,
+            "estoque_total": estoque_total,
+            "padrao": qtd_padrao,
+            "necessario": necessario,
+            "ajustado": recurso.id in ajustados,
+            "ativo_no_contrato": necessario > 0,
+            "comprometido_outros": outros,
+            "disponivel_antes": disponivel_antes,
+            "falta": falta,
+            "conflito": falta > 0,
+        })
+    conflitos = [linha for linha in linhas if linha["conflito"]]
+    return {"recursos": linhas, "conflitos": conflitos, "tem_conflito": bool(conflitos)}
+
+
+def _alugado_por_produto_data(db: Session, empresa_id: int, data_consulta: date) -> dict[int, int]:
+    reservas = _reservas_ativas_na_data(db, empresa_id, data_consulta)
+    totais: dict[int, int] = {}
+    for reserva in reservas:
+        for ri in reserva.itens:
+            if ri.produto_id:
+                totais[int(ri.produto_id)] = totais.get(int(ri.produto_id), 0) + max(1, int(ri.quantidade or 1))
+    return totais
+
+
+def _limite_recursos_produto(
+        produto: ProdutoServico,
+        recursos_produto: dict[int, int],
+        itens_estoque: dict[int, ItemProdutoServicoEstoque],
+        comprometido: dict[int, int],
+        limite_fisico: int,
+) -> tuple[int, list[dict]]:
+    limite = max(0, int(limite_fisico or 0))
+    detalhes = []
+    for item_estoque_id, qtd_por_unidade in recursos_produto.items():
+        recurso = itens_estoque.get(item_estoque_id)
+        if not recurso:
+            continue
+        qtd_por_unidade = max(1, int(qtd_por_unidade or 1))
+        total = max(0, int(recurso.quantidade_estoque or 0))
+        usado = max(0, int(comprometido.get(item_estoque_id, 0)))
+        livre = max(total - usado, 0)
+        capacidade = livre // qtd_por_unidade
+        limite = min(limite, capacidade)
+        detalhes.append({
+            "id": recurso.id,
+            "nome": recurso.nome,
+            "estoque_total": total,
+            "comprometido": usado,
+            "disponivel": livre,
+            "por_unidade": qtd_por_unidade,
+            "capacidade_produto": capacidade,
+            "limitante": capacidade < limite_fisico,
+        })
+    return max(0, limite), detalhes
+
+
+def _salvar_vinculos_recursos_produto(
+        db: Session,
+        empresa_id: int,
+        produto: ProdutoServico,
+        recurso_item_id: list[str],
+        recurso_utiliza: list[str],
+        recurso_quantidade: list[str],
+):
+    db.query(ProdutoServicoRecurso).filter_by(
+        empresa_id=empresa_id, produto_id=produto.id
+    ).delete(synchronize_session=False)
+    for idx, bruto_id in enumerate(recurso_item_id or []):
+        try:
+            item_id = int(bruto_id)
+        except (TypeError, ValueError):
+            continue
+        utiliza = str(recurso_utiliza[idx] if idx < len(recurso_utiliza) else "0") == "1"
+        try:
+            qtd = int(recurso_quantidade[idx] if idx < len(recurso_quantidade) else 1)
+        except (TypeError, ValueError):
+            qtd = 1
+        if not utiliza or qtd <= 0:
+            continue
+        recurso = db.get(ItemProdutoServicoEstoque, item_id)
+        if not recurso or recurso.empresa_id != empresa_id or not recurso.ativo:
+            continue
+        db.add(ProdutoServicoRecurso(
+            empresa_id=empresa_id,
+            produto_id=produto.id,
+            item_estoque_id=item_id,
+            quantidade_por_unidade=max(1, qtd),
+        ))
+
+
+def _recursos_produto_edicao(db: Session, empresa_id: int, produto_id: int | None) -> dict[int, int]:
+    if not produto_id:
+        return {}
+    return {
+        int(row.item_estoque_id): max(1, int(row.quantidade_por_unidade or 1))
+        for row in db.query(ProdutoServicoRecurso).filter_by(
+            empresa_id=empresa_id, produto_id=produto_id
+        ).all()
+    }
+
+
 def criar_modelos_iniciais_empresa(db: Session, empresa: Empresa):
-    """Cria produto, contrato e mensagens padrão para a empresa não começar vazia."""
+    """Cria produto, contrato, recursos de estoque e mensagens padrão para a empresa não começar vazia."""
+    garantir_itens_estoque_padrao(db, empresa.id)
     contrato = db.query(Contrato).filter_by(empresa_id=empresa.id).first()
     if not contrato:
         contrato = Contrato(
@@ -3657,11 +3910,27 @@ async def salvar_configuracoes_empresa(
 
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/produtos.html",
-                                      {"request": request, "empresa": empresa, "produtos": produtos, "produto": None,
-                                       "contratos": contratos})
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+    itens_por_id = {item.id: item for item in itens_estoque}
+    for p in produtos:
+        resumo = []
+        for item_id, qtd in mapa.get(p.id, {}).items():
+            recurso = itens_por_id.get(item_id)
+            if recurso:
+                resumo.append(f"{recurso.nome} x{qtd}")
+        p.recursos_estoque_resumo = resumo
+    return templates.TemplateResponse("admin/produtos.html", {
+        "request": request,
+        "empresa": empresa,
+        "produtos": produtos,
+        "produto": None,
+        "contratos": contratos,
+        "itens_estoque": itens_estoque,
+        "recursos_produto": {},
+    })
 
 
 @app.get("/painel/produto/{produto_id}", response_class=HTMLResponse)
@@ -3670,22 +3939,105 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     produto = db.get(ProdutoServico, produto_id)
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    return templates.TemplateResponse("admin/produtos.html",
-                                      {"request": request, "empresa": empresa, "produtos": produtos,
-                                       "produto": produto, "contratos": contratos})
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+    itens_por_id = {item.id: item for item in itens_estoque}
+    for p in produtos:
+        resumo = []
+        for item_id, qtd in mapa.get(p.id, {}).items():
+            recurso = itens_por_id.get(item_id)
+            if recurso:
+                resumo.append(f"{recurso.nome} x{qtd}")
+        p.recursos_estoque_resumo = resumo
+    return templates.TemplateResponse("admin/produtos.html", {
+        "request": request,
+        "empresa": empresa,
+        "produtos": produtos,
+        "produto": produto,
+        "contratos": contratos,
+        "itens_estoque": itens_estoque,
+        "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id),
+    })
+
+
+@app.post("/painel/itens-estoque/salvar")
+def salvar_itens_estoque(
+        item_id: list[str] = Form(default=[]),
+        quantidade_estoque: list[str] = Form(default=[]),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    for idx, bruto_id in enumerate(item_id or []):
+        try:
+            recurso_id = int(bruto_id)
+        except (TypeError, ValueError):
+            continue
+        recurso = db.get(ItemProdutoServicoEstoque, recurso_id)
+        if not recurso or recurso.empresa_id != empresa.id:
+            continue
+        try:
+            qtd = int(quantidade_estoque[idx] if idx < len(quantidade_estoque) else 0)
+        except (TypeError, ValueError):
+            qtd = 0
+        recurso.quantidade_estoque = max(0, qtd)
+    db.commit()
+    return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
+
+
+@app.post("/painel/itens-estoque/novo")
+def novo_item_estoque(
+        nome: str = Form(...),
+        quantidade_estoque: int = Form(0),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    nome_limpo = " ".join((nome or "").strip().split())
+    if not nome_limpo:
+        return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
+    existente = db.query(ItemProdutoServicoEstoque).filter(
+        ItemProdutoServicoEstoque.empresa_id == empresa.id,
+        func.lower(ItemProdutoServicoEstoque.nome) == nome_limpo.lower(),
+    ).first()
+    if existente:
+        existente.ativo = True
+        existente.quantidade_estoque = max(0, int(quantidade_estoque or 0))
+    else:
+        db.add(ItemProdutoServicoEstoque(
+            empresa_id=empresa.id,
+            nome=nome_limpo,
+            quantidade_estoque=max(0, int(quantidade_estoque or 0)),
+            ativo=True,
+        ))
+    db.commit()
+    return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
 
 
 @app.post("/painel/produto/{produto_id_url}")
-def salvar_produto_url(produto_id_url: int, nome: str = Form(...), descricao: str = Form(""),
-                       quantidade_disponivel: int = Form(1), valor_base: str = Form("0"),
-                       duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
-                       carga_pontos: int = Form(1), volume_logistico: int = Form(1),
-                       permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
-                       contrato_id: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    return salvar_produto(str(produto_id_url), nome, descricao, quantidade_disponivel, valor_base, duracao_minutos,
-                          prazo_retirada_dias, carga_pontos, volume_logistico, permite_interno, permite_mala, permite_teto, contrato_id, db, empresa)
+def salvar_produto_url(
+        produto_id_url: int,
+        nome: str = Form(...), descricao: str = Form(""),
+        quantidade_disponivel: int = Form(1), valor_base: str = Form("0"),
+        duracao_minutos: int = Form(240), prazo_retirada_dias: int = Form(1),
+        carga_pontos: int = Form(1), volume_logistico: int = Form(1),
+        permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
+        contrato_id: str = Form(""),
+        recurso_item_id: list[str] = Form(default=[]),
+        recurso_utiliza: list[str] = Form(default=[]),
+        recurso_quantidade: list[str] = Form(default=[]),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    return salvar_produto(
+        produto_id=str(produto_id_url), nome=nome, descricao=descricao,
+        quantidade_disponivel=quantidade_disponivel, valor_base=valor_base,
+        duracao_minutos=duracao_minutos, prazo_retirada_dias=prazo_retirada_dias,
+        carga_pontos=carga_pontos, volume_logistico=volume_logistico,
+        permite_interno=permite_interno, permite_mala=permite_mala, permite_teto=permite_teto,
+        contrato_id=contrato_id, recurso_item_id=recurso_item_id,
+        recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
+        db=db, empresa=empresa,
+    )
 
 
 @app.post("/painel/produtos")
@@ -3695,19 +4047,27 @@ def salvar_produto(
         quantidade_disponivel: int = Form(1), valor_base: str = Form("0"), duracao_minutos: int = Form(240),
         prazo_retirada_dias: int = Form(1), carga_pontos: int = Form(1), volume_logistico: int = Form(1),
         permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
-        contrato_id: str = Form(""), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
+        contrato_id: str = Form(""),
+        recurso_item_id: list[str] = Form(default=[]),
+        recurso_utiliza: list[str] = Form(default=[]),
+        recurso_quantidade: list[str] = Form(default=[]),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
+    garantir_itens_estoque_padrao(db, empresa.id)
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
+    if produto and produto.empresa_id != empresa.id:
+        raise HTTPException(404)
     if not produto:
         produto = ProdutoServico(empresa_id=empresa.id)
         db.add(produto)
+
     produto.nome = nome.strip()
     produto.descricao = descricao
     contrato_id_int = int(contrato_id) if contrato_id and str(contrato_id).isdigit() else None
     contrato = db.get(Contrato, contrato_id_int) if contrato_id_int else None
     produto.contrato_id = contrato.id if contrato and contrato.empresa_id == empresa.id else None
-    produto.quantidade_disponivel = quantidade_disponivel
+    produto.quantidade_disponivel = max(0, int(quantidade_disponivel or 0))
     produto.valor_base = texto_para_float(valor_base)
     produto.duracao_minutos = duracao_minutos
     produto.prazo_retirada_dias = prazo_retirada_dias
@@ -3719,6 +4079,10 @@ def salvar_produto(
     if not (produto.permite_interno or produto.permite_mala or produto.permite_teto):
         produto.permite_interno = True
     produto.tipo_locacao = "horas_fixas"
+    db.flush()
+    _salvar_vinculos_recursos_produto(
+        db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
+    )
     db.commit()
     return RedirectResponse("/painel/produtos", status_code=303)
 
@@ -3728,13 +4092,25 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
     origem = db.get(ProdutoServico, produto_id)
     if not origem or origem.empresa_id != empresa.id:
         raise HTTPException(404)
-    novo = ProdutoServico(empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
-                          descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
-                          valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
-                          prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
-                          volume_logistico=origem.volume_logistico or 1, permite_interno=origem.permite_interno,
-                          permite_mala=origem.permite_mala, permite_teto=origem.permite_teto, ativo=True)
+    novo = ProdutoServico(
+        empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
+        descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
+        valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
+        prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
+        volume_logistico=origem.volume_logistico or 1, permite_interno=origem.permite_interno,
+        permite_mala=origem.permite_mala, permite_teto=origem.permite_teto, ativo=True,
+    )
     db.add(novo)
+    db.flush()
+    for vinculo in db.query(ProdutoServicoRecurso).filter_by(
+        empresa_id=empresa.id, produto_id=origem.id
+    ).all():
+        db.add(ProdutoServicoRecurso(
+            empresa_id=empresa.id,
+            produto_id=novo.id,
+            item_estoque_id=vinculo.item_estoque_id,
+            quantidade_por_unidade=vinculo.quantidade_por_unidade,
+        ))
     db.commit()
     db.refresh(novo)
     return RedirectResponse(f"/painel/produto/{novo.id}", status_code=303)
@@ -4158,6 +4534,68 @@ def gerar_nfse_no_organiza(
     destino = f"{ORGANIZA_NFSE_URL}?{urlencode(params)}"
     return RedirectResponse(destino, status_code=303)
 
+@app.post("/painel/solicitacao/{solicitacao_id}/recursos")
+def salvar_recursos_solicitacao(
+        solicitacao_id: int,
+        recurso_item_id: list[str] = Form(default=[]),
+        recurso_ativo: list[str] = Form(default=[]),
+        recurso_quantidade: list[str] = Form(default=[]),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+
+    mapa_produtos = _mapa_recursos_produtos(db, empresa.id)
+    padrao = _requisitos_solicitacao_padrao(item, mapa_produtos)
+    ids_validos = set(padrao.keys())
+    db.query(SolicitacaoRecurso).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).delete(synchronize_session=False)
+
+    for idx, bruto_id in enumerate(recurso_item_id or []):
+        try:
+            item_estoque_id = int(bruto_id)
+        except (TypeError, ValueError):
+            continue
+        if item_estoque_id not in ids_validos:
+            continue
+        ativo = str(recurso_ativo[idx] if idx < len(recurso_ativo) else "0") == "1"
+        try:
+            qtd = int(recurso_quantidade[idx] if idx < len(recurso_quantidade) else 0)
+        except (TypeError, ValueError):
+            qtd = 0
+        db.add(SolicitacaoRecurso(
+            empresa_id=empresa.id,
+            solicitacao_id=item.id,
+            item_estoque_id=item_estoque_id,
+            quantidade=max(0, qtd) if ativo else 0,
+        ))
+    db.commit()
+    return RedirectResponse(
+        f"/painel/solicitacao/{item.id}#estoque-recursos-contrato", status_code=303
+    )
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/recursos/padrao")
+def restaurar_recursos_solicitacao(
+        solicitacao_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    db.query(SolicitacaoRecurso).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).delete(synchronize_session=False)
+    db.commit()
+    return RedirectResponse(
+        f"/painel/solicitacao/{item.id}#estoque-recursos-contrato", status_code=303
+    )
+
+
 @app.get("/painel/solicitacao/{solicitacao_id}", response_class=HTMLResponse)
 def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
                         empresa: Empresa = Depends(empresa_logada)):
@@ -4180,12 +4618,15 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
         .all()
     )
     mensagens = mensagens_empresa(empresa)
+    analise_estoque = _analise_estoque_solicitacao(db, item)
     return templates.TemplateResponse("admin/solicitacao_detalhe.html",
                                       {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
                                        "contratos": contratos, "empresas_transferencia": empresas_transferencia,
                                        "mensagens": mensagens, "cobrancas_infinitepay": cobrancas_infinitepay,
                                        "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS,
-                                       "fluxo_infinitepay": _infinitepay_habilitada(empresa)})
+                                       "fluxo_infinitepay": _infinitepay_habilitada(empresa),
+                                       "analise_estoque": analise_estoque,
+                                       "recursos_contrato": analise_estoque.get("recursos", [])})
 
 
 
@@ -4898,6 +5339,12 @@ async def preparar_contrato(
     quantidades = form.getlist("quantidade")
     valores_unitarios = form.getlist("valor_unitario")
 
+    assinatura_anterior = sorted(
+        (int(ri.produto_id), max(1, int(ri.quantidade or 1)))
+        for ri in list(item.itens or []) if ri.produto_id
+    )
+    assinatura_nova = []
+
     # Regrava os itens da reserva para permitir vários produtos/serviços.
     db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
     primeiro_produto = None
@@ -4908,6 +5355,8 @@ async def preparar_contrato(
         if not produto or produto.empresa_id != empresa.id:
             continue
         quantidade = int(quantidades[idx]) if idx < len(quantidades) and str(quantidades[idx]).isdigit() else 1
+        quantidade = max(1, quantidade)
+        assinatura_nova.append((int(produto.id), quantidade))
         valor_unitario = texto_para_float(valores_unitarios[idx]) if idx < len(valores_unitarios) else (
                 produto.valor_base or 0)
         total_item = quantidade * valor_unitario
@@ -4923,6 +5372,13 @@ async def preparar_contrato(
         ))
         if primeiro_produto is None:
             primeiro_produto = produto
+
+    if assinatura_anterior != sorted(assinatura_nova):
+        # Mudou a composição do contrato: volta ao consumo padrão dos produtos.
+        # O usuário poderá desmarcar/ajustar novamente os recursos no card do contrato.
+        db.query(SolicitacaoRecurso).filter_by(
+            empresa_id=empresa.id, solicitacao_id=item.id
+        ).delete(synchronize_session=False)
 
     item.produto_id = primeiro_produto.id if primeiro_produto else None
     contrato_padrao_id = primeiro_produto.contrato_id if primeiro_produto and primeiro_produto.contrato_id else None
@@ -7820,22 +8276,10 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
                     empresa: Empresa = Depends(empresa_logada)):
     data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
 
+    garantir_itens_estoque_padrao(db, empresa.id)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
 
-    # Reservas consideradas: locações ativas na data escolhida.
-    status_ignorados = ["cancelada", "rejeitada"]
-    reservas_do_dia = (
-        db.query(Solicitacao)
-        .options(
-            joinedload(Solicitacao.cliente),
-            selectinload(Solicitacao.itens),
-        )
-        .filter(Solicitacao.empresa_id == empresa.id)
-        .filter(Solicitacao.data_evento == data_consulta)
-        .filter(~Solicitacao.status.in_(status_ignorados))
-        .all()
-    )
-
+    reservas_do_dia = _reservas_ativas_na_data(db, empresa.id, data_consulta)
     alugado_por_produto = {}
     locais_por_produto = {}
     for reserva in reservas_do_dia:
@@ -7857,14 +8301,32 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
                 "retirada_hora": reserva.retirada_hora,
             })
 
+    mapa_recursos = _mapa_recursos_produtos(db, empresa.id)
+    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta)
+    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+
     itens = []
     produto_selecionado = None
     for produto in produtos:
-        total = produto.quantidade_disponivel or 0
-        alugados = alugado_por_produto.get(produto.id, 0)
-        disponiveis = max(total - alugados, 0)
-        conflito = alugados > total
-        status = "conflito" if conflito else ("disponivel" if disponiveis > 1 else ("atencao" if disponiveis == 1 else "indisponivel"))
+        total = max(0, int(produto.quantidade_disponivel or 0))
+        alugados = max(0, int(alugado_por_produto.get(produto.id, 0)))
+        disponivel_fisico = max(total - alugados, 0)
+        disponiveis, recursos_detalhes = _limite_recursos_produto(
+            produto,
+            mapa_recursos.get(produto.id, {}),
+            itens_estoque,
+            comprometido_recursos,
+            disponivel_fisico,
+        )
+        conflito_produto = alugados > total
+        conflito_recursos = any(
+            detalhe["comprometido"] > detalhe["estoque_total"] for detalhe in recursos_detalhes
+        )
+        limitado_recursos = disponiveis < disponivel_fisico
+        conflito = conflito_produto or conflito_recursos
+        status = "conflito" if conflito else (
+            "disponivel" if disponiveis > 1 else ("atencao" if disponiveis == 1 else "indisponivel")
+        )
         locais_ordenados = sorted(
             locais_por_produto.get(produto.id, []),
             key=lambda loc: (loc.get("hora_ordenacao") or time.min, loc.get("reserva_id") or 0)
@@ -7873,9 +8335,14 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             "produto": produto,
             "total": total,
             "alugados": alugados,
+            "disponivel_fisico": disponivel_fisico,
             "disponiveis": disponiveis,
             "status": status,
             "conflito": conflito,
+            "conflito_produto": conflito_produto,
+            "conflito_recursos": conflito_recursos,
+            "limitado_recursos": limitado_recursos,
+            "recursos": recursos_detalhes,
             "locais": locais_ordenados,
         }
         itens.append(dados)
@@ -7892,6 +8359,43 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             "produto_selecionado": produto_selecionado,
         },
     )
+
+
+@app.get("/api/estoque/produto/{produto_id}")
+def api_estoque_produto(
+        produto_id: int,
+        data: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa.id:
+        raise HTTPException(404)
+    try:
+        data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
+    except ValueError:
+        raise HTTPException(422, "Data inválida")
+
+    alugados = _alugado_por_produto_data(db, empresa.id, data_consulta).get(produto.id, 0)
+    total = max(0, int(produto.quantidade_disponivel or 0))
+    disponivel_fisico = max(total - int(alugados or 0), 0)
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+    comprometido = _comprometimento_recursos_data(db, empresa.id, data_consulta)
+    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+    disponiveis, recursos = _limite_recursos_produto(
+        produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico
+    )
+    return JSONResponse({
+        "produto_id": produto.id,
+        "produto": produto.nome,
+        "data": data_consulta.isoformat(),
+        "total_produto": total,
+        "alugados": int(alugados or 0),
+        "disponivel_fisico": disponivel_fisico,
+        "disponiveis": disponiveis,
+        "limitado_recursos": disponiveis < disponivel_fisico,
+        "recursos": recursos,
+    })
 
 
 def _responsavel_contrato_exibicao(item: Solicitacao) -> str:

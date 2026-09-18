@@ -245,6 +245,42 @@ class ProdutoServico(Base):
     contrato = relationship("Contrato")
 
 
+class ItemProdutoServicoEstoque(Base):
+    __tablename__ = "itens_produto_servico_estoque"
+    __table_args__ = (UniqueConstraint("empresa_id", "nome", name="uq_item_produto_servico_empresa_nome"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    nome = Column(String(140), nullable=False)
+    quantidade_estoque = Column(Integer, nullable=False, default=0)
+    ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
+class ProdutoServicoRecurso(Base):
+    __tablename__ = "produtos_servicos_recursos"
+    __table_args__ = (UniqueConstraint("produto_id", "item_estoque_id", name="uq_produto_recurso_item"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_estoque_id = Column(Integer, ForeignKey("itens_produto_servico_estoque.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantidade_por_unidade = Column(Integer, nullable=False, default=1)
+    criado_em = Column(DateTime, server_default=func.now())
+
+
+class SolicitacaoRecurso(Base):
+    __tablename__ = "solicitacoes_recursos"
+    __table_args__ = (UniqueConstraint("solicitacao_id", "item_estoque_id", name="uq_solicitacao_recurso_item"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_estoque_id = Column(Integer, ForeignKey("itens_produto_servico_estoque.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantidade = Column(Integer, nullable=False, default=0)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Solicitacao(Base):
     __tablename__ = "solicitacoes"
 
