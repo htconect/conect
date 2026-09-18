@@ -1,13 +1,14 @@
-# HUMIAT Conect — Versão 1.0.33
+# HUMIAT Conect — Versão 1.0.34
 
-## Estoque de itens compartilhados por produto/serviço
+## Recursos no contrato + alertas de estoque
 
-- Criado cadastro de itens de estoque por empresa.
-- Itens iniciais para todas as empresas, com estoque 0: TV, Som JBL, BOMBOX JBL, Microfone sem fio, Pedestal, Mesa de apoio, Spot de LED e Mesa de som.
-- Cada produto/serviço pode informar quais itens utiliza e quantas unidades consome por unidade do produto.
-- O contrato calcula os recursos necessários e permite desmarcar ou ajustar quantidades somente naquela locação.
-- A disponibilidade considera tanto a quantidade do produto quanto o estoque compartilhado dos itens auxiliares.
-- O contrato exibe alerta quando a data escolhida possui falta de algum recurso.
-- A tela de novo contrato consulta a disponibilidade do item principal na data selecionada.
+- O botão **Ver contrato** usado pelo atendente na Operação abre a tela interna do contrato, a mesma acessada pela Agenda; o PDF/tela pública continuam exclusivos do fluxo do cliente.
+- O cadastro de equipamentos do contrato mostra uma prévia dos recursos padrão calculados a partir dos produtos/serviços escolhidos.
+- Ao salvar os equipamentos, os recursos padrão do produto continuam sendo aplicados automaticamente e podem ser editados/desmarcados somente naquele contrato.
+- Criado alerta separado para **PRODUTO EXCEDIDO** e **RECURSO EXCEDIDO**.
+- Agenda exibe os recursos do contrato e os alertas de excesso.
+- Operação exibe os recursos com destaque e os alertas de excesso.
+- Tela principal ganhou a pendência **Item / Produto / Serviço**, mostrando o contrato afetado e o que está faltando.
+- Disponibilidade diferencia excesso do produto e excesso de recurso compartilhado.
 
-`v1.0.33 - estoque compartilhado por produto e contrato`
+`v1.0.34 - recursos e alertas de estoque em contrato, agenda e operacao`

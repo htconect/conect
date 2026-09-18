@@ -22,12 +22,14 @@
 
 {% if analise_estoque and analise_estoque.tem_conflito %}
 <div class="box aviso" id="alerta-estoque-contrato">
-  <b>Problema de estoque para esta data</b>
-  <p class="texto-discreto">Os equipamentos podem existir, mas faltam itens de apoio necessários para esta locação.</p>
-  {% for conflito in analise_estoque.conflitos %}
-    <p><b>{{ conflito.nome }}</b> · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>faltam {{ conflito.falta }}</strong></p>
+  <b>ATENÇÃO — problema de estoque para esta data</b>
+  {% for conflito in analise_estoque.conflitos_produtos %}
+    <p><b>PRODUTO EXCEDIDO:</b> {{ conflito.nome }} · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>falta {{ conflito.falta }}</strong></p>
   {% endfor %}
-  <p class="texto-discreto">Se esta locação não usar algum item, desmarque-o em “Recursos desta locação” abaixo.</p>
+  {% for conflito in analise_estoque.conflitos_recursos %}
+    <p><b>RECURSO EXCEDIDO:</b> {{ conflito.nome }} · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>falta {{ conflito.falta }}</strong></p>
+  {% endfor %}
+  <p class="texto-discreto">Se este contrato não utilizar algum recurso padrão, ajuste ou desmarque o recurso no bloco de equipamentos e recursos.</p>
 </div>
 {% endif %}
 
@@ -214,8 +216,8 @@
 
 <section class="card-reserva">
   <div class="card-reserva-head">
-    <h2>Equipamentos</h2>
-    <button class="link-botao" type="button" onclick="toggleBloco('formEquipamentos')">{% if tem_itens %}Editar{% else %}Adicionar{% endif %}</button>
+    <h2>Equipamentos e recursos</h2>
+    <button class="link-botao" type="button" onclick="toggleBloco('formEquipamentos')">Registrar equipamentos</button>
   </div>
 
   {% if item.itens %}
@@ -234,8 +236,8 @@
 
   {% if recursos_contrato %}
   <div class="box" id="estoque-recursos-contrato" style="margin-top:14px">
-    <h3>Recursos desta locação</h3>
-    <p class="texto-discreto">Vêm marcados conforme o cadastro do produto. Para este contrato você pode desmarcar um item ou alterar a quantidade sem mudar o padrão do produto.</p>
+    <h3>Recursos do contrato</h3>
+    <p class="texto-discreto">Os valores padrão vêm dos equipamentos registrados. Você pode desmarcar ou alterar a quantidade somente neste contrato.</p>
     <form method="post" action="/painel/solicitacao/{{ item.id }}/recursos">
       {% for recurso in recursos_contrato %}
       <div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
@@ -296,6 +298,12 @@
     </div>
 
     <button type="button" class="secundario largura-total" onclick="adicionarItem()">+ Adicionar outro item</button>
+
+    <div class="box" id="previewRecursosEquipamentos" style="margin-top:12px">
+      <h3 style="margin-top:0">Recursos padrão calculados</h3>
+      <p class="texto-discreto">O sistema soma os recursos dos equipamentos e quantidades acima. Depois de salvar, você pode editar ou desmarcar cada recurso deste contrato.</p>
+      <div id="listaPreviewRecursos"><small class="texto-discreto">Selecione os equipamentos para calcular os recursos.</small></div>
+    </div>
 
     <div class="contrato-automatico-campo">
       <label for="contratoAutomaticoVisual">Modelo de contrato</label>
@@ -508,6 +516,29 @@
 </details>
 
 <script>
+const RECURSOS_POR_PRODUTO = {{ recursos_por_produto_view|tojson }};
+function recalcularPreviewRecursos(){
+  const totais = {};
+  document.querySelectorAll('#itensReserva .item-reserva').forEach(linha => {
+    const sel = linha.querySelector('select[name="produto_id"]');
+    const qtdCampo = linha.querySelector('input[name="quantidade"]');
+    const produtoId = sel ? String(sel.value || '') : '';
+    const qtdProduto = Math.max(1, parseInt(qtdCampo?.value || '1', 10) || 1);
+    (RECURSOS_POR_PRODUTO[produtoId] || []).forEach(r => {
+      const chave = String(r.id);
+      if(!totais[chave]) totais[chave] = {nome:r.nome, quantidade:0};
+      totais[chave].quantidade += (parseInt(r.quantidade || 0, 10) || 0) * qtdProduto;
+    });
+  });
+  const box = document.getElementById('listaPreviewRecursos');
+  if(!box) return;
+  const linhas = Object.values(totais).filter(r => r.quantidade > 0);
+  if(!linhas.length){
+    box.innerHTML = '<small class="texto-discreto">Nenhum recurso padrão vinculado aos equipamentos selecionados.</small>';
+    return;
+  }
+  box.innerHTML = linhas.map(r => `<div class="linha-local"><b>${r.nome}</b><span>${r.quantidade}</span></div>`).join('');
+}
 function alternarRecursoContrato(check){
   const linha = check.closest('.linha');
   const hidden = linha ? linha.querySelector('.recurso-ativo-contrato') : null;
@@ -527,10 +558,16 @@ function aplicarContratoPadrao(select){
 document.addEventListener('change', function(ev){
   if(ev.target && ev.target.name === 'produto_id'){
     aplicarContratoPadrao(ev.target);
+    recalcularPreviewRecursos();
   }
+  if(ev.target && ev.target.name === 'quantidade') recalcularPreviewRecursos();
+});
+document.addEventListener('input', function(ev){
+  if(ev.target && ev.target.name === 'quantidade') recalcularPreviewRecursos();
 });
 document.addEventListener('DOMContentLoaded', function(){
   document.querySelectorAll('select[name="produto_id"]').forEach(aplicarContratoPadrao);
+  recalcularPreviewRecursos();
 });
 
 function adicionarItem(){
@@ -544,10 +581,12 @@ function adicionarItem(){
     if(campo.name === 'valor_unitario') campo.value = '0,00';
   });
   container.appendChild(clone);
+  recalcularPreviewRecursos();
 }
 function removerItem(botao){
   const linha = botao.closest('.item-reserva');
   if(linha) linha.remove();
+  recalcularPreviewRecursos();
 }
 function toggleBloco(id){
   const el = document.getElementById(id);

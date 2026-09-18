@@ -76,8 +76,8 @@
     or 'Empresa')|replace('{{hora_entrega}}', hora_entrega if hora_entrega != '--' else
     '-')|replace('{{hora_previsao_inicio}}', hora_previsao_inicio)|replace('{{hora_previsao_fim}}', hora_previsao_fim)
     %}
-    {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug,
-    solicitacao_id=a.solicitacao_id) %}
+    {% set link_contrato_visual = '/painel/solicitacao/' ~ a.solicitacao_id %}
+    {% set ae = a.solicitacao.analise_estoque_view if a.solicitacao else none %}
     {% set c = a.solicitacao.cliente %}
     {% set endereco_rota = endereco_rota_solicitacao(a.solicitacao) %}
     {% set url_waze = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=waze' %}
@@ -100,6 +100,12 @@
                 </div>
                 {% else %}
                 <b>{{ item_nome }}</b>
+                {% endif %}
+                {% if ae and ae.recursos %}
+                <small class="responsaveis-operacao-mini"><b>Recursos:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.nome }} {{ r.necessario }}{% endfor %}</small>
+                {% endif %}
+                {% if ae and ae.tem_conflito %}
+                  <small class="observacao-destaque"><b>ATENÇÃO:</b> estoque excedido neste contrato</small>
                 {% endif %}
                 <small>{{ a.solicitacao.cliente.nome }}</small>
                 <small>{{ a.bairro or a.solicitacao.bairro or '-' }}</small>
@@ -128,8 +134,18 @@
               class="preparo-acoes form-operacao"
               data-data-evento="{{ a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else '' }}"
               data-tipo="{{ tipo }}" onsubmit="return validarDataOperacao(this)">
-            <a class="link-detalhe link-contrato-operacao" href="{{ link_contrato_visual }}" target="_blank">Ver
-                contrato</a>
+            <a class="link-detalhe link-contrato-operacao" href="{{ link_contrato_visual }}">Ver contrato</a>
+
+            {% if ae and (ae.recursos or ae.tem_conflito) %}
+            <div class="box {% if ae.tem_conflito %}aviso{% endif %}" style="margin:10px 0">
+                <b>Recursos do contrato</b>
+                {% if ae.recursos %}
+                <p style="margin:.4rem 0">{% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.nome }}: {{ r.necessario }}{% endfor %}</p>
+                {% endif %}
+                {% for p in ae.conflitos_produtos %}<p style="margin:.35rem 0"><b>ATENÇÃO — PRODUTO EXCEDIDO:</b> {{ p.nome }} · falta {{ p.falta }}</p>{% endfor %}
+                {% for r in ae.conflitos_recursos %}<p style="margin:.35rem 0"><b>ATENÇÃO — RECURSO EXCEDIDO:</b> {{ r.nome }} · falta {{ r.falta }}</p>{% endfor %}
+            </div>
+            {% endif %}
 
             {% set vinculada = operacoes_vinculadas.get(a.id) %}
             {% if vinculada %}

@@ -52,6 +52,14 @@
         {% endif %}
         · {{ s.bairro or '-' }}
       </small>
+      {% set ae = s.analise_estoque_view %}
+      {% if ae and ae.recursos %}
+        <small class="financeiro-mini"><b>Recursos:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.nome }} {{ r.necessario }}{% endfor %}</small>
+      {% endif %}
+      {% if ae and ae.tem_conflito %}
+        {% for p in ae.conflitos_produtos %}<small class="observacao-destaque"><b>ATENÇÃO — PRODUTO EXCEDIDO:</b> {{ p.nome }} · falta {{ p.falta }}</small>{% endfor %}
+        {% for r in ae.conflitos_recursos %}<small class="observacao-destaque"><b>ATENÇÃO — RECURSO EXCEDIDO:</b> {{ r.nome }} · falta {{ r.falta }}</small>{% endfor %}
+      {% endif %}
       {% set rota = rotas_por_solicitacao.get(s.id) %}<small class="financeiro-mini">{% if rota and rota.roteirizado %}Roteirizado · {{ rota.equipe.nome if rota.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}</small>
       {% if eh_credito %}
         <small class="financeiro-mini">Situação: Em crédito</small>

@@ -96,6 +96,7 @@
 {% set qtd_contratos = (pendencias_agenda|length) + (pendencias_envio_contrato|length) + ((pendencias_sinal|length) if empresa.exige_sinal else 0) %}
 {% set qtd_operacao = pendencias_operacao|length %}
 {% set qtd_financeiro = (pendencias_a_receber|length) + (pendencias_financeiras|length) %}
+{% set qtd_estoque = pendencias_estoque|length %}
 
 <div class="pendencias-home pendencias-agrupadas">
     {% if qtd_contratos > 0 %}
@@ -166,6 +167,39 @@
             </div>
             {% endif %}
 
+        </div>
+    </details>
+    {% endif %}
+
+    {% if qtd_estoque > 0 %}
+    <details class="accordion pendencia-grupo" open>
+        <summary>
+            <span class="pendencia-grupo-icone"><i class="bi bi-exclamation-triangle"></i></span>
+            <span class="pendencia-grupo-texto">
+                <b>Item / Produto / Serviço</b>
+                <small>{{ qtd_estoque }} contrato{% if qtd_estoque != 1 %}s{% endif %} com conflito de estoque</small>
+            </span>
+            <b class="pendencia-grupo-contador">{{ qtd_estoque }}</b>
+        </summary>
+        <div class="pendencia-grupo-conteudo">
+            <div class="lista-mobile">
+            {% for i in pendencias_estoque %}
+                {% set ae = i.analise_estoque_view %}
+                <a class="card-lista status-conflito" href="/painel/solicitacao/{{ i.id }}">
+                    <div>
+                        <b>Contrato #{{ i.id }} · {{ i.cliente.nome }}</b>
+                        <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or '-' }}</small>
+                        {% for p in ae.conflitos_produtos %}
+                          <small><b>PRODUTO EXCEDIDO:</b> {{ p.nome }} · falta {{ p.falta }}</small>
+                        {% endfor %}
+                        {% for r in ae.conflitos_recursos %}
+                          <small><b>RECURSO EXCEDIDO:</b> {{ r.nome }} · falta {{ r.falta }}</small>
+                        {% endfor %}
+                    </div>
+                    <strong>Ver contrato ›</strong>
+                </a>
+            {% endfor %}
+            </div>
         </div>
     </details>
     {% endif %}
@@ -246,7 +280,7 @@
     </details>
     {% endif %}
 
-    {% if qtd_contratos == 0 and qtd_operacao == 0 and qtd_financeiro == 0 %}
+    {% if qtd_contratos == 0 and qtd_estoque == 0 and qtd_operacao == 0 and qtd_financeiro == 0 %}
     <div class="pendencias-tudo-certo">
         <i class="bi bi-check-circle"></i>
         <div>

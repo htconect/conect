@@ -2968,48 +2968,120 @@ def _comprometimento_recursos_data(
 
 
 def _analise_estoque_solicitacao(db: Session, item: Solicitacao) -> dict:
-    if not item or not item.data_evento:
-        return {"recursos": [], "conflitos": [], "tem_conflito": False}
-    mapa_produtos = _mapa_recursos_produtos(db, item.empresa_id)
-    padrao, efetivo, ajustados = _requisitos_solicitacao_efetivos(db, item, mapa_produtos)
-    ids = set(padrao.keys())
-    if not ids:
-        return {"recursos": [], "conflitos": [], "tem_conflito": False}
+    """Analisa, para um contrato, excesso do produto principal e dos recursos compartilhados.
 
-    comprometido_outros = _comprometimento_recursos_data(
-        db, item.empresa_id, item.data_evento, excluir_solicitacao_id=item.id
-    )
-    recursos_db = {
-        r.id: r for r in db.query(ItemProdutoServicoEstoque).filter(
-            ItemProdutoServicoEstoque.empresa_id == item.empresa_id,
-            ItemProdutoServicoEstoque.id.in_(ids),
-        ).all()
+    Produto excedido = quantidade deste contrato ultrapassa o saldo físico do produto na data.
+    Recurso excedido = TV/Som/Microfone/etc. necessário ultrapassa o saldo do recurso na data.
+    """
+    vazio = {
+        "produtos": [], "recursos": [],
+        "conflitos_produtos": [], "conflitos_recursos": [],
+        "conflitos": [], "tem_conflito": False,
     }
-    linhas = []
-    for recurso in _itens_estoque_empresa(db, item.empresa_id, somente_ativos=False):
-        if recurso.id not in ids:
+    if not item or not item.data_evento:
+        return vazio
+
+    # ---- Produtos/serviços do contrato -------------------------------------------------
+    solicitados_por_produto: dict[int, int] = {}
+    nomes_reserva: dict[int, str] = {}
+    for ri in list(getattr(item, "itens", []) or []):
+        if not ri.produto_id:
             continue
-        qtd_padrao = max(0, int(padrao.get(recurso.id, 0)))
-        necessario = max(0, int(efetivo.get(recurso.id, qtd_padrao)))
-        estoque_total = max(0, int(recurso.quantidade_estoque or 0))
-        outros = max(0, int(comprometido_outros.get(recurso.id, 0)))
+        pid = int(ri.produto_id)
+        solicitados_por_produto[pid] = solicitados_por_produto.get(pid, 0) + max(1, int(ri.quantidade or 1))
+        nomes_reserva[pid] = ri.nome or f"Produto #{pid}"
+
+    outros_produtos: dict[int, int] = {}
+    for reserva in _reservas_ativas_na_data(
+        db, item.empresa_id, item.data_evento, excluir_solicitacao_id=item.id
+    ):
+        for ri in list(getattr(reserva, "itens", []) or []):
+            if not ri.produto_id:
+                continue
+            pid = int(ri.produto_id)
+            outros_produtos[pid] = outros_produtos.get(pid, 0) + max(1, int(ri.quantidade or 1))
+
+    produtos_db = {}
+    if solicitados_por_produto:
+        produtos_db = {
+            p.id: p for p in db.query(ProdutoServico).filter(
+                ProdutoServico.empresa_id == item.empresa_id,
+                ProdutoServico.id.in_(list(solicitados_por_produto.keys())),
+            ).all()
+        }
+
+    linhas_produtos = []
+    for pid, necessario in solicitados_por_produto.items():
+        produto = produtos_db.get(pid)
+        estoque_total = max(0, int(produto.quantidade_disponivel or 0)) if produto else 0
+        outros = max(0, int(outros_produtos.get(pid, 0)))
         disponivel_antes = max(estoque_total - outros, 0)
         falta = max(necessario - disponivel_antes, 0)
-        linhas.append({
-            "id": recurso.id,
-            "nome": recurso.nome,
+        linhas_produtos.append({
+            "id": pid,
+            "nome": (produto.nome if produto else nomes_reserva.get(pid)) or f"Produto #{pid}",
             "estoque_total": estoque_total,
-            "padrao": qtd_padrao,
             "necessario": necessario,
-            "ajustado": recurso.id in ajustados,
-            "ativo_no_contrato": necessario > 0,
             "comprometido_outros": outros,
             "disponivel_antes": disponivel_antes,
             "falta": falta,
             "conflito": falta > 0,
         })
-    conflitos = [linha for linha in linhas if linha["conflito"]]
-    return {"recursos": linhas, "conflitos": conflitos, "tem_conflito": bool(conflitos)}
+
+    # ---- Recursos compartilhados -------------------------------------------------------
+    mapa_produtos = _mapa_recursos_produtos(db, item.empresa_id)
+    padrao, efetivo, ajustados = _requisitos_solicitacao_efetivos(db, item, mapa_produtos)
+    ids = set(padrao.keys())
+    comprometido_outros = _comprometimento_recursos_data(
+        db, item.empresa_id, item.data_evento, excluir_solicitacao_id=item.id
+    )
+
+    linhas_recursos = []
+    if ids:
+        for recurso in _itens_estoque_empresa(db, item.empresa_id, somente_ativos=False):
+            if recurso.id not in ids:
+                continue
+            qtd_padrao = max(0, int(padrao.get(recurso.id, 0)))
+            necessario = max(0, int(efetivo.get(recurso.id, qtd_padrao)))
+            estoque_total = max(0, int(recurso.quantidade_estoque or 0))
+            outros = max(0, int(comprometido_outros.get(recurso.id, 0)))
+            disponivel_antes = max(estoque_total - outros, 0)
+            falta = max(necessario - disponivel_antes, 0)
+            linhas_recursos.append({
+                "id": recurso.id,
+                "nome": recurso.nome,
+                "estoque_total": estoque_total,
+                "padrao": qtd_padrao,
+                "necessario": necessario,
+                "ajustado": recurso.id in ajustados,
+                "ativo_no_contrato": necessario > 0,
+                "comprometido_outros": outros,
+                "disponivel_antes": disponivel_antes,
+                "falta": falta,
+                "conflito": falta > 0,
+            })
+
+    conflitos_produtos = [linha for linha in linhas_produtos if linha["conflito"]]
+    conflitos_recursos = [linha for linha in linhas_recursos if linha["conflito"]]
+    return {
+        "produtos": linhas_produtos,
+        "recursos": linhas_recursos,
+        "conflitos_produtos": conflitos_produtos,
+        "conflitos_recursos": conflitos_recursos,
+        "conflitos": conflitos_produtos + conflitos_recursos,
+        "tem_conflito": bool(conflitos_produtos or conflitos_recursos),
+    }
+
+
+def _anexar_analise_estoque(db: Session, solicitacoes):
+    """Anexa atributo transitório ``analise_estoque_view`` para Agenda/Operação/Home."""
+    vistos = set()
+    for item in solicitacoes or []:
+        if not item or not getattr(item, "id", None) or item.id in vistos:
+            continue
+        vistos.add(item.id)
+        item.analise_estoque_view = _analise_estoque_solicitacao(db, item)
+    return solicitacoes
 
 
 def _alugado_por_produto_data(db: Session, empresa_id: int, data_consulta: date) -> dict[int, int]:
@@ -3319,6 +3391,32 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             .all()
         )
 
+    # Pendências de estoque: produto/serviço ou recurso compartilhado excedido.
+    # Mantemos na tela principal para o atendente descobrir o problema antes da operação.
+    candidatos_estoque = (
+        db.query(Solicitacao)
+        .options(
+            joinedload(Solicitacao.cliente),
+            selectinload(Solicitacao.itens),
+        )
+        .filter(
+            Solicitacao.empresa_id == empresa.id,
+            Solicitacao.data_evento >= hoje,
+            ~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)),
+        )
+        .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc(), Solicitacao.id.asc())
+        .limit(60)
+        .all()
+    )
+    pendencias_estoque = []
+    for contrato_estoque in candidatos_estoque:
+        analise = _analise_estoque_solicitacao(db, contrato_estoque)
+        if analise.get("tem_conflito"):
+            contrato_estoque.analise_estoque_view = analise
+            pendencias_estoque.append(contrato_estoque)
+            if len(pendencias_estoque) >= 12:
+                break
+
     _anexar_responsaveis_exibicao(solicitacoes)
 
     link_pre_contrato, responsavel_pre_contrato_nome, responsavel_pre_contrato_telefone = _url_pre_contrato_pessoal(request, db, empresa)
@@ -3359,6 +3457,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "pendencias_a_receber": pendencias_a_receber,
         "pendencias_operacao": pendencias_operacao,
         "pendencias_financeiras": pendencias_financeiras,
+        "pendencias_estoque": pendencias_estoque,
         "total_clientes": int(total_clientes),
         "total_produtos": int(total_produtos),
         "pendentes": pendentes,
@@ -4368,6 +4467,15 @@ def preparar_reservas(
             # recente, que é o melhor candidato para auditoria operacional.
             operacoes_vinculadas[agenda.id] = candidatos[-1] if candidatos else None
 
+    solicitacoes_operacao = []
+    vistos_operacao = set()
+    for agenda_item in itens:
+        sol = getattr(agenda_item, "solicitacao", None)
+        if sol and sol.id not in vistos_operacao:
+            vistos_operacao.add(sol.id)
+            solicitacoes_operacao.append(sol)
+    _anexar_analise_estoque(db, solicitacoes_operacao)
+
     return templates.TemplateResponse("admin/preparar.html", {
         "request": request,
         "empresa": empresa,
@@ -4618,6 +4726,21 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
         .all()
     )
     mensagens = mensagens_empresa(empresa)
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
+    mapa_recursos = _mapa_recursos_produtos(db, empresa.id)
+    itens_estoque_por_id = {r.id: r for r in itens_estoque}
+    recursos_por_produto_view = {}
+    for produto_id, vinculos in mapa_recursos.items():
+        recursos_por_produto_view[str(produto_id)] = [
+            {
+                "id": item_estoque_id,
+                "nome": itens_estoque_por_id[item_estoque_id].nome,
+                "quantidade": quantidade,
+            }
+            for item_estoque_id, quantidade in vinculos.items()
+            if item_estoque_id in itens_estoque_por_id
+        ]
+
     analise_estoque = _analise_estoque_solicitacao(db, item)
     return templates.TemplateResponse("admin/solicitacao_detalhe.html",
                                       {"request": request, "item": item, "empresa": empresa, "produtos": produtos,
@@ -4626,7 +4749,8 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS,
                                        "fluxo_infinitepay": _infinitepay_habilitada(empresa),
                                        "analise_estoque": analise_estoque,
-                                       "recursos_contrato": analise_estoque.get("recursos", [])})
+                                       "recursos_contrato": analise_estoque.get("recursos", []),
+                                       "recursos_por_produto_view": recursos_por_produto_view})
 
 
 
@@ -8532,6 +8656,7 @@ def agenda(
             itens.append(s)
 
     _anexar_responsaveis_exibicao(itens)
+    _anexar_analise_estoque(db, itens)
     mensagens = mensagens_empresa(empresa)
     return templates.TemplateResponse("admin/agenda.html", {
         "request": request,

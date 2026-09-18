@@ -47,7 +47,9 @@
     <summary>Onde está nessa data</summary>
     {% if produto_selecionado.conflito %}
       <div class="alerta-conflito-disponibilidade">
-        <i class="bi bi-exclamation-triangle"></i> Conflito identificado: {{ produto_selecionado.alugados }} locação(ões) para {{ produto_selecionado.total }} equipamento(s).
+        <i class="bi bi-exclamation-triangle"></i>
+        {% if produto_selecionado.conflito_produto %}<b>ATENÇÃO — PRODUTO EXCEDIDO.</b> {{ produto_selecionado.alugados }} unidade(s) reservada(s) para {{ produto_selecionado.total }} disponível(is).{% endif %}
+        {% if produto_selecionado.conflito_recursos %}<b> ATENÇÃO — RECURSO EXCEDIDO.</b> Um ou mais recursos compartilhados passaram do estoque disponível.{% endif %}
       </div>
     {% endif %}
     {% if produto_selecionado.locais %}
@@ -87,7 +89,7 @@
     <div>
       <b>{{ item.produto.nome }}</b>
       <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
-      {% if item.limitado_recursos %}<small>Limitado por item de estoque</small>{% endif %}
+      {% if item.conflito_produto %}<small><b>ATENÇÃO — PRODUTO EXCEDIDO</b></small>{% endif %}{% if item.conflito_recursos %}<small><b>ATENÇÃO — RECURSO EXCEDIDO</b></small>{% elif item.limitado_recursos %}<small>Limitado por recurso de estoque</small>{% endif %}
     </div>
     <strong>{% if item.status == 'disponivel' %}<i class="bi bi-check-circle status-disponivel"></i>{% elif item.status == 'atencao' %}<i class="bi bi-exclamation-circle status-atencao"></i>{% elif item.status == 'conflito' %}<i class="bi bi-exclamation-triangle status-conflito"></i>{% else %}<i class="bi bi-x-circle status-indisponivel"></i>{% endif %}</strong>
   </a>
