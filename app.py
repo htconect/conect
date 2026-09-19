@@ -5677,6 +5677,12 @@ async def preparar_contrato(
     # Regrava os itens da reserva para permitir vários produtos/serviços.
     db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
     primeiro_produto = None
+    # IMPORTANTE: ``item.itens`` já foi acessado acima para montar ``assinatura_anterior``.
+    # Portanto, a relationship fica carregada em memória com os itens antigos. Após o
+    # DELETE em lote + INSERT dos novos itens, somar ``item.itens`` nesta mesma sessão
+    # pode devolver a coleção antiga (ou vazia), zerando o valor total do contrato.
+    # Mantemos o total a partir dos novos itens que estão sendo gravados agora.
+    total_itens_novos = 0.0
     for idx, produto_id in enumerate(produto_ids):
         if not produto_id:
             continue
@@ -5689,6 +5695,7 @@ async def preparar_contrato(
         valor_unitario = texto_para_float(valores_unitarios[idx]) if idx < len(valores_unitarios) else (
                 produto.valor_base or 0)
         total_item = quantidade * valor_unitario
+        total_itens_novos += total_item
         db.add(ReservaItem(
             empresa_id=empresa.id,
             solicitacao_id=item.id,
@@ -5713,9 +5720,8 @@ async def preparar_contrato(
     contrato_padrao_id = primeiro_produto.contrato_id if primeiro_produto and primeiro_produto.contrato_id else None
     item.contrato_id = int(contrato_id) if contrato_id else contrato_padrao_id
     db.flush()
-    total_itens = sum((linha.valor_total or 0) for linha in item.itens)
     valor_manual = texto_para_float(valor)
-    item.valor = total_itens if total_itens > 0 else valor_manual
+    item.valor = round(total_itens_novos, 2) if total_itens_novos > 0 else valor_manual
     item.sinal = texto_para_float(sinal)
     item.observacoes = observacoes
     if primeiro_produto and item.hora_inicio:

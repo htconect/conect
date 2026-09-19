@@ -1,12 +1,11 @@
-# HUMIAT Conect — Versão 1.0.35
+# HUMIAT Conect — Versão 1.0.36
 
-## Otimização de performance do estoque e do painel
+## Correção do cálculo do valor do contrato
 
-- Eliminado o padrão N+1 na análise de Produto/Serviço e Recursos.
-- Painel, Agenda e Operação agora carregam produtos, recursos, ajustes e reservas em lote.
-- A pendência **Item / Produto / Serviço** continua funcionando, mas sem recalcular o mesmo estoque contrato por contrato.
-- Adicionados índices de apoio para solicitações, agenda, clientes, produtos, itens da reserva e recursos.
-- Adicionada medição específica `home.pendencias_estoque` no monitor de performance.
-- Não altera regras de estoque, quantidades, contratos ou recursos cadastrados.
+- Corrigido o salvamento dos equipamentos/serviços no contrato.
+- O valor total agora é calculado a partir dos novos itens gravados na própria requisição.
+- Evita o uso da coleção antiga de `ReservaItem` que permanecia carregada na sessão SQLAlchemy após a regravação dos itens.
+- Corrige o cenário em que **Total**, **Falta / valor a pagar** e a base da cobrança InfinitePay ficavam em **R$ 0,00** mesmo com itens com valor preenchido.
+- A rotina de inicialização existente continua corrigindo contratos legados cujo total possa ter ficado zerado, desde que os itens tenham `valor_total` preenchido.
 
-`v1.0.35 - otimiza consultas de estoque no painel agenda e operacao`
+`v1.0.36 - corrige calculo do valor total e saldo do contrato`
