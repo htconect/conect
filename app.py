@@ -7387,10 +7387,12 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
     total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
-    # Acumulado do banco: posição real de cada conta até a data de corte.
-    # Para consulta histórica, soma todo o histórico disponível (não apenas o ano)
-    # e inclui o saldo inicial cadastrado da conta. Para mês futuro, corta em hoje.
+    # Acumulado do banco: mantém a mesma regra que já conferia com os extratos.
+    # A seleção de mês/ano altera apenas a data de corte; não muda a base do saldo.
+    # Considera os movimentos do ano até a data de corte e NÃO soma saldo_inicial
+    # automaticamente, evitando duplicidade em contas como InfinitePay.
     corte_banco = min(mes_cards_fim, hoje)
+    inicio_ano = corte_banco.replace(month=1, day=1)
     totais_banco_por_conta = {
         conta_id_resultado: float(total or 0)
         for conta_id_resultado, total in db.query(
@@ -7398,6 +7400,7 @@ def financeiro(
             func.coalesce(func.sum(LancamentoBanco.valor), 0),
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
+            LancamentoBanco.data >= inicio_ano,
             LancamentoBanco.data <= corte_banco,
         ).group_by(LancamentoBanco.conta_id).all()
     }
@@ -7409,6 +7412,7 @@ def financeiro(
         ).filter(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
             LancamentoManualFinanceiro.tipo == "real",
+            LancamentoManualFinanceiro.data >= inicio_ano,
             LancamentoManualFinanceiro.data <= corte_banco,
         ).group_by(LancamentoManualFinanceiro.conta_id).all()
     }
@@ -7417,8 +7421,7 @@ def financeiro(
         if not conta_calculo:
             return 0.0
         return (
-            float(conta_calculo.saldo_inicial or 0)
-            + totais_banco_por_conta.get(conta_calculo.id, 0.0)
+            totais_banco_por_conta.get(conta_calculo.id, 0.0)
             + totais_manuais_por_conta.get(conta_calculo.id, 0.0)
         )
 
@@ -7784,20 +7787,23 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
     hoje = date.today()
     ate_data = ate_data or hoje
     corte_banco = min(ate_data, hoje)
+    inicio_ano = corte_banco.replace(month=1, day=1)
     contas_ativas = db.query(ContaFinanceira).filter_by(empresa_id=empresa_id, ativa=True).all()
     ids_contas = [c.id for c in contas_ativas]
 
-    saldo_banco = sum(float(c.saldo_inicial or 0) for c in contas_ativas)
+    saldo_banco = 0.0
     if ids_contas:
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
             LancamentoBanco.empresa_id == empresa_id,
             LancamentoBanco.conta_id.in_(ids_contas),
+            LancamentoBanco.data >= inicio_ano,
             LancamentoBanco.data <= corte_banco,
         ).scalar() or 0)
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
             LancamentoManualFinanceiro.empresa_id == empresa_id,
             LancamentoManualFinanceiro.conta_id.in_(ids_contas),
             LancamentoManualFinanceiro.tipo == "real",
+            LancamentoManualFinanceiro.data >= inicio_ano,
             LancamentoManualFinanceiro.data <= corte_banco,
         ).scalar() or 0)
 
