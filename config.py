@@ -1,7 +1,7 @@
 import os
 
 APP_NOME = "HUMIAT Conect"
-APP_VERSION = "1.0.36"
+APP_VERSION = "1.0.37"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conect.db")
 

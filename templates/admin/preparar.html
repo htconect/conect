@@ -361,9 +361,10 @@ Digite o número da opção:`, '1');
   const nomeContrato = b.dataset.clienteContrato || b.dataset.clienteNome || 'cliente';
   mensagem = mensagem.replace(/^Olá,\s*[^.]+\./i, `Olá, ${nomeDestino}.`);
   if(contato.rotulo === 'Responsável no local'){
+    const tipoDeslocamento = b.dataset.tipo === 'retirada' ? 'retirada' : 'entrega';
     mensagem = mensagem.replace(
       /Nossa equipe já está a caminho\./i,
-      `Estamos a caminho da entrega do equipamento de ${nomeContrato}.`
+      `Estamos a caminho da ${tipoDeslocamento} do equipamento de ${nomeContrato}.`
     );
   }
   // O primeiro aviso operacional (Previsão ou A caminho) fixa o responsável.
