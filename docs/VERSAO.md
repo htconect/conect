@@ -1,10 +1,15 @@
-# HUMIAT Conect — Versão 1.0.37
+# HUMIAT Conect — Versão 1.0.38
 
-## Correção da mensagem “A caminho” na Operação
+## Financeiro — contas a pagar, baixas parciais e posição financeira
 
-- Corrigida a mensagem de WhatsApp do botão **A caminho** conforme o tipo do card.
-- No card de **Entregar**, a mensagem continua informando: **“Estamos a caminho da entrega...”**.
-- No card de **Retirar/Buscar**, a mensagem passa a informar: **“Estamos a caminho da retirada...”**.
-- A correção usa o `tipo_evento` já existente no card e não altera a escolha do responsável, o endereço nem a abertura automática da rota.
+- Adicionada criação manual de **A pagar**, mantendo **Movimento** e **A receber**.
+- Movimentos positivos podem ser vinculados a contas a receber e movimentos negativos a contas a pagar.
+- O vínculo passa a aceitar **baixas parciais**: um título de R$ 4.000 pode receber uma baixa de R$ 2.000 e permanecer com R$ 2.000 em aberto.
+- Um mesmo título pode receber várias baixas até sua quitação.
+- Um movimento pode usar apenas parte do valor e manter saldo disponível para novas baixas.
+- As telas **A receber** e **A pagar** mostram valor original, valor baixado e saldo restante.
+- Lançamentos vinculados não podem ser excluídos; é necessário desvincular primeiro.
+- Adicionada visão consolidada com **No banco**, **A receber**, **A pagar** e **Saldo projetado**.
+- O relatório mensal em Excel/PDF passa a incluir a posição financeira atual.
 
-`v1.0.37 - corrige mensagem a caminho para entrega e retirada`
+`v1.0.38 - financeiro com contas a pagar e baixas parciais`

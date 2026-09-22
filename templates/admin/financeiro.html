@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260801-perf1">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin1">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -60,23 +60,23 @@
       </div>
       <div class="indicador-card indicador-receber">
         <span class="indicador-icone"><i class="bi bi-receipt" aria-hidden="true"></i></span>
-        <div><small>A receber manual</small><b>R$ {{ total_receber|moeda_br }}</b></div>
+        <div><small>A receber</small><b>R$ {{ total_receber_posicao|moeda_br }}</b><em>Em aberto</em></div>
       </div>
       <div class="indicador-card indicador-quantidade">
         <span class="indicador-icone"><i class="bi bi-hash" aria-hidden="true"></i></span>
         <div><small>Qtd. de contratos</small><b>{{ quantidade_contratos_cards }}</b><em>{{ quantidade_contratos_cards_proprios }} próprios · {{ quantidade_contratos_cards_transferidos }} transferidos</em></div>
       </div>
       <div class="indicador-card indicador-contrato">
-        <span class="indicador-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
-        <div><small>Contratos a receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b><em>Repasse: R$ {{ total_repasse_cards|moeda_br }}</em></div>
+        <span class="indicador-icone"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i></span>
+        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Em aberto</em></div>
       </div>
       <div class="indicador-card indicador-banco">
-        <span class="indicador-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
-        <div><small>Total do banco</small><b>R$ {{ saldo_banco|moeda_br }}</b></div>
+        <span class="indicador-icone"><i class="bi bi-bank" aria-hidden="true"></i></span>
+        <div><small>No banco</small><b>R$ {{ saldo_todos|moeda_br }}</b><em>Todas as contas</em></div>
       </div>
       <div class="indicador-card indicador-contas">
-        <span class="indicador-icone"><i class="bi bi-house" aria-hidden="true"></i></span>
-        <div><small>Todas contas</small><b>R$ {{ saldo_todos|moeda_br }}</b></div>
+        <span class="indicador-icone"><i class="bi bi-graph-up-arrow" aria-hidden="true"></i></span>
+        <div><small>Saldo projetado</small><b>R$ {{ saldo_projetado_posicao|moeda_br }}</b><em>Banco + receber − pagar</em></div>
       </div>
     </div>
   </div>
@@ -135,11 +135,11 @@
       </button>
       <button type="button" class="botao-secundario" data-aba-fin="receber">
         <i class="bi bi-arrow-down-circle icone-aba" aria-hidden="true"></i>
-        <span><b>A receber</b><small>Somente informação</small></span>
+        <span><b>A receber</b><small>Títulos e saldos</small></span>
       </button>
       <button type="button" class="botao-secundario" data-aba-fin="pagar">
         <i class="bi bi-wallet2 icone-aba" aria-hidden="true"></i>
-        <span><b>A pagar</b><small>Somente informação</small></span>
+        <span><b>A pagar</b><small>Títulos e saldos</small></span>
       </button>
     </nav>
   </div>
@@ -157,6 +157,7 @@
     <div class="manual-modal-abas">
       <button type="button" class="botao-secundario ativo" data-manual-aba="movimento"><i class="bi bi-arrow-left-right" aria-hidden="true"></i><span>Movimento</span></button>
       <button type="button" class="botao-secundario" data-manual-aba="receber"><i class="bi bi-arrow-down-circle" aria-hidden="true"></i><span>A receber</span></button>
+      <button type="button" class="botao-secundario" data-manual-aba="pagar"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i><span>A pagar</span></button>
     </div>
 
     <div class="manual-modal-painel ativo" data-manual-painel="movimento">
@@ -202,6 +203,31 @@
         </div>
       </form>
     </div>
+
+    <div class="manual-modal-painel" data-manual-painel="pagar">
+      <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
+        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
+        <input type="hidden" name="tipo" value="pagar">
+        <label>Vencimento<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label class="campo-largo">Descrição<input name="descricao" placeholder="A pagar" required></label>
+        <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
+        <label>Tipo
+          <select name="categoria">
+            <option value="empresa">Empresa</option>
+            <option value="casa">Casa</option>
+            <option value="aluguel">Aluguel</option>
+            <option value="venda">Venda</option>
+            <option value="manutencao">Manutenção</option>
+            <option value="repasse">Repasse</option>
+          </select>
+        </label>
+        <div class="modal-vinculo-rodape campo-largo">
+          <button type="button" class="botao-perigo btn-modal-cancelar"
+                  onclick="document.getElementById('dlg-lancamento-manual').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Salvar a pagar</button>
+        </div>
+      </form>
+    </div>
   </dialog>
 
 <div class="financeiro-duas-colunas">
@@ -220,7 +246,7 @@
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
         <tbody>
         {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento or l.organiza_lancamento_id or vinculos_por_banco.get(l.id) else '' }}">
+          <tr class="{{ 'linha-vinculada' if l.pagamento or l.organiza_lancamento_id or vinculos_por_banco.get(l.id) or vinculos_titulo_por_banco.get(l.id) else '' }}">
             <td>{{ l.data.strftime('%d/%m') }}</td>
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
@@ -232,10 +258,12 @@
               <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
             </td>
             <td class="vinculo-compacto">
-              {% if l.pagamento or l.organiza_lancamento or (l.categoria == 'repasse' and vinculos_por_banco.get(l.id)) %}
+              {% set vinculos_conta = vinculos_titulo_por_banco.get(l.id, []) %}
+              {% set tem_vinculo = l.pagamento or l.organiza_lancamento or vinculos_por_banco.get(l.id) or vinculos_conta %}
+              {% if tem_vinculo %}
                 <button type="button" class="botao-icone btn-vinculo-ok" title="Ver vínculo"
                         onclick="document.getElementById('dlg-vinculo-{{ l.id }}').showModal()"><i class="bi bi-check-circle-fill" aria-hidden="true"></i></button>
-              {% elif l.categoria in ('aluguel', 'venda', 'manutencao', 'repasse') %}
+              {% elif (l.valor or 0)|abs > 0.01 %}
                 <button type="button" class="botao-pequeno btn-vincular"
                         onclick="document.getElementById('dlg-vinculo-{{ l.id }}').showModal()">
                   <i class="bi bi-link-45deg" aria-hidden="true"></i><span>Vincular</span>
@@ -244,7 +272,7 @@
                 <span class="texto-discreto">—</span>
               {% endif %}
 
-              {% if l.categoria in ('aluguel', 'venda', 'manutencao', 'repasse') %}
+              {% if (l.valor or 0)|abs > 0.01 %}
               <dialog id="dlg-vinculo-{{ l.id }}" class="modal-vinculo">
                 <div class="modal-vinculo-cabecalho">
                   <div>
@@ -254,8 +282,19 @@
                   <button type="button" class="botao-icone modal-fechar"
                           onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
                 </div>
-
                 <div class="modal-vinculo-historico">{{ l.historico }}</div>
+
+                {% if vinculos_conta %}
+                  <div class="modal-vinculo-tipo">Baixas de {{ 'contas a receber' if l.valor > 0 else 'contas a pagar' }}</div>
+                  {% for vt in vinculos_conta %}
+                    <div class="repasse-vinculado-modal">
+                      <span><b>{{ vt.titulo.descricao }}</b><small>{{ 'A receber' if vt.titulo.tipo == 'receber' else 'A pagar' }} · baixa R$ {{ vt.valor|moeda_br }}</small></span>
+                      <form method="post" action="/painel/financeiro/vinculo-titulo/{{ vt.id }}/excluir" class="preserve-scroll">
+                        <button class="btn-remover-vinculo" title="Desvincular baixa"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
+                      </form>
+                    </div>
+                  {% endfor %}
+                {% endif %}
 
                 {% if l.pagamento %}
                   <div class="vinculo-atual-modal">
@@ -273,100 +312,63 @@
                   </div>
                 {% endif %}
 
-                {% if l.categoria == 'venda' or l.categoria == 'manutencao' %}
-                  <div class="modal-vinculo-tipo">
-                    {{ 'Vendas' if l.categoria == 'venda' else 'Manutenções' }} disponíveis
-                  </div>
-                  {% if candidatos_organiza.get(l.id) %}
-                    <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-organiza"
-                          class="preserve-scroll">
-                      <div class="lista-vinculos-modal">
-                        {% for c in candidatos_organiza.get(l.id) %}
-                          {% set o = c.item %}
-                          <label class="opcao-vinculo-modal">
-                            <input type="radio" name="organiza_id" value="{{ o.id }}" {% if loop.first %}checked{% endif %}>
-                            <span>
-                              <b>{{ o.cliente or '-' }}</b>
-                              <small>{{ o.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ o.valor|moeda_br }}
-                              {% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small>
-                            </span>
-                          </label>
-                        {% endfor %}
-                      </div>
-                      <div class="modal-vinculo-rodape">
-                        <button type="button" class="botao-perigo btn-modal-cancelar"
-                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
-                        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
-                      </div>
-                    </form>
-                  {% else %}
-                    <div class="modal-vazio">Nenhuma {{ 'venda' if l.categoria == 'venda' else 'manutenção' }} disponível para este filtro.</div>
-                  {% endif %}
-
-                {% elif l.categoria == 'aluguel' %}
-                  <div class="modal-vinculo-tipo">Aluguéis disponíveis</div>
-                  {% if candidatos_vinculo.get(l.id) %}
-                    <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular"
-                          class="preserve-scroll">
-                      <div class="lista-vinculos-modal">
-                        {% for c in candidatos_vinculo.get(l.id) %}
-                          {% set p = c.pagamento %}
-                          <label class="opcao-vinculo-modal">
-                            <input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}>
-                            <span>
-                              <b>{{ p.solicitacao.cliente.nome }}</b>
-                              <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}
-                              {% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small>
-                            </span>
-                          </label>
-                        {% endfor %}
-                      </div>
-                      <div class="modal-vinculo-rodape">
-                        <button type="button" class="botao-perigo btn-modal-cancelar"
-                                onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
-                        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
-                      </div>
-                    </form>
-                  {% else %}
-                    <div class="modal-vazio">Nenhum aluguel disponível para este filtro.</div>
-                  {% endif %}
-
-                {% elif l.categoria == 'repasse' %}
-                  <div class="modal-vinculo-tipo">Repasses deste lançamento</div>
-                  {% for vr in vinculos_por_banco.get(l.id, []) %}
-                    <div class="repasse-vinculado-modal">
-                      <span><b>{{ vr.solicitacao.cliente.nome }}</b> → {{ vr.solicitacao.empresa_transferida.nome if vr.solicitacao.empresa_transferida else 'Empresa' }}</span>
-                      <span>R$ {{ vr.valor|moeda_br }}</span>
-                      <form method="post" action="/painel/financeiro/banco/{{ l.id }}/repasse/{{ vr.solicitacao.id }}/desvincular" class="preserve-scroll">
-                        <button class="btn-remover-vinculo" title="Remover vínculo"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
-                      </form>
+                {% if not l.pagamento and not l.organiza_lancamento and not vinculos_por_banco.get(l.id) and saldo_vinculo_por_banco.get(l.id, 0) > 0.01 and candidatos_titulo_por_banco.get(l.id) %}
+                  <div class="modal-vinculo-tipo">{{ 'Contas a receber' if l.valor > 0 else 'Contas a pagar' }} em aberto</div>
+                  <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-titulo" class="preserve-scroll">
+                    <div class="lista-vinculos-modal">
+                      {% for t in candidatos_titulo_por_banco.get(l.id, []) %}
+                        {% set saldo_t = (t.valor or 0) - valor_baixado_por_titulo.get(t.id, 0) %}
+                        {% if saldo_t > 0.01 %}
+                        <label class="opcao-vinculo-modal">
+                          <input type="radio" name="titulo_id" value="{{ t.id }}" {% if loop.first %}checked{% endif %}>
+                          <span><b>{{ t.descricao }}</b><small>{{ t.data.strftime('%d/%m/%Y') }} · saldo R$ {{ saldo_t|moeda_br }}</small></span>
+                        </label>
+                        {% endif %}
+                      {% endfor %}
                     </div>
-                  {% endfor %}
+                    <label class="campo-largo">Valor da baixa
+                      <input name="valor" data-mascara="moeda" placeholder="Vazio = usar o máximo disponível">
+                    </label>
+                    <div class="modal-vinculo-rodape">
+                      <button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+                      <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular baixa</button>
+                    </div>
+                  </form>
+                {% endif %}
 
-                  {% if saldo_repasse_por_banco.get(l.id, 0) > 0.01 and candidatos_repasse_por_banco.get(l.id) %}
-                    <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-repasse"
-                          class="preserve-scroll">
-                      <div class="lista-vinculos-modal">
-                        {% for r in candidatos_repasse_por_banco.get(l.id) %}
-                          {% set pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
-                          <label class="opcao-vinculo-modal">
-                            <input type="radio" name="solicitacao_id" value="{{ r.id }}" {% if loop.first %}checked{% endif %}>
-                            <span>
-                              <b>{{ r.cliente.nome }}</b>
-                              <small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }} · falta R$ {{ (r.valor_repasse - pago_repasse)|moeda_br }}</small>
-                            </span>
-                          </label>
-                        {% endfor %}
-                      </div>
-                      <div class="modal-vinculo-rodape">
-                        <button type="submit" name="modo" value="saldo" class="botao-secundario btn-modal-secundario">Usar saldo</button>
-                        <button type="submit" name="modo" value="total" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Usar total</button>
-                      </div>
-                    </form>
-                  {% elif saldo_repasse_por_banco.get(l.id, 0) <= 0.01 %}
-                    <div class="modal-vazio">Valor totalmente distribuído.</div>
-                  {% else %}
-                    <div class="modal-vazio">Nenhum repasse pendente neste filtro.</div>
+                {% if not vinculos_conta %}
+                  {% if l.categoria == 'venda' or l.categoria == 'manutencao' %}
+                    <div class="modal-vinculo-tipo">{{ 'Vendas' if l.categoria == 'venda' else 'Manutenções' }} disponíveis</div>
+                    {% if candidatos_organiza.get(l.id) %}
+                      <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-organiza" class="preserve-scroll">
+                        <div class="lista-vinculos-modal">
+                          {% for c in candidatos_organiza.get(l.id) %}
+                            {% set o = c.item %}
+                            <label class="opcao-vinculo-modal"><input type="radio" name="organiza_id" value="{{ o.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ o.cliente or '-' }}</b><small>{{ o.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ o.valor|moeda_br }}{% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small></span></label>
+                          {% endfor %}
+                        </div>
+                        <div class="modal-vinculo-rodape"><button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button><button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button></div>
+                      </form>
+                    {% endif %}
+                  {% elif l.categoria == 'aluguel' %}
+                    <div class="modal-vinculo-tipo">Aluguéis disponíveis</div>
+                    {% if candidatos_vinculo.get(l.id) %}
+                      <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular" class="preserve-scroll">
+                        <div class="lista-vinculos-modal">{% for c in candidatos_vinculo.get(l.id) %}{% set p = c.pagamento %}<label class="opcao-vinculo-modal"><input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ p.solicitacao.cliente.nome }}</b><small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}</small></span></label>{% endfor %}</div>
+                        <div class="modal-vinculo-rodape"><button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-vinculo-{{ l.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button><button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button></div>
+                      </form>
+                    {% endif %}
+                  {% elif l.categoria == 'repasse' %}
+                    <div class="modal-vinculo-tipo">Repasses deste lançamento</div>
+                    {% for vr in vinculos_por_banco.get(l.id, []) %}
+                      <div class="repasse-vinculado-modal"><span><b>{{ vr.solicitacao.cliente.nome }}</b> → {{ vr.solicitacao.empresa_transferida.nome if vr.solicitacao.empresa_transferida else 'Empresa' }}</span><span>R$ {{ vr.valor|moeda_br }}</span><form method="post" action="/painel/financeiro/banco/{{ l.id }}/repasse/{{ vr.solicitacao.id }}/desvincular" class="preserve-scroll"><button class="btn-remover-vinculo" title="Remover vínculo"><i class="bi bi-x-circle" aria-hidden="true"></i></button></form></div>
+                    {% endfor %}
+                    {% if saldo_repasse_por_banco.get(l.id, 0) > 0.01 and candidatos_repasse_por_banco.get(l.id) %}
+                      <form method="post" action="/painel/financeiro/banco/{{ l.id }}/vincular-repasse" class="preserve-scroll">
+                        <div class="lista-vinculos-modal">{% for r in candidatos_repasse_por_banco.get(l.id) %}{% set pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}<label class="opcao-vinculo-modal"><input type="radio" name="solicitacao_id" value="{{ r.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ r.cliente.nome }}</b><small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }} · falta R$ {{ (r.valor_repasse - pago_repasse)|moeda_br }}</small></span></label>{% endfor %}</div>
+                        <div class="modal-vinculo-rodape"><button type="submit" name="modo" value="saldo" class="botao-secundario btn-modal-secundario">Usar saldo</button><button type="submit" name="modo" value="total" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Usar total</button></div>
+                      </form>
+                    {% endif %}
                   {% endif %}
                 {% endif %}
               </dialog>
@@ -376,12 +378,14 @@
 <td class="acoes-linha">
               <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo"><i class="bi bi-check2"></i></button>
               
-              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
+              {% if not l.pagamento and not l.organiza_lancamento_id and not vinculos_por_banco.get(l.id) and not vinculos_titulo_por_banco.get(l.id) %}
+              <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
+              {% else %}<span class="texto-discreto" title="Desvincule antes de excluir"><i class="bi bi-lock"></i></span>{% endif %}
             </td>
           </tr>
         {% else %}<tr><td colspan="6">Nenhum extrato importado neste filtro.</td></tr>{% endfor %}
         {% for m in manuais_reais %}
-          <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento or m.organiza_lancamento_id else '' }}">
+          <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento or m.organiza_lancamento_id or vinculos_titulo_por_manual.get(m.id) else '' }}">
             <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
             <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
             <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
@@ -391,113 +395,66 @@
               </select>
             </td>
             <td class="vinculo-compacto">
-              {% if m.pagamento or m.organiza_lancamento_id %}
-                <button type="button" class="botao-icone btn-vinculo-ok" title="Ver vínculo"
-                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-check-circle-fill" aria-hidden="true"></i></button>
-                <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
-                  <div class="modal-vinculo-cabecalho">
-                    <div>
-                      <strong>Vínculo atual</strong>
-                      <small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small>
-                    </div>
-                    <button type="button" class="botao-icone modal-fechar"
-                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
-                  </div>
-                  <div class="modal-vinculo-historico">{{ m.descricao }}</div>
-                  <div class="vinculo-atual-modal">
-                    <span>
-                      <b><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Vinculado</b>
-                      {% if m.pagamento %}
-                        <small>{{ m.pagamento.solicitacao.cliente.nome }} · Aluguel · R$ {{ m.pagamento.valor|moeda_br }}</small>
-                      {% elif m.organiza_lancamento %}
-                        <small>{{ m.organiza_lancamento.cliente or '-' }} · {{ 'Venda' if m.organiza_lancamento.tipo == 'venda' else 'Manutenção' }} · R$ {{ m.organiza_lancamento.valor|moeda_br }}</small>
-                      {% endif %}
-                    </span>
-                    {% if m.pagamento %}
-                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll">
-                        <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
-                      </form>
-                    {% elif m.organiza_lancamento_id %}
-                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular-organiza" class="preserve-scroll">
-                        <button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button>
-                      </form>
-                    {% endif %}
-                  </div>
-                </dialog>
-              {% elif m.categoria in ('aluguel', 'venda', 'manutencao') and m.valor > 0 %}
-                <button type="button" class="botao-pequeno btn-vincular"
-                        onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-link-45deg" aria-hidden="true"></i><span>Vincular</span></button>
-                <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
-                  <div class="modal-vinculo-cabecalho">
-                    <div>
-                      <strong>Vincular {{ 'aluguel' if m.categoria == 'aluguel' else ('venda' if m.categoria == 'venda' else 'manutenção') }}</strong>
-                      <small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small>
-                    </div>
-                    <button type="button" class="botao-icone modal-fechar"
-                            onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
-                  </div>
-                  <div class="modal-vinculo-historico">{{ m.descricao }}</div>
-
-                  {% if m.categoria == 'aluguel' %}
-                    {% if candidatos_manual.get(m.id) %}
-                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="preserve-scroll">
-                        <div class="lista-vinculos-modal">
-                          {% for c in candidatos_manual.get(m.id) %}
-                            {% set p = c.pagamento %}
-                            <label class="opcao-vinculo-modal">
-                              <input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}>
-                              <span>
-                                <b>{{ p.solicitacao.cliente.nome }}</b>
-                                <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}</small>
-                              </span>
-                            </label>
-                          {% endfor %}
-                        </div>
-                        <div class="modal-vinculo-rodape">
-                          <button type="button" class="botao-perigo btn-modal-cancelar"
-                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
-                          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
-                        </div>
-                      </form>
-                    {% else %}
-                      <div class="modal-vazio">Nenhum aluguel disponível.</div>
-                    {% endif %}
-                  {% else %}
-                    {% if candidatos_manual_organiza.get(m.id) %}
-                      <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular-organiza" class="preserve-scroll">
-                        <div class="lista-vinculos-modal">
-                          {% for c in candidatos_manual_organiza.get(m.id) %}
-                            {% set o = c.item %}
-                            <label class="opcao-vinculo-modal">
-                              <input type="radio" name="organiza_id" value="{{ o.id }}" {% if loop.first %}checked{% endif %}>
-                              <span>
-                                <b>{{ o.cliente or '-' }}</b>
-                                <small>{{ o.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ o.valor|moeda_br }}
-                                {% if c.diff_valor > 0.01 %} · diferença R$ {{ c.diff_valor|moeda_br }}{% endif %}</small>
-                              </span>
-                            </label>
-                          {% endfor %}
-                        </div>
-                        <div class="modal-vinculo-rodape">
-                          <button type="button" class="botao-perigo btn-modal-cancelar"
-                                  onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
-                          <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button>
-                        </div>
-                      </form>
-                    {% else %}
-                      <div class="modal-vazio">Nenhuma {{ 'venda' if m.categoria == 'venda' else 'manutenção' }} disponível no Organiza.</div>
-                    {% endif %}
-                  {% endif %}
-                </dialog>
+              {% set vinculos_conta_manual = vinculos_titulo_por_manual.get(m.id, []) %}
+              {% if m.pagamento or m.organiza_lancamento_id or vinculos_conta_manual %}
+                <button type="button" class="botao-icone btn-vinculo-ok" title="Ver vínculo" onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-check-circle-fill" aria-hidden="true"></i></button>
+              {% elif (m.valor or 0)|abs > 0.01 %}
+                <button type="button" class="botao-pequeno btn-vincular" onclick="document.getElementById('dlg-manual-{{ m.id }}').showModal()"><i class="bi bi-link-45deg" aria-hidden="true"></i><span>Vincular</span></button>
               {% else %}
                 <span class="texto-discreto">—</span>
+              {% endif %}
+
+              {% if (m.valor or 0)|abs > 0.01 %}
+              <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
+                <div class="modal-vinculo-cabecalho"><div><strong>Vincular movimento manual</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+                <div class="modal-vinculo-historico">{{ m.descricao }}</div>
+
+                {% if vinculos_conta_manual %}
+                  <div class="modal-vinculo-tipo">Baixas de {{ 'contas a receber' if m.valor > 0 else 'contas a pagar' }}</div>
+                  {% for vt in vinculos_conta_manual %}
+                    <div class="repasse-vinculado-modal"><span><b>{{ vt.titulo.descricao }}</b><small>{{ 'A receber' if vt.titulo.tipo == 'receber' else 'A pagar' }} · baixa R$ {{ vt.valor|moeda_br }}</small></span><form method="post" action="/painel/financeiro/vinculo-titulo/{{ vt.id }}/excluir" class="preserve-scroll"><button class="btn-remover-vinculo" title="Desvincular baixa"><i class="bi bi-x-circle" aria-hidden="true"></i></button></form></div>
+                  {% endfor %}
+                {% endif %}
+
+                {% if m.pagamento or m.organiza_lancamento_id %}
+                  <div class="vinculo-atual-modal"><span><b><i class="bi bi-check-circle-fill" aria-hidden="true"></i> Vinculado</b>{% if m.pagamento %}<small>{{ m.pagamento.solicitacao.cliente.nome }} · Aluguel · R$ {{ m.pagamento.valor|moeda_br }}</small>{% elif m.organiza_lancamento %}<small>{{ m.organiza_lancamento.cliente or '-' }} · {{ 'Venda' if m.organiza_lancamento.tipo == 'venda' else 'Manutenção' }} · R$ {{ m.organiza_lancamento.valor|moeda_br }}</small>{% endif %}</span>
+                    {% if m.pagamento %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular" class="preserve-scroll"><button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button></form>{% elif m.organiza_lancamento_id %}<form method="post" action="/painel/financeiro/manual/{{ m.id }}/desvincular-organiza" class="preserve-scroll"><button type="submit" class="botao-perigo btn-desvincular-modal"><i class="bi bi-unlink" aria-hidden="true"></i> Desvincular</button></form>{% endif %}
+                  </div>
+                {% endif %}
+
+                {% if not m.pagamento and not m.organiza_lancamento_id and saldo_vinculo_por_manual.get(m.id, 0) > 0.01 and candidatos_titulo_por_manual.get(m.id) %}
+                  <div class="modal-vinculo-tipo">{{ 'Contas a receber' if m.valor > 0 else 'Contas a pagar' }} em aberto</div>
+                  <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular-titulo" class="preserve-scroll">
+                    <div class="lista-vinculos-modal">
+                      {% for t in candidatos_titulo_por_manual.get(m.id, []) %}
+                        {% set saldo_t = (t.valor or 0) - valor_baixado_por_titulo.get(t.id, 0) %}
+                        {% if saldo_t > 0.01 %}<label class="opcao-vinculo-modal"><input type="radio" name="titulo_id" value="{{ t.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ t.descricao }}</b><small>{{ t.data.strftime('%d/%m/%Y') }} · saldo R$ {{ saldo_t|moeda_br }}</small></span></label>{% endif %}
+                      {% endfor %}
+                    </div>
+                    <label class="campo-largo">Valor da baixa<input name="valor" data-mascara="moeda" placeholder="Vazio = usar o máximo disponível"></label>
+                    <div class="modal-vinculo-rodape"><button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button><button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular baixa</button></div>
+                  </form>
+                {% endif %}
+
+                {% if not vinculos_conta_manual and not m.pagamento and not m.organiza_lancamento_id and m.valor > 0 %}
+                  {% if m.categoria == 'aluguel' and candidatos_manual.get(m.id) %}
+                    <div class="modal-vinculo-tipo">Aluguéis disponíveis</div>
+                    <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular" class="preserve-scroll"><div class="lista-vinculos-modal">{% for c in candidatos_manual.get(m.id) %}{% set p = c.pagamento %}<label class="opcao-vinculo-modal"><input type="radio" name="pagamento_id" value="{{ p.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ p.solicitacao.cliente.nome }}</b><small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ p.valor|moeda_br }}</small></span></label>{% endfor %}</div><div class="modal-vinculo-rodape"><button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button><button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button></div></form>
+                  {% elif m.categoria in ('venda','manutencao') and candidatos_manual_organiza.get(m.id) %}
+                    <div class="modal-vinculo-tipo">{{ 'Vendas' if m.categoria == 'venda' else 'Manutenções' }} disponíveis</div>
+                    <form method="post" action="/painel/financeiro/manual/{{ m.id }}/vincular-organiza" class="preserve-scroll"><div class="lista-vinculos-modal">{% for c in candidatos_manual_organiza.get(m.id) %}{% set o = c.item %}<label class="opcao-vinculo-modal"><input type="radio" name="organiza_id" value="{{ o.id }}" {% if loop.first %}checked{% endif %}><span><b>{{ o.cliente or '-' }}</b><small>{{ o.data_pagamento.strftime('%d/%m/%Y') }} · R$ {{ o.valor|moeda_br }}</small></span></label>{% endfor %}</div><div class="modal-vinculo-rodape"><button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button><button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Vincular</button></div></form>
+                  {% endif %}
+                {% endif %}
+              </dialog>
               {% endif %}
             </td>
 
 <td class="acoes-linha">
               <form id="manual-edit-{{ m.id }}" method="post" action="/painel/financeiro/manual/{{ m.id }}/editar" class="preserve-scroll"></form>
               <button form="manual-edit-{{ m.id }}" class="btn-ok" title="Salvar edição"><i class="bi bi-check2"></i></button>
-              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual? O aluguel do sistema não será apagado.');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
+              {% if not m.pagamento and not m.organiza_lancamento_id and not vinculos_titulo_por_manual.get(m.id) %}
+              <form method="post" action="/painel/financeiro/manual/{{ m.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento manual?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
+              {% else %}<span class="texto-discreto" title="Desvincule antes de excluir"><i class="bi bi-lock"></i></span>{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -643,25 +600,24 @@
               {% endfor %}
 
               {% for r in receber %}
+                {% set baixado = valor_baixado_por_titulo.get(r.id, 0) %}
+                {% set saldo_r = (r.valor or 0) - baixado %}
                 <tr>
                   <td>{{ r.data.strftime('%d/%m') }}</td>
-                  <td class="cliente-cell">
-                    <strong>{{ r.descricao }}</strong>
-                    <small>Manual</small>
-                  </td>
+                  <td class="cliente-cell"><strong>{{ r.descricao }}</strong><small>Manual · valor original R$ {{ r.valor|moeda_br }}</small></td>
                   <td>
-                    {% if r.categoria == 'manutencao' %}
-                      <span class="tipo-chip manutencao">Manutenção</span>
-                    {% elif r.categoria == 'venda' %}
-                      <span class="tipo-chip venda">Venda</span>
-                    {% elif r.categoria == 'aluguel' %}
-                      <span class="tipo-chip aluguel">Aluguel</span>
-                    {% else %}
-                      <span class="tipo-chip">{{ r.categoria|capitalize }}</span>
+                    {% if r.categoria == 'manutencao' %}<span class="tipo-chip manutencao">Manutenção</span>
+                    {% elif r.categoria == 'venda' %}<span class="tipo-chip venda">Venda</span>
+                    {% elif r.categoria == 'aluguel' %}<span class="tipo-chip aluguel">Aluguel</span>
+                    {% else %}<span class="tipo-chip">{{ r.categoria|capitalize }}</span>{% endif %}
+                  </td>
+                  <td class="positivo">R$ {{ saldo_r|moeda_br }}</td>
+                  <td>
+                    {% if baixado > 0.01 %}<span class="badge-pendente">Parcial · recebido R$ {{ baixado|moeda_br }}</span>
+                    {% else %}<span class="badge-pendente">A receber</span>
+                      <form method="post" action="/painel/financeiro/titulo/{{ r.id }}/excluir" class="preserve-scroll" style="display:inline" onsubmit="return confirm('Excluir esta conta a receber?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
                     {% endif %}
                   </td>
-                  <td class="positivo">R$ {{ r.valor|moeda_br }}</td>
-                  <td><span class="badge-pendente">A receber</span></td>
                 </tr>
               {% endfor %}
 
@@ -696,7 +652,7 @@
       <div class="financeiro-painel-aba" data-painel-fin="pagar">
         <div class="sistema-toolbar">
           <strong>Todos os valores a pagar</strong>
-          <span class="sistema-toolbar-info">Repasses pendentes e parciais.</span>
+          <span class="sistema-toolbar-info">Contas manuais e repasses pendentes/parciais.</span>
         </div>
 
         <div class="sistema-scroll-unico">
@@ -705,6 +661,31 @@
               <tr><th>Data</th><th>Cliente / destino</th><th>Tipo</th><th>Valor</th><th>Status</th></tr>
             </thead>
             <tbody>
+            {% for p in pagar %}
+              {% set baixado_p = valor_baixado_por_titulo.get(p.id, 0) %}
+              {% set saldo_p = (p.valor or 0) - baixado_p %}
+              {% if saldo_p > 0.01 %}
+              <tr>
+                <td>{{ p.data.strftime('%d/%m') }}</td>
+                <td class="cliente-cell"><strong>{{ p.descricao }}</strong><small>Manual · valor original R$ {{ p.valor|moeda_br }}</small></td>
+                <td>
+                  {% if p.categoria == 'manutencao' %}<span class="tipo-chip manutencao">Manutenção</span>
+                  {% elif p.categoria == 'venda' %}<span class="tipo-chip venda">Venda</span>
+                  {% elif p.categoria == 'aluguel' %}<span class="tipo-chip aluguel">Aluguel</span>
+                  {% elif p.categoria == 'repasse' %}<span class="tipo-chip repasse">Repasse</span>
+                  {% else %}<span class="tipo-chip">{{ p.categoria|capitalize }}</span>{% endif %}
+                </td>
+                <td class="negativo">R$ {{ saldo_p|moeda_br }}</td>
+                <td>
+                  {% if baixado_p > 0.01 %}<span class="badge-pendente">Parcial · pago R$ {{ baixado_p|moeda_br }}</span>
+                  {% else %}<span class="badge-pendente">A pagar</span>
+                    <form method="post" action="/painel/financeiro/titulo/{{ p.id }}/excluir" class="preserve-scroll" style="display:inline" onsubmit="return confirm('Excluir esta conta a pagar?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+
             {% for r in repasses_sistema %}
               {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
               {% set falta_repasse = (r.valor_repasse or 0) - valor_pago_repasse %}
@@ -727,7 +708,7 @@
               </tr>
               {% endif %}
             {% else %}
-              <tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>
+              {% if not pagar %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
             {% endfor %}
             </tbody>
           </table>

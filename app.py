@@ -37,7 +37,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -1344,6 +1344,30 @@ def garantir_colunas_novas():
             CONSTRAINT uq_vinculo_repasse_banco UNIQUE (lancamento_banco_id, solicitacao_id)
         )
         """)
+
+    if "vinculos_titulos_financeiros" not in tabelas:
+        comandos.append("""
+        CREATE TABLE vinculos_titulos_financeiros (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            titulo_id INTEGER NOT NULL,
+            lancamento_banco_id INTEGER,
+            lancamento_manual_id INTEGER,
+            valor FLOAT NOT NULL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            criado_por VARCHAR(120),
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            FOREIGN KEY(titulo_id) REFERENCES lancamentos_manuais_financeiros (id),
+            FOREIGN KEY(lancamento_banco_id) REFERENCES lancamentos_banco (id),
+            FOREIGN KEY(lancamento_manual_id) REFERENCES lancamentos_manuais_financeiros (id),
+            CONSTRAINT uq_vinculo_titulo_banco UNIQUE (lancamento_banco_id, titulo_id),
+            CONSTRAINT uq_vinculo_titulo_manual UNIQUE (lancamento_manual_id, titulo_id)
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_empresa_id ON vinculos_titulos_financeiros (empresa_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_titulo_id ON vinculos_titulos_financeiros (titulo_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_banco_id ON vinculos_titulos_financeiros (lancamento_banco_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_manual_id ON vinculos_titulos_financeiros (lancamento_manual_id)")
 
     if "lancamentos_manuais_financeiros" in tabelas:
         cols_manual_fin = colunas("lancamentos_manuais_financeiros")
@@ -7113,18 +7137,26 @@ def financeiro(
         LancamentoManualFinanceiro.tipo == "receber",
         LancamentoManualFinanceiro.recebido == False
     )
+    q_pagar = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "pagar",
+        LancamentoManualFinanceiro.recebido == False
+    )
     if conta:
         q_banco = q_banco.filter(LancamentoBanco.conta_id == conta.id)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.conta_id == conta.id)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.conta_id == conta.id)
+        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.conta_id == conta.id)
     if data_inicial:
         q_banco = q_banco.filter(LancamentoBanco.data >= inicio)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data >= inicio)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.data >= inicio)
+        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.data >= inicio)
     if data_final:
         q_banco = q_banco.filter(LancamentoBanco.data <= fim)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data <= fim)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.data <= fim)
+        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.data <= fim)
     if categoria == "sem_categoria":
         q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
         q_manual_real = q_manual_real.filter(or_(
@@ -7135,10 +7167,15 @@ def financeiro(
             LancamentoManualFinanceiro.categoria == None,
             LancamentoManualFinanceiro.categoria == ""
         ))
+        q_pagar = q_pagar.filter(or_(
+            LancamentoManualFinanceiro.categoria == None,
+            LancamentoManualFinanceiro.categoria == ""
+        ))
     elif categoria:
         q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.categoria == categoria)
         q_receber = q_receber.filter(LancamentoManualFinanceiro.categoria == categoria)
+        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.categoria == categoria)
     valor_busca = None
     if busca:
         termo_busca = busca.strip()
@@ -7158,12 +7195,72 @@ def financeiro(
         q_banco = q_banco.filter(or_(*filtro_banco))
         q_manual_real = q_manual_real.filter(or_(*filtro_manual))
         q_receber = q_receber.filter(or_(*filtro_manual))
+        q_pagar = q_pagar.filter(or_(*filtro_manual))
 
     banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.ordem.asc(), LancamentoBanco.id.asc()).all()
     manuais_reais = q_manual_real.order_by(LancamentoManualFinanceiro.data.desc(),
                                            LancamentoManualFinanceiro.ordem.asc(),
                                            LancamentoManualFinanceiro.id.asc()).all()
     receber = q_receber.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
+    pagar = q_pagar.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
+
+    vinculos_titulos = db.query(VinculoTituloFinanceiro).options(
+        joinedload(VinculoTituloFinanceiro.titulo),
+        joinedload(VinculoTituloFinanceiro.lancamento_banco),
+        joinedload(VinculoTituloFinanceiro.lancamento_manual),
+    ).filter(VinculoTituloFinanceiro.empresa_id == empresa.id).all()
+    valor_baixado_por_titulo = {}
+    vinculos_titulo_por_banco = {}
+    vinculos_titulo_por_manual = {}
+    for vinculo in vinculos_titulos:
+        valor_baixado_por_titulo[vinculo.titulo_id] = valor_baixado_por_titulo.get(vinculo.titulo_id, 0.0) + float(vinculo.valor or 0)
+        if vinculo.lancamento_banco_id:
+            vinculos_titulo_por_banco.setdefault(vinculo.lancamento_banco_id, []).append(vinculo)
+        if vinculo.lancamento_manual_id:
+            vinculos_titulo_por_manual.setdefault(vinculo.lancamento_manual_id, []).append(vinculo)
+
+    saldo_titulo = lambda titulo: max(abs(float(titulo.valor or 0)) - valor_baixado_por_titulo.get(titulo.id, 0.0), 0.0)
+    receber = [titulo for titulo in receber if saldo_titulo(titulo) > 0.01]
+    pagar = [titulo for titulo in pagar if saldo_titulo(titulo) > 0.01]
+
+    titulos_abertos = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo.in_(["receber", "pagar"]),
+        LancamentoManualFinanceiro.recebido == False,
+    ).order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
+    titulos_abertos = [titulo for titulo in titulos_abertos if saldo_titulo(titulo) > 0.01]
+    titulos_receber_abertos = [titulo for titulo in titulos_abertos if titulo.tipo == "receber"]
+    titulos_pagar_abertos = [titulo for titulo in titulos_abertos if titulo.tipo == "pagar"]
+
+    bancos_com_repasse_vinculado = {
+        banco_id for (banco_id,) in db.query(VinculoRepasseBanco.lancamento_banco_id).filter(
+            VinculoRepasseBanco.empresa_id == empresa.id
+        ).distinct().all()
+    }
+    saldo_vinculo_por_banco = {}
+    candidatos_titulo_por_banco = {}
+    for lanc in banco:
+        usado = sum(float(v.valor or 0) for v in vinculos_titulo_por_banco.get(lanc.id, []))
+        saldo_fonte = max(abs(float(lanc.valor or 0)) - usado, 0.0)
+        saldo_vinculo_por_banco[lanc.id] = saldo_fonte
+        possui_vinculo_legado = bool(
+            lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.id in bancos_com_repasse_vinculado
+        )
+        if saldo_fonte <= 0.01 or possui_vinculo_legado:
+            continue
+        candidatos = titulos_receber_abertos if float(lanc.valor or 0) > 0 else titulos_pagar_abertos
+        candidatos_titulo_por_banco[lanc.id] = candidatos[:100]
+
+    saldo_vinculo_por_manual = {}
+    candidatos_titulo_por_manual = {}
+    for lanc in manuais_reais:
+        usado = sum(float(v.valor or 0) for v in vinculos_titulo_por_manual.get(lanc.id, []))
+        saldo_fonte = max(abs(float(lanc.valor or 0)) - usado, 0.0)
+        saldo_vinculo_por_manual[lanc.id] = saldo_fonte
+        if saldo_fonte <= 0.01 or lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id:
+            continue
+        candidatos = titulos_receber_abertos if float(lanc.valor or 0) > 0 else titulos_pagar_abertos
+        candidatos_titulo_por_manual[lanc.id] = candidatos[:100]
 
     q_contratos_receber = db.query(Solicitacao).options(
         joinedload(Solicitacao.cliente)
@@ -7258,7 +7355,9 @@ def financeiro(
         abs(float(l.valor or 0)) for l in manuais_cards if l.tipo == "real" and (l.valor or 0) < 0)
     saldo_real = entradas - saidas
     total_receber = sum(
-        max(float(l.valor or 0), 0) for l in manuais_cards if l.tipo == "receber" and not l.recebido)
+        saldo_titulo(l) for l in manuais_cards if l.tipo == "receber" and not l.recebido)
+    total_pagar = sum(
+        saldo_titulo(l) for l in manuais_cards if l.tipo == "pagar" and not l.recebido)
 
     # Uma única consulta mensal alimenta os cards, o relatório semanal e a semana selecionada.
     contratos_mes = db.query(Solicitacao).filter(
@@ -7356,7 +7455,7 @@ def financeiro(
         "valor_repasse": sum(item["valor_repasse"] for item in relatorio_semanal),
     }
 
-    saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards
+    saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards - total_pagar
 
     # Cards inferiores: reutilizam os contratos já carregados para o mês.
     contratos_semana = [
@@ -7564,6 +7663,38 @@ def financeiro(
             "saldo": max(total - pago, 0),
         })
 
+    # Posição financeira atual: visão consolidada do que há em banco, a receber e a pagar.
+    contratos_posicao = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+    ).all()
+    total_contratos_receber_posicao = sum(
+        max(float(c.valor or 0) - float(c.valor_pago or 0), 0.0) for c in contratos_posicao
+    )
+    total_manual_receber_posicao = sum(saldo_titulo(t) for t in titulos_receber_abertos)
+    total_manual_pagar_posicao = sum(saldo_titulo(t) for t in titulos_pagar_abertos)
+    total_organiza_receber_posicao = sum(max(float(item.falta_receber or 0), 0.0) for item in todos_lancamentos_organiza)
+    total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
+
+    repasses_posicao = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.empresa_transferida_id != None,
+        func.coalesce(Solicitacao.valor_repasse, 0) > 0,
+    ).all()
+    total_repasses_pagar_posicao = sum(
+        max(float(r.valor_repasse or 0) - valor_vinculado_por_repasse.get(r.id, 0.0), 0.0)
+        for r in repasses_posicao
+    )
+    total_receber_posicao = (
+        total_manual_receber_posicao + total_contratos_receber_posicao
+        + total_organiza_receber_posicao + total_interempresa_receber_posicao
+    )
+    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao
+    saldo_projetado_posicao = saldo_todos + total_receber_posicao - total_pagar_posicao
+
     return templates.TemplateResponse("admin/financeiro.html", {
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
@@ -7573,7 +7704,7 @@ def financeiro(
         "semana_cards": semana_cards_inicio.isoformat(), "semanas_cards": semanas_cards,
         "semana_cards_inicio": semana_cards_inicio, "semana_cards_fim": semana_cards_fim,
         "timedelta": timedelta,
-        "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagamentos_sistema": pagamentos_sistema,
+        "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagar": pagar, "pagamentos_sistema": pagamentos_sistema,
         "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
         "quantidade_contratos_cards": quantidade_contratos_cards,
         "quantidade_contratos_cards_proprios": quantidade_contratos_cards_proprios,
@@ -7593,8 +7724,10 @@ def financeiro(
         "contratos_vencidos": contratos_vencidos, "contratos_em_dia": contratos_em_dia,
         "total_contratos_vencidos": total_contratos_vencidos, "total_contratos_em_dia": total_contratos_em_dia,
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
-        "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber,
+        "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber, "total_pagar": total_pagar,
         "saldo_previsto": saldo_previsto, "saldo_banco": saldo_banco, "saldo_todos": saldo_todos,
+        "total_receber_posicao": total_receber_posicao, "total_pagar_posicao": total_pagar_posicao,
+        "saldo_projetado_posicao": saldo_projetado_posicao,
         "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
         "candidatos_vinculo": candidatos_vinculo,
         "candidatos_manual": candidatos_manual,
@@ -7608,9 +7741,113 @@ def financeiro(
         "candidatos_repasse_por_banco": candidatos_repasse_por_banco,
         "saldo_repasse_por_banco": saldo_repasse_por_banco,
         "lancamentos_organiza_financeiro": lancamentos_organiza_financeiro,
+        "valor_baixado_por_titulo": valor_baixado_por_titulo,
+        "vinculos_titulo_por_banco": vinculos_titulo_por_banco,
+        "vinculos_titulo_por_manual": vinculos_titulo_por_manual,
+        "saldo_vinculo_por_banco": saldo_vinculo_por_banco,
+        "saldo_vinculo_por_manual": saldo_vinculo_por_manual,
+        "candidatos_titulo_por_banco": candidatos_titulo_por_banco,
+        "candidatos_titulo_por_manual": candidatos_titulo_por_manual,
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("venda", "Venda"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 
+
+
+def _posicao_financeira_atual(db: Session, empresa_id: int):
+    hoje = date.today()
+    inicio_ano = hoje.replace(month=1, day=1)
+    contas_ativas = db.query(ContaFinanceira).filter_by(empresa_id=empresa_id, ativa=True).all()
+    ids_contas = [c.id for c in contas_ativas]
+
+    saldo_banco = 0.0
+    if ids_contas:
+        saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
+            LancamentoBanco.empresa_id == empresa_id,
+            LancamentoBanco.conta_id.in_(ids_contas),
+            LancamentoBanco.data >= inicio_ano,
+            LancamentoBanco.data <= hoje,
+        ).scalar() or 0)
+        saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
+            LancamentoManualFinanceiro.empresa_id == empresa_id,
+            LancamentoManualFinanceiro.conta_id.in_(ids_contas),
+            LancamentoManualFinanceiro.tipo == "real",
+            LancamentoManualFinanceiro.data >= inicio_ano,
+            LancamentoManualFinanceiro.data <= hoje,
+        ).scalar() or 0)
+
+    baixas_titulo = {
+        titulo_id: float(total or 0)
+        for titulo_id, total in db.query(
+            VinculoTituloFinanceiro.titulo_id, func.coalesce(func.sum(VinculoTituloFinanceiro.valor), 0)
+        ).filter(VinculoTituloFinanceiro.empresa_id == empresa_id).group_by(VinculoTituloFinanceiro.titulo_id).all()
+    }
+    titulos = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa_id,
+        LancamentoManualFinanceiro.tipo.in_(["receber", "pagar"]),
+        LancamentoManualFinanceiro.recebido == False,
+    ).all()
+    receber_manual = sum(
+        max(abs(float(t.valor or 0)) - baixas_titulo.get(t.id, 0.0), 0.0) for t in titulos if t.tipo == "receber"
+    )
+    pagar_manual = sum(
+        max(abs(float(t.valor or 0)) - baixas_titulo.get(t.id, 0.0), 0.0) for t in titulos if t.tipo == "pagar"
+    )
+
+    contratos = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa_id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
+    ).all()
+    receber_contratos = sum(max(float(c.valor or 0) - float(c.valor_pago or 0), 0.0) for c in contratos)
+
+    receber_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
+        LancamentoOrganiza.empresa_id == empresa_id, LancamentoOrganiza.falta_receber > 0
+    ).scalar() or 0)
+
+    vinculos_repasse = {
+        solicitacao_id: float(total or 0)
+        for solicitacao_id, total in db.query(
+            VinculoRepasseBanco.solicitacao_id, func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)
+        ).group_by(VinculoRepasseBanco.solicitacao_id).all()
+    }
+    repasses = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa_id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.empresa_transferida_id != None,
+        func.coalesce(Solicitacao.valor_repasse, 0) > 0,
+    ).all()
+    pagar_repasses = sum(
+        max(float(r.valor_repasse or 0) - vinculos_repasse.get(r.id, 0.0), 0.0) for r in repasses
+    )
+
+    copias = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa_id,
+        Solicitacao.cancelado_em == None,
+        Solicitacao.transferencia_origem_id != None,
+    ).all()
+    origens_ids = [c.transferencia_origem_id for c in copias if c.transferencia_origem_id]
+    receber_interempresa = 0.0
+    if origens_ids:
+        origens = db.query(Solicitacao).filter(Solicitacao.id.in_(origens_ids)).all()
+        receber_interempresa = sum(
+            max(float(o.valor_repasse or 0) - vinculos_repasse.get(o.id, 0.0), 0.0) for o in origens
+        )
+
+    total_receber = receber_manual + receber_contratos + receber_organiza + receber_interempresa
+    total_pagar = pagar_manual + pagar_repasses
+    return {
+        "banco": saldo_banco,
+        "receber": total_receber,
+        "pagar": total_pagar,
+        "projetado": saldo_banco + total_receber - total_pagar,
+        "receber_manual": receber_manual,
+        "pagar_manual": pagar_manual,
+        "receber_contratos": receber_contratos,
+        "receber_organiza": receber_organiza,
+        "receber_interempresa": receber_interempresa,
+        "pagar_repasses": pagar_repasses,
+    }
 
 
 def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
@@ -7668,7 +7905,7 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
     return inicio_mes, fim_mes, semanas, total
 
 
-def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
+def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None):
     # Gera um XLSX simples e válido sem dependência adicional.
     linhas = [
         ["Relatório financeiro mensal", "", "", "", "", "", "", "", "", "", ""],
@@ -7695,6 +7932,15 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total):
         total["valor_total"], total["valor_total_proprios"], total["valor_total_transferidos"],
         total["valor_repasse"], total["valor_recebido"], total["valor_receber"],
     ])
+    if posicao:
+        linhas.extend([
+            ["", "", "", "", "", "", "", "", "", "", ""],
+            ["POSIÇÃO FINANCEIRA ATUAL", "", "", "", "", "", "", "", "", "", ""],
+            ["No banco", "", "", "", "", posicao["banco"], "", "", "", "", ""],
+            ["A receber", "", "", "", "", posicao["receber"], "", "", "", "", ""],
+            ["A pagar", "", "", "", "", posicao["pagar"], "", "", "", "", ""],
+            ["Saldo projetado", "", "", "", "", posicao["projetado"], "", "", "", "", ""],
+        ])
 
     def coluna_excel(numero):
         resultado = ""
@@ -7782,7 +8028,8 @@ def financeiro_relatorio_excel(
     if not usuario_pode_financeiro(request, empresa, db):
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
     inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
-    conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total)
+    posicao = _posicao_financeira_atual(db, empresa.id)
+    conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao)
     nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.xlsx"
     return Response(
         conteudo,
@@ -7809,6 +8056,7 @@ def financeiro_relatorio_pdf(
         raise HTTPException(500, "Para gerar PDF, instale a dependência reportlab.")
 
     inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
+    posicao = _posicao_financeira_atual(db, empresa.id)
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     estilos = getSampleStyleSheet()
@@ -7816,8 +8064,26 @@ def financeiro_relatorio_pdf(
         Paragraph(f"Relatório financeiro mensal - {inicio_mes.strftime('%m/%Y')}", estilos["Title"]),
         Spacer(1, 14),
     ]
-    dados = [["Semana", "Período", "Qtd.", "Próprios", "Transf.", "Valor total", "Valor próprios", "Valor transf.", "Repasse", "Recebido", "A receber"]]
     moeda = lambda v: f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    dados_posicao = [
+        ["Posição atual", "Valor"],
+        ["No banco", moeda(posicao["banco"])],
+        ["A receber", moeda(posicao["receber"])],
+        ["A pagar", moeda(posicao["pagar"])],
+        ["Saldo projetado", moeda(posicao["projetado"])],
+    ]
+    tabela_posicao = Table(dados_posicao, colWidths=[130, 100])
+    tabela_posicao.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
+        ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    elementos.extend([tabela_posicao, Spacer(1, 14)])
+
+    dados = [["Semana", "Período", "Qtd.", "Próprios", "Transf.", "Valor total", "Valor próprios", "Valor transf.", "Repasse", "Recebido", "A receber"]]
     for item in semanas:
         dados.append([
             f"Semana {item['numero']}",
@@ -7860,6 +8126,177 @@ def financeiro_relatorio_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{nome}"'}
     )
+
+
+def _total_baixado_titulo(db: Session, titulo_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoTituloFinanceiro.valor), 0)).filter(
+        VinculoTituloFinanceiro.titulo_id == titulo_id
+    ).scalar() or 0)
+
+
+def _atualizar_status_titulo(db: Session, titulo: LancamentoManualFinanceiro):
+    if not titulo or titulo.tipo not in ("receber", "pagar"):
+        return
+    total = abs(float(titulo.valor or 0))
+    baixado = _total_baixado_titulo(db, titulo.id)
+    titulo.recebido = total <= 0.01 or baixado >= total - 0.01
+
+
+def _valor_vinculado_fonte_banco(db: Session, lancamento_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoTituloFinanceiro.valor), 0)).filter(
+        VinculoTituloFinanceiro.lancamento_banco_id == lancamento_id
+    ).scalar() or 0)
+
+
+def _valor_vinculado_fonte_manual(db: Session, lancamento_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoTituloFinanceiro.valor), 0)).filter(
+        VinculoTituloFinanceiro.lancamento_manual_id == lancamento_id
+    ).scalar() or 0)
+
+
+def _valor_baixa_solicitado(valor: str, limite_fonte: float, limite_titulo: float) -> float:
+    limite = min(max(limite_fonte, 0.0), max(limite_titulo, 0.0))
+    if limite <= 0.01:
+        raise HTTPException(400, "Não há saldo disponível para vincular.")
+    if valor and valor.strip():
+        solicitado = abs(texto_para_float(valor))
+        if solicitado <= 0.01:
+            raise HTTPException(400, "Informe um valor de baixa maior que zero.")
+        if solicitado > limite + 0.01:
+            raise HTTPException(400, f"O valor informado ultrapassa o saldo disponível de R$ {limite:.2f}.")
+        return solicitado
+    return limite
+
+
+@app.post("/painel/financeiro/banco/{lancamento_id}/vincular-titulo")
+def financeiro_vincular_titulo_banco(
+        request: Request,
+        lancamento_id: int,
+        titulo_id: int = Form(...),
+        valor: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoBanco, lancamento_id)
+    titulo = db.get(LancamentoManualFinanceiro, titulo_id)
+    if not lanc or lanc.empresa_id != empresa.id or not titulo or titulo.empresa_id != empresa.id or titulo.tipo not in ("receber", "pagar"):
+        raise HTTPException(404)
+    if lanc.pagamento_id or lanc.organiza_lancamento_id or db.query(VinculoRepasseBanco).filter(
+        VinculoRepasseBanco.lancamento_banco_id == lanc.id
+    ).first():
+        raise HTTPException(400, "Este movimento já possui outro tipo de vínculo. Desvincule-o primeiro.")
+
+    valor_movimento = float(lanc.valor or 0)
+    if abs(valor_movimento) <= 0.01:
+        raise HTTPException(400, "Movimento bancário sem valor disponível.")
+    tipo_esperado = "receber" if valor_movimento > 0 else "pagar"
+    if titulo.tipo != tipo_esperado:
+        raise HTTPException(400, "Entradas só podem baixar contas a receber e saídas só podem baixar contas a pagar.")
+
+    usado_fonte = _valor_vinculado_fonte_banco(db, lanc.id)
+    baixado_titulo = _total_baixado_titulo(db, titulo.id)
+    saldo_fonte = max(abs(valor_movimento) - usado_fonte, 0.0)
+    saldo_titulo = max(abs(float(titulo.valor or 0)) - baixado_titulo, 0.0)
+    valor_baixa = _valor_baixa_solicitado(valor, saldo_fonte, saldo_titulo)
+
+    existente = db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_banco_id == lanc.id,
+        VinculoTituloFinanceiro.titulo_id == titulo.id,
+    ).first()
+    if existente:
+        existente.valor = float(existente.valor or 0) + valor_baixa
+    else:
+        db.add(VinculoTituloFinanceiro(
+            empresa_id=empresa.id, titulo_id=titulo.id, lancamento_banco_id=lanc.id,
+            valor=valor_baixa, criado_por=request.session.get("usuario_nome") or "Financeiro"
+        ))
+    db.flush()
+    _atualizar_status_titulo(db, titulo)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/manual/{lancamento_id}/vincular-titulo")
+def financeiro_vincular_titulo_manual(
+        request: Request,
+        lancamento_id: int,
+        titulo_id: int = Form(...),
+        valor: str = Form(""),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
+    titulo = db.get(LancamentoManualFinanceiro, titulo_id)
+    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not titulo or titulo.empresa_id != empresa.id or titulo.tipo not in ("receber", "pagar"):
+        raise HTTPException(404)
+    if lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id:
+        raise HTTPException(400, "Este movimento já possui outro tipo de vínculo. Desvincule-o primeiro.")
+
+    valor_movimento = float(lanc.valor or 0)
+    if abs(valor_movimento) <= 0.01:
+        raise HTTPException(400, "Movimento sem valor disponível.")
+    tipo_esperado = "receber" if valor_movimento > 0 else "pagar"
+    if titulo.tipo != tipo_esperado:
+        raise HTTPException(400, "Entradas só podem baixar contas a receber e saídas só podem baixar contas a pagar.")
+
+    usado_fonte = _valor_vinculado_fonte_manual(db, lanc.id)
+    baixado_titulo = _total_baixado_titulo(db, titulo.id)
+    saldo_fonte = max(abs(valor_movimento) - usado_fonte, 0.0)
+    saldo_titulo = max(abs(float(titulo.valor or 0)) - baixado_titulo, 0.0)
+    valor_baixa = _valor_baixa_solicitado(valor, saldo_fonte, saldo_titulo)
+
+    existente = db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id,
+        VinculoTituloFinanceiro.titulo_id == titulo.id,
+    ).first()
+    if existente:
+        existente.valor = float(existente.valor or 0) + valor_baixa
+    else:
+        db.add(VinculoTituloFinanceiro(
+            empresa_id=empresa.id, titulo_id=titulo.id, lancamento_manual_id=lanc.id,
+            valor=valor_baixa, criado_por=request.session.get("usuario_nome") or "Financeiro"
+        ))
+    db.flush()
+    _atualizar_status_titulo(db, titulo)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/vinculo-titulo/{vinculo_id}/excluir")
+def financeiro_desvincular_titulo(
+        request: Request,
+        vinculo_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    vinculo = db.get(VinculoTituloFinanceiro, vinculo_id)
+    if not vinculo or vinculo.empresa_id != empresa.id:
+        raise HTTPException(404)
+    titulo = db.get(LancamentoManualFinanceiro, vinculo.titulo_id)
+    db.delete(vinculo)
+    db.flush()
+    if titulo:
+        _atualizar_status_titulo(db, titulo)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/titulo/{lancamento_id}/excluir")
+def financeiro_excluir_titulo(
+        request: Request,
+        lancamento_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    titulo = db.get(LancamentoManualFinanceiro, lancamento_id)
+    if not titulo or titulo.empresa_id != empresa.id or titulo.tipo not in ("receber", "pagar"):
+        raise HTTPException(404)
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.titulo_id == titulo.id).first():
+        raise HTTPException(400, "Este título possui baixa vinculada. Desvincule as baixas antes de excluir.")
+    conta_id = titulo.conta_id
+    db.delete(titulo)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta_id}", status_code=303)
 
 
 @app.post("/painel/financeiro/conta")
@@ -7984,6 +8421,8 @@ def financeiro_vincular_repasse_banco(
         raise HTTPException(404)
     if (lanc.valor or 0) >= 0 or lanc.pagamento_id or lanc.categoria != "repasse":
         raise HTTPException(400, "Marque esta saída com a categoria Repasse antes de vincular.")
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui baixa de conta a pagar vinculada. Desvincule-a primeiro.")
 
     usado_banco = db.query(func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)).filter(
         VinculoRepasseBanco.lancamento_banco_id == lanc.id
@@ -8082,7 +8521,9 @@ def financeiro_vincular_organiza(
     item = db.get(LancamentoOrganiza, organiza_id)
     if not lanc or lanc.empresa_id != empresa.id or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
-    if lanc.pagamento_id or lanc.organiza_lancamento_id:
+    if lanc.pagamento_id or lanc.organiza_lancamento_id or db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_banco_id == lanc.id
+    ).first():
         raise HTTPException(400, "Este lançamento bancário já está vinculado.")
     if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
         raise HTTPException(400, "O tipo do banco deve corresponder ao lançamento do Organiza.")
@@ -8125,6 +8566,8 @@ def financeiro_vincular_banco(
     pagamento = db.get(Pagamento, pagamento_id)
     if not lanc or lanc.empresa_id != empresa.id or not pagamento or pagamento.empresa_id != empresa.id:
         raise HTTPException(404)
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
     lanc.pagamento_id = pagamento.id
     lanc.categoria = "aluguel"
     pagamento.conciliado_em = agora_utc()
@@ -8161,12 +8604,13 @@ def financeiro_excluir_banco(
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if lanc.pagamento:
-        lanc.pagamento.conciliado_em = None
-        lanc.pagamento.conciliado_por = None
-    if getattr(lanc, "repasse_solicitacao", None):
-        lanc.repasse_solicitacao.repasse_pago_em = None
-        lanc.repasse_solicitacao.repasse_pago_por = None
+    possui_vinculo = bool(
+        lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id
+        or db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == lanc.id).first()
+        or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first()
+    )
+    if possui_vinculo:
+        raise HTTPException(400, "Lançamento vinculado não pode ser excluído. Desvincule-o primeiro.")
     db.delete(lanc)
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
@@ -8242,13 +8686,13 @@ def financeiro_lancamento_manual(
         raise HTTPException(404)
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
-    if tipo not in ["real", "receber"]:
+    if tipo not in ["real", "receber", "pagar"]:
         raise HTTPException(400, "Tipo inválido.")
     valor_float = texto_para_float(valor)
     proxima_ordem = int(
         db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(empresa_id=empresa.id,
                                                                                          conta_id=conta.id).scalar() or 0) + 1
-    if tipo == "receber" and valor_float < 0:
+    if tipo in ("receber", "pagar"):
         valor_float = abs(valor_float)
     db.add(LancamentoManualFinanceiro(
         empresa_id=empresa.id,
@@ -8295,6 +8739,8 @@ def financeiro_editar_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first():
+        raise HTTPException(400, "Movimento vinculado a uma conta. Desvincule a baixa antes de editar.")
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     lanc.data = datetime.strptime(data, "%Y-%m-%d").date()
@@ -8324,7 +8770,9 @@ def financeiro_vincular_manual_organiza(
     item = db.get(LancamentoOrganiza, organiza_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
-    if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None):
+    if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None) or db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
+    ).first():
         raise HTTPException(400, "Este lançamento manual já está vinculado.")
     if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
         raise HTTPException(400, "O tipo deve corresponder ao lançamento do Organiza.")
@@ -8378,6 +8826,8 @@ def financeiro_vincular_manual(
     pagamento = db.get(Pagamento, pagamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not pagamento or pagamento.empresa_id != empresa.id:
         raise HTTPException(404)
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
     lanc.pagamento_id = pagamento.id
     lanc.categoria = "aluguel"
     pagamento.conciliado_em = agora_utc()
@@ -8416,10 +8866,11 @@ def financeiro_excluir_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
         raise HTTPException(404)
+    if lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id or db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
+    ).first():
+        raise HTTPException(400, "Lançamento vinculado não pode ser excluído. Desvincule-o primeiro.")
     conta_id = lanc.conta_id
-    if lanc.pagamento:
-        lanc.pagamento.conciliado_em = None
-        lanc.pagamento.conciliado_por = None
     db.delete(lanc)
     db.commit()
     return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta_id}",

@@ -607,7 +607,7 @@ class LancamentoManualFinanceiro(Base):
     descricao = Column(Text, nullable=False)
     valor = Column(Float, default=0)
     categoria = Column(String(20), default="empresa")
-    tipo = Column(String(20), default="real")  # real ou receber
+    tipo = Column(String(20), default="real")  # real, receber ou pagar
     recebido = Column(Boolean, default=False)
     pagamento_id = Column(Integer, ForeignKey("pagamentos.id"), nullable=True)
     organiza_lancamento_id = Column(Integer, ForeignKey("lancamentos_organiza.id"), nullable=True, index=True)
@@ -619,6 +619,28 @@ class LancamentoManualFinanceiro(Base):
     pagamento = relationship("Pagamento")
     organiza_lancamento = relationship("LancamentoOrganiza", foreign_keys=[organiza_lancamento_id])
     repasse_solicitacao = relationship("Solicitacao", foreign_keys=[repasse_solicitacao_id])
+
+
+class VinculoTituloFinanceiro(Base):
+    """Baixa parcial entre um movimento financeiro e um título manual a pagar/receber."""
+    __tablename__ = "vinculos_titulos_financeiros"
+    __table_args__ = (
+        UniqueConstraint("lancamento_banco_id", "titulo_id", name="uq_vinculo_titulo_banco"),
+        UniqueConstraint("lancamento_manual_id", "titulo_id", name="uq_vinculo_titulo_manual"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    titulo_id = Column(Integer, ForeignKey("lancamentos_manuais_financeiros.id"), nullable=False, index=True)
+    lancamento_banco_id = Column(Integer, ForeignKey("lancamentos_banco.id"), nullable=True, index=True)
+    lancamento_manual_id = Column(Integer, ForeignKey("lancamentos_manuais_financeiros.id"), nullable=True, index=True)
+    valor = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    criado_por = Column(String(120), nullable=True)
+
+    titulo = relationship("LancamentoManualFinanceiro", foreign_keys=[titulo_id])
+    lancamento_banco = relationship("LancamentoBanco", foreign_keys=[lancamento_banco_id])
+    lancamento_manual = relationship("LancamentoManualFinanceiro", foreign_keys=[lancamento_manual_id])
 
 
 class LancamentoOrganiza(Base):

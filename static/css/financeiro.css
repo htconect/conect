@@ -1322,7 +1322,7 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 .modal-manual-unico::backdrop{background:rgba(15,23,42,.42)}
 .manual-modal-abas{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
   gap:0;
   border-bottom:1px solid #e5eaf1;
 }
