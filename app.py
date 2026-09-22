@@ -7056,13 +7056,11 @@ def financeiro(
     conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
 
     hoje = date.today()
-    data_inicial = data_inicial or hoje.replace(day=1).isoformat()
-    data_final = data_final or hoje.isoformat()
-    inicio = datetime.strptime(data_inicial, "%Y-%m-%d").date()
-    fim = datetime.strptime(data_final, "%Y-%m-%d").date()
 
-    # O período dos cards pode ser consultado livremente por mês/ano.
-    # A semana é sempre um número dentro do mês escolhido acima.
+    # Existe um único mês/ano mestre: o seletor dos cards superiores.
+    # Ao trocar esse mês, o período detalhado abaixo nasce automaticamente do
+    # primeiro ao último dia do mês selecionado. O usuário pode depois reduzir
+    # apenas os dias, sempre dentro desse mesmo mês.
     def primeiro_dia_mes(valor: date) -> date:
         return valor.replace(day=1)
 
@@ -7076,6 +7074,24 @@ def financeiro(
     except ValueError:
         mes_cards_inicio = mes_vigente
     mes_cards_fim = avancar_mes(mes_cards_inicio, 1) - timedelta(days=1)
+
+    def data_no_mes(valor: str, padrao: date) -> date:
+        try:
+            data_valor = datetime.strptime(valor, "%Y-%m-%d").date() if valor else padrao
+        except ValueError:
+            data_valor = padrao
+        if data_valor < mes_cards_inicio:
+            return mes_cards_inicio
+        if data_valor > mes_cards_fim:
+            return mes_cards_fim
+        return data_valor
+
+    inicio = data_no_mes(data_inicial, mes_cards_inicio)
+    fim = data_no_mes(data_final, mes_cards_fim)
+    if inicio > fim:
+        fim = inicio
+    data_inicial = inicio.isoformat()
+    data_final = fim.isoformat()
 
     # Semanas do mês selecionado. A primeira e a última podem ser parciais,
     # garantindo que todos os contratos do mês apareçam em exatamente uma semana.
@@ -7104,9 +7120,12 @@ def financeiro(
             indice_semana = None
 
     if indice_semana is None:
+        # Se o usuário acabou de mudar o intervalo de dias, a semana acompanha
+        # a data inicial escolhida. Nas demais trocas de filtro ela permanece.
+        referencia_semana = inicio if request.query_params.get("data_inicial") else hoje
         indice_semana = next(
             (i for i, periodo in enumerate(semanas_cards)
-             if periodo["inicio"] <= hoje <= periodo["fim"]),
+             if periodo["inicio"] <= referencia_semana <= periodo["fim"]),
             0,
         )
 
@@ -7140,9 +7159,9 @@ def financeiro(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real"
     )
-    # A receber / A pagar funcionam como posição do mês selecionado:
-    # carregam tudo que venceu/pertence até o último dia do mês (inclusive meses
-    # anteriores ainda em aberto), sem antecipar títulos de meses futuros.
+    # A receber mantém a lógica de posição (mês selecionado + saldos anteriores).
+    # A pagar mostra somente os vencimentos pertencentes ao mês selecionado,
+    # evitando misturar dívidas antigas quando o usuário consulta outro mês.
     q_receber = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "receber",
@@ -7153,6 +7172,7 @@ def financeiro(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "pagar",
         LancamentoManualFinanceiro.recebido == False,
+        LancamentoManualFinanceiro.data >= mes_cards_inicio,
         LancamentoManualFinanceiro.data <= mes_cards_fim,
     )
     if conta:
@@ -7503,7 +7523,10 @@ def financeiro(
         Solicitacao.empresa_transferida_id != None,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0
     )
-    q_repasses = q_repasses.filter(Solicitacao.data_evento <= mes_cards_fim)
+    q_repasses = q_repasses.filter(
+        Solicitacao.data_evento >= mes_cards_inicio,
+        Solicitacao.data_evento <= mes_cards_fim,
+    )
     if busca:
         like_repasse = f"%{busca.strip()}%"
         filtros_repasse = [Cliente.nome.ilike(like_repasse)]
@@ -7695,7 +7718,8 @@ def financeiro(
         saldo_titulo(t) for t in titulos_receber_abertos if t.data and t.data <= mes_cards_fim
     )
     total_manual_pagar_posicao = sum(
-        saldo_titulo(t) for t in titulos_pagar_abertos if t.data and t.data <= mes_cards_fim
+        saldo_titulo(t) for t in titulos_pagar_abertos
+        if t.data and mes_cards_inicio <= t.data <= mes_cards_fim
     )
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
@@ -7708,6 +7732,7 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
+        Solicitacao.data_evento >= mes_cards_inicio,
         Solicitacao.data_evento <= mes_cards_fim,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0,
     ).all()
@@ -8812,13 +8837,25 @@ def financeiro_editar_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first():
+    if lanc.tipo == "real" and db.query(VinculoTituloFinanceiro).filter(
+        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
+    ).first():
         raise HTTPException(400, "Movimento vinculado a uma conta. Desvincule a baixa antes de editar.")
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
+
+    novo_valor = texto_para_float(valor)
+    if lanc.tipo in ("receber", "pagar"):
+        novo_valor = abs(novo_valor)
+        total_baixado = float(db.query(func.coalesce(func.sum(VinculoTituloFinanceiro.valor), 0)).filter(
+            VinculoTituloFinanceiro.titulo_id == lanc.id
+        ).scalar() or 0)
+        if novo_valor < total_baixado - 0.009:
+            raise HTTPException(400, f"O valor não pode ser menor que o total já baixado (R$ {total_baixado:.2f}).")
+
     lanc.data = datetime.strptime(data, "%Y-%m-%d").date()
     lanc.descricao = descricao.strip()
-    lanc.valor = texto_para_float(valor)
+    lanc.valor = novo_valor
     lanc.categoria = categoria
     if categoria != "aluguel" and getattr(lanc, "pagamento_id", None):
         pagamento = db.get(Pagamento, lanc.pagamento_id)

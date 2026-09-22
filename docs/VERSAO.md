@@ -1,13 +1,14 @@
-# HUMIAT Conect — Versão 1.0.46
+# HUMIAT Conect — Versão 1.0.47
 
-## Financeiro — período livre, banco para conferência e contratos compactos
+## Financeiro — período único, contas a pagar do mês e edição
 
-- Cards financeiros reorganizados.
-- Banco selecionado e total de todos os bancos posicionados após A pagar e antes do Saldo projetado.
-- Seleção livre de mês/ano.
-- Seleção numérica de semana dentro do mês escolhido.
-- Resumo mensal de contratos em um único card compacto.
-- Resumo semanal permanece separado.
-- Saldo bancário considera saldo inicial + histórico acumulado até a data de corte.
+- O seletor superior de mês/ano é a única referência mensal da tela.
+- Ao trocar o mês, o intervalo detalhado é preenchido automaticamente do primeiro ao último dia desse mês.
+- As datas detalhadas ficam limitadas ao mês selecionado e podem reduzir o período por dias.
+- A semana acompanha somente alteração do período de datas ou seleção manual de semana.
+- Removidos os botões Filtrar e Limpar; filtros passam a ser aplicados automaticamente.
+- A pagar exibe apenas vencimentos e repasses pertencentes ao mês selecionado, sem carregar dívidas de meses anteriores.
+- Contas a pagar manuais podem ser editadas; em títulos com baixa parcial, o novo valor não pode ficar abaixo do total já pago.
+- O cálculo bancário validado permanece inalterado.
 
-`v1.0.44 - financeiro com periodo livre e resumos compactos`
+`v1.0.47 - financeiro periodo unico e edicao de contas a pagar`

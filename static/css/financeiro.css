@@ -206,7 +206,7 @@ body.tela-financeiro-desktop .container-app{
 }
 .financeiro-filtros{
   display:grid;
-  grid-template-columns:160px 150px 135px 135px 155px 165px minmax(220px,1fr) 108px 108px;
+  grid-template-columns:160px 135px 135px 155px 165px minmax(260px,1fr);
   gap:10px;
   margin-bottom:0;
 }
@@ -1280,7 +1280,7 @@ body.tela-financeiro-desktop{overflow:hidden!important}
   border-radius:12px!important;
 }
 .financeiro-filtros{
-  grid-template-columns:140px 120px 118px 118px 140px 145px minmax(240px,1fr) 88px 88px!important;
+  grid-template-columns:140px 118px 118px 140px 145px minmax(260px,1fr)!important;
   gap:6px!important;
 }
 .financeiro-filtros input,
@@ -1851,4 +1851,15 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 }
 @media(max-width:1450px){
   .financeiro-mensal-compacto .contrato-mensal-unico{min-width:780px}
+}
+
+
+/* v1.0.47 — um único mês mestre, filtros automáticos e edição de contas a pagar */
+.financeiro-filtros-auto{align-items:center}
+.financeiro-filtros-auto input,.financeiro-filtros-auto select{width:100%}
+.acoes-titulo-pagar{white-space:nowrap}
+.btn-editar-pagar{margin-left:6px;color:#2563eb;border-color:#bfdbfe;background:#eff6ff}
+.modal-editar-pagar .manual-modal-form{padding:14px}
+@media (max-width:1200px){
+  .financeiro-filtros{min-width:900px!important}
 }

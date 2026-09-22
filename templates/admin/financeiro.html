@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin3">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin4">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -30,8 +30,6 @@
   <div class="financeiro-resumo-linha">
     <form method="get" class="seletor-periodo seletor-mes-cards seletor-periodo-livre" aria-label="Selecionar mês e ano dos cards superiores">
       <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
-      <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
-      <input type="hidden" name="data_final" value="{{ data_final }}">
       <input type="hidden" name="categoria" value="{{ categoria }}">
       <input type="hidden" name="busca" value="{{ busca }}">
       <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
@@ -58,7 +56,7 @@
       </div>
       <div class="indicador-card indicador-contrato">
         <span class="indicador-icone"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i></span>
-        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Até {{ mes_cards_fim.strftime('%d/%m') }} + saldos anteriores</em></div>
+        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Vencimentos de {{ mes_cards_inicio.strftime('%m/%Y') }}</em></div>
       </div>
       <div class="indicador-card indicador-banco-selecionado">
         <span class="indicador-icone"><i class="bi bi-credit-card-2-front" aria-hidden="true"></i></span>
@@ -78,37 +76,18 @@
   
 
   <div class="financeiro-filtros-card">
-    <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
+    <form method="get" class="financeiro-filtros financeiro-filtros-auto" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
-      <input type="hidden" name="semana_numero" value="{{ semana_numero }}">
-      <select name="conta_id" onchange="this.form.submit()">
+      <input type="hidden" name="semana_numero" value="{{ semana_numero }}" data-semana-atual>
+      <select name="conta_id" data-auto-submit>
         {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
       </select>
-      <select id="financeiro-mes" name="mes_ref" aria-label="Mês de referência">
-        <option value="">Todos os meses</option>
-        {% set mes_atual = data_inicial[5:7] if data_inicial else '' %}
-        <option value="01" {% if mes_atual == '01' %}selected{% endif %}>Janeiro</option>
-        <option value="02" {% if mes_atual == '02' %}selected{% endif %}>Fevereiro</option>
-        <option value="03" {% if mes_atual == '03' %}selected{% endif %}>Março</option>
-        <option value="04" {% if mes_atual == '04' %}selected{% endif %}>Abril</option>
-        <option value="05" {% if mes_atual == '05' %}selected{% endif %}>Maio</option>
-        <option value="06" {% if mes_atual == '06' %}selected{% endif %}>Junho</option>
-        <option value="07" {% if mes_atual == '07' %}selected{% endif %}>Julho</option>
-        <option value="08" {% if mes_atual == '08' %}selected{% endif %}>Agosto</option>
-        <option value="09" {% if mes_atual == '09' %}selected{% endif %}>Setembro</option>
-        <option value="10" {% if mes_atual == '10' %}selected{% endif %}>Outubro</option>
-        <option value="11" {% if mes_atual == '11' %}selected{% endif %}>Novembro</option>
-        <option value="12" {% if mes_atual == '12' %}selected{% endif %}>Dezembro</option>
-      </select>
-      <input type="date" name="data_inicial" value="{{ data_inicial }}">
-      <input type="date" name="data_final" value="{{ data_final }}">
-      <select name="categoria"><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
-      <select name="status_sistema"><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
-      <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor">
-      <button class="botao-pequeno btn-filtrar"><i class="bi bi-search" aria-hidden="true"></i><span>Filtrar</span></button>
-      <a class="botao-secundario btn-limpar-filtros" href="/painel/financeiro"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Limpar</span></a>
+      <input type="date" name="data_inicial" value="{{ data_inicial }}" min="{{ mes_cards_inicio.isoformat() }}" max="{{ mes_cards_fim.isoformat() }}" data-auto-submit data-altera-semana title="Data inicial dentro do mês selecionado">
+      <input type="date" name="data_final" value="{{ data_final }}" min="{{ mes_cards_inicio.isoformat() }}" max="{{ mes_cards_fim.isoformat() }}" data-auto-submit data-altera-semana title="Data final dentro do mês selecionado">
+      <select name="categoria" data-auto-submit><option value="">Todas categorias</option><option value="sem_categoria" {% if categoria == "sem_categoria" %}selected{% endif %}>Sem categoria</option>{% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select>
+      <select name="status_sistema" data-auto-submit><option value="pendente" {% if status_sistema == 'pendente' %}selected{% endif %}>Sistema: pendentes</option><option value="vinculado" {% if status_sistema == 'vinculado' %}selected{% endif %}>Sistema: vinculados</option><option value="todos" {% if status_sistema == 'todos' %}selected{% endif %}>Sistema: todos</option></select>
+      <input name="busca" value="{{ busca }}" placeholder="Nome, histórico ou valor" data-busca-auto>
     </form>
-
   </div>
 
   {% if request.query_params.get('importados') is not none %}
@@ -233,6 +212,35 @@
         </div>
       </form>
     </div>
+  </dialog>
+
+  <dialog id="dlg-editar-pagar" class="modal-vinculo modal-editar-pagar">
+    <div class="modal-vinculo-cabecalho">
+      <div>
+        <strong>Editar conta a pagar</strong>
+        <small>Corrija vencimento, descrição, valor ou tipo. Baixas já realizadas são preservadas.</small>
+      </div>
+      <button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-editar-pagar').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </div>
+    <form method="post" id="form-editar-pagar" class="manual-modal-form preserve-scroll">
+      <label>Vencimento<input type="date" name="data" id="editar-pagar-data" required></label>
+      <label class="campo-largo">Descrição<input name="descricao" id="editar-pagar-descricao" required></label>
+      <label>Valor<input name="valor" id="editar-pagar-valor" data-mascara="moeda" required></label>
+      <label>Tipo
+        <select name="categoria" id="editar-pagar-categoria">
+          <option value="empresa">Empresa</option>
+          <option value="casa">Casa</option>
+          <option value="aluguel">Aluguel</option>
+          <option value="venda">Venda</option>
+          <option value="manutencao">Manutenção</option>
+          <option value="repasse">Repasse</option>
+        </select>
+      </label>
+      <div class="modal-vinculo-rodape campo-largo">
+        <button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-editar-pagar').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Salvar alteração</button>
+      </div>
+    </form>
   </dialog>
 
 <div class="financeiro-duas-colunas">
@@ -687,9 +695,14 @@
                   {% else %}<span class="tipo-chip">{{ p.categoria|capitalize }}</span>{% endif %}
                 </td>
                 <td class="negativo">R$ {{ saldo_p|moeda_br }}</td>
-                <td>
+                <td class="acoes-titulo-pagar">
                   {% if baixado_p > 0.01 %}<span class="badge-pendente">Parcial · pago R$ {{ baixado_p|moeda_br }}</span>
-                  {% else %}<span class="badge-pendente">A pagar</span>
+                  {% else %}<span class="badge-pendente">A pagar</span>{% endif %}
+                  <button type="button" class="botao-icone btn-editar-pagar" title="Editar conta a pagar" aria-label="Editar conta a pagar"
+                          data-id="{{ p.id }}" data-data="{{ p.data.isoformat() }}" data-descricao="{{ p.descricao|e }}" data-valor="{{ '%.2f'|format(p.valor or 0) }}" data-categoria="{{ p.categoria }}">
+                    <i class="bi bi-pencil-square" aria-hidden="true"></i>
+                  </button>
+                  {% if baixado_p <= 0.01 %}
                     <form method="post" action="/painel/financeiro/titulo/{{ p.id }}/excluir" class="preserve-scroll" style="display:inline" onsubmit="return confirm('Excluir esta conta a pagar?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
                   {% endif %}
                 </td>
@@ -809,23 +822,38 @@
   });
 
 
-  var seletorMes = document.getElementById('financeiro-mes');
-  if(seletorMes){
-    seletorMes.addEventListener('change', function(){
-      var mes = this.value;
-      var form = this.form;
-      var inicio = form.querySelector('input[name="data_inicial"]');
-      var fim = form.querySelector('input[name="data_final"]');
-      if(mes && inicio && fim){
-        var ano = (fim.value || inicio.value || new Date().toISOString().slice(0,10)).slice(0,4);
-        var ultimoDia = new Date(parseInt(ano,10), parseInt(mes,10), 0).getDate();
-        inicio.value = ano + '-' + mes + '-01';
-        fim.value = ano + '-' + mes + '-' + String(ultimoDia).padStart(2,'0');
-      }
-      salvarScrolls();
-      form.submit();
+  var filtrosAuto = document.querySelector('.financeiro-filtros-auto');
+  if(filtrosAuto){
+    filtrosAuto.querySelectorAll('[data-auto-submit]').forEach(function(campo){
+      campo.addEventListener('change', function(){
+        if(this.hasAttribute('data-altera-semana')){
+          var semana = filtrosAuto.querySelector('[data-semana-atual]');
+          if(semana) semana.value = '0';
+        }
+        salvarScrolls();
+        filtrosAuto.submit();
+      });
     });
+    var buscaAuto = filtrosAuto.querySelector('[data-busca-auto]');
+    if(buscaAuto){
+      buscaAuto.addEventListener('change', function(){ salvarScrolls(); filtrosAuto.submit(); });
+    }
   }
+
+  document.querySelectorAll('.btn-editar-pagar').forEach(function(botao){
+    botao.addEventListener('click', function(){
+      var dlg = document.getElementById('dlg-editar-pagar');
+      var form = document.getElementById('form-editar-pagar');
+      if(!dlg || !form) return;
+      form.action = '/painel/financeiro/manual/' + this.dataset.id + '/editar';
+      document.getElementById('editar-pagar-data').value = this.dataset.data || '';
+      document.getElementById('editar-pagar-descricao').value = this.dataset.descricao || '';
+      var valor = parseFloat(this.dataset.valor || '0');
+      document.getElementById('editar-pagar-valor').value = valor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      document.getElementById('editar-pagar-categoria').value = this.dataset.categoria || 'empresa';
+      dlg.showModal();
+    });
+  });
 
   document.querySelectorAll('.combo-vinculo').forEach(function(select){
     function atualizarTitulo(){
