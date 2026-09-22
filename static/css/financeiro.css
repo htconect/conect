@@ -1676,3 +1676,40 @@ body.tela-financeiro-desktop{overflow:hidden!important}
   content:none!important;
   display:none!important;
 }
+
+
+/* v1.0.41 — topo financeiro + resumos mensal/semanal de contratos */
+.indicador-banco-selecionado .indicador-icone{background:#eef2ff;color:#4338ca}
+.indicador-banco-total .indicador-icone{background:#ecfdf5;color:#047857}
+.periodo-contratos-label{
+  height:72px;min-height:72px;box-sizing:border-box;background:#fff;border:1px solid var(--borda);
+  border-radius:12px;box-shadow:var(--sombra);padding:9px 10px;display:flex;flex-direction:column;
+  justify-content:center;overflow:hidden;
+}
+.periodo-contratos-label small{font-size:9px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.periodo-contratos-label b{font-size:13px;color:#0f172a;margin:2px 0;white-space:nowrap}
+.periodo-contratos-label span{font-size:9px;color:#64748b;font-weight:700;white-space:nowrap}
+.financeiro-rodape-mensal,.financeiro-rodape-semanal{flex:0 0 72px!important;min-height:72px!important}
+.financeiro-rodape-mensal .contrato-card,.financeiro-rodape-semanal .contrato-card{height:72px!important;min-height:72px!important}
+@media(max-width:1450px){
+  .financeiro-rodape-mensal,.financeiro-rodape-semanal{height:auto!important;min-height:72px!important}
+}
+
+
+/* v1.0.42 — ação compacta para abrir agenda nos cards de contratos */
+.financeiro-novo .contrato-card a.btn-ver-agenda-icone{
+  width:32px!important;
+  height:32px!important;
+  min-width:32px!important;
+  padding:0!important;
+  border-radius:9px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  margin-left:auto!important;
+  flex:0 0 32px!important;
+}
+.financeiro-novo .contrato-card a.btn-ver-agenda-icone i{
+  font-size:15px!important;
+  line-height:1!important;
+}

@@ -7460,9 +7460,10 @@ def financeiro(
 
     saldo_previsto = saldo_real + total_receber + total_contratos_receber_cards - total_pagar
 
-    # Cards inferiores: reutilizam os contratos já carregados para o mês.
+    # Cards inferiores: mensal e semanal usam somente contratos aprovados,
+    # evitando contar pré-contratos/solicitações ainda não convertidos em contrato.
     contratos_semana = [
-        c for c in contratos_mes
+        c for c in contratos_cards
         if c.data_evento and semana_cards_inicio <= c.data_evento <= semana_cards_fim
     ]
     contratos_semana_proprios = [c for c in contratos_semana if not c.empresa_transferida_id]
