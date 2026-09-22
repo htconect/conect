@@ -52,11 +52,11 @@
       </div>
       <div class="indicador-card indicador-receber">
         <span class="indicador-icone"><i class="bi bi-receipt" aria-hidden="true"></i></span>
-        <div><small>A receber</small><b>R$ {{ total_receber_posicao|moeda_br }}</b><em>Até {{ mes_cards_fim.strftime('%d/%m') }} + saldos anteriores</em></div>
+        <div><small>A receber</small><b>R$ {{ total_receber_posicao|moeda_br }}</b><em>Período {{ data_inicial[8:10] }}/{{ data_inicial[5:7] }} a {{ data_final[8:10] }}/{{ data_final[5:7] }}</em></div>
       </div>
       <div class="indicador-card indicador-contrato">
         <span class="indicador-icone"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i></span>
-        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Vencimentos de {{ mes_cards_inicio.strftime('%m/%Y') }}</em></div>
+        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Período {{ data_inicial[8:10] }}/{{ data_inicial[5:7] }} a {{ data_final[8:10] }}/{{ data_final[5:7] }}</em></div>
       </div>
       <div class="indicador-card indicador-banco-selecionado">
         <span class="indicador-icone"><i class="bi bi-credit-card-2-front" aria-hidden="true"></i></span>
@@ -155,7 +155,6 @@
 
     <div class="manual-modal-painel" data-manual-painel="receber">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
         <input type="hidden" name="tipo" value="receber">
         <label>Previsão<input type="date" name="data" value="{{ data_final }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A receber" required></label>
@@ -179,7 +178,6 @@
 
     <div class="manual-modal-painel" data-manual-painel="pagar">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
-        <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
         <input type="hidden" name="tipo" value="pagar">
         <label>Vencimento<input type="date" name="data" value="{{ data_final }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A pagar" required></label>
@@ -764,8 +762,7 @@
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
       <label for="semana-numero">Semana</label>
       <div class="semana-numero-linha">
-        <input id="semana-numero" type="number" name="semana_numero" min="1" max="{{ semanas_cards|length }}" value="{{ semana_numero }}" inputmode="numeric" title="Digite a semana do mês">
-        <button type="submit" title="Aplicar semana" aria-label="Aplicar semana"><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+        <input id="semana-numero" type="number" name="semana_numero" min="1" max="{{ semanas_cards|length }}" value="{{ semana_numero }}" inputmode="numeric" title="Digite a semana do mês" onchange="this.form.submit()">
       </div>
       <small>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }} · mês {{ mes_cards_inicio.strftime('%m/%Y') }}</small>
     </form>

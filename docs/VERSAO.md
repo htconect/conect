@@ -1,14 +1,13 @@
-# HUMIAT Conect — Versão 1.0.47
+# HUMIAT Conect — Versão 1.0.49
 
-## Financeiro — período único, contas a pagar do mês e edição
+## Financeiro — período, semana e títulos sem banco previsto
 
-- O seletor superior de mês/ano é a única referência mensal da tela.
-- Ao trocar o mês, o intervalo detalhado é preenchido automaticamente do primeiro ao último dia desse mês.
-- As datas detalhadas ficam limitadas ao mês selecionado e podem reduzir o período por dias.
-- A semana acompanha somente alteração do período de datas ou seleção manual de semana.
-- Removidos os botões Filtrar e Limpar; filtros passam a ser aplicados automaticamente.
-- A pagar exibe apenas vencimentos e repasses pertencentes ao mês selecionado, sem carregar dívidas de meses anteriores.
-- Contas a pagar manuais podem ser editadas; em títulos com baixa parcial, o novo valor não pode ficar abaixo do total já pago.
-- O cálculo bancário validado permanece inalterado.
+- A receber e A pagar respeitam data inicial e data final do filtro.
+- Contratos, Organiza e repasses usados nesses totais seguem o mesmo intervalo.
+- Títulos manuais A receber/A pagar nascem sem banco definido.
+- O banco é determinado somente pela baixa real vinculada ao título.
+- Trocar o mês seleciona automaticamente a semana atual quando for o mês corrente; em outro mês, usa a primeira semana válida.
+- Alterar o número da semana atualiza automaticamente, sem botão de aplicar.
+- Mantém o cálculo acumulado do banco/InfinitePay validado.
 
-`v1.0.47 - financeiro periodo unico e edicao de contas a pagar`
+`v1.0.49 - financeiro respeita filtro de datas e titulos sem banco previsto`

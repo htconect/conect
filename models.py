@@ -602,7 +602,9 @@ class LancamentoManualFinanceiro(Base):
 
     id = Column(Integer, primary_key=True)
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False)
-    conta_id = Column(Integer, ForeignKey("contas_financeiras.id"), nullable=False)
+    # Títulos a receber/pagar não têm banco previsto. A conta é definida apenas
+    # para movimentos reais; a baixa do título herda o banco do movimento vinculado.
+    conta_id = Column(Integer, ForeignKey("contas_financeiras.id"), nullable=True)
     data = Column(Date, nullable=False, index=True)
     descricao = Column(Text, nullable=False)
     valor = Column(Float, default=0)

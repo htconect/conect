@@ -1278,7 +1278,7 @@ def garantir_colunas_novas():
         CREATE TABLE lancamentos_manuais_financeiros (
             id INTEGER PRIMARY KEY,
             empresa_id INTEGER NOT NULL,
-            conta_id INTEGER NOT NULL,
+            conta_id INTEGER,
             data DATE NOT NULL,
             descricao TEXT NOT NULL,
             valor FLOAT DEFAULT 0,
@@ -1297,6 +1297,22 @@ def garantir_colunas_novas():
 
     if "lancamentos_manuais_financeiros" in tabelas:
         cols_lmf = colunas("lancamentos_manuais_financeiros")
+        if engine.dialect.name == "postgresql":
+            info_conta_lmf = next(
+                (c for c in insp.get_columns("lancamentos_manuais_financeiros") if c.get("name") == "conta_id"),
+                None,
+            )
+            if info_conta_lmf and not info_conta_lmf.get("nullable", True):
+                comandos.append(
+                    "ALTER TABLE lancamentos_manuais_financeiros ALTER COLUMN conta_id DROP NOT NULL"
+                )
+            # Títulos não representam dinheiro em uma conta bancária. Limpa a
+            # associação histórica criada pelas versões anteriores; o banco real
+            # passa a existir somente no movimento usado como baixa.
+            comandos.append(
+                "UPDATE lancamentos_manuais_financeiros SET conta_id = NULL "
+                "WHERE tipo IN ('receber', 'pagar') AND conta_id IS NOT NULL"
+            )
         if "pagamento_id" not in cols_lmf:
             comandos.append("ALTER TABLE lancamentos_manuais_financeiros ADD COLUMN pagamento_id INTEGER")
         if "ordem" not in cols_lmf:
@@ -7159,27 +7175,26 @@ def financeiro(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real"
     )
-    # A receber mantém a lógica de posição (mês selecionado + saldos anteriores).
-    # A pagar mostra somente os vencimentos pertencentes ao mês selecionado,
-    # evitando misturar dívidas antigas quando o usuário consulta outro mês.
+    # A receber e A pagar obedecem exatamente ao intervalo de datas escolhido
+    # dentro do mês mestre. Títulos não têm banco previsto: o banco só nasce
+    # quando uma baixa real é vinculada ao título.
     q_receber = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "receber",
         LancamentoManualFinanceiro.recebido == False,
-        LancamentoManualFinanceiro.data <= mes_cards_fim,
+        LancamentoManualFinanceiro.data >= inicio,
+        LancamentoManualFinanceiro.data <= fim,
     )
     q_pagar = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "pagar",
         LancamentoManualFinanceiro.recebido == False,
-        LancamentoManualFinanceiro.data >= mes_cards_inicio,
-        LancamentoManualFinanceiro.data <= mes_cards_fim,
+        LancamentoManualFinanceiro.data >= inicio,
+        LancamentoManualFinanceiro.data <= fim,
     )
     if conta:
         q_banco = q_banco.filter(LancamentoBanco.conta_id == conta.id)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.conta_id == conta.id)
-        q_receber = q_receber.filter(LancamentoManualFinanceiro.conta_id == conta.id)
-        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.conta_id == conta.id)
     if data_inicial:
         q_banco = q_banco.filter(LancamentoBanco.data >= inicio)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data >= inicio)
@@ -7300,12 +7315,12 @@ def financeiro(
         # Pagamentos já lançados em rascunhos continuam disponíveis para conciliação,
         # mas o restante não é cobrado enquanto o contrato não estiver aprovado.
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-        Solicitacao.data_evento <= mes_cards_fim,
+        Solicitacao.data_evento >= inicio,
+        Solicitacao.data_evento <= fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009
     )
-    # Contratos anteriores com saldo continuam aparecendo; contratos de meses
-    # futuros não entram. Dentro do mês selecionado entram todos os contratos
-    # aprovados, mesmo que o evento ainda não tenha sido realizado/entregue.
+    # A receber de contratos segue o mesmo intervalo de datas do filtro detalhado.
+    # O mês mestre define o limite e o usuário pode reduzir apenas os dias.
     if busca:
         like = f"%{busca.strip()}%"
         filtros_contrato = [Cliente.nome.ilike(like)]
@@ -7654,7 +7669,7 @@ def financeiro(
     # Reutiliza a consulta já realizada e limita somente a exibição.
     lancamentos_organiza_financeiro = [
         item for item in todos_lancamentos_organiza
-        if item.data_pagamento and item.data_pagamento <= mes_cards_fim
+        if item.data_pagamento and inicio <= item.data_pagamento <= fim
     ][:500]
 
     # Transferências internas recebidas: na empresa de destino o valor já pago pelo
@@ -7665,7 +7680,8 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.transferencia_origem_id != None,
-        Solicitacao.data_evento <= mes_cards_fim,
+        Solicitacao.data_evento >= inicio,
+        Solicitacao.data_evento <= fim,
     ).all()
     origens_ids = [c.transferencia_origem_id for c in copias_transferencia if c.transferencia_origem_id]
     origens_transferencia = {}
@@ -7703,28 +7719,32 @@ def financeiro(
             "saldo": max(total - pago, 0),
         })
 
-    # Posição financeira atual: visão consolidada do que há em banco, a receber e a pagar.
+    # Posição financeira do intervalo visível: A receber e A pagar seguem
+    # exatamente data inicial/final. O saldo bancário mantém a regra acumulada
+    # já validada e não é recalculado por este filtro.
     contratos_posicao = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-        Solicitacao.data_evento <= mes_cards_fim,
+        Solicitacao.data_evento >= inicio,
+        Solicitacao.data_evento <= fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
     ).all()
     total_contratos_receber_posicao = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0.0) for c in contratos_posicao
     )
     total_manual_receber_posicao = sum(
-        saldo_titulo(t) for t in titulos_receber_abertos if t.data and t.data <= mes_cards_fim
+        saldo_titulo(t) for t in titulos_receber_abertos
+        if t.data and inicio <= t.data <= fim
     )
     total_manual_pagar_posicao = sum(
         saldo_titulo(t) for t in titulos_pagar_abertos
-        if t.data and mes_cards_inicio <= t.data <= mes_cards_fim
+        if t.data and inicio <= t.data <= fim
     )
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
         for item in todos_lancamentos_organiza
-        if item.data_pagamento and item.data_pagamento <= mes_cards_fim
+        if item.data_pagamento and inicio <= item.data_pagamento <= fim
     )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
@@ -7732,8 +7752,8 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
-        Solicitacao.data_evento >= mes_cards_inicio,
-        Solicitacao.data_evento <= mes_cards_fim,
+        Solicitacao.data_evento >= inicio,
+        Solicitacao.data_evento <= fim,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0,
     ).all()
     total_repasses_pagar_posicao = sum(
@@ -8360,7 +8380,8 @@ def financeiro_excluir_titulo(
     conta_id = titulo.conta_id
     db.delete(titulo)
     db.commit()
-    return RedirectResponse(request.headers.get("referer") or f"/painel/financeiro?conta_id={conta_id}", status_code=303)
+    destino = f"/painel/financeiro?conta_id={conta_id}" if conta_id else "/painel/financeiro"
+    return RedirectResponse(request.headers.get("referer") or destino, status_code=303)
 
 
 @app.post("/painel/financeiro/conta")
@@ -8717,7 +8738,7 @@ def financeiro_lancar_pagamento_sistema(
         forma = (pagamento.forma_pagamento or "pagamento").strip()
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id,
+            conta_id=conta.id if tipo == "real" and conta else None,
             data=pagamento.data_pagamento,
             descricao=f"{cliente_nome} - {forma}",
             valor=pagamento.valor or 0,
@@ -8736,7 +8757,7 @@ def financeiro_lancar_pagamento_sistema(
 @app.post("/painel/financeiro/manual")
 def financeiro_lancamento_manual(
         request: Request,
-        conta_id: int = Form(...),
+        conta_id: int = Form(0),
         data: str = Form(...),
         descricao: str = Form(...),
         valor: str = Form("0"),
@@ -8747,17 +8768,24 @@ def financeiro_lancamento_manual(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    conta = db.get(ContaFinanceira, conta_id)
-    if not conta or conta.empresa_id != empresa.id:
+    conta = db.get(ContaFinanceira, conta_id) if conta_id else None
+    if tipo == "real" and (not conta or conta.empresa_id != empresa.id):
+        raise HTTPException(400, "Movimento bancário exige uma conta válida.")
+    if conta and conta.empresa_id != empresa.id:
         raise HTTPException(404)
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if tipo not in ["real", "receber", "pagar"]:
         raise HTTPException(400, "Tipo inválido.")
     valor_float = texto_para_float(valor)
-    proxima_ordem = int(
-        db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter_by(empresa_id=empresa.id,
-                                                                                         conta_id=conta.id).scalar() or 0) + 1
+    q_ordem = db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id
+    )
+    if tipo == "real" and conta:
+        q_ordem = q_ordem.filter(LancamentoManualFinanceiro.conta_id == conta.id)
+    else:
+        q_ordem = q_ordem.filter(LancamentoManualFinanceiro.tipo == tipo)
+    proxima_ordem = int(q_ordem.scalar() or 0) + 1
     if tipo in ("receber", "pagar"):
         valor_float = abs(valor_float)
 
@@ -8792,11 +8820,17 @@ def financeiro_lancamento_manual(
         return data_base
 
     for indice in range(quantidade_recorrencia):
+        # Identifica visualmente cada parcela/ocorrência recorrente no próprio
+        # histórico, por exemplo: "Internet 1/3", "Internet 2/3" e "Internet 3/3".
+        descricao_ocorrencia = descricao_limpa
+        if tipo == "pagar" and recorrencia in ("mensal", "anual"):
+            descricao_ocorrencia = f"{descricao_limpa} {indice + 1}/{quantidade_recorrencia}"
+
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id,
+            conta_id=conta.id if tipo == "real" and conta else None,
             data=data_da_ocorrencia(indice),
-            descricao=descricao_limpa,
+            descricao=descricao_ocorrencia,
             valor=valor_float,
             categoria=categoria,
             tipo=tipo,
@@ -8804,7 +8838,8 @@ def financeiro_lancamento_manual(
             ordem=proxima_ordem + indice
         ))
     db.commit()
-    return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={conta.id}")
+    destino = f"/painel/financeiro?conta_id={conta.id}" if conta else "/painel/financeiro"
+    return redirect_preservando_filtros(request, destino)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/mover")
@@ -8865,7 +8900,8 @@ def financeiro_editar_manual(
     if categoria not in ("venda", "manutencao") and getattr(lanc, "organiza_lancamento_id", None):
         lanc.organiza_lancamento_id = None
     db.commit()
-    return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={lanc.conta_id}")
+    destino = f"/painel/financeiro?conta_id={lanc.conta_id}" if lanc.conta_id else "/painel/financeiro"
+    return redirect_preservando_filtros(request, destino)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/vincular-organiza")
@@ -10151,7 +10187,7 @@ def _registrar_pagamento_infinitepay(
         cliente_nome = item.cliente.nome if item.cliente else "Cliente"
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id,
+            conta_id=conta.id if tipo == "real" and conta else None,
             data=pagamento.data_pagamento,
             descricao=f"{cliente_nome} - InfinitePay - contrato #{item.id}",
             valor=pagamento.valor or 0,
