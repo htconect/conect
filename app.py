@@ -7132,15 +7132,20 @@ def financeiro(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real"
     )
+    # A receber / A pagar funcionam como posição do mês selecionado:
+    # carregam tudo que venceu/pertence até o último dia do mês (inclusive meses
+    # anteriores ainda em aberto), sem antecipar títulos de meses futuros.
     q_receber = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "receber",
-        LancamentoManualFinanceiro.recebido == False
+        LancamentoManualFinanceiro.recebido == False,
+        LancamentoManualFinanceiro.data <= mes_cards_fim,
     )
     q_pagar = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "pagar",
-        LancamentoManualFinanceiro.recebido == False
+        LancamentoManualFinanceiro.recebido == False,
+        LancamentoManualFinanceiro.data <= mes_cards_fim,
     )
     if conta:
         q_banco = q_banco.filter(LancamentoBanco.conta_id == conta.id)
@@ -7150,13 +7155,9 @@ def financeiro(
     if data_inicial:
         q_banco = q_banco.filter(LancamentoBanco.data >= inicio)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data >= inicio)
-        q_receber = q_receber.filter(LancamentoManualFinanceiro.data >= inicio)
-        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.data >= inicio)
     if data_final:
         q_banco = q_banco.filter(LancamentoBanco.data <= fim)
         q_manual_real = q_manual_real.filter(LancamentoManualFinanceiro.data <= fim)
-        q_receber = q_receber.filter(LancamentoManualFinanceiro.data <= fim)
-        q_pagar = q_pagar.filter(LancamentoManualFinanceiro.data <= fim)
     if categoria == "sem_categoria":
         q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
         q_manual_real = q_manual_real.filter(or_(
@@ -7271,12 +7272,12 @@ def financeiro(
         # Pagamentos já lançados em rascunhos continuam disponíveis para conciliação,
         # mas o restante não é cobrado enquanto o contrato não estiver aprovado.
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        Solicitacao.data_evento <= mes_cards_fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009
     )
-    if data_inicial:
-        q_contratos_receber = q_contratos_receber.filter(Solicitacao.data_evento >= inicio)
-    if data_final:
-        q_contratos_receber = q_contratos_receber.filter(Solicitacao.data_evento <= fim)
+    # Contratos anteriores com saldo continuam aparecendo; contratos de meses
+    # futuros não entram. Dentro do mês selecionado entram todos os contratos
+    # aprovados, mesmo que o evento ainda não tenha sido realizado/entregue.
     if busca:
         like = f"%{busca.strip()}%"
         filtros_contrato = [Cliente.nome.ilike(like)]
@@ -7387,7 +7388,7 @@ def financeiro(
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
             LancamentoBanco.data >= inicio_ano,
-            LancamentoBanco.data <= hoje,
+            LancamentoBanco.data <= corte_banco,
         ).group_by(LancamentoBanco.conta_id).all()
     }
     totais_manuais_por_conta = {
@@ -7399,7 +7400,7 @@ def financeiro(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
             LancamentoManualFinanceiro.tipo == "real",
             LancamentoManualFinanceiro.data >= inicio_ano,
-            LancamentoManualFinanceiro.data <= hoje,
+            LancamentoManualFinanceiro.data <= corte_banco,
         ).group_by(LancamentoManualFinanceiro.conta_id).all()
     }
 
@@ -7487,10 +7488,7 @@ def financeiro(
         Solicitacao.empresa_transferida_id != None,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0
     )
-    if data_inicial:
-        q_repasses = q_repasses.filter(Solicitacao.data_evento >= inicio)
-    if data_final:
-        q_repasses = q_repasses.filter(Solicitacao.data_evento <= fim)
+    q_repasses = q_repasses.filter(Solicitacao.data_evento <= mes_cards_fim)
     if busca:
         like_repasse = f"%{busca.strip()}%"
         filtros_repasse = [Cliente.nome.ilike(like_repasse)]
@@ -7616,7 +7614,10 @@ def financeiro(
 
     # Organiza fica separado dos lançamentos nativos do Connect.
     # Reutiliza a consulta já realizada e limita somente a exibição.
-    lancamentos_organiza_financeiro = todos_lancamentos_organiza[:500]
+    lancamentos_organiza_financeiro = [
+        item for item in todos_lancamentos_organiza
+        if item.data_pagamento and item.data_pagamento <= mes_cards_fim
+    ][:500]
 
     # Transferências internas recebidas: na empresa de destino o valor já pago pelo
     # cliente deixa de ser "a receber do cliente" e passa a ser "a receber da empresa de origem".
@@ -7626,6 +7627,7 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.transferencia_origem_id != None,
+        Solicitacao.data_evento <= mes_cards_fim,
     ).all()
     origens_ids = [c.transferencia_origem_id for c in copias_transferencia if c.transferencia_origem_id]
     origens_transferencia = {}
@@ -7668,20 +7670,30 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        Solicitacao.data_evento <= mes_cards_fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
     ).all()
     total_contratos_receber_posicao = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0.0) for c in contratos_posicao
     )
-    total_manual_receber_posicao = sum(saldo_titulo(t) for t in titulos_receber_abertos)
-    total_manual_pagar_posicao = sum(saldo_titulo(t) for t in titulos_pagar_abertos)
-    total_organiza_receber_posicao = sum(max(float(item.falta_receber or 0), 0.0) for item in todos_lancamentos_organiza)
+    total_manual_receber_posicao = sum(
+        saldo_titulo(t) for t in titulos_receber_abertos if t.data and t.data <= mes_cards_fim
+    )
+    total_manual_pagar_posicao = sum(
+        saldo_titulo(t) for t in titulos_pagar_abertos if t.data and t.data <= mes_cards_fim
+    )
+    total_organiza_receber_posicao = sum(
+        max(float(item.falta_receber or 0), 0.0)
+        for item in todos_lancamentos_organiza
+        if item.data_pagamento and item.data_pagamento <= mes_cards_fim
+    )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
     repasses_posicao = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
+        Solicitacao.data_evento <= mes_cards_fim,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0,
     ).all()
     total_repasses_pagar_posicao = sum(
@@ -7753,9 +7765,11 @@ def financeiro(
 
 
 
-def _posicao_financeira_atual(db: Session, empresa_id: int):
+def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[date] = None):
     hoje = date.today()
-    inicio_ano = hoje.replace(month=1, day=1)
+    ate_data = ate_data or hoje
+    corte_banco = min(ate_data, hoje)
+    inicio_ano = corte_banco.replace(month=1, day=1)
     contas_ativas = db.query(ContaFinanceira).filter_by(empresa_id=empresa_id, ativa=True).all()
     ids_contas = [c.id for c in contas_ativas]
 
@@ -7765,14 +7779,14 @@ def _posicao_financeira_atual(db: Session, empresa_id: int):
             LancamentoBanco.empresa_id == empresa_id,
             LancamentoBanco.conta_id.in_(ids_contas),
             LancamentoBanco.data >= inicio_ano,
-            LancamentoBanco.data <= hoje,
+            LancamentoBanco.data <= corte_banco,
         ).scalar() or 0)
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
             LancamentoManualFinanceiro.empresa_id == empresa_id,
             LancamentoManualFinanceiro.conta_id.in_(ids_contas),
             LancamentoManualFinanceiro.tipo == "real",
             LancamentoManualFinanceiro.data >= inicio_ano,
-            LancamentoManualFinanceiro.data <= hoje,
+            LancamentoManualFinanceiro.data <= corte_banco,
         ).scalar() or 0)
 
     baixas_titulo = {
@@ -7785,6 +7799,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int):
         LancamentoManualFinanceiro.empresa_id == empresa_id,
         LancamentoManualFinanceiro.tipo.in_(["receber", "pagar"]),
         LancamentoManualFinanceiro.recebido == False,
+        LancamentoManualFinanceiro.data <= ate_data,
     ).all()
     receber_manual = sum(
         max(abs(float(t.valor or 0)) - baixas_titulo.get(t.id, 0.0), 0.0) for t in titulos if t.tipo == "receber"
@@ -7797,12 +7812,15 @@ def _posicao_financeira_atual(db: Session, empresa_id: int):
         Solicitacao.empresa_id == empresa_id,
         Solicitacao.cancelado_em == None,
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+        Solicitacao.data_evento <= ate_data,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
     ).all()
     receber_contratos = sum(max(float(c.valor or 0) - float(c.valor_pago or 0), 0.0) for c in contratos)
 
     receber_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
-        LancamentoOrganiza.empresa_id == empresa_id, LancamentoOrganiza.falta_receber > 0
+        LancamentoOrganiza.empresa_id == empresa_id,
+        LancamentoOrganiza.falta_receber > 0,
+        LancamentoOrganiza.data_pagamento <= ate_data,
     ).scalar() or 0)
 
     vinculos_repasse = {
@@ -7815,6 +7833,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int):
         Solicitacao.empresa_id == empresa_id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
+        Solicitacao.data_evento <= ate_data,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0,
     ).all()
     pagar_repasses = sum(
@@ -7825,6 +7844,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int):
         Solicitacao.empresa_id == empresa_id,
         Solicitacao.cancelado_em == None,
         Solicitacao.transferencia_origem_id != None,
+        Solicitacao.data_evento <= ate_data,
     ).all()
     origens_ids = [c.transferencia_origem_id for c in copias if c.transferencia_origem_id]
     receber_interempresa = 0.0
@@ -8027,8 +8047,8 @@ def financeiro_relatorio_excel(
 ):
     if not usuario_pode_financeiro(request, empresa, db):
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
-    inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
-    posicao = _posicao_financeira_atual(db, empresa.id)
+    inicio_mes, fim_mes, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
+    posicao = _posicao_financeira_atual(db, empresa.id, fim_mes)
     conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao)
     nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.xlsx"
     return Response(
@@ -8055,8 +8075,8 @@ def financeiro_relatorio_pdf(
     except Exception:
         raise HTTPException(500, "Para gerar PDF, instale a dependência reportlab.")
 
-    inicio_mes, _, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
-    posicao = _posicao_financeira_atual(db, empresa.id)
+    inicio_mes, fim_mes, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
+    posicao = _posicao_financeira_atual(db, empresa.id, fim_mes)
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     estilos = getSampleStyleSheet()

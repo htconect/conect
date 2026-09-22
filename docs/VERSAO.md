@@ -1,15 +1,16 @@
-# HUMIAT Conect — Versão 1.0.38
+# HUMIAT Conect — Versão 1.0.39
 
-## Financeiro — contas a pagar, baixas parciais e posição financeira
+## Financeiro — posição mensal dinâmica de A receber / A pagar
 
-- Adicionada criação manual de **A pagar**, mantendo **Movimento** e **A receber**.
-- Movimentos positivos podem ser vinculados a contas a receber e movimentos negativos a contas a pagar.
-- O vínculo passa a aceitar **baixas parciais**: um título de R$ 4.000 pode receber uma baixa de R$ 2.000 e permanecer com R$ 2.000 em aberto.
-- Um mesmo título pode receber várias baixas até sua quitação.
-- Um movimento pode usar apenas parte do valor e manter saldo disponível para novas baixas.
-- As telas **A receber** e **A pagar** mostram valor original, valor baixado e saldo restante.
-- Lançamentos vinculados não podem ser excluídos; é necessário desvincular primeiro.
-- Adicionada visão consolidada com **No banco**, **A receber**, **A pagar** e **Saldo projetado**.
-- O relatório mensal em Excel/PDF passa a incluir a posição financeira atual.
+- **A receber** passa a considerar todos os contratos aprovados até o último dia do mês selecionado, inclusive contratos do próprio mês que ainda não foram entregues/realizados.
+- Saldos pendentes de contratos de meses anteriores continuam carregados até serem quitados.
+- Contratos de meses futuros não entram antecipadamente na posição do mês selecionado.
+- O saldo do contrato é dinâmico: valor do contrato menos tudo que já foi recebido.
+- Ao registrar um pagamento, a parte recebida deixa imediatamente de compor **A receber**; o pagamento fica disponível em **Vincular** para conciliação com o movimento bancário.
+- Pagamento parcial mantém somente o saldo restante em **A receber** e exibe o valor já recebido.
+- Pagamento total retira o contrato de **A receber**.
+- O registro do pagamento do contrato não é somado como novo saldo bancário; somente o movimento real do banco compõe **No banco**, evitando duplicidade.
+- **A pagar** segue a mesma lógica mensal para títulos manuais e repasses: mês selecionado + saldos anteriores em aberto, sem antecipar meses futuros.
+- Relatórios Excel/PDF usam o corte do mês selecionado para a posição financeira.
 
-`v1.0.38 - financeiro com contas a pagar e baixas parciais`
+`v1.0.39 - financeiro mensal dinamico e conciliacao sem duplicidade`

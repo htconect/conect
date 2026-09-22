@@ -60,7 +60,7 @@
       </div>
       <div class="indicador-card indicador-receber">
         <span class="indicador-icone"><i class="bi bi-receipt" aria-hidden="true"></i></span>
-        <div><small>A receber</small><b>R$ {{ total_receber_posicao|moeda_br }}</b><em>Em aberto</em></div>
+        <div><small>A receber</small><b>R$ {{ total_receber_posicao|moeda_br }}</b><em>Até {{ mes_cards_fim.strftime('%d/%m') }} + saldos anteriores</em></div>
       </div>
       <div class="indicador-card indicador-quantidade">
         <span class="indicador-icone"><i class="bi bi-hash" aria-hidden="true"></i></span>
@@ -68,7 +68,7 @@
       </div>
       <div class="indicador-card indicador-contrato">
         <span class="indicador-icone"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i></span>
-        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Em aberto</em></div>
+        <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Até {{ mes_cards_fim.strftime('%d/%m') }} + saldos anteriores</em></div>
       </div>
       <div class="indicador-card indicador-banco">
         <span class="indicador-icone"><i class="bi bi-bank" aria-hidden="true"></i></span>
@@ -551,7 +551,7 @@
       <div class="financeiro-painel-aba" data-painel-fin="receber">
         <div class="sistema-toolbar">
           <strong>Todos os valores a receber</strong>
-          <span class="sistema-toolbar-info">Informativo — não gera lançamento bancário.</span>
+          <span class="sistema-toolbar-info">Até o fim do mês selecionado + saldos anteriores em aberto.</span>
         </div>
 
         <div class="sistema-scroll-unico">
@@ -594,7 +594,13 @@
                   </td>
                   <td><span class="tipo-chip aluguel">Aluguel</span></td>
                   <td class="positivo">R$ {{ falta|moeda_br }}</td>
-                  <td><span class="badge-pendente">A receber</span></td>
+                  <td>
+                    {% if (r.valor_pago or 0) > 0.01 %}
+                      <span class="badge-pendente">Parcial · recebido R$ {{ r.valor_pago|moeda_br }}</span>
+                    {% else %}
+                      <span class="badge-pendente">A receber</span>
+                    {% endif %}
+                  </td>
                 </tr>
                 {% endif %}
               {% endfor %}
