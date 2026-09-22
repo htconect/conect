@@ -215,6 +215,17 @@
             <option value="repasse">Repasse</option>
           </select>
         </label>
+        <label>Recorrência
+          <select name="recorrencia" data-recorrencia-pagar>
+            <option value="nenhuma">Não repetir</option>
+            <option value="mensal">Mensal</option>
+            <option value="anual">Anual</option>
+          </select>
+        </label>
+        <label data-quantidade-recorrencia style="display:none">Quantidade de lançamentos
+          <input type="number" name="quantidade_recorrencia" min="1" max="240" value="1" inputmode="numeric">
+          <small class="ajuda-campo">Inclui este primeiro vencimento.</small>
+        </label>
         <div class="modal-vinculo-rodape campo-largo">
           <button type="button" class="botao-perigo btn-modal-cancelar"
                   onclick="document.getElementById('dlg-lancamento-manual').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
@@ -883,6 +894,19 @@ document.addEventListener("DOMContentLoaded", function(){
     const painel = document.querySelector('[data-manual-painel="'+btn.dataset.manualAba+'"]');
     if(painel) painel.classList.add("ativo");
   }));
+
+  const recorrencia = document.querySelector('[data-recorrencia-pagar]');
+  const campoQuantidade = document.querySelector('[data-quantidade-recorrencia]');
+  if(recorrencia && campoQuantidade){
+    const atualizarRecorrencia = function(){
+      const ativo = recorrencia.value === 'mensal' || recorrencia.value === 'anual';
+      campoQuantidade.style.display = ativo ? '' : 'none';
+      const input = campoQuantidade.querySelector('input');
+      if(input && !ativo) input.value = '1';
+    };
+    recorrencia.addEventListener('change', atualizarRecorrencia);
+    atualizarRecorrencia();
+  }
 });
 </script>
 

@@ -1749,3 +1749,5 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
   .humiat-packages{grid-template-columns:1fr 1fr;gap:12px}.humiat-package-card{min-height:205px;padding:20px 12px 12px}.humiat-package-qty strong{font-size:1.7rem}.humiat-package-price{font-size:1.08rem}.humiat-package-button{font-size:13px}
 }
 @media(max-width:380px){.humiat-packages{grid-template-columns:1fr}}
+
+.ajuda-campo{display:block;margin-top:4px;font-size:11px;line-height:1.25;opacity:.7;font-weight:500}

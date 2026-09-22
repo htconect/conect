@@ -21,6 +21,7 @@ from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 import time as time_module
 import threading
+from calendar import monthrange
 
 logger = logging.getLogger("conect")
 geo_logger = logging.getLogger("conect.geocodificacao")
@@ -8716,6 +8717,8 @@ def financeiro_lancamento_manual(
         valor: str = Form("0"),
         categoria: str = Form("empresa"),
         tipo: str = Form("real"),
+        recorrencia: str = Form("nenhuma"),
+        quantidade_recorrencia: int = Form(1),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -8732,17 +8735,49 @@ def financeiro_lancamento_manual(
                                                                                          conta_id=conta.id).scalar() or 0) + 1
     if tipo in ("receber", "pagar"):
         valor_float = abs(valor_float)
-    db.add(LancamentoManualFinanceiro(
-        empresa_id=empresa.id,
-        conta_id=conta.id,
-        data=datetime.strptime(data, "%Y-%m-%d").date(),
-        descricao=descricao.strip(),
-        valor=valor_float,
-        categoria=categoria,
-        tipo=tipo,
-        recebido=False,
-        ordem=proxima_ordem
-    ))
+
+    data_base = datetime.strptime(data, "%Y-%m-%d").date()
+    descricao_limpa = descricao.strip()
+
+    # Recorrência é exclusiva de contas a pagar manuais. Cada ocorrência vira
+    # um título independente, preservando baixa parcial, vínculo e exclusão.
+    if tipo == "pagar":
+        recorrencia = (recorrencia or "nenhuma").strip().lower()
+        if recorrencia not in ("nenhuma", "mensal", "anual"):
+            raise HTTPException(400, "Recorrência inválida.")
+        if recorrencia == "nenhuma":
+            quantidade_recorrencia = 1
+        if quantidade_recorrencia < 1 or quantidade_recorrencia > 240:
+            raise HTTPException(400, "A quantidade deve ficar entre 1 e 240 lançamentos.")
+    else:
+        recorrencia = "nenhuma"
+        quantidade_recorrencia = 1
+
+    def data_da_ocorrencia(indice: int) -> date:
+        if recorrencia == "mensal":
+            total_meses = (data_base.year * 12 + (data_base.month - 1)) + indice
+            ano = total_meses // 12
+            mes = (total_meses % 12) + 1
+            dia = min(data_base.day, monthrange(ano, mes)[1])
+            return date(ano, mes, dia)
+        if recorrencia == "anual":
+            ano = data_base.year + indice
+            dia = min(data_base.day, monthrange(ano, data_base.month)[1])
+            return date(ano, data_base.month, dia)
+        return data_base
+
+    for indice in range(quantidade_recorrencia):
+        db.add(LancamentoManualFinanceiro(
+            empresa_id=empresa.id,
+            conta_id=conta.id,
+            data=data_da_ocorrencia(indice),
+            descricao=descricao_limpa,
+            valor=valor_float,
+            categoria=categoria,
+            tipo=tipo,
+            recebido=False,
+            ordem=proxima_ordem + indice
+        ))
     db.commit()
     return redirect_preservando_filtros(request, f"/painel/financeiro?conta_id={conta.id}")
 

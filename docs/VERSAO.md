@@ -1,4 +1,4 @@
-# HUMIAT Conect — Versão 1.0.44
+# HUMIAT Conect — Versão 1.0.46
 
 ## Financeiro — período livre, banco para conferência e contratos compactos
 
