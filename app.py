@@ -7043,6 +7043,7 @@ def financeiro(
         status_sistema: str = "pendente",
         mes_cards: str = "",
         semana_cards: str = "",
+        semana_numero: int = 0,
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -7059,7 +7060,8 @@ def financeiro(
     inicio = datetime.strptime(data_inicial, "%Y-%m-%d").date()
     fim = datetime.strptime(data_final, "%Y-%m-%d").date()
 
-    # Períodos independentes dos cards: mês vigente no topo e semana vigente (segunda a domingo) no rodapé.
+    # O período dos cards pode ser consultado livremente por mês/ano.
+    # A semana é sempre um número dentro do mês escolhido acima.
     def primeiro_dia_mes(valor: date) -> date:
         return valor.replace(day=1)
 
@@ -7073,7 +7075,6 @@ def financeiro(
     except ValueError:
         mes_cards_inicio = mes_vigente
     mes_cards_fim = avancar_mes(mes_cards_inicio, 1) - timedelta(days=1)
-    meses_cards = [avancar_mes(mes_vigente, deslocamento) for deslocamento in range(3)]
 
     # Semanas do mês selecionado. A primeira e a última podem ser parciais,
     # garantindo que todos os contratos do mês apareçam em exatamente uma semana.
@@ -7085,25 +7086,31 @@ def financeiro(
         semanas_cards.append({"inicio": cursor_semana, "fim": fim_periodo})
         cursor_semana = fim_periodo + timedelta(days=1)
 
-    semana_cards_inicio_solicitada = None
-    try:
-        if semana_cards:
+    # Preferência nova: número da semana dentro do mês. Mantém compatibilidade
+    # com links antigos que ainda enviem a data inicial em semana_cards.
+    indice_semana = None
+    if 1 <= semana_numero <= len(semanas_cards):
+        indice_semana = semana_numero - 1
+    elif semana_cards:
+        try:
             semana_cards_inicio_solicitada = datetime.strptime(semana_cards, "%Y-%m-%d").date()
-    except ValueError:
-        semana_cards_inicio_solicitada = None
+            indice_semana = next(
+                (i for i, periodo in enumerate(semanas_cards)
+                 if periodo["inicio"] == semana_cards_inicio_solicitada),
+                None,
+            )
+        except ValueError:
+            indice_semana = None
 
-    semana_selecionada = next(
-        (periodo for periodo in semanas_cards
-         if periodo["inicio"] == semana_cards_inicio_solicitada),
-        None
-    )
-    if not semana_selecionada:
-        semana_selecionada = next(
-            (periodo for periodo in semanas_cards
+    if indice_semana is None:
+        indice_semana = next(
+            (i for i, periodo in enumerate(semanas_cards)
              if periodo["inicio"] <= hoje <= periodo["fim"]),
-            semanas_cards[0]
+            0,
         )
 
+    semana_selecionada = semanas_cards[indice_semana]
+    semana_numero_selecionada = indice_semana + 1
     semana_cards_inicio = semana_selecionada["inicio"]
     semana_cards_fim = semana_selecionada["fim"]
 
@@ -7373,15 +7380,17 @@ def financeiro(
     quantidade_contratos_cards = len(contratos_cards)
     quantidade_contratos_cards_proprios = len(contratos_cards_proprios)
     quantidade_contratos_cards_transferidos = len(contratos_cards_transferidos)
+    valor_total_contratos_cards = sum(float(c.valor or 0) for c in contratos_cards)
+    valor_total_contratos_cards_proprios = sum(float(c.valor or 0) for c in contratos_cards_proprios)
+    valor_total_contratos_cards_transferidos = sum(float(c.valor or 0) for c in contratos_cards_transferidos)
     total_contratos_receber_cards = sum(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
     total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
-    # Acumulado do banco: duas consultas agrupadas para todas as contas.
-    # Para o mês atual/futuro, nunca considera movimento com data posterior a hoje.
-    # Para mês passado, fecha a posição no último dia daquele mês.
+    # Acumulado do banco: posição real de cada conta até a data de corte.
+    # Para consulta histórica, soma todo o histórico disponível (não apenas o ano)
+    # e inclui o saldo inicial cadastrado da conta. Para mês futuro, corta em hoje.
     corte_banco = min(mes_cards_fim, hoje)
-    inicio_ano = corte_banco.replace(month=1, day=1)
     totais_banco_por_conta = {
         conta_id_resultado: float(total or 0)
         for conta_id_resultado, total in db.query(
@@ -7389,7 +7398,6 @@ def financeiro(
             func.coalesce(func.sum(LancamentoBanco.valor), 0),
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.data >= inicio_ano,
             LancamentoBanco.data <= corte_banco,
         ).group_by(LancamentoBanco.conta_id).all()
     }
@@ -7401,7 +7409,6 @@ def financeiro(
         ).filter(
             LancamentoManualFinanceiro.empresa_id == empresa.id,
             LancamentoManualFinanceiro.tipo == "real",
-            LancamentoManualFinanceiro.data >= inicio_ano,
             LancamentoManualFinanceiro.data <= corte_banco,
         ).group_by(LancamentoManualFinanceiro.conta_id).all()
     }
@@ -7410,7 +7417,8 @@ def financeiro(
         if not conta_calculo:
             return 0.0
         return (
-            totais_banco_por_conta.get(conta_calculo.id, 0.0)
+            float(conta_calculo.saldo_inicial or 0)
+            + totais_banco_por_conta.get(conta_calculo.id, 0.0)
             + totais_manuais_por_conta.get(conta_calculo.id, 0.0)
         )
 
@@ -7714,9 +7722,10 @@ def financeiro(
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
         "status_sistema": status_sistema,
-        "mes_cards": mes_cards_inicio.strftime("%Y-%m"), "meses_cards": meses_cards,
+        "mes_cards": mes_cards_inicio.strftime("%Y-%m"),
         "mes_cards_inicio": mes_cards_inicio, "mes_cards_fim": mes_cards_fim,
-        "semana_cards": semana_cards_inicio.isoformat(), "semanas_cards": semanas_cards,
+        "semana_cards": semana_cards_inicio.isoformat(), "semana_numero": semana_numero_selecionada,
+        "semanas_cards": semanas_cards,
         "semana_cards_inicio": semana_cards_inicio, "semana_cards_fim": semana_cards_fim,
         "timedelta": timedelta,
         "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagar": pagar, "pagamentos_sistema": pagamentos_sistema,
@@ -7724,6 +7733,9 @@ def financeiro(
         "quantidade_contratos_cards": quantidade_contratos_cards,
         "quantidade_contratos_cards_proprios": quantidade_contratos_cards_proprios,
         "quantidade_contratos_cards_transferidos": quantidade_contratos_cards_transferidos,
+        "valor_total_contratos_cards": valor_total_contratos_cards,
+        "valor_total_contratos_cards_proprios": valor_total_contratos_cards_proprios,
+        "valor_total_contratos_cards_transferidos": valor_total_contratos_cards_transferidos,
         "total_contratos_receber_cards": total_contratos_receber_cards,
         "total_repasse_cards": total_repasse_cards,
         "quantidade_contratos_semana": quantidade_contratos_semana,
@@ -7772,23 +7784,20 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
     hoje = date.today()
     ate_data = ate_data or hoje
     corte_banco = min(ate_data, hoje)
-    inicio_ano = corte_banco.replace(month=1, day=1)
     contas_ativas = db.query(ContaFinanceira).filter_by(empresa_id=empresa_id, ativa=True).all()
     ids_contas = [c.id for c in contas_ativas]
 
-    saldo_banco = 0.0
+    saldo_banco = sum(float(c.saldo_inicial or 0) for c in contas_ativas)
     if ids_contas:
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoBanco.valor), 0)).filter(
             LancamentoBanco.empresa_id == empresa_id,
             LancamentoBanco.conta_id.in_(ids_contas),
-            LancamentoBanco.data >= inicio_ano,
             LancamentoBanco.data <= corte_banco,
         ).scalar() or 0)
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
             LancamentoManualFinanceiro.empresa_id == empresa_id,
             LancamentoManualFinanceiro.conta_id.in_(ids_contas),
             LancamentoManualFinanceiro.tipo == "real",
-            LancamentoManualFinanceiro.data >= inicio_ano,
             LancamentoManualFinanceiro.data <= corte_banco,
         ).scalar() or 0)
 

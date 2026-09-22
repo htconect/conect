@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin2">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin3">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -28,32 +28,18 @@
   </div>
 
   <div class="financeiro-resumo-linha">
-    <form method="get" class="seletor-periodo seletor-mes-cards" aria-label="Selecionar mês dos cards superiores">
+    <form method="get" class="seletor-periodo seletor-mes-cards seletor-periodo-livre" aria-label="Selecionar mês e ano dos cards superiores">
       <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
       <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
       <input type="hidden" name="data_final" value="{{ data_final }}">
       <input type="hidden" name="categoria" value="{{ categoria }}">
       <input type="hidden" name="busca" value="{{ busca }}">
       <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
-      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
-      <select name="mes_cards" onchange="this.form.submit()" title="Mês dos cards">
-        {% for mes in meses_cards %}
-          <option value="{{ mes.strftime('%Y-%m') }}" {% if mes.strftime('%Y-%m') == mes_cards %}selected{% endif %}>
-            Mês {{ loop.index }} · {{ mes.strftime('%m/%Y') }}
-          </option>
-        {% endfor %}
-      </select>
+      <label for="mes-cards-livre">Mês / ano</label>
+      <input id="mes-cards-livre" type="month" name="mes_cards" value="{{ mes_cards }}" onchange="this.form.submit()" title="Escolha qualquer mês e ano">
     </form>
 
     <div class="financeiro-resumo" aria-label="Resumo financeiro mensal e acumulado">
-      <div class="indicador-card indicador-banco-selecionado">
-        <span class="indicador-icone"><i class="bi bi-credit-card-2-front" aria-hidden="true"></i></span>
-        <div><small>{{ conta.nome if conta else 'Banco selecionado' }}</small><b>R$ {{ saldo_banco|moeda_br }}</b><em>Saldo do banco selecionado para conferência</em></div>
-      </div>
-      <div class="indicador-card indicador-banco indicador-banco-total">
-        <span class="indicador-icone"><i class="bi bi-bank" aria-hidden="true"></i></span>
-        <div><small>Total de todos os bancos</small><b>R$ {{ saldo_todos|moeda_br }}</b><em>Soma de todas as contas</em></div>
-      </div>
       <div class="indicador-card indicador-entrada">
         <span class="indicador-icone"><i class="bi bi-arrow-down" aria-hidden="true"></i></span>
         <div><small>Entradas do mês</small><b class="positivo">R$ {{ entradas|moeda_br }}</b><em>{{ conta.nome if conta else 'Todas as contas' }}</em></div>
@@ -74,6 +60,14 @@
         <span class="indicador-icone"><i class="bi bi-arrow-up-circle" aria-hidden="true"></i></span>
         <div><small>A pagar</small><b class="negativo">R$ {{ total_pagar_posicao|moeda_br }}</b><em>Até {{ mes_cards_fim.strftime('%d/%m') }} + saldos anteriores</em></div>
       </div>
+      <div class="indicador-card indicador-banco-selecionado">
+        <span class="indicador-icone"><i class="bi bi-credit-card-2-front" aria-hidden="true"></i></span>
+        <div><small>{{ conta.nome if conta else 'Banco selecionado' }}</small><b>R$ {{ saldo_banco|moeda_br }}</b><em>Saldo do banco selecionado para conferência</em></div>
+      </div>
+      <div class="indicador-card indicador-banco indicador-banco-total">
+        <span class="indicador-icone"><i class="bi bi-bank" aria-hidden="true"></i></span>
+        <div><small>Total de todos os bancos</small><b>R$ {{ saldo_todos|moeda_br }}</b><em>Soma de todas as contas</em></div>
+      </div>
       <div class="indicador-card indicador-contas">
         <span class="indicador-icone"><i class="bi bi-graph-up-arrow" aria-hidden="true"></i></span>
         <div><small>Saldo projetado</small><b>R$ {{ saldo_projetado_posicao|moeda_br }}</b><em>Banco + receber − pagar</em></div>
@@ -86,7 +80,7 @@
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
-      <input type="hidden" name="semana_cards" value="{{ semana_cards }}">
+      <input type="hidden" name="semana_numero" value="{{ semana_numero }}">
       <select name="conta_id" onchange="this.form.submit()">
         {% for c in contas %}<option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
       </select>
@@ -723,39 +717,20 @@
     </section>
   </div>
 
-  <div class="financeiro-rodape-linha financeiro-rodape-mensal">
-    <div class="periodo-contratos-label" aria-label="Resumo mensal dos contratos">
-      <small>Contratos</small>
-      <b>Mês {{ mes_cards_inicio.strftime('%m/%Y') }}</b>
-      <span>Resumo mensal</span>
-    </div>
-
-    <div class="financeiro-rodape-cards">
-      <div class="contrato-card contrato-quantidade">
-        <span class="contrato-icone"><i class="bi bi-calendar2-month" aria-hidden="true"></i></span>
-        <div><small>Contratos no mês</small><b>{{ quantidade_contratos_cards }}</b><em>{{ quantidade_contratos_cards_proprios }} próprios · {{ quantidade_contratos_cards_transferidos }} transferidos</em></div>
-        <a href="/painel/agenda?data_inicial={{ mes_cards_inicio.isoformat() }}&data_final={{ mes_cards_fim.isoformat() }}&ativos=1" class="btn-ver-agenda-icone" title="Ver agenda" aria-label="Ver agenda"><i class="bi bi-eye" aria-hidden="true"></i></a>
-      </div>
-      <div class="contrato-card contrato-total">
-        <span class="contrato-icone"><i class="bi bi-wallet2" aria-hidden="true"></i></span>
-        <div><small>Valor dos contratos no mês</small><b>R$ {{ valor_total_contratos_cards|moeda_br }}</b><em>Próprios R$ {{ valor_total_contratos_cards_proprios|moeda_br }} · Transf. R$ {{ valor_total_contratos_cards_transferidos|moeda_br }}</em></div>
-        <a href="/painel/agenda?data_inicial={{ mes_cards_inicio.isoformat() }}&data_final={{ mes_cards_fim.isoformat() }}&ativos=1" class="btn-ver-agenda-icone" title="Ver agenda" aria-label="Ver agenda"><i class="bi bi-eye" aria-hidden="true"></i></a>
-      </div>
-      <div class="contrato-card contrato-receber-semana">
-        <span class="contrato-icone"><i class="bi bi-arrow-down" aria-hidden="true"></i></span>
-        <div><small>A receber dos contratos no mês</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b><em>Próprios R$ {{ total_contratos_receber_cards_proprios|moeda_br }} · Transf. R$ {{ total_contratos_receber_cards_transferidos|moeda_br }}</em></div>
-        <a href="/painel/agenda?data_inicial={{ mes_cards_inicio.isoformat() }}&data_final={{ mes_cards_fim.isoformat() }}&ativos=1" class="btn-ver-agenda-icone" title="Ver agenda" aria-label="Ver agenda"><i class="bi bi-eye" aria-hidden="true"></i></a>
-      </div>
-      <div class="contrato-card contrato-repasse-semana">
-        <span class="contrato-icone"><i class="bi bi-arrow-up-right" aria-hidden="true"></i></span>
-        <div><small>Repasse a pagar no mês</small><b>R$ {{ total_repasse_cards|moeda_br }}</b><em>{{ quantidade_contratos_cards_transferidos }} contrato(s) transferido(s)</em></div>
-        <a href="/painel/agenda?data_inicial={{ mes_cards_inicio.isoformat() }}&data_final={{ mes_cards_fim.isoformat() }}&ativos=1" class="btn-ver-agenda-icone" title="Ver agenda" aria-label="Ver agenda"><i class="bi bi-eye" aria-hidden="true"></i></a>
+  <div class="financeiro-rodape-linha financeiro-rodape-mensal financeiro-mensal-compacto">
+    <div class="contrato-card contrato-mensal-unico" aria-label="Acumulado dos contratos no mês">
+      <span class="contrato-icone"><i class="bi bi-calendar2-month" aria-hidden="true"></i></span>
+      <div class="mensal-metricas">
+        <div class="mensal-metrica"><small>Contratos no mês</small><b>{{ quantidade_contratos_cards }}</b></div>
+        <div class="mensal-metrica"><small>Valor dos contratos</small><b>R$ {{ valor_total_contratos_cards|moeda_br }}</b></div>
+        <div class="mensal-metrica"><small>A receber</small><b>R$ {{ total_contratos_receber_cards|moeda_br }}</b></div>
+        <div class="mensal-metrica"><small>Repasse a pagar</small><b>R$ {{ total_repasse_cards|moeda_br }}</b></div>
       </div>
     </div>
   </div>
 
   <div class="financeiro-rodape-linha financeiro-rodape-semanal">
-    <form method="get" class="seletor-periodo seletor-semana-cards" aria-label="Selecionar semana dos cards inferiores">
+    <form method="get" class="seletor-periodo seletor-semana-cards seletor-semana-numerico" aria-label="Selecionar número da semana dentro do mês escolhido">
       <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
       <input type="hidden" name="data_inicial" value="{{ data_inicial }}">
       <input type="hidden" name="data_final" value="{{ data_final }}">
@@ -763,13 +738,12 @@
       <input type="hidden" name="busca" value="{{ busca }}">
       <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
-      <select name="semana_cards" onchange="this.form.submit()" title="Semana dos cards">
-        {% for semana in semanas_cards %}
-          <option value="{{ semana.inicio.isoformat() }}" {% if semana.inicio.isoformat() == semana_cards %}selected{% endif %}>
-            Semana {{ loop.index }} · {{ semana.inicio.strftime('%d/%m') }} a {{ semana.fim.strftime('%d/%m') }}
-          </option>
-        {% endfor %}
-      </select>
+      <label for="semana-numero">Semana</label>
+      <div class="semana-numero-linha">
+        <input id="semana-numero" type="number" name="semana_numero" min="1" max="{{ semanas_cards|length }}" value="{{ semana_numero }}" inputmode="numeric" title="Digite a semana do mês">
+        <button type="submit" title="Aplicar semana" aria-label="Aplicar semana"><i class="bi bi-check-lg" aria-hidden="true"></i></button>
+      </div>
+      <small>{{ semana_cards_inicio.strftime('%d/%m') }} a {{ semana_cards_fim.strftime('%d/%m') }} · mês {{ mes_cards_inicio.strftime('%m/%Y') }}</small>
     </form>
 
     <div class="financeiro-rodape-cards">
