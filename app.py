@@ -7468,7 +7468,7 @@ def financeiro(
     relatorio_semanal = []
     for indice, periodo in enumerate(semanas_cards, start=1):
         contratos_periodo = [
-            c for c in contratos_mes
+            c for c in contratos_cards
             if c.data_evento and periodo["inicio"] <= c.data_evento <= periodo["fim"]
         ]
         valor_total_periodo = sum(float(c.valor or 0) for c in contratos_periodo)
@@ -7950,6 +7950,7 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
         contratos = db.query(Solicitacao).filter(
             Solicitacao.empresa_id == empresa_id,
             Solicitacao.cancelado_em == None,
+            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
             Solicitacao.data_evento >= cursor,
             Solicitacao.data_evento <= fim_semana
         ).all()
