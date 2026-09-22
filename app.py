@@ -7378,8 +7378,10 @@ def financeiro(
     total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
     # Acumulado do banco: duas consultas agrupadas para todas as contas.
-    # Evita executar duas somas separadas para cada conta financeira.
-    inicio_ano = hoje.replace(month=1, day=1)
+    # Para o mês atual/futuro, nunca considera movimento com data posterior a hoje.
+    # Para mês passado, fecha a posição no último dia daquele mês.
+    corte_banco = min(mes_cards_fim, hoje)
+    inicio_ano = corte_banco.replace(month=1, day=1)
     totais_banco_por_conta = {
         conta_id_resultado: float(total or 0)
         for conta_id_resultado, total in db.query(
