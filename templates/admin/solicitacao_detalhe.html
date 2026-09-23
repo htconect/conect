@@ -390,7 +390,7 @@
 
   <form id="formPagamento" method="post" action="/painel/solicitacao/{{ item.id }}/pagamento" class="form-mobile-simples bloco-oculto" onsubmit="return validarPagamentoReserva(this)">
     <label>Valor recebido</label>
-    <input name="valor_pago" value="{{ falta|moeda_br }}" required inputmode="decimal" data-max="{{ '%.2f'|format(falta) }}" {% if falta <= 0 %}disabled{% endif %}>
+    <input name="valor_pago" value="{{ pagamento_manual_sugerido|moeda_br }}" required inputmode="decimal" data-max="{{ '%.2f'|format(falta) }}" {% if falta <= 0 %}disabled{% endif %}>
     <label>Forma</label>
     <select name="forma_pagamento" {% if falta <= 0 %}disabled{% endif %}>
       <option value="pix">PIX</option>
@@ -399,7 +399,7 @@
     </select>
     <details class="accordion interno">
       <summary>Detalhes opcionais</summary>
-      <label>Data do pagamento</label><input type="date" name="data_pagamento">
+      <label>Data do pagamento</label><input type="date" name="data_pagamento" value="{{ hoje_iso }}">
       <label>Comprovante no nome do cliente?</label>
       <select name="comprovante_no_nome_cliente" onchange="document.getElementById('nomeComprovante').style.display = this.value === 'nao' ? 'block' : 'none'">
         <option value="sim">Sim</option>

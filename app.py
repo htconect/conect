@@ -178,40 +178,57 @@ def pagamentos_pendentes_conciliacao(itens):
     return [p for i in itens for p in (getattr(i, "pagamentos", []) or []) if not getattr(p, "conciliado_em", None)]
 
 
-def recalcular_pagamento_solicitacao(db: Session, item: Solicitacao):
-    # Fonte da verdade do financeiro: tabela de pagamentos.
-    # O campo Solicitacao.valor_pago é apenas um resumo/cache usado nos cards.
-    # Antes havia casos em que o card mostrava falta receber mesmo com todos
-    # os pagamentos lançados/conciliados, porque esse resumo ficou desatualizado.
-    db.flush()
-    total_pago = sum(
-        (p.valor or 0) for p in db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
+def _aplicar_total_pagamento_solicitacao(item: Solicitacao, total_pago: float):
+    """Atualiza o resumo/cache financeiro da solicitação sem nova consulta ao banco."""
+    total_pago = max(float(total_pago or 0), 0.0)
     item.valor_pago = total_pago
-    item.sinal_recebido = total_pago > 0
-    if total_pago <= 0:
+    item.sinal_recebido = total_pago > 0.009
+    if total_pago <= 0.009:
         item.pagamento_confirmado_em = None
     elif not item.pagamento_confirmado_em:
         item.pagamento_confirmado_em = agora_utc()
     return total_pago
 
 
+def recalcular_pagamento_solicitacao(db: Session, item: Solicitacao):
+    # Fonte da verdade do financeiro: tabela de pagamentos.
+    # Usa SUM no banco para evitar carregar todas as linhas de Pagamento em memória.
+    db.flush()
+    total_pago = (
+        db.query(func.coalesce(func.sum(Pagamento.valor), 0))
+        .filter(Pagamento.empresa_id == item.empresa_id, Pagamento.solicitacao_id == item.id)
+        .scalar()
+        or 0
+    )
+    return _aplicar_total_pagamento_solicitacao(item, total_pago)
+
+
 def sincronizar_pagamentos_solicitacoes(db: Session, solicitacoes):
-    """Recalcula o resumo financeiro exibido nas telas operacionais/detalhe."""
-    alterou = False
+    """Recalcula em lote o resumo financeiro exibido nas telas operacionais/detalhe."""
+    itens = []
     vistos = set()
     for item in solicitacoes or []:
-        if not item or item.id in vistos:
-            continue
-        vistos.add(item.id)
-        total_pago = sum((p.valor or 0) for p in
-                         db.query(Pagamento).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).all())
-        if round(float(item.valor_pago or 0), 2) != round(float(total_pago or 0), 2):
-            item.valor_pago = total_pago
-            item.sinal_recebido = total_pago > 0
-            if total_pago <= 0:
-                item.pagamento_confirmado_em = None
-            elif not item.pagamento_confirmado_em:
-                item.pagamento_confirmado_em = agora_utc()
+        if item and item.id not in vistos:
+            vistos.add(item.id)
+            itens.append(item)
+    if not itens:
+        return False
+
+    ids = [item.id for item in itens]
+    totais = {
+        solicitacao_id: float(total or 0)
+        for solicitacao_id, total in (
+            db.query(Pagamento.solicitacao_id, func.coalesce(func.sum(Pagamento.valor), 0))
+            .filter(Pagamento.solicitacao_id.in_(ids))
+            .group_by(Pagamento.solicitacao_id)
+            .all()
+        )
+    }
+    alterou = False
+    for item in itens:
+        total_pago = totais.get(item.id, 0.0)
+        if round(float(item.valor_pago or 0), 2) != round(total_pago, 2):
+            _aplicar_total_pagamento_solicitacao(item, total_pago)
             alterou = True
     if alterou:
         db.commit()
@@ -803,6 +820,29 @@ def _sinal_infinitepay_contrato(empresa: Empresa, item: Solicitacao) -> float:
     if sinal_calculado > 0.009:
         return min(sinal_calculado, total)
     return min(sinal_item, total)
+
+
+def _valor_pagamento_manual_sugerido(empresa: Empresa, item: Solicitacao) -> float:
+    """Sugere sinal no primeiro recebimento e saldo restante nos seguintes.
+
+    Reaproveita o valor de sinal já configurado na empresa. Se a empresa ainda
+    não configurou esse campo, usa R$ 100,00 por equipamento como padrão visual
+    do registro manual, sem alterar a configuração da InfinitePay.
+    """
+    total = max(float(getattr(item, "valor", 0) or 0), 0.0)
+    pago = max(float(getattr(item, "valor_pago", 0) or 0), 0.0)
+    saldo = max(total - pago, 0.0)
+    if saldo <= 0.009:
+        return 0.0
+    if pago > 0.009:
+        return round(saldo, 2)
+
+    sinal_configurado = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
+    if sinal_configurado > 0.009 or float(getattr(item, "sinal", 0) or 0) > 0.009:
+        sinal = _sinal_infinitepay_contrato(empresa, item)
+    else:
+        sinal = 100.0 * _quantidade_equipamentos_contrato(item)
+    return round(min(max(sinal, 0.0), saldo), 2)
 
 
 def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
@@ -1490,6 +1530,30 @@ def garantir_colunas_novas():
     if "produtos_servicos_recursos" in tabelas:
         comandos.append(
             "CREATE INDEX IF NOT EXISTS ix_perf_produtos_recursos_empresa_produto ON produtos_servicos_recursos (empresa_id, produto_id)"
+        )
+    # Financeiro/pagamentos: o monitor mostrou várias consultas curtas pagando o custo
+    # de ida e volta ao PostgreSQL remoto. Estes índices reduzem o trabalho dos filtros
+    # mais frequentes sem alterar as regras financeiras já validadas.
+    if "pagamentos" in tabelas:
+        comandos.extend([
+            "CREATE INDEX IF NOT EXISTS ix_perf_pagamentos_empresa_solicitacao ON pagamentos (empresa_id, solicitacao_id)",
+            "CREATE INDEX IF NOT EXISTS ix_perf_pagamentos_empresa_data ON pagamentos (empresa_id, data_pagamento)",
+        ])
+    if "lancamentos_banco" in tabelas:
+        comandos.append(
+            "CREATE INDEX IF NOT EXISTS ix_perf_lancamentos_banco_empresa_conta_data ON lancamentos_banco (empresa_id, conta_id, data)"
+        )
+    if "lancamentos_manuais_financeiros" in tabelas:
+        comandos.append(
+            "CREATE INDEX IF NOT EXISTS ix_perf_lancamentos_manuais_empresa_tipo_data ON lancamentos_manuais_financeiros (empresa_id, tipo, data)"
+        )
+    if "vinculos_repasse_banco" in tabelas:
+        comandos.append(
+            "CREATE INDEX IF NOT EXISTS ix_perf_vinculos_repasse_empresa_solicitacao ON vinculos_repasse_banco (empresa_id, solicitacao_id)"
+        )
+    if "usuarios_equipes" in tabelas:
+        comandos.append(
+            "CREATE INDEX IF NOT EXISTS ix_perf_usuarios_equipes_usuario_equipe ON usuarios_equipes (usuario_id, equipe_id)"
         )
 
     if comandos:
@@ -4977,10 +5041,24 @@ def restaurar_recursos_solicitacao(
 @app.get("/painel/solicitacao/{solicitacao_id}", response_class=HTMLResponse)
 def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Depends(get_db),
                         empresa: Empresa = Depends(empresa_logada)):
-    item = db.get(Solicitacao, solicitacao_id)
-    if not item or item.empresa_id != empresa.id:
+    item = (db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente),
+        joinedload(Solicitacao.produto),
+        joinedload(Solicitacao.contrato),
+        joinedload(Solicitacao.empresa_transferida),
+        joinedload(Solicitacao.agenda),
+        selectinload(Solicitacao.itens),
+        selectinload(Solicitacao.pagamentos),
+    ).filter(
+        Solicitacao.id == solicitacao_id,
+        Solicitacao.empresa_id == empresa.id,
+    ).first())
+    if not item:
         raise HTTPException(404)
-    sincronizar_pagamentos_solicitacoes(db, [item])
+    total_pagamentos_carregado = sum(float(p.valor or 0) for p in (item.pagamentos or []))
+    if round(float(item.valor_pago or 0), 2) != round(total_pagamentos_carregado, 2):
+        _aplicar_total_pagamento_solicitacao(item, total_pagamentos_carregado)
+        db.commit()
     if _infinitepay_habilitada(empresa):
         _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
     cobrancas_infinitepay = (db.query(InfinitePayCobranca)
@@ -5018,6 +5096,8 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "mensagens": mensagens, "cobrancas_infinitepay": cobrancas_infinitepay,
                                        "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS,
                                        "fluxo_infinitepay": _infinitepay_habilitada(empresa),
+                                       "pagamento_manual_sugerido": _valor_pagamento_manual_sugerido(empresa, item),
+                                       "hoje_iso": date.today().isoformat(),
                                        "analise_estoque": analise_estoque,
                                        "recursos_contrato": analise_estoque.get("recursos", []),
                                        "recursos_por_produto_view": recursos_por_produto_view})
@@ -9278,8 +9358,14 @@ def confirmar_pagamento(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    item = db.get(Solicitacao, solicitacao_id)
-    if not item or item.empresa_id != empresa.id:
+    item = (db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente),
+        selectinload(Solicitacao.pagamentos),
+    ).filter(
+        Solicitacao.id == solicitacao_id,
+        Solicitacao.empresa_id == empresa.id,
+    ).first())
+    if not item:
         raise HTTPException(404)
     # Pagamento pode ser informado antes ou depois do aceite.
     # Depois do aceite, ao atingir o sinal mínimo exigido, o lançamento manual também
@@ -9287,24 +9373,24 @@ def confirmar_pagamento(
     valor = texto_para_float(valor_pago)
     if valor <= 0:
         return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
-    total_atual = sum((p.valor or 0) for p in getattr(item, "pagamentos", []) or [])
-    validar_total_pagamentos(item, total_atual + valor)
+    total_atual = sum(float(p.valor or 0) for p in (item.pagamentos or []))
+    novo_total = total_atual + valor
+    validar_total_pagamentos(item, novo_total)
     data_ref = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else date.today()
     no_nome = comprovante_no_nome_cliente == "sim"
     pagamento = Pagamento(
         empresa_id=empresa.id,
-        solicitacao_id=item.id,
+        solicitacao=item,
         data_pagamento=data_ref,
         valor=valor,
         forma_pagamento=forma_pagamento,
         comprovante_no_nome_cliente=no_nome,
-        nome_comprovante=item.cliente.nome if no_nome else nome_comprovante.strip(),
+        nome_comprovante=(item.cliente.nome if item.cliente else "") if no_nome else nome_comprovante.strip(),
         observacoes=observacoes_pagamento.strip(),
         usuario_registro=request.session.get("usuario_sistema", "Usuário")
     )
     db.add(pagamento)
-    db.flush()
-    recalcular_pagamento_solicitacao(db, item)
+    _aplicar_total_pagamento_solicitacao(item, novo_total)
     # Se o cliente já aceitou e a empresa usa o fluxo de pagamento após aceite,
     # um recebimento lançado manualmente também pode confirmar a reserva. Assim
     # o link público reflete a mesma situação financeira, independentemente da origem.
@@ -9361,19 +9447,20 @@ def editar_pagamento_financeiro(
     if valor <= 0:
         raise HTTPException(400, "O valor do pagamento precisa ser maior que zero.")
 
-    total_sem_este = sum((p.valor or 0) for p in db.query(Pagamento).filter(
+    total_sem_este = float((db.query(func.coalesce(func.sum(Pagamento.valor), 0)).filter(
         Pagamento.empresa_id == empresa.id,
         Pagamento.solicitacao_id == item.id,
         Pagamento.id != pagamento.id
-    ).all())
-    validar_total_pagamentos(item, total_sem_este + valor)
+    ).scalar() or 0))
+    novo_total = total_sem_este + valor
+    validar_total_pagamentos(item, novo_total)
 
     pagamento.data_pagamento = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else date.today()
     pagamento.valor = valor
     pagamento.forma_pagamento = forma_pagamento
     pagamento.nome_comprovante = nome_comprovante.strip() or (item.cliente.nome if item.cliente else "")
     pagamento.observacoes = observacoes_pagamento.strip()
-    recalcular_pagamento_solicitacao(db, item)
+    _aplicar_total_pagamento_solicitacao(item, novo_total)
     db.commit()
     voltar = request.headers.get("referer") or "/painel/financeiro"
     return RedirectResponse(voltar, status_code=303)

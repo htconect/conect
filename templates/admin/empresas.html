@@ -50,7 +50,7 @@
       <label>InfiniteTag / handle</label>
       <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else 'karaokerj' }}" placeholder="karaokerj">
       <label>Valor do sinal por equipamento</label>
-      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '0,00' }}" placeholder="100,00">
+      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '100,00' }}" placeholder="100,00">
       <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Valor do contrato pelo checkout. A configuração é isolada por empresa.</p>
     </div>
 
