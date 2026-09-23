@@ -1863,3 +1863,6 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 @media (max-width:1200px){
   .financeiro-filtros{min-width:900px!important}
 }
+
+/* v1.0.53 — atalho para análise histórica */
+.btn-evolucao-financeira{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border:1px solid #b9d2ff;border-radius:10px;text-decoration:none;background:#f4f8ff;color:#0f3d91;font-weight:800;white-space:nowrap}

@@ -713,6 +713,30 @@ class VeiculoPerfilCarga(Base):
     produto = relationship("ProdutoServico")
 
 
+
+class EvolucaoFinanceiraHistorico(Base):
+    """Base histórica mensal usada no comparativo financeiro.
+
+    Meses automáticos (a partir de 07/2026 no caso da Karaokê RJ) não precisam
+    ser gravados aqui: são calculados diretamente a partir dos contratos.
+    """
+    __tablename__ = "evolucao_financeira_historico"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "ano", "mes", name="uq_evolucao_fin_empresa_ano_mes"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    ano = Column(Integer, nullable=False, index=True)
+    mes = Column(Integer, nullable=False)
+    quantidade_contratos = Column(Integer, nullable=False, default=0)
+    valor_total = Column(Float, nullable=False, default=0)
+    observacao = Column(String(240), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    empresa = relationship("Empresa")
+
 class ConfiguracaoRotaInteligente(Base):
     __tablename__ = "configuracoes_rota_inteligente"
     __table_args__ = (UniqueConstraint("empresa_id", name="uq_config_rota_empresa"),)

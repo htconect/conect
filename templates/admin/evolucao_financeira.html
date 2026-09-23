@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block body_class %}tela-evolucao-financeira{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/evolucao_financeira.css?v=20260923-v153">{% endblock %}
+{% block conteudo %}
+<section class="evolucao-financeira">
+  <header class="evolucao-cabecalho">
+    <div class="evolucao-titulo">
+      <a href="/painel/financeiro" class="voltar-financeiro"><i class="bi bi-arrow-left"></i> Financeiro</a>
+      <div>
+        <h1>Evolução Financeira</h1>
+        <p>Histórico e comparativo de contratos por mês e ano</p>
+      </div>
+    </div>
+    <form method="get" class="seletor-ano-comparacao">
+      <label for="ano-final">Comparar até</label>
+      <div>
+        <a href="?ano_final={{ ano_final - 1 }}" title="Anos anteriores"><i class="bi bi-chevron-left"></i></a>
+        <input id="ano-final" type="number" name="ano_final" min="2026" max="2100" value="{{ ano_final }}" onchange="this.form.submit()">
+        <a href="?ano_final={{ ano_final + 1 }}" title="Anos seguintes"><i class="bi bi-chevron-right"></i></a>
+      </div>
+    </form>
+  </header>
+
+  <div class="fonte-resumo">
+    <span><i class="bi bi-database-check"></i> <b>Histórico:</b> dados reais importados até 06/2026</span>
+    <span><i class="bi bi-lightning-charge"></i> <b>Sistema:</b> contratos válidos automaticamente a partir de 07/2026</span>
+  </div>
+
+  <div class="cards-anos">
+    {% for ano in anos %}
+    <article class="card-ano">
+      <div class="card-ano-topo">
+        <strong>{{ ano }}</strong>
+        {% if totais[ano].crescimento is not none %}
+          <span class="variacao {% if totais[ano].crescimento >= 0 %}positiva{% else %}negativa{% endif %}">
+            <i class="bi bi-{% if totais[ano].crescimento >= 0 %}arrow-up-right{% else %}arrow-down-right{% endif %}"></i>
+            {{ '%.1f'|format(totais[ano].crescimento)|replace('.', ',') }}%
+          </span>
+        {% endif %}
+      </div>
+      <div class="card-ano-destaque">R$ {{ totais[ano].valor|moeda_br }}</div>
+      <div class="card-ano-metricas">
+        <span><small>Contratos</small><b>{{ totais[ano].quantidade }}</b></span>
+        <span><small>Média por contrato</small><b>R$ {{ totais[ano].ticket|moeda_br }}</b></span>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <section class="painel-grafico box-evolucao">
+    <div class="secao-titulo">
+      <div>
+        <h2>{{ anos|join(' × ') }}</h2>
+        <p>Comparativo mensal</p>
+      </div>
+      <div class="grafico-tipo" role="group" aria-label="Métrica do gráfico">
+        <button type="button" class="ativo" data-grafico-tipo="valor">Valor</button>
+        <button type="button" data-grafico-tipo="quantidade">Quantidade</button>
+      </div>
+    </div>
+    <div id="grafico-evolucao" class="grafico-evolucao" aria-label="Gráfico comparativo mensal"></div>
+    <div class="legenda-grafico">
+      {% for ano in anos %}<span><i class="cor-serie cor-serie-{{ loop.index }}"></i>{{ ano }}</span>{% endfor %}
+    </div>
+  </section>
+
+  <section class="box-evolucao tabela-evolucao-box">
+    <div class="secao-titulo">
+      <div>
+        <h2>Comparativo mensal</h2>
+        <p>Quantidade de contratos e valor total por competência</p>
+      </div>
+    </div>
+    <div class="tabela-evolucao-scroll">
+      <table class="tabela-evolucao">
+        <thead>
+          <tr>
+            <th rowspan="2">Mês</th>
+            {% for ano in anos %}<th colspan="2">{{ ano }}</th>{% endfor %}
+          </tr>
+          <tr>
+            {% for ano in anos %}<th>Qtd.</th><th>Valor total</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for linha in linhas %}
+          <tr>
+            <th>{{ linha.nome }}</th>
+            {% for ano in anos %}
+              {% set dado = linha.anos[ano] %}
+              <td>
+                {{ dado.quantidade }}
+                {% if dado.origem != 'sem_dados' %}<small class="fonte-tag {{ dado.origem }}">{{ 'H' if dado.origem == 'historico' else 'S' }}</small>{% endif %}
+              </td>
+              <td>
+                R$ {{ dado.valor|moeda_br }}
+                {% if dado.origem != 'sem_dados' %}<small class="fonte-tag {{ dado.origem }}">{{ 'H' if dado.origem == 'historico' else 'S' }}</small>{% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            {% for ano in anos %}<td>{{ totais[ano].quantidade }}</td><td>R$ {{ totais[ano].valor|moeda_br }}</td>{% endfor %}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="fonte-legenda"><span><b>H</b> Histórico importado</span><span><b>S</b> Sistema / contratos</span></div>
+  </section>
+
+  <details class="box-evolucao ajuste-historico">
+    <summary><i class="bi bi-pencil-square"></i> Ajustar dado histórico</summary>
+    <div class="ajuste-historico-conteudo">
+      <p>Use apenas para corrigir competências anteriores a julho/2026. A partir de 07/2026 os números vêm automaticamente dos contratos e não precisam ser digitados.</p>
+      <form method="post" action="/painel/evolucao-financeira/historico" class="form-historico">
+        <label>Ano<input type="number" name="ano" min="2000" max="2026" value="2026" required></label>
+        <label>Mês<select name="mes" required>{% for linha in linhas %}<option value="{{ linha.mes }}">{{ linha.nome }}</option>{% endfor %}</select></label>
+        <label>Qtd. contratos<input type="number" name="quantidade_contratos" min="0" value="0" required></label>
+        <label>Valor total<input type="text" name="valor_total" class="money" inputmode="decimal" value="0,00" required></label>
+        <button type="submit" class="botao"><i class="bi bi-check2-circle"></i> Salvar histórico</button>
+      </form>
+    </div>
+  </details>
+</section>
+
+<script>
+(() => {
+  const dados = {{ grafico|tojson }};
+  const alvo = document.getElementById('grafico-evolucao');
+  const botoes = document.querySelectorAll('[data-grafico-tipo]');
+  const formatarMoeda = valor => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0}).format(valor || 0);
+  const formatarNumero = valor => new Intl.NumberFormat('pt-BR').format(valor || 0);
+
+  function desenhar(tipo) {
+    alvo.innerHTML = '';
+    const chave = tipo === 'quantidade' ? 'quantidades' : 'valores';
+    const maximo = Math.max(1, ...dados.series.flatMap(s => s[chave]));
+    dados.meses.forEach((mes, indiceMes) => {
+      const grupo = document.createElement('div');
+      grupo.className = 'grupo-mes';
+      const barras = document.createElement('div');
+      barras.className = 'barras-mes';
+      dados.series.forEach((serie, indiceSerie) => {
+        const valor = Number(serie[chave][indiceMes] || 0);
+        const barra = document.createElement('div');
+        barra.className = `barra serie-${indiceSerie + 1}`;
+        barra.style.height = `${Math.max(valor > 0 ? 5 : 0, (valor / maximo) * 100)}%`;
+        const texto = tipo === 'quantidade' ? `${formatarNumero(valor)} contratos` : formatarMoeda(valor);
+        barra.title = `${mes} ${serie.ano}: ${texto}`;
+        barra.setAttribute('aria-label', barra.title);
+        if (valor > 0) {
+          const rotulo = document.createElement('span');
+          rotulo.textContent = tipo === 'quantidade' ? formatarNumero(valor) : formatarMoeda(valor);
+          barra.appendChild(rotulo);
+        }
+        barras.appendChild(barra);
+      });
+      const nome = document.createElement('small');
+      nome.textContent = mes.substring(0, 3).toUpperCase();
+      grupo.appendChild(barras);
+      grupo.appendChild(nome);
+      alvo.appendChild(grupo);
+    });
+  }
+
+  botoes.forEach(botao => botao.addEventListener('click', () => {
+    botoes.forEach(b => b.classList.remove('ativo'));
+    botao.classList.add('ativo');
+    desenhar(botao.dataset.graficoTipo);
+  }));
+  desenhar('valor');
+})();
+</script>
+{% endblock %}

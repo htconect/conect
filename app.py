@@ -38,7 +38,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -74,7 +74,7 @@ class ControleAcessoMiddleware:
             return "operacao"
         if path == "/painel/clientes" or path.startswith("/painel/cliente/"):
             return "buscar_cliente"
-        if path == "/painel/financeiro" or path.startswith("/painel/financeiro/"):
+        if path == "/painel/financeiro" or path.startswith("/painel/financeiro/") or path == "/painel/evolucao-financeira" or path.startswith("/painel/evolucao-financeira/"):
             return "financeiro"
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/"):
             return "relatorios"
@@ -7161,6 +7161,218 @@ def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 1
     candidatos.sort(key=lambda c: (-c["score"], c["diff_valor"], c["diff_dias"]))
     return candidatos[:limite]
 
+
+
+EVOLUCAO_FINANCEIRA_CORTE_SISTEMA = date(2026, 7, 1)
+EVOLUCAO_FINANCEIRA_HISTORICO_KARAOKE_RJ = {
+    2024: [
+        (18, 4480.00), (26, 8670.00), (29, 7650.00), (32, 8960.00),
+        (36, 9790.00), (61, 16650.00), (65, 17490.00), (58, 16140.00),
+        (34, 9720.00), (43, 11750.00), (40, 10920.00), (86, 34980.00),
+    ],
+    2025: [
+        (20, 5400.00), (31, 9610.00), (34, 10550.00), (31, 9270.00),
+        (27, 8440.00), (62, 18070.00), (65, 19730.00), (58, 17020.00),
+        (33, 10680.00), (44, 17390.00), (39, 12190.00), (96, 42500.00),
+    ],
+    2026: [
+        (20, 6710.00), (25, 8650.00), (38, 12570.00),
+        (24, 10640.00), (40, 13350.00), (28, 8660.00),
+    ],
+}
+
+
+def _nome_normalizado_evolucao(valor: str | None) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", " ", texto.lower()).strip()
+
+
+def _empresa_e_karaoke_rj(empresa: Empresa) -> bool:
+    alvo = f"{_nome_normalizado_evolucao(empresa.nome)} {_nome_normalizado_evolucao(empresa.slug)}"
+    return "karaoke" in alvo and "rj" in alvo
+
+
+def garantir_historico_evolucao_karaoke_rj(db: Session, empresa: Empresa) -> None:
+    """Importa uma única vez a série histórica real fornecida pela Karaokê RJ."""
+    if not _empresa_e_karaoke_rj(empresa):
+        return
+    existentes = {
+        (int(ano), int(mes))
+        for ano, mes in db.query(
+            EvolucaoFinanceiraHistorico.ano,
+            EvolucaoFinanceiraHistorico.mes,
+        ).filter(EvolucaoFinanceiraHistorico.empresa_id == empresa.id).all()
+    }
+    criou = False
+    for ano, meses in EVOLUCAO_FINANCEIRA_HISTORICO_KARAOKE_RJ.items():
+        for indice, (quantidade, valor) in enumerate(meses, start=1):
+            if (ano, indice) in existentes:
+                continue
+            db.add(EvolucaoFinanceiraHistorico(
+                empresa_id=empresa.id,
+                ano=ano,
+                mes=indice,
+                quantidade_contratos=int(quantidade),
+                valor_total=float(valor),
+                observacao="Histórico real Karaokê RJ importado da planilha 2024-2026",
+            ))
+            criou = True
+    if criou:
+        db.commit()
+
+
+def _dados_evolucao_financeira(db: Session, empresa_id: int, anos: list[int]) -> dict[int, dict[int, dict]]:
+    dados: dict[int, dict[int, dict]] = {
+        ano: {mes: {"quantidade": 0, "valor": 0.0, "origem": "sem_dados"} for mes in range(1, 13)}
+        for ano in anos
+    }
+
+    historicos = db.query(EvolucaoFinanceiraHistorico).filter(
+        EvolucaoFinanceiraHistorico.empresa_id == empresa_id,
+        EvolucaoFinanceiraHistorico.ano.in_(anos),
+    ).all()
+    for item in historicos:
+        if item.ano in dados and 1 <= int(item.mes or 0) <= 12:
+            dados[item.ano][item.mes] = {
+                "quantidade": int(item.quantidade_contratos or 0),
+                "valor": float(item.valor_total or 0),
+                "origem": "historico",
+            }
+
+    # A partir de julho/2026 a fonte oficial passa a ser o próprio Conect.
+    inicio_sistema = EVOLUCAO_FINANCEIRA_CORTE_SISTEMA
+    fim_sistema = date(max(anos), 12, 31)
+    if max(anos) >= inicio_sistema.year:
+        linhas_sistema = db.query(
+            func.extract("year", Solicitacao.data_evento).label("ano"),
+            func.extract("month", Solicitacao.data_evento).label("mes"),
+            func.count(Solicitacao.id).label("quantidade"),
+            func.coalesce(func.sum(Solicitacao.valor), 0).label("valor"),
+        ).filter(
+            Solicitacao.empresa_id == empresa_id,
+            Solicitacao.data_evento >= inicio_sistema,
+            Solicitacao.data_evento <= fim_sistema,
+            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+            Solicitacao.cancelado_em == None,
+        ).group_by(
+            func.extract("year", Solicitacao.data_evento),
+            func.extract("month", Solicitacao.data_evento),
+        ).all()
+        agregados = {(int(a), int(m)): (int(q or 0), float(v or 0)) for a, m, q, v in linhas_sistema}
+
+        for ano in anos:
+            for mes in range(1, 13):
+                competencia = date(ano, mes, 1)
+                if competencia < inicio_sistema:
+                    continue
+                quantidade, valor = agregados.get((ano, mes), (0, 0.0))
+                dados[ano][mes] = {
+                    "quantidade": quantidade,
+                    "valor": valor,
+                    "origem": "sistema",
+                }
+    return dados
+
+
+@app.get("/painel/evolucao-financeira", response_class=HTMLResponse)
+def evolucao_financeira(
+        request: Request,
+        ano_final: int = 0,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+
+    garantir_historico_evolucao_karaoke_rj(db, empresa)
+    ano_atual = date.today().year
+    ano_final = int(ano_final or max(ano_atual, 2026))
+    ano_final = max(2026, min(ano_final, 2100))
+    anos = [ano_final - 2, ano_final - 1, ano_final]
+    dados = _dados_evolucao_financeira(db, empresa.id, anos)
+
+    meses = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+    ]
+    linhas = []
+    for mes_numero, mes_nome in enumerate(meses, start=1):
+        linha = {"mes": mes_numero, "nome": mes_nome, "anos": {}}
+        for ano in anos:
+            linha["anos"][ano] = dados[ano][mes_numero]
+        linhas.append(linha)
+
+    totais = {}
+    for ano in anos:
+        quantidade = sum(dados[ano][mes]["quantidade"] for mes in range(1, 13))
+        valor = sum(dados[ano][mes]["valor"] for mes in range(1, 13))
+        totais[ano] = {
+            "quantidade": quantidade,
+            "valor": valor,
+            "ticket": (valor / quantidade) if quantidade else 0,
+        }
+    for pos, ano in enumerate(anos):
+        anterior = anos[pos - 1] if pos > 0 else None
+        if anterior and totais[anterior]["valor"]:
+            totais[ano]["crescimento"] = ((totais[ano]["valor"] / totais[anterior]["valor"]) - 1) * 100
+        else:
+            totais[ano]["crescimento"] = None
+
+    grafico = {
+        "meses": meses,
+        "series": [
+            {
+                "ano": ano,
+                "valores": [dados[ano][mes]["valor"] for mes in range(1, 13)],
+                "quantidades": [dados[ano][mes]["quantidade"] for mes in range(1, 13)],
+            }
+            for ano in anos
+        ],
+    }
+
+    return templates.TemplateResponse("admin/evolucao_financeira.html", {
+        "request": request,
+        "empresa": empresa,
+        "titulo": "Evolução Financeira",
+        "anos": anos,
+        "ano_final": ano_final,
+        "linhas": linhas,
+        "totais": totais,
+        "grafico": grafico,
+        "corte_sistema": EVOLUCAO_FINANCEIRA_CORTE_SISTEMA,
+        "e_karaoke_rj": _empresa_e_karaoke_rj(empresa),
+    })
+
+
+@app.post("/painel/evolucao-financeira/historico")
+def evolucao_financeira_salvar_historico(
+        request: Request,
+        ano: int = Form(...),
+        mes: int = Form(...),
+        quantidade_contratos: int = Form(0),
+        valor_total: str = Form("0"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para editar o histórico financeiro.")
+    if mes < 1 or mes > 12 or ano < 2000 or ano > 2100:
+        raise HTTPException(400, "Competência inválida.")
+    if date(ano, mes, 1) >= EVOLUCAO_FINANCEIRA_CORTE_SISTEMA:
+        raise HTTPException(400, "A partir de 07/2026 os dados são calculados automaticamente pelos contratos.")
+    valor = max(float(texto_para_float(valor_total) or 0), 0.0)
+    quantidade = max(int(quantidade_contratos or 0), 0)
+    item = db.query(EvolucaoFinanceiraHistorico).filter_by(
+        empresa_id=empresa.id, ano=ano, mes=mes
+    ).first()
+    if item is None:
+        item = EvolucaoFinanceiraHistorico(empresa_id=empresa.id, ano=ano, mes=mes)
+        db.add(item)
+    item.quantidade_contratos = quantidade
+    item.valor_total = valor
+    item.observacao = "Ajuste manual do histórico"
+    db.commit()
+    return RedirectResponse(f"/painel/evolucao-financeira?ano_final={max(2026, ano)}", status_code=303)
 
 @app.get("/painel/financeiro", response_class=HTMLResponse)
 def financeiro(
