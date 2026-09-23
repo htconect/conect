@@ -7748,12 +7748,11 @@ def financeiro(
         max(float(c.valor or 0) - float(c.valor_pago or 0), 0) for c in contratos_cards)
     total_repasse_cards = sum(float(c.valor_repasse or 0) for c in contratos_cards_transferidos)
 
-    # Acumulado do banco: mantém a mesma regra que já conferia com os extratos.
-    # A seleção de mês/ano altera apenas a data de corte; não muda a base do saldo.
-    # Considera os movimentos do ano até a data de corte e NÃO soma saldo_inicial
-    # automaticamente, evitando duplicidade em contas como InfinitePay.
-    corte_banco = min(mes_cards_fim, hoje)
-    inicio_ano = corte_banco.replace(month=1, day=1)
+    # Acumulado bancário atual: independente do mês escolhido nos cards.
+    # Mantém a regra antiga: soma somente os movimentos reais do ano corrente
+    # até hoje. Não usa saldo_inicial nem o campo Saldo do extrato.
+    corte_banco = hoje
+    inicio_ano = hoje.replace(month=1, day=1)
     totais_banco_por_conta = {
         conta_id_resultado: float(total or 0)
         for conta_id_resultado, total in db.query(
@@ -9212,7 +9211,7 @@ def financeiro_lancar_pagamento_sistema(
         forma = (pagamento.forma_pagamento or "pagamento").strip()
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id if tipo == "real" and conta else None,
+            conta_id=conta.id if conta else None,
             data=pagamento.data_pagamento,
             descricao=f"{cliente_nome} - {forma}",
             valor=pagamento.valor or 0,
@@ -9302,7 +9301,7 @@ def financeiro_lancamento_manual(
 
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id if tipo == "real" and conta else None,
+            conta_id=conta.id if conta else None,
             data=data_da_ocorrencia(indice),
             descricao=descricao_ocorrencia,
             valor=valor_float,
@@ -9612,6 +9611,64 @@ def confirmar_pagamento(
     return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
+def _pagamento_origem_infinitepay(pagamento: Pagamento) -> bool:
+    return (
+        str(getattr(pagamento, "usuario_registro", "") or "").strip().lower() == "infinitepay"
+        or str(getattr(pagamento, "conciliado_por", "") or "").strip().lower() == "infinitepay"
+        or "infinitepay" in str(getattr(pagamento, "observacoes", "") or "").lower()
+    )
+
+
+def _sincronizar_movimento_infinitepay(db: Session, pagamento: Pagamento) -> None:
+    """Mantém o movimento real da InfinitePay espelhado no pagamento confirmado."""
+    if not _pagamento_origem_infinitepay(pagamento):
+        return
+    movimentos = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == pagamento.empresa_id,
+        LancamentoManualFinanceiro.pagamento_id == pagamento.id,
+        LancamentoManualFinanceiro.tipo == "real",
+    ).all()
+    for movimento in movimentos:
+        movimento.data = pagamento.data_pagamento
+        movimento.valor = float(pagamento.valor or 0)
+        movimento.recebido = True
+
+
+def _desfazer_vinculo_pagamento(db: Session, pagamento: Pagamento) -> None:
+    """Ao excluir um pagamento, não deixa saldo fantasma nos cards bancários.
+
+    Movimento automático da InfinitePay é removido junto. Movimento bancário/manual
+    conciliado manualmente é apenas desvinculado, pois continua sendo um fato bancário.
+    """
+    origem_infinitepay = _pagamento_origem_infinitepay(pagamento)
+
+    movimentos_manuais = db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == pagamento.empresa_id,
+        LancamentoManualFinanceiro.pagamento_id == pagamento.id,
+        LancamentoManualFinanceiro.tipo == "real",
+    ).all()
+    for movimento in movimentos_manuais:
+        if origem_infinitepay:
+            db.delete(movimento)
+        else:
+            movimento.pagamento_id = None
+
+    movimentos_banco = db.query(LancamentoBanco).filter(
+        LancamentoBanco.empresa_id == pagamento.empresa_id,
+        LancamentoBanco.pagamento_id == pagamento.id,
+    ).all()
+    for movimento in movimentos_banco:
+        movimento.pagamento_id = None
+
+    if origem_infinitepay:
+        cobrancas = db.query(InfinitePayCobranca).filter(
+            InfinitePayCobranca.empresa_id == pagamento.empresa_id,
+            InfinitePayCobranca.pagamento_id == pagamento.id,
+        ).all()
+        for cobranca in cobrancas:
+            cobranca.pagamento_id = None
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/pagamento/{pagamento_id}/excluir")
 def excluir_pagamento_solicitacao(
         solicitacao_id: int,
@@ -9627,6 +9684,7 @@ def excluir_pagamento_solicitacao(
     if not pagamento or pagamento.empresa_id != empresa.id or pagamento.solicitacao_id != item.id:
         raise HTTPException(404)
 
+    _desfazer_vinculo_pagamento(db, pagamento)
     db.delete(pagamento)
     db.flush()
     recalcular_pagamento_solicitacao(db, item)
@@ -9672,6 +9730,7 @@ def editar_pagamento_financeiro(
     pagamento.forma_pagamento = forma_pagamento
     pagamento.nome_comprovante = nome_comprovante.strip() or (item.cliente.nome if item.cliente else "")
     pagamento.observacoes = observacoes_pagamento.strip()
+    _sincronizar_movimento_infinitepay(db, pagamento)
     _aplicar_total_pagamento_solicitacao(item, novo_total)
     db.commit()
     voltar = request.headers.get("referer") or "/painel/financeiro"
@@ -9691,6 +9750,7 @@ def excluir_pagamento_financeiro(
     item = db.get(Solicitacao, pagamento.solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    _desfazer_vinculo_pagamento(db, pagamento)
     db.delete(pagamento)
     db.flush()
     recalcular_pagamento_solicitacao(db, item)
@@ -10702,7 +10762,7 @@ def _registrar_pagamento_infinitepay(
         cliente_nome = item.cliente.nome if item.cliente else "Cliente"
         db.add(LancamentoManualFinanceiro(
             empresa_id=empresa.id,
-            conta_id=conta.id if tipo == "real" and conta else None,
+            conta_id=conta.id if conta else None,
             data=pagamento.data_pagamento,
             descricao=f"{cliente_nome} - InfinitePay - contrato #{item.id}",
             valor=pagamento.valor or 0,
