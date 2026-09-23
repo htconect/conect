@@ -645,6 +645,28 @@ class VinculoTituloFinanceiro(Base):
     lancamento_manual = relationship("LancamentoManualFinanceiro", foreign_keys=[lancamento_manual_id])
 
 
+class VinculoOrganizaFinanceiro(Base):
+    """Rateio parcial entre um movimento financeiro e um lançamento do Organiza."""
+    __tablename__ = "vinculos_organiza_financeiros"
+    __table_args__ = (
+        UniqueConstraint("lancamento_banco_id", "organiza_lancamento_id", name="uq_vinculo_organiza_banco"),
+        UniqueConstraint("lancamento_manual_id", "organiza_lancamento_id", name="uq_vinculo_organiza_manual"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    organiza_lancamento_id = Column(Integer, ForeignKey("lancamentos_organiza.id"), nullable=False, index=True)
+    lancamento_banco_id = Column(Integer, ForeignKey("lancamentos_banco.id"), nullable=True, index=True)
+    lancamento_manual_id = Column(Integer, ForeignKey("lancamentos_manuais_financeiros.id"), nullable=True, index=True)
+    valor = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now())
+    criado_por = Column(String(120), nullable=True)
+
+    organiza_lancamento = relationship("LancamentoOrganiza", foreign_keys=[organiza_lancamento_id])
+    lancamento_banco = relationship("LancamentoBanco", foreign_keys=[lancamento_banco_id])
+    lancamento_manual = relationship("LancamentoManualFinanceiro", foreign_keys=[lancamento_manual_id])
+
+
 class LancamentoOrganiza(Base):
     """Lançamento financeiro recebido do sistema Organiza."""
     __tablename__ = "lancamentos_organiza"

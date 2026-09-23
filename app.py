@@ -38,7 +38,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -1385,6 +1385,30 @@ def garantir_colunas_novas():
         comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_titulo_id ON vinculos_titulos_financeiros (titulo_id)")
         comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_banco_id ON vinculos_titulos_financeiros (lancamento_banco_id)")
         comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_titulos_financeiros_manual_id ON vinculos_titulos_financeiros (lancamento_manual_id)")
+
+    if "vinculos_organiza_financeiros" not in tabelas:
+        comandos.append("""
+        CREATE TABLE vinculos_organiza_financeiros (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            organiza_lancamento_id INTEGER NOT NULL,
+            lancamento_banco_id INTEGER,
+            lancamento_manual_id INTEGER,
+            valor FLOAT NOT NULL DEFAULT 0,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            criado_por VARCHAR(120),
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            FOREIGN KEY(organiza_lancamento_id) REFERENCES lancamentos_organiza (id),
+            FOREIGN KEY(lancamento_banco_id) REFERENCES lancamentos_banco (id),
+            FOREIGN KEY(lancamento_manual_id) REFERENCES lancamentos_manuais_financeiros (id),
+            CONSTRAINT uq_vinculo_organiza_banco UNIQUE (lancamento_banco_id, organiza_lancamento_id),
+            CONSTRAINT uq_vinculo_organiza_manual UNIQUE (lancamento_manual_id, organiza_lancamento_id)
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_organiza_financeiros_empresa_id ON vinculos_organiza_financeiros (empresa_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_organiza_financeiros_organiza_id ON vinculos_organiza_financeiros (organiza_lancamento_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_organiza_financeiros_banco_id ON vinculos_organiza_financeiros (lancamento_banco_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vinculos_organiza_financeiros_manual_id ON vinculos_organiza_financeiros (lancamento_manual_id)")
 
     if "lancamentos_manuais_financeiros" in tabelas:
         cols_manual_fin = colunas("lancamentos_manuais_financeiros")
@@ -7013,9 +7037,14 @@ def mover_lancamento_na_lista(db: Session, modelo, lanc, direcao: str):
     db.commit()
 
 
-def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 12):
-    """Sugere lançamentos do Organiza compatíveis com o lançamento bancário."""
+def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 12,
+                              valor_vinculado_por_organiza=None, saldo_fonte: float | None = None):
+    """Sugere lançamentos do Organiza compatíveis, considerando baixas parciais."""
     if not lancamento or (lancamento.valor or 0) <= 0:
+        return []
+    valor_vinculado_por_organiza = valor_vinculado_por_organiza or {}
+    saldo_origem = max(float(saldo_fonte if saldo_fonte is not None else abs(float(lancamento.valor or 0))), 0.0)
+    if saldo_origem <= 0.01:
         return []
     historico_origem = getattr(lancamento, "historico", None) or getattr(lancamento, "descricao", None) or ""
     historico = texto_normalizado_financeiro(historico_origem)
@@ -7028,22 +7057,26 @@ def melhores_vinculos_organiza(lancamento, registros, tipo: str, limite: int = 1
         item_tipo = (item.tipo or "").strip().lower().replace("ç", "c").replace("ã", "a")
         if item_tipo != tipo_normalizado:
             continue
+        ja_baixado = float(valor_vinculado_por_organiza.get(item.id, 0.0) or 0.0)
+        saldo_item = max(abs(float(item.valor or 0)) - ja_baixado, 0.0)
+        if saldo_item <= 0.01:
+            continue
         nome = texto_normalizado_financeiro(item.cliente or "")
         descricao = texto_normalizado_financeiro(item.descricao or "")
         alvo = " ".join(x for x in [nome, descricao] if x)
-        diff_valor = abs(float(lancamento.valor or 0) - float(item.valor or 0))
+        diff_valor = abs(saldo_origem - saldo_item)
         diff_dias = abs((lancamento.data - item.data_pagamento).days) if lancamento.data and item.data_pagamento else 99
         score_nome = max(
             SequenceMatcher(None, historico, nome).ratio() if nome else 0,
             SequenceMatcher(None, historico, alvo).ratio() if alvo else 0,
         )
-        # Valor e proximidade de data têm peso maior; nome ajuda a ordenar.
         score = (1 / (1 + diff_valor)) * 4 + (1 / (1 + diff_dias)) * 2 + score_nome
         candidatos.append({
             "item": item,
             "diff_valor": diff_valor,
             "diff_dias": diff_dias,
             "score": score,
+            "saldo_item": saldo_item,
         })
     candidatos.sort(key=lambda c: (-c["score"], c["diff_valor"], c["diff_dias"]))
     return candidatos[:limite]
@@ -7608,7 +7641,28 @@ def financeiro(
         if not l.pagamento_id and not getattr(l, "organiza_lancamento_id", None) and l.categoria == "aluguel"
     }
 
-    # Organiza: carrega vínculos e registros uma única vez.
+    # Organiza: permite ratear um único recebimento entre vários lançamentos
+    # (ex.: R$ 300,00 do cliente = duas manutenções de R$ 150,00) e também
+    # permite baixa parcial quando o valor bancário é menor que o lançamento.
+    vinculos_organiza_todos = db.query(VinculoOrganizaFinanceiro).options(
+        joinedload(VinculoOrganizaFinanceiro.organiza_lancamento),
+        joinedload(VinculoOrganizaFinanceiro.lancamento_banco),
+        joinedload(VinculoOrganizaFinanceiro.lancamento_manual),
+    ).filter(VinculoOrganizaFinanceiro.empresa_id == empresa.id).all()
+    valor_vinculado_por_organiza = {}
+    vinculos_organiza_por_banco = {}
+    vinculos_organiza_por_manual = {}
+    for vo in vinculos_organiza_todos:
+        valor_vinculado_por_organiza[vo.organiza_lancamento_id] = (
+            valor_vinculado_por_organiza.get(vo.organiza_lancamento_id, 0.0) + float(vo.valor or 0)
+        )
+        if vo.lancamento_banco_id:
+            vinculos_organiza_por_banco.setdefault(vo.lancamento_banco_id, []).append(vo)
+        if vo.lancamento_manual_id:
+            vinculos_organiza_por_manual.setdefault(vo.lancamento_manual_id, []).append(vo)
+
+    # Compatibilidade com vínculos antigos 1:1. Eles continuam válidos e
+    # permanecem bloqueados até serem desvinculados pelo fluxo legado.
     lancamentos_banco_organiza = db.query(LancamentoBanco).options(
         joinedload(LancamentoBanco.organiza_lancamento)
     ).filter(
@@ -7622,7 +7676,7 @@ def financeiro(
         LancamentoManualFinanceiro.organiza_lancamento_id != None,
     ).all()
 
-    ids_organiza_vinculados = {
+    ids_organiza_vinculados_legado = {
         l.organiza_lancamento_id
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
@@ -7635,35 +7689,72 @@ def financeiro(
     )
     registros_organiza_disponiveis = [
         item for item in todos_lancamentos_organiza
-        if item.id not in ids_organiza_vinculados
+        if item.id not in ids_organiza_vinculados_legado
+        and valor_vinculado_por_organiza.get(item.id, 0.0) < abs(float(item.valor or 0)) - 0.01
     ]
-    candidatos_organiza = {
-        l.id: melhores_vinculos_organiza(l, registros_organiza_disponiveis, l.categoria)
-        for l in banco
-        if not l.pagamento_id
-        and not getattr(l, "organiza_lancamento_id", None)
-        and l.categoria in ("venda", "manutencao")
-        and (l.valor or 0) > 0
-    }
+
+    saldo_organiza_por_banco = {}
+    candidatos_organiza = {}
+    for l in banco:
+        if (
+            l.pagamento_id or getattr(l, "organiza_lancamento_id", None)
+            or l.categoria not in ("venda", "manutencao") or (l.valor or 0) <= 0
+            or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == l.id).first()
+            or db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == l.id).first()
+        ):
+            continue
+        usado = sum(float(v.valor or 0) for v in vinculos_organiza_por_banco.get(l.id, []))
+        saldo_fonte = max(abs(float(l.valor or 0)) - usado, 0.0)
+        saldo_organiza_por_banco[l.id] = saldo_fonte
+        if saldo_fonte > 0.01:
+            candidatos_organiza[l.id] = melhores_vinculos_organiza(
+                l, registros_organiza_disponiveis, l.categoria,
+                valor_vinculado_por_organiza=valor_vinculado_por_organiza,
+                saldo_fonte=saldo_fonte,
+            )
+
     bancos_por_organiza = {
         l.organiza_lancamento_id: l
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
+    status_organiza_por_item = {}
+    for item in todos_lancamentos_organiza:
+        if item.id in bancos_por_organiza:
+            status_organiza_por_item[item.id] = "vinculado"
+            continue
+        pago = float(valor_vinculado_por_organiza.get(item.id, 0.0) or 0.0)
+        total = abs(float(item.valor or 0))
+        if pago >= total - 0.01:
+            status_organiza_por_item[item.id] = "vinculado"
+        elif pago > 0.01:
+            status_organiza_por_item[item.id] = "parcial"
+        else:
+            status_organiza_por_item[item.id] = "pendente"
 
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
         for m in manuais_reais
         if not getattr(m, "pagamento_id", None) and m.categoria == "aluguel" and (m.valor or 0) > 0
     }
-    candidatos_manual_organiza = {
-        m.id: melhores_vinculos_organiza(m, registros_organiza_disponiveis, m.categoria)
-        for m in manuais_reais
-        if not getattr(m, "pagamento_id", None)
-        and not getattr(m, "organiza_lancamento_id", None)
-        and m.categoria in ("venda", "manutencao")
-        and (m.valor or 0) > 0
-    }
+    saldo_organiza_por_manual = {}
+    candidatos_manual_organiza = {}
+    for m in manuais_reais:
+        if (
+            getattr(m, "pagamento_id", None) or getattr(m, "organiza_lancamento_id", None)
+            or m.categoria not in ("venda", "manutencao") or (m.valor or 0) <= 0
+            or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == m.id).first()
+        ):
+            continue
+        usado = sum(float(v.valor or 0) for v in vinculos_organiza_por_manual.get(m.id, []))
+        saldo_fonte = max(abs(float(m.valor or 0)) - usado, 0.0)
+        saldo_organiza_por_manual[m.id] = saldo_fonte
+        if saldo_fonte > 0.01:
+            candidatos_manual_organiza[m.id] = melhores_vinculos_organiza(
+                m, registros_organiza_disponiveis, m.categoria,
+                valor_vinculado_por_organiza=valor_vinculado_por_organiza,
+                saldo_fonte=saldo_fonte,
+            )
 
     # Organiza fica separado dos lançamentos nativos do Connect.
     # Reutiliza a consulta já realizada e limita somente a exibição.
@@ -7810,6 +7901,12 @@ def financeiro(
         "candidatos_manual_organiza": candidatos_manual_organiza,
         "candidatos_organiza": candidatos_organiza,
         "bancos_por_organiza": bancos_por_organiza,
+        "status_organiza_por_item": status_organiza_por_item,
+        "valor_vinculado_por_organiza": valor_vinculado_por_organiza,
+        "vinculos_organiza_por_banco": vinculos_organiza_por_banco,
+        "vinculos_organiza_por_manual": vinculos_organiza_por_manual,
+        "saldo_organiza_por_banco": saldo_organiza_por_banco,
+        "saldo_organiza_por_manual": saldo_organiza_por_manual,
         "repasses_sistema": repasses_sistema,
         "repasses_receber_interempresa": repasses_receber_interempresa,
                 "valor_vinculado_por_repasse": valor_vinculado_por_repasse,
@@ -8266,9 +8363,9 @@ def financeiro_vincular_titulo_banco(
     titulo = db.get(LancamentoManualFinanceiro, titulo_id)
     if not lanc or lanc.empresa_id != empresa.id or not titulo or titulo.empresa_id != empresa.id or titulo.tipo not in ("receber", "pagar"):
         raise HTTPException(404)
-    if lanc.pagamento_id or lanc.organiza_lancamento_id or db.query(VinculoRepasseBanco).filter(
-        VinculoRepasseBanco.lancamento_banco_id == lanc.id
-    ).first():
+    if (lanc.pagamento_id or lanc.organiza_lancamento_id
+            or db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == lanc.id).first()
+            or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id).first()):
         raise HTTPException(400, "Este movimento já possui outro tipo de vínculo. Desvincule-o primeiro.")
 
     valor_movimento = float(lanc.valor or 0)
@@ -8314,7 +8411,8 @@ def financeiro_vincular_titulo_manual(
     titulo = db.get(LancamentoManualFinanceiro, titulo_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not titulo or titulo.empresa_id != empresa.id or titulo.tipo not in ("receber", "pagar"):
         raise HTTPException(404)
-    if lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id:
+    if (lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id
+            or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id).first()):
         raise HTTPException(400, "Este movimento já possui outro tipo de vínculo. Desvincule-o primeiro.")
 
     valor_movimento = float(lanc.valor or 0)
@@ -8480,6 +8578,10 @@ def financeiro_categoria_banco(
         raise HTTPException(404)
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
+    if categoria != lanc.categoria and db.query(VinculoOrganizaFinanceiro).filter(
+        VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
+    ).first():
+        raise HTTPException(400, "Desvincule as vendas/manutenções deste lançamento antes de alterar a categoria.")
     if categoria != "repasse":
         possui_rateio = db.query(VinculoRepasseBanco).filter(
             VinculoRepasseBanco.lancamento_banco_id == lanc.id
@@ -8509,6 +8611,8 @@ def financeiro_vincular_repasse_banco(
         raise HTTPException(400, "Marque esta saída com a categoria Repasse antes de vincular.")
     if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first():
         raise HTTPException(400, "Este movimento possui baixa de conta a pagar vinculada. Desvincule-a primeiro.")
+    if db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui venda/manutenção vinculada. Desvincule-a primeiro.")
 
     usado_banco = db.query(func.coalesce(func.sum(VinculoRepasseBanco.valor), 0)).filter(
         VinculoRepasseBanco.lancamento_banco_id == lanc.id
@@ -8595,31 +8699,90 @@ def financeiro_desvincular_repasse_banco(
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
+def _valor_vinculado_organiza_item(db: Session, organiza_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoOrganizaFinanceiro.valor), 0)).filter(
+        VinculoOrganizaFinanceiro.organiza_lancamento_id == organiza_id
+    ).scalar() or 0)
+
+
+def _valor_vinculado_organiza_banco(db: Session, lancamento_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoOrganizaFinanceiro.valor), 0)).filter(
+        VinculoOrganizaFinanceiro.lancamento_banco_id == lancamento_id
+    ).scalar() or 0)
+
+
+def _valor_vinculado_organiza_manual(db: Session, lancamento_id: int) -> float:
+    return float(db.query(func.coalesce(func.sum(VinculoOrganizaFinanceiro.valor), 0)).filter(
+        VinculoOrganizaFinanceiro.lancamento_manual_id == lancamento_id
+    ).scalar() or 0)
+
+
 @app.post("/painel/financeiro/banco/{lancamento_id}/vincular-organiza")
 def financeiro_vincular_organiza(
         request: Request,
         lancamento_id: int,
-        organiza_id: int = Form(...),
+        organiza_id: list[int] = Form([]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoBanco, lancamento_id)
-    item = db.get(LancamentoOrganiza, organiza_id)
-    if not lanc or lanc.empresa_id != empresa.id or not item or item.empresa_id != empresa.id:
+    if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if lanc.pagamento_id or lanc.organiza_lancamento_id or db.query(VinculoTituloFinanceiro).filter(
-        VinculoTituloFinanceiro.lancamento_banco_id == lanc.id
-    ).first():
-        raise HTTPException(400, "Este lançamento bancário já está vinculado.")
-    if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
-        raise HTTPException(400, "O tipo do banco deve corresponder ao lançamento do Organiza.")
-    ja_usado = db.query(LancamentoBanco).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.organiza_lancamento_id == item.id
-    ).first()
-    if ja_usado:
-        raise HTTPException(400, "Este lançamento do Organiza já está vinculado a outro movimento bancário.")
-    lanc.organiza_lancamento_id = item.id
+    if not organiza_id:
+        raise HTTPException(400, "Selecione pelo menos um lançamento para vincular.")
+    if (lanc.valor or 0) <= 0 or lanc.categoria not in ("venda", "manutencao"):
+        raise HTTPException(400, "Este vínculo exige uma entrada bancária classificada como Venda ou Manutenção.")
+    if lanc.pagamento_id or lanc.organiza_lancamento_id:
+        raise HTTPException(400, "Este lançamento possui um vínculo antigo. Desvincule-o antes de fazer rateio.")
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
+    if db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui repasse vinculado. Desvincule-o primeiro.")
+
+    saldo_fonte = max(abs(float(lanc.valor or 0)) - _valor_vinculado_organiza_banco(db, lanc.id), 0.0)
+    if saldo_fonte <= 0.01:
+        raise HTTPException(400, "Este lançamento bancário não possui saldo disponível para novos vínculos.")
+
+    vinculou = 0
+    vistos = set()
+    for item_id in organiza_id:
+        if item_id in vistos or saldo_fonte <= 0.01:
+            continue
+        vistos.add(item_id)
+        item = db.get(LancamentoOrganiza, item_id)
+        if not item or item.empresa_id != empresa.id:
+            continue
+        if lanc.categoria != (item.tipo or "").lower():
+            continue
+        # Vínculos antigos 1:1 continuam exclusivos.
+        usado_legado = db.query(LancamentoBanco).filter(
+            LancamentoBanco.empresa_id == empresa.id, LancamentoBanco.organiza_lancamento_id == item.id
+        ).first() or db.query(LancamentoManualFinanceiro).filter(
+            LancamentoManualFinanceiro.empresa_id == empresa.id, LancamentoManualFinanceiro.organiza_lancamento_id == item.id
+        ).first()
+        if usado_legado:
+            continue
+        saldo_item = max(abs(float(item.valor or 0)) - _valor_vinculado_organiza_item(db, item.id), 0.0)
+        if saldo_item <= 0.01:
+            continue
+        valor_baixa = min(saldo_fonte, saldo_item)
+        existente = db.query(VinculoOrganizaFinanceiro).filter(
+            VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id,
+            VinculoOrganizaFinanceiro.organiza_lancamento_id == item.id,
+        ).first()
+        if existente:
+            existente.valor = float(existente.valor or 0) + valor_baixa
+        else:
+            db.add(VinculoOrganizaFinanceiro(
+                empresa_id=empresa.id, organiza_lancamento_id=item.id, lancamento_banco_id=lanc.id,
+                valor=valor_baixa, criado_por=request.session.get("usuario_nome") or "Financeiro"
+            ))
+        saldo_fonte -= valor_baixa
+        vinculou += 1
+
+    if not vinculou:
+        db.rollback()
+        raise HTTPException(400, "Nenhum dos lançamentos selecionados possui saldo disponível para vínculo.")
     lanc.categoria_confirmada = True
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
@@ -8640,6 +8803,21 @@ def financeiro_desvincular_organiza(
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
+@app.post("/painel/financeiro/vinculo-organiza/{vinculo_id}/excluir")
+def financeiro_desvincular_organiza_rateio(
+        request: Request,
+        vinculo_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    vinculo = db.get(VinculoOrganizaFinanceiro, vinculo_id)
+    if not vinculo or vinculo.empresa_id != empresa.id:
+        raise HTTPException(404)
+    db.delete(vinculo)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
 @app.post("/painel/financeiro/banco/{lancamento_id}/vincular")
 def financeiro_vincular_banco(
         request: Request,
@@ -8654,6 +8832,8 @@ def financeiro_vincular_banco(
         raise HTTPException(404)
     if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first():
         raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
+    if db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui venda/manutenção vinculada. Desvincule-a primeiro.")
     lanc.pagamento_id = pagamento.id
     lanc.categoria = "aluguel"
     pagamento.conciliado_em = agora_utc()
@@ -8694,6 +8874,7 @@ def financeiro_excluir_banco(
         lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id
         or db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == lanc.id).first()
         or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == lanc.id).first()
+        or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id).first()
     )
     if possui_vinculo:
         raise HTTPException(400, "Lançamento vinculado não pode ser excluído. Desvincule-o primeiro.")
@@ -8873,12 +9054,17 @@ def financeiro_editar_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if lanc.tipo == "real" and db.query(VinculoTituloFinanceiro).filter(
-        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
-    ).first():
-        raise HTTPException(400, "Movimento vinculado a uma conta. Desvincule a baixa antes de editar.")
+    if lanc.tipo == "real" and (
+        db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first()
+        or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id).first()
+    ):
+        raise HTTPException(400, "Movimento vinculado. Desvincule as baixas antes de editar.")
     if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
+    if categoria != lanc.categoria and db.query(VinculoOrganizaFinanceiro).filter(
+        VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id
+    ).first():
+        raise HTTPException(400, "Desvincule as vendas/manutenções deste lançamento antes de alterar a categoria.")
 
     novo_valor = texto_para_float(valor)
     if lanc.tipo in ("receber", "pagar"):
@@ -8909,38 +9095,65 @@ def financeiro_editar_manual(
 def financeiro_vincular_manual_organiza(
         request: Request,
         lancamento_id: int,
-        organiza_id: int = Form(...),
+        organiza_id: list[int] = Form([]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
-    item = db.get(LancamentoOrganiza, organiza_id)
-    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real" or not item or item.empresa_id != empresa.id:
+    if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
         raise HTTPException(404)
-    if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None) or db.query(VinculoTituloFinanceiro).filter(
-        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
-    ).first():
-        raise HTTPException(400, "Este lançamento manual já está vinculado.")
-    if lanc.categoria not in ("venda", "manutencao") or lanc.categoria != (item.tipo or "").lower():
-        raise HTTPException(400, "O tipo deve corresponder ao lançamento do Organiza.")
+    if not organiza_id:
+        raise HTTPException(400, "Selecione pelo menos um lançamento para vincular.")
+    if (lanc.valor or 0) <= 0 or lanc.categoria not in ("venda", "manutencao"):
+        raise HTTPException(400, "Este vínculo exige uma entrada classificada como Venda ou Manutenção.")
+    if lanc.pagamento_id or getattr(lanc, "organiza_lancamento_id", None):
+        raise HTTPException(400, "Este lançamento possui um vínculo antigo. Desvincule-o antes de fazer rateio.")
+    if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
 
-    usado_banco = db.query(LancamentoBanco).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.organiza_lancamento_id == item.id
-    ).first()
-    usado_manual = db.query(LancamentoManualFinanceiro).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa.id,
-        LancamentoManualFinanceiro.organiza_lancamento_id == item.id
-    ).first()
-    if usado_banco or usado_manual:
-        raise HTTPException(400, "Este lançamento do Organiza já está vinculado.")
+    saldo_fonte = max(abs(float(lanc.valor or 0)) - _valor_vinculado_organiza_manual(db, lanc.id), 0.0)
+    if saldo_fonte <= 0.01:
+        raise HTTPException(400, "Este lançamento não possui saldo disponível para novos vínculos.")
 
-    lanc.organiza_lancamento_id = item.id
+    vinculou = 0
+    vistos = set()
+    for item_id in organiza_id:
+        if item_id in vistos or saldo_fonte <= 0.01:
+            continue
+        vistos.add(item_id)
+        item = db.get(LancamentoOrganiza, item_id)
+        if not item or item.empresa_id != empresa.id or lanc.categoria != (item.tipo or "").lower():
+            continue
+        usado_legado = db.query(LancamentoBanco).filter(
+            LancamentoBanco.empresa_id == empresa.id, LancamentoBanco.organiza_lancamento_id == item.id
+        ).first() or db.query(LancamentoManualFinanceiro).filter(
+            LancamentoManualFinanceiro.empresa_id == empresa.id, LancamentoManualFinanceiro.organiza_lancamento_id == item.id
+        ).first()
+        if usado_legado:
+            continue
+        saldo_item = max(abs(float(item.valor or 0)) - _valor_vinculado_organiza_item(db, item.id), 0.0)
+        if saldo_item <= 0.01:
+            continue
+        valor_baixa = min(saldo_fonte, saldo_item)
+        existente = db.query(VinculoOrganizaFinanceiro).filter(
+            VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id,
+            VinculoOrganizaFinanceiro.organiza_lancamento_id == item.id,
+        ).first()
+        if existente:
+            existente.valor = float(existente.valor or 0) + valor_baixa
+        else:
+            db.add(VinculoOrganizaFinanceiro(
+                empresa_id=empresa.id, organiza_lancamento_id=item.id, lancamento_manual_id=lanc.id,
+                valor=valor_baixa, criado_por=request.session.get("usuario_nome") or "Financeiro"
+            ))
+        saldo_fonte -= valor_baixa
+        vinculou += 1
+
+    if not vinculou:
+        db.rollback()
+        raise HTTPException(400, "Nenhum dos lançamentos selecionados possui saldo disponível para vínculo.")
     db.commit()
-    return RedirectResponse(
-        request.headers.get("referer") or f"/painel/financeiro?conta_id={lanc.conta_id}",
-        status_code=303
-    )
+    return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
 @app.post("/painel/financeiro/manual/{lancamento_id}/desvincular-organiza")
@@ -8975,6 +9188,8 @@ def financeiro_vincular_manual(
         raise HTTPException(404)
     if db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first():
         raise HTTPException(400, "Este movimento possui baixa de conta vinculada. Desvincule-a primeiro.")
+    if db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id).first():
+        raise HTTPException(400, "Este movimento possui venda/manutenção vinculada. Desvincule-a primeiro.")
     lanc.pagamento_id = pagamento.id
     lanc.categoria = "aluguel"
     pagamento.conciliado_em = agora_utc()
@@ -9013,9 +9228,9 @@ def financeiro_excluir_manual(
     lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
         raise HTTPException(404)
-    if lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id or db.query(VinculoTituloFinanceiro).filter(
-        VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
-    ).first():
+    if (lanc.pagamento_id or lanc.organiza_lancamento_id or lanc.repasse_solicitacao_id
+            or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == lanc.id).first()
+            or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id).first()):
         raise HTTPException(400, "Lançamento vinculado não pode ser excluído. Desvincule-o primeiro.")
     conta_id = lanc.conta_id
     db.delete(lanc)
