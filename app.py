@@ -16,7 +16,7 @@ import zipfile
 import unicodedata
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
-from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse
+from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse, urljoin
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 import time as time_module
@@ -122,6 +122,153 @@ HUMIAT_PACOTES = {
     50: 27500,
     100: 50000,
 }
+
+# Humiat ID / SSO. O Connect mantém suas permissões operacionais locais,
+# mas a identidade e o direito de entrar vêm do Humiat ID.
+HUMIAT_SSO_SECRET = os.getenv("HUMIAT_SSO_SECRET", "").strip()
+HUMIAT_SSO_VALIDATE_URL = os.getenv(
+    "HUMIAT_SSO_VALIDATE_URL",
+    "https://www.humiat.com.br/api/humiat/sso/validar",
+).strip()
+HUMIAT_LOGIN_URL = os.getenv("HUMIAT_LOGIN_URL", "https://www.humiat.com.br/entrar").strip()
+HUMIAT_USER_VALIDATE_URL = os.getenv(
+    "HUMIAT_USER_VALIDATE_URL",
+    "https://www.humiat.com.br/api/humiat/integracoes/usuario/validar",
+).strip()
+
+
+def _humiat_login_connect_url(modo: str) -> str:
+    modo_n = "adm" if (modo or "").strip().lower() == "adm" else "sistema"
+    base = HUMIAT_LOGIN_URL or "https://www.humiat.com.br/entrar"
+    destino = f"/painel/produto/CONNECT?modo={modo_n}"
+    sep = "&" if "?" in base else "?"
+    return base + sep + urlencode({"next": destino})
+
+
+def _humiat_validar_ticket(ticket: str) -> dict:
+    if not HUMIAT_SSO_SECRET:
+        raise HTTPException(status_code=503, detail="HUMIAT_SSO_SECRET não configurado no Connect")
+    dados = urlencode({"ticket": ticket}).encode("utf-8")
+    cabecalhos = {
+        "X-Humiat-SSO-Secret": HUMIAT_SSO_SECRET,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": f"Connect-Humiat-SSO/{APP_VERSION}",
+    }
+    req = UrlRequest(HUMIAT_SSO_VALIDATE_URL, data=dados, method="POST", headers=cabecalhos)
+    try:
+        with urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308):
+            location = exc.headers.get("Location")
+            if location:
+                destino = urljoin(HUMIAT_SSO_VALIDATE_URL, location)
+                req2 = UrlRequest(destino, data=dados, method="POST", headers=cabecalhos)
+                try:
+                    with urlopen(req2, timeout=12) as resp:
+                        return json.loads(resp.read().decode("utf-8"))
+                except Exception as exc2:
+                    raise HTTPException(status_code=502, detail=f"Falha ao validar Humiat ID após redirecionamento: {exc2}")
+        detalhe = ""
+        try:
+            detalhe = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        raise HTTPException(status_code=502, detail=f"Falha ao validar Humiat ID: HTTP {exc.code} {detalhe or exc.reason}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Falha ao validar Humiat ID: {exc}")
+
+
+def _humiat_validar_usuario_email(email: str) -> dict:
+    if not HUMIAT_SSO_SECRET:
+        return {}
+    email_n = (email or "").strip().lower()
+    if not email_n:
+        return {}
+    dados = urlencode({"email": email_n, "produto": "CONNECT"}).encode("utf-8")
+    cabecalhos = {
+        "X-Humiat-SSO-Secret": HUMIAT_SSO_SECRET,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "User-Agent": f"Connect-Humiat-Link/{APP_VERSION}",
+    }
+    req = UrlRequest(HUMIAT_USER_VALIDATE_URL, data=dados, method="POST", headers=cabecalhos)
+    try:
+        with urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except HTTPError as exc:
+        detalhe = ""
+        try:
+            bruto = exc.read().decode("utf-8", errors="replace")
+            obj = json.loads(bruto)
+            detalhe = str(obj.get("detail") or bruto)
+        except Exception:
+            detalhe = str(exc.reason)
+        raise ValueError(detalhe or f"HTTP {exc.code}")
+    except Exception as exc:
+        raise ValueError(f"Falha ao validar Humiat ID: {exc}")
+
+
+def _telefone_chave(valor: str | None) -> str:
+    return re.sub(r"\D", "", str(valor or ""))[-11:]
+
+
+def _sessao_usuario_empresa(request: Request, db: Session, usuario_empresa: UsuarioEmpresa) -> RedirectResponse:
+    request.session.clear()
+    request.session["empresa_id"] = int(usuario_empresa.empresa_id)
+    request.session["usuario_sistema"] = usuario_empresa.usuario
+    request.session["usuario_nome"] = usuario_empresa.nome
+    request.session["usuario_empresa_id"] = int(usuario_empresa.id)
+    request.session["humiat_user_id"] = int(usuario_empresa.humiat_user_id or 0) or None
+    request.session["acesso_total"] = False
+    request.session["acessos"] = {
+        "agenda": bool(usuario_empresa.acesso_agenda),
+        "operacao": bool(usuario_empresa.acesso_operacao),
+        "buscar_cliente": bool(usuario_empresa.acesso_buscar_cliente),
+        "financeiro": bool(usuario_empresa.acesso_financeiro),
+        "cadastros": bool(usuario_empresa.acesso_cadastros),
+        "relatorios": bool(usuario_empresa.acesso_relatorios),
+    }
+    empresa = db.get(Empresa, usuario_empresa.empresa_id)
+    if empresa:
+        empresa_cache_salvar(empresa)
+    return RedirectResponse("/painel", status_code=303)
+
+
+def _candidatos_usuario_humiat(db: Session, uid: int, email: str, telefone: str, empresa_id: int | None = None) -> list[UsuarioEmpresa]:
+    base = db.query(UsuarioEmpresa).join(Empresa, Empresa.id == UsuarioEmpresa.empresa_id).filter(
+        UsuarioEmpresa.ativo == True, Empresa.ativa == True
+    )
+    if empresa_id:
+        base = base.filter(UsuarioEmpresa.empresa_id == int(empresa_id))
+
+    vinculados = base.filter(UsuarioEmpresa.humiat_user_id == int(uid)).all() if uid else []
+    if vinculados:
+        return vinculados
+
+    email_n = (email or "").strip().lower()
+    if email_n:
+        por_email = base.filter(or_(
+            func.lower(func.coalesce(UsuarioEmpresa.email, "")) == email_n,
+            func.lower(UsuarioEmpresa.usuario) == email_n,
+        )).all()
+        if por_email:
+            return por_email
+
+    tel = _telefone_chave(telefone)
+    if tel:
+        todos = base.all()
+        por_tel = [u for u in todos if _telefone_chave(u.telefone) == tel]
+        if por_tel:
+            return por_tel
+    return []
+
+
+def _vincular_usuario_humiat(usuario_empresa: UsuarioEmpresa, uid: int, email: str) -> None:
+    usuario_empresa.humiat_user_id = int(uid)
+    if email and not (usuario_empresa.email or "").strip():
+        usuario_empresa.email = email.strip().lower()[:160]
 
 
 def agora_utc() -> datetime:
@@ -1246,6 +1393,9 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN telefone VARCHAR(30)")
         if "email" not in cols_usu:
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN email VARCHAR(160)")
+        if "humiat_user_id" not in cols_usu:
+            comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN humiat_user_id INTEGER")
+            comandos.append("CREATE INDEX IF NOT EXISTS ix_usuarios_empresa_humiat_user_id ON usuarios_empresa (humiat_user_id)")
         if "pre_contrato_token" not in cols_usu:
             comandos.append("ALTER TABLE usuarios_empresa ADD COLUMN pre_contrato_token VARCHAR(64)")
         novas_permissoes = {
@@ -2485,6 +2635,10 @@ def admin_performance_limpar(ok: bool = Depends(admin_geral_logado)):
 
 @app.get("/admin/login", response_class=HTMLResponse)
 def admin_login_form(request: Request):
+    if request.session.get("admin_geral"):
+        return RedirectResponse("/admin", status_code=303)
+    if HUMIAT_SSO_SECRET and request.query_params.get("local") != "1":
+        return RedirectResponse(_humiat_login_connect_url("adm"), status_code=303)
     return templates.TemplateResponse("admin/login.html", {
         "request": request,
         "erro": request.query_params.get("erro"),
@@ -2803,6 +2957,7 @@ def admin_criar_usuario_empresa(
         nome: str = Form(...),
         usuario: str = Form(...),
         telefone: str = Form(""),
+        email: str = Form(""),
         senha: Optional[str] = Form(None),
         usuario_id: Optional[str] = Form(None),
         ativo: Optional[str] = Form("1"),
@@ -2843,10 +2998,21 @@ def admin_criar_usuario_empresa(
     if conflito and (not existente or conflito.id != existente.id):
         raise HTTPException(400, "Já existe um usuário com este login nesta empresa.")
 
+    email_humiat = (email or "").strip().lower()[:160]
+    humiat_user_id = None
+    if email_humiat and HUMIAT_SSO_SECRET:
+        try:
+            retorno_humiat = _humiat_validar_usuario_email(email_humiat)
+            humiat_user_id = int((retorno_humiat.get("usuario") or {}).get("id") or 0) or None
+        except ValueError as exc:
+            raise HTTPException(400, f"Humiat ID: {exc}")
+
     dados = {
         "nome": nome.strip(),
         "usuario": usuario_limpo,
         "telefone": _limpar_tel_whatsapp(telefone),
+        "email": email_humiat or None,
+        "humiat_user_id": humiat_user_id if email_humiat else None,
         "ativo": bool(ativo),
         "acesso_agenda": bool(acesso_agenda),
         "acesso_operacao": bool(acesso_operacao),
@@ -2919,10 +3085,77 @@ def admin_excluir_usuario_empresa(
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 
 
+@app.get("/_connect/sso/humiat", include_in_schema=False)
+def connect_sso_humiat(request: Request, humiat_ticket: str, db: Session = Depends(get_db)):
+    dados = _humiat_validar_ticket(humiat_ticket)
+    if not dados.get("ok") or (dados.get("produto") or "").strip().upper() != "CONNECT":
+        raise HTTPException(status_code=401, detail="Acesso Humiat inválido para o Connect")
+
+    usuario_h = dados.get("usuario") or {}
+    empresa_h = dados.get("empresa") or {}
+    modo = (dados.get("modo") or "sistema").strip().lower()
+    uid = int(usuario_h.get("id") or 0)
+    email = (usuario_h.get("email") or "").strip().lower()
+    telefone = usuario_h.get("telefone") or ""
+    nome = (usuario_h.get("nome") or email or "Usuário Humiat").strip()
+    slug = (empresa_h.get("slug") or dados.get("destino_slug") or "").strip().lower()
+
+    empresa = None
+    if slug:
+        empresa = db.query(Empresa).filter(func.lower(Empresa.slug) == slug, Empresa.ativa == True).first()
+        if not empresa:
+            raise HTTPException(
+                status_code=403,
+                detail=f"A empresa '{slug}' está liberada no Organiza, mas ainda não existe no Connect com o mesmo slug.",
+            )
+
+    if modo == "adm":
+        request.session.clear()
+        request.session["humiat_user_id"] = uid
+        request.session["usuario_nome"] = nome
+        request.session["usuario_sistema"] = email
+        if empresa:
+            # ADM com empresa = administrador daquela empresa, sem expor o ADM global.
+            request.session["empresa_id"] = int(empresa.id)
+            request.session["acesso_total"] = True
+            request.session["acessos"] = {}
+            empresa_cache_salvar(empresa)
+            return RedirectResponse("/painel", status_code=303)
+        # Equipe interna sem empresa = ADM global do Connect.
+        request.session["admin_geral"] = True
+        return RedirectResponse("/admin", status_code=303)
+
+    if modo != "sistema":
+        raise HTTPException(status_code=400, detail="Perfil Humiat não suportado pelo Connect")
+
+    candidatos = _candidatos_usuario_humiat(db, uid, email, telefone, empresa.id if empresa else None)
+    if len(candidatos) == 1:
+        local = candidatos[0]
+        _vincular_usuario_humiat(local, uid, email)
+        db.commit()
+        return _sessao_usuario_empresa(request, db, local)
+
+    if len(candidatos) > 1:
+        # Não adivinha empresa/usuário. Isso evita vincular o Humiat ID à pessoa errada.
+        nomes = ", ".join(sorted({db.get(Empresa, u.empresa_id).slug for u in candidatos if db.get(Empresa, u.empresa_id)}))
+        raise HTTPException(status_code=409, detail=f"Este Humiat ID encontrou mais de um usuário no Connect ({nomes}). Vincule o e-mail ao usuário correto no ADM Connect.")
+
+    empresa_txt = f" da empresa {empresa.nome}" if empresa else ""
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            f"Nenhum usuário existente do Connect{empresa_txt} está vinculado ao Humiat ID {email}. "
+            "No ADM Connect, edite o usuário existente e informe este mesmo e-mail. No próximo acesso o vínculo será gravado automaticamente."
+        ),
+    )
+
+
 @app.get("/empresa/login", response_class=HTMLResponse)
 def empresa_login_form(request: Request, db: Session = Depends(get_db)):
     if request.session.get("empresa_id"):
         return RedirectResponse("/painel", status_code=303)
+    if HUMIAT_SSO_SECRET and request.query_params.get("local") != "1":
+        return RedirectResponse(_humiat_login_connect_url("sistema"), status_code=303)
     return templates.TemplateResponse("admin/login.html", {
         "request": request,
         "erro": request.query_params.get("erro"),

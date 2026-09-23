@@ -214,6 +214,9 @@
     <label>WhatsApp do usuário</label>
     <input name="telefone" id="usuario_telefone" inputmode="tel" placeholder="(21) 99999-9999">
     <small class="texto-discreto">Usado quando este usuário for o responsável do contrato. Após o pagamento, o cliente será direcionado para este WhatsApp.</small>
+    <label>E-mail do Humiat ID</label>
+    <input type="email" name="email" id="usuario_email" placeholder="usuario@empresa.com.br">
+    <small class="texto-discreto">Informe o mesmo e-mail usado no Humiat ID. No primeiro acesso SSO, o Connect valida e grava o vínculo sem criar outro usuário.</small>
     <label id="label_senha">Senha</label>
     <input name="senha" id="usuario_senha" required>
     <small class="texto-discreto" id="aviso_senha" style="display:none">Deixe em branco para manter a senha atual.</small>
@@ -251,7 +254,8 @@
       <div>
         <b>{{ u.nome }}</b>
         <small>
-          {{ u.usuario }}{% if u.telefone %} · {{ u.telefone }}{% endif %} · {{ "Ativo" if u.ativo else "Inativo" }} ·
+          {{ u.usuario }}{% if u.telefone %} · {{ u.telefone }}{% endif %}{% if u.email %} · {{ u.email }}{% endif %} · {{ "Ativo" if u.ativo else "Inativo" }} ·
+          {% if u.humiat_user_id %}<b>Humiat ID #{{ u.humiat_user_id }}</b> · {% else %}<b>Humiat ID pendente</b> · {% endif %}
           {% set acessos = [] %}
           {% if u.acesso_agenda %}{% set _ = acessos.append("Agenda") %}{% endif %}
           {% if u.acesso_operacao %}{% set _ = acessos.append("Operação") %}{% endif %}
@@ -273,6 +277,8 @@
             "nome": u.nome,
             "usuario": u.usuario,
             "telefone": u.telefone,
+            "email": u.email,
+            "humiat_user_id": u.humiat_user_id,
             "ativo": u.ativo,
             "acesso_agenda": u.acesso_agenda,
             "acesso_operacao": u.acesso_operacao,
@@ -314,6 +320,7 @@ function editarUsuario(usuario) {
   document.getElementById("usuario_nome").value = usuario.nome || "";
   document.getElementById("usuario_login").value = usuario.usuario || "";
   document.getElementById("usuario_telefone").value = usuario.telefone || "";
+  document.getElementById("usuario_email").value = usuario.email || "";
   document.getElementById("usuario_senha").value = "";
   document.getElementById("usuario_senha").required = false;
   document.getElementById("usuario_ativo").checked = Boolean(usuario.ativo);

@@ -14,6 +14,16 @@ services:
       - key: CONECT_ADMIN_SENHA
         value: humiat123
 
+      # Mesmo segredo do Humiat/Organiza. Configure o valor no Render.
+      - key: HUMIAT_SSO_SECRET
+        sync: false
+      - key: HUMIAT_SSO_VALIDATE_URL
+        value: https://www.humiat.com.br/api/humiat/sso/validar
+      - key: HUMIAT_LOGIN_URL
+        value: https://www.humiat.com.br/entrar
+      - key: HUMIAT_USER_VALIDATE_URL
+        value: https://www.humiat.com.br/api/humiat/integracoes/usuario/validar
+
       - key: INFINITEPAY_HANDLE
         value: karaokerj
       - key: INFINITEPAY_TIMEOUT_SECONDS

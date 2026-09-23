@@ -67,6 +67,9 @@ class UsuarioEmpresa(Base):
     usuario = Column(String(80), nullable=False, index=True)
     telefone = Column(String(30), nullable=True)
     email = Column(String(160), nullable=True)
+    # Identidade central. O mesmo Humiat ID pode existir em empresas diferentes,
+    # por isso o vínculo não é único globalmente no Connect.
+    humiat_user_id = Column(Integer, nullable=True, index=True)
     pre_contrato_token = Column(String(64), nullable=True, index=True)
     senha = Column(String(120), nullable=False)
     ativo = Column(Boolean, default=True)
