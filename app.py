@@ -91,7 +91,7 @@ app = FastAPI(title=APP_NOME, version=APP_VERSION)
 install_sql_monitor(engine)
 app.add_middleware(PerformanceMiddleware)
 app.add_middleware(ControleAcessoMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 24)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["APP_VERSION"] = APP_VERSION
@@ -131,18 +131,39 @@ HUMIAT_SSO_VALIDATE_URL = os.getenv(
     "https://www.humiat.com.br/api/humiat/sso/validar",
 ).strip()
 HUMIAT_LOGIN_URL = os.getenv("HUMIAT_LOGIN_URL", "https://www.humiat.com.br/entrar").strip()
+HUMIAT_FORGOT_URL = os.getenv("HUMIAT_FORGOT_URL", "https://www.humiat.com.br/esqueci-senha").strip()
+HUMIAT_PORTAL_URL = os.getenv("HUMIAT_PORTAL_URL", "https://www.humiat.com.br/painel").strip()
+HUMIAT_SOLVOZ_BASE_URL = os.getenv("HUMIAT_SOLVOZ_BASE_URL", "https://www.solvoz.com.br").strip()
 HUMIAT_USER_VALIDATE_URL = os.getenv(
     "HUMIAT_USER_VALIDATE_URL",
     "https://www.humiat.com.br/api/humiat/integracoes/usuario/validar",
 ).strip()
 
 
-def _humiat_login_connect_url(modo: str) -> str:
-    modo_n = "adm" if (modo or "").strip().lower() == "adm" else "sistema"
-    base = HUMIAT_LOGIN_URL or "https://www.humiat.com.br/entrar"
-    destino = f"/painel/produto/CONNECT?modo={modo_n}"
-    sep = "&" if "?" in base else "?"
-    return base + sep + urlencode({"next": destino})
+def _humiat_login_connect_url(modo: str = "sistema") -> str:
+    # O primeiro acesso sempre termina no portal Humiat. De lá o usuário escolhe
+    # o produto/perfil. Se já existir sessão Humiat, /entrar vai direto ao /painel.
+    return HUMIAT_LOGIN_URL or "https://www.humiat.com.br/entrar"
+
+
+def _retorno_logout_humiat_seguro(retorno: str | None) -> str:
+    padrao = HUMIAT_PORTAL_URL or "https://www.humiat.com.br/painel"
+    alvo = (retorno or "").strip()
+    if not alvo:
+        return padrao
+    try:
+        parsed = urlparse(alvo)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return padrao
+        hosts = {
+            urlparse(HUMIAT_LOGIN_URL).netloc.lower(),
+            urlparse(HUMIAT_PORTAL_URL).netloc.lower(),
+            urlparse(HUMIAT_SOLVOZ_BASE_URL).netloc.lower(),
+        }
+        hosts.discard("")
+        return alvo if parsed.netloc.lower() in hosts else padrao
+    except Exception:
+        return padrao
 
 
 def _humiat_validar_ticket(ticket: str) -> dict:
@@ -2643,12 +2664,16 @@ def admin_login_form(request: Request):
         "request": request,
         "erro": request.query_params.get("erro"),
         "titulo_login": "Administrador Geral",
-        "action_login": "/admin/login"
+        "action_login": "/admin/login",
+        "humiat_login_url": HUMIAT_LOGIN_URL,
+        "humiat_forgot_url": HUMIAT_FORGOT_URL,
     })
 
 
 @app.post("/admin/login")
 def admin_login(request: Request, usuario: str = Form(...), senha: str = Form(...)):
+    if HUMIAT_SSO_SECRET:
+        return RedirectResponse(_humiat_login_connect_url("adm"), status_code=303)
     if usuario.strip() == ADMIN_NOME and senha.strip() == ADMIN_SENHA:
         request.session.clear()
         request.session["admin_geral"] = True
@@ -2659,7 +2684,7 @@ def admin_login(request: Request, usuario: str = Form(...), senha: str = Form(..
 @app.get("/admin/sair")
 def admin_sair(request: Request):
     request.session.clear()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(HUMIAT_PORTAL_URL, status_code=303)
 
 
 def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, tipo: str, motivo: str = "", observacao: str = "", usuario: str = "", solicitacao_id: int | None = None):
@@ -3160,12 +3185,16 @@ def empresa_login_form(request: Request, db: Session = Depends(get_db)):
         "request": request,
         "erro": request.query_params.get("erro"),
         "titulo_login": "Acesso da Empresa",
-        "action_login": "/empresa/login"
+        "action_login": "/empresa/login",
+        "humiat_login_url": HUMIAT_LOGIN_URL,
+        "humiat_forgot_url": HUMIAT_FORGOT_URL,
     })
 
 
 @app.post("/empresa/login")
 def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(...), db: Session = Depends(get_db)):
+    if HUMIAT_SSO_SECRET:
+        return RedirectResponse(_humiat_login_connect_url("sistema"), status_code=303)
     if request.session.get("empresa_id"):
         return RedirectResponse("/painel", status_code=303)
     usuario_limpo = usuario.strip()
@@ -3222,7 +3251,14 @@ def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(
 @app.get("/empresa/sair")
 def empresa_sair(request: Request):
     request.session.clear()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(HUMIAT_PORTAL_URL, status_code=303)
+
+
+@app.get("/_connect/logout-humiat", include_in_schema=False)
+def connect_logout_humiat(request: Request, retorno: str = ""):
+    """Etapa do logout global disparado pelo Humiat ID."""
+    request.session.clear()
+    return RedirectResponse(_retorno_logout_humiat_seguro(retorno), status_code=303)
 
 
 @app.get("/admin/setup")
@@ -4438,6 +4474,8 @@ def salvar_perfil_usuario(
 
 @app.get("/painel/alterar-senha", response_class=HTMLResponse)
 def alterar_senha_form(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if request.session.get("humiat_user_id"):
+        return RedirectResponse(HUMIAT_FORGOT_URL, status_code=303)
     return templates.TemplateResponse("admin/alterar_senha.html", {
         "request": request,
         "empresa": empresa,
@@ -4454,6 +4492,8 @@ def alterar_senha_salvar(
         confirmar_senha: str = Form(...),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)):
+    if request.session.get("humiat_user_id"):
+        return RedirectResponse(HUMIAT_FORGOT_URL, status_code=303)
     senha_atual = senha_atual.strip()
     nova_senha = nova_senha.strip()
     confirmar_senha = confirmar_senha.strip()

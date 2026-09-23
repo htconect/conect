@@ -3,12 +3,18 @@
 <div class="box pequeno">
   <h1>{{ titulo_login or "Entrar no Conect" }}</h1>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
-  <form method="post" action="{{ action_login or '/admin/login' }}">
-    <label>Usuário</label>
-    <input name="usuario" required autocapitalize="none" autocomplete="username" spellcheck="false">
-    <label>Senha</label>
-    <input name="senha" type="password" required autocomplete="current-password">
-    <button>Entrar</button>
-  </form>
+  {% if humiat_login_url %}
+    <p>O acesso ao Connect usa sua conta Humiat ID.</p>
+    <a class="botao" href="{{ humiat_login_url }}">Entrar com Humiat ID</a>
+    <p style="margin-top:14px"><a href="{{ humiat_forgot_url }}">Esqueci minha senha</a></p>
+  {% else %}
+    <form method="post" action="{{ action_login or '/admin/login' }}">
+      <label>Usuário</label>
+      <input name="usuario" required autocapitalize="none" autocomplete="username" spellcheck="false">
+      <label>Senha</label>
+      <input name="senha" type="password" required autocomplete="current-password">
+      <button>Entrar</button>
+    </form>
+  {% endif %}
 </div>
 {% endblock %}
