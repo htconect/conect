@@ -33,21 +33,6 @@
   </div>
 </form>
 
-{% if request.query_params.get('google_erro') %}<div class="alerta erro">{{ request.query_params.get('google_erro') }}</div>{% endif %}
-{% if (request.query_params.get('google_ok') is not none) or (empresa.google_calendar_ativo and empresa.google_calendar_contratos) %}
-<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0">
-  {% if request.query_params.get('google_ok') is not none %}
-  <div class="box" style="margin:0"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
-  {% endif %}
-  {% if empresa.google_calendar_ativo and empresa.google_calendar_contratos %}
-  <form method="post" action="/painel/agenda/google-calendar/sincronizar" class="acoes" style="margin:0">
-    {% for s in itens %}<input type="hidden" name="solicitacao_ids" value="{{ s.id }}">{% endfor %}
-    <button type="submit" class="botao btn-krj-primary" {% if not itens %}disabled{% endif %}><i class="bi bi-calendar-check"></i> Sincronizar Google</button>
-  </form>
-  {% endif %}
-</div>
-{% endif %}
-
 <div class="lista-agenda agenda-compacta">
 {% for s in itens %}
   {% set data_curta = s.data_evento.strftime('%d/%m') if s.data_evento else '-' %}
@@ -76,8 +61,6 @@
         {% for r in ae.conflitos_recursos %}<small class="observacao-destaque"><b>ATENÇÃO — RECURSO EXCEDIDO:</b> {{ r.nome }} · falta {{ r.falta }}</small>{% endfor %}
       {% endif %}
       {% set rota = rotas_por_solicitacao.get(s.id) %}<small class="financeiro-mini">{% if rota and rota.roteirizado %}Roteirizado · {{ rota.equipe.nome if rota.equipe else 'Sem equipe' }}{% else %}Não roteirizado{% endif %}</small>
-      {% set gs = s.google_calendar_status_view or 'nao_sincronizado' %}
-      <small class="financeiro-mini"><b>Google:</b> {% if gs == 'sincronizado' %}Sincronizado{% elif gs == 'atualizar' %}Atualizar{% elif gs == 'erro' %}Erro{% elif gs == 'finalizado' %}Finalizado{% elif gs == 'desativado' %}Desativado{% else %}Não sincronizado{% endif %}</small>
       {% if eh_credito %}
         <small class="financeiro-mini">Situação: Em crédito</small>
       {% elif eh_cancelado %}

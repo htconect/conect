@@ -30,21 +30,6 @@
     </div>
 </form>
 
-{% if request.query_params.get('google_erro') %}<div class="alerta-operacao-pagamento">{{ request.query_params.get('google_erro') }}</div>{% endif %}
-{% if (request.query_params.get('google_ok') is not none) or (empresa.google_calendar_ativo and empresa.google_calendar_operacao) %}
-<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0">
-    {% if request.query_params.get('google_ok') is not none %}
-    <div class="box" style="margin:0"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} finalizado(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
-    {% endif %}
-    {% if empresa.google_calendar_ativo and empresa.google_calendar_operacao %}
-    <form method="post" action="/painel/reservas/google-calendar/sincronizar" class="acoes" style="margin:0">
-        {% for a in itens %}<input type="hidden" name="agenda_ids" value="{{ a.id }}">{% endfor %}
-        <button type="submit" class="botao btn-krj-primary" {% if not itens %}disabled{% endif %}><i class="bi bi-calendar-check"></i> Sincronizar Google</button>
-    </form>
-    {% endif %}
-</div>
-{% endif %}
-
 {% if request.query_params.get('op_erro') %}
 <div class="alerta-operacao-pagamento">{{ request.query_params.get('op_erro') }}</div>
 {% endif %}
@@ -141,8 +126,6 @@
                 {% else %}
                     Não roteirizado
                 {% endif %}
-                {% set gs = a.google_calendar_status_view or 'nao_sincronizado' %}
-                <small>Google: {% if gs == 'sincronizado' %}Sincronizado{% elif gs == 'atualizar' %}Atualizar{% elif gs == 'erro' %}Erro{% elif gs == 'finalizado' %}Finalizado{% elif gs == 'substituido' %}Substituído{% elif gs == 'desativado' %}Desativado{% else %}Não sincronizado{% endif %}</small>
             </div>
             <span class="seta-card seta-expandir">⌄</span>
         </summary>

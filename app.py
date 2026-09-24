@@ -139,17 +139,15 @@ HUMIAT_USER_VALIDATE_URL = os.getenv(
     "https://www.humiat.com.br/api/humiat/integracoes/usuario/validar",
 ).strip()
 
-# Google Agenda. As credenciais identificam o aplicativo Web; cada empresa
-# conecta a própria conta e mantém seus tokens isolados no cadastro.
-GOOGLE_CALENDAR_CLIENT_ID = os.getenv("GOOGLE_CALENDAR_CLIENT_ID", "").strip()
-GOOGLE_CALENDAR_CLIENT_SECRET = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", "").strip()
-GOOGLE_CALENDAR_REDIRECT_URI = os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "").strip()
-GOOGLE_CALENDAR_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_CALENDAR_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GOOGLE_CALENDAR_API_URL = "https://www.googleapis.com/calendar/v3"
-GOOGLE_CALENDAR_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
-GOOGLE_CALENDAR_SCOPE = "openid email https://www.googleapis.com/auth/calendar.events"
-GOOGLE_CALENDAR_TIMEZONE = "America/Sao_Paulo"
+# Lista de Clientes de Aluguel do Organiza. A mesma chave já usada na integração
+# financeira pode ser reutilizada nos dois sentidos.
+ORGANIZA_CLIENTES_ALUGUEL_URL = os.getenv(
+    "ORGANIZA_CLIENTES_ALUGUEL_URL",
+    "https://www.humiat.com.br/api/integracoes/connect/clientes-aluguel",
+).strip()
+ORGANIZA_CLIENTES_ALUGUEL_API_KEY = (
+    os.getenv("ORGANIZA_API_KEY", "").strip() or os.getenv("CONNECT_API_KEY", "").strip()
+)
 
 
 def _humiat_login_connect_url(modo: str = "sistema") -> str:
@@ -803,389 +801,6 @@ templates.env.globals["coordenadas_rota_solicitacao"] = coordenadas_rota_solicit
 templates.env.globals["endereco_referencia_solicitacao"] = endereco_referencia_solicitacao
 
 
-# ---------------------------------------------------------------------------
-# Google Agenda
-# ---------------------------------------------------------------------------
-_GOOGLE_ETAPA_ORDEM = {"contrato": 0, "entrega": 1, "retirada": 2}
-
-
-def _google_calendar_oauth_disponivel() -> bool:
-    return bool(GOOGLE_CALENDAR_CLIENT_ID and GOOGLE_CALENDAR_CLIENT_SECRET)
-
-
-def _google_calendar_conectado(empresa: Empresa) -> bool:
-    return bool(
-        _google_calendar_oauth_disponivel()
-        and (getattr(empresa, "google_calendar_refresh_token", None) or getattr(empresa, "google_calendar_access_token", None))
-    )
-
-
-def _google_calendar_habilitado(empresa: Empresa) -> bool:
-    return bool(getattr(empresa, "google_calendar_ativo", False) and _google_calendar_conectado(empresa))
-
-
-def _google_calendar_token_post(dados: dict) -> dict:
-    req = UrlRequest(
-        GOOGLE_CALENDAR_TOKEN_URL,
-        data=urlencode(dados).encode("utf-8"),
-        method="POST",
-        headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-    )
-    try:
-        with urlopen(req, timeout=20) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except HTTPError as exc:
-        detalhe = exc.read().decode("utf-8", errors="replace")[:600]
-        raise RuntimeError(f"Google OAuth HTTP {exc.code}: {detalhe or exc.reason}")
-    except Exception as exc:
-        raise RuntimeError(f"Falha ao acessar o Google OAuth: {exc}")
-
-
-def _google_calendar_access_token(db: Session, empresa: Empresa, forcar_refresh: bool = False) -> str:
-    agora = agora_utc()
-    token = str(getattr(empresa, "google_calendar_access_token", "") or "").strip()
-    expira = getattr(empresa, "google_calendar_token_expires_at", None)
-    if token and not forcar_refresh and (not expira or expira > agora + timedelta(seconds=90)):
-        return token
-
-    refresh = str(getattr(empresa, "google_calendar_refresh_token", "") or "").strip()
-    if not refresh:
-        if token and not forcar_refresh:
-            return token
-        raise RuntimeError("Conta Google não conectada. Conecte a conta no cadastro da empresa.")
-
-    resposta = _google_calendar_token_post({
-        "client_id": GOOGLE_CALENDAR_CLIENT_ID,
-        "client_secret": GOOGLE_CALENDAR_CLIENT_SECRET,
-        "refresh_token": refresh,
-        "grant_type": "refresh_token",
-    })
-    novo = str(resposta.get("access_token") or "").strip()
-    if not novo:
-        raise RuntimeError("O Google não retornou um novo token de acesso.")
-    empresa.google_calendar_access_token = novo
-    empresa.google_calendar_token_expires_at = agora + timedelta(seconds=max(int(resposta.get("expires_in") or 3600), 60))
-    db.flush()
-    return novo
-
-
-def _google_calendar_api(db: Session, empresa: Empresa, metodo: str, caminho: str, corpo: dict | None = None, aceitar_404: bool = False) -> dict:
-    def executar(token: str):
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        data = None
-        if corpo is not None:
-            headers["Content-Type"] = "application/json; charset=utf-8"
-            data = json.dumps(corpo, ensure_ascii=False).encode("utf-8")
-        req = UrlRequest(GOOGLE_CALENDAR_API_URL + caminho, data=data, method=metodo, headers=headers)
-        with urlopen(req, timeout=20) as resp:
-            bruto = resp.read().decode("utf-8")
-            return json.loads(bruto) if bruto.strip() else {}
-
-    token = _google_calendar_access_token(db, empresa)
-    try:
-        return executar(token)
-    except HTTPError as exc:
-        if exc.code == 401:
-            token = _google_calendar_access_token(db, empresa, forcar_refresh=True)
-            try:
-                return executar(token)
-            except HTTPError as exc2:
-                exc = exc2
-        if exc.code == 404 and aceitar_404:
-            return {}
-        detalhe = exc.read().decode("utf-8", errors="replace")[:800]
-        raise RuntimeError(f"Google Agenda HTTP {exc.code}: {detalhe or exc.reason}")
-    except Exception as exc:
-        if isinstance(exc, RuntimeError):
-            raise
-        raise RuntimeError(f"Falha ao acessar o Google Agenda: {exc}")
-
-
-def _google_calendar_itens_texto(item: Solicitacao) -> str:
-    itens = list(getattr(item, "itens", None) or [])
-    if itens:
-        partes = []
-        for ri in itens:
-            qtd = int(getattr(ri, "quantidade", None) or 1)
-            nome = str(getattr(ri, "nome", "") or "Item").strip()
-            partes.append(f"{qtd}x {nome}" if qtd > 1 else nome)
-        return " + ".join(partes)
-    return (item.produto.nome if item.produto else "Reserva")
-
-
-def _google_calendar_hora_operacao(agenda: Agenda) -> time | None:
-    previsao = str(getattr(agenda, "previsao_entrega", "") or "").strip()
-    if previsao:
-        try:
-            return datetime.strptime(previsao, "%H:%M").time()
-        except ValueError:
-            pass
-    return agenda.hora_inicio
-
-
-def _google_calendar_alvo_dados(empresa: Empresa, item: Solicitacao, etapa: str, agenda: Agenda | None = None) -> dict:
-    cliente = item.cliente
-    cliente_nome = (cliente.nome if cliente else "Cliente") or "Cliente"
-    itens = _google_calendar_itens_texto(item)
-    endereco = endereco_rota_solicitacao(item)
-    if etapa == "contrato":
-        inicio = datetime.combine(item.data_evento, item.hora_inicio)
-        if item.hora_fim:
-            fim = datetime.combine(item.data_evento, item.hora_fim)
-            if fim <= inicio:
-                fim += timedelta(days=1)
-        else:
-            duracao = int(getattr(item.produto, "duracao_minutos", 240) or 240) if item.produto else 240
-            fim = inicio + timedelta(minutes=max(duracao, 30))
-        titulo = f"CONTRATO #{item.id} · {cliente_nome} · {itens}"
-    else:
-        if not agenda or not agenda.data:
-            raise RuntimeError("Operação sem data para sincronizar.")
-        hora = _google_calendar_hora_operacao(agenda)
-        if not hora:
-            raise RuntimeError("Operação sem hora roteirizada para sincronizar.")
-        inicio = datetime.combine(agenda.data, hora)
-        duracao = max(int(getattr(empresa, "google_calendar_duracao_operacao_min", 30) or 30), 5)
-        fim = inicio + timedelta(minutes=duracao)
-        prefixo = "RETIRADA" if etapa == "retirada" else "ENTREGA"
-        titulo = f"{prefixo} #{item.id} · {cliente_nome} · {itens}"
-
-    return {
-        "etapa": etapa,
-        "titulo": titulo[:250],
-        "inicio": inicio,
-        "fim": fim,
-        "endereco": endereco,
-        "cliente": cliente_nome,
-        "telefone": (cliente.telefone if cliente else "") or "",
-        "itens": itens,
-    }
-
-
-def _google_calendar_assinatura(empresa: Empresa, item: Solicitacao, etapa: str, agenda: Agenda | None = None) -> str:
-    d = _google_calendar_alvo_dados(empresa, item, etapa, agenda)
-    lembretes = sorted({
-        max(int(getattr(empresa, "google_calendar_reminder_1", 0) or 0), 0),
-        max(int(getattr(empresa, "google_calendar_reminder_2", 0) or 0), 0),
-    } - {0})
-    bruto = json.dumps({
-        "etapa": d["etapa"], "titulo": d["titulo"],
-        "inicio": d["inicio"].isoformat(), "fim": d["fim"].isoformat(),
-        "endereco": d["endereco"], "telefone": d["telefone"], "itens": d["itens"],
-        "lembretes": lembretes,
-    }, ensure_ascii=False, sort_keys=True)
-    return hashlib.sha256(bruto.encode("utf-8")).hexdigest()
-
-
-def _google_calendar_payload(empresa: Empresa, item: Solicitacao, etapa: str, agenda: Agenda | None = None, request: Request | None = None) -> dict:
-    d = _google_calendar_alvo_dados(empresa, item, etapa, agenda)
-    link = ""
-    if request is not None:
-        try:
-            link = str(request.url_for("detalhe_solicitacao", solicitacao_id=item.id))
-        except Exception:
-            link = f"/painel/solicitacao/{item.id}"
-    linhas = [
-        f"Contrato #{item.id}",
-        f"Cliente: {d['cliente']}",
-        f"WhatsApp: {d['telefone'] or '-'}",
-        f"Itens: {d['itens']}",
-        f"Etapa: {etapa.upper()}",
-    ]
-    if link:
-        linhas.append(f"Connect: {link}")
-    lembretes = []
-    for minutos in [getattr(empresa, "google_calendar_reminder_1", 0), getattr(empresa, "google_calendar_reminder_2", 0)]:
-        try:
-            minutos = int(minutos or 0)
-        except Exception:
-            minutos = 0
-        if minutos > 0 and minutos not in [x["minutes"] for x in lembretes]:
-            lembretes.append({"method": "popup", "minutes": min(minutos, 40320)})
-    return {
-        "summary": d["titulo"],
-        "location": d["endereco"],
-        "description": "\n".join(linhas),
-        "start": {"dateTime": d["inicio"].isoformat(timespec="seconds"), "timeZone": GOOGLE_CALENDAR_TIMEZONE},
-        "end": {"dateTime": d["fim"].isoformat(timespec="seconds"), "timeZone": GOOGLE_CALENDAR_TIMEZONE},
-        "reminders": {"useDefault": False, "overrides": lembretes} if lembretes else {"useDefault": True},
-        "extendedProperties": {"private": {"connect_solicitacao_id": str(item.id), "connect_etapa": etapa}},
-    }
-
-
-def _google_calendar_registrar_erro(item: Solicitacao, exc: Exception) -> None:
-    item.google_calendar_erro = str(exc)[:1200]
-
-
-def _google_calendar_enviar_evento(db: Session, empresa: Empresa, item: Solicitacao, etapa: str, agenda: Agenda | None = None, request: Request | None = None) -> str:
-    if not _google_calendar_habilitado(empresa):
-        return "desativado"
-    atual = str(getattr(item, "google_calendar_etapa", "") or "")
-    if item.google_calendar_event_id and _GOOGLE_ETAPA_ORDEM.get(atual, -1) > _GOOGLE_ETAPA_ORDEM.get(etapa, -1):
-        return "etapa_posterior"
-
-    calendario = (getattr(empresa, "google_calendar_id", None) or "primary").strip() or "primary"
-    assinatura = _google_calendar_assinatura(empresa, item, etapa, agenda)
-    if item.google_calendar_event_id and item.google_calendar_calendario_id == calendario and item.google_calendar_etapa == etapa and item.google_calendar_assinatura == assinatura:
-        item.google_calendar_erro = None
-        return "sem_alteracao"
-
-    payload = _google_calendar_payload(empresa, item, etapa, agenda, request)
-    evento_id = str(getattr(item, "google_calendar_event_id", "") or "").strip()
-    calendario_antigo = str(getattr(item, "google_calendar_calendario_id", "") or "").strip()
-    if evento_id and calendario_antigo and calendario_antigo != calendario:
-        antigo = quote(calendario_antigo, safe="")
-        eid = quote(evento_id, safe="")
-        _google_calendar_api(db, empresa, "DELETE", f"/calendars/{antigo}/events/{eid}", aceitar_404=True)
-        evento_id = ""
-
-    cal = quote(calendario, safe="")
-    if evento_id:
-        eid = quote(evento_id, safe="")
-        try:
-            resposta = _google_calendar_api(db, empresa, "PATCH", f"/calendars/{cal}/events/{eid}?sendUpdates=none", payload)
-        except RuntimeError as exc:
-            if "HTTP 404" not in str(exc):
-                raise
-            evento_id = ""
-            resposta = {}
-    else:
-        resposta = {}
-    if not evento_id:
-        resposta = _google_calendar_api(db, empresa, "POST", f"/calendars/{cal}/events?sendUpdates=none", payload)
-        evento_id = str(resposta.get("id") or "").strip()
-        if not evento_id:
-            raise RuntimeError("O Google Agenda não retornou o ID do evento criado.")
-
-    item.google_calendar_event_id = evento_id
-    item.google_calendar_calendario_id = calendario
-    item.google_calendar_etapa = etapa
-    item.google_calendar_assinatura = assinatura
-    item.google_calendar_sincronizado_em = agora_utc()
-    item.google_calendar_erro = None
-    db.flush()
-    return "sincronizado"
-
-
-def _google_calendar_excluir_evento(db: Session, empresa: Empresa, item: Solicitacao) -> str:
-    evento_id = str(getattr(item, "google_calendar_event_id", "") or "").strip()
-    if not evento_id:
-        item.google_calendar_etapa = None
-        item.google_calendar_assinatura = None
-        item.google_calendar_erro = None
-        return "sem_evento"
-    if not _google_calendar_conectado(empresa):
-        raise RuntimeError("Conta Google desconectada; não foi possível excluir o compromisso.")
-    calendario = (getattr(item, "google_calendar_calendario_id", None) or getattr(empresa, "google_calendar_id", None) or "primary").strip() or "primary"
-    cal = quote(calendario, safe="")
-    eid = quote(evento_id, safe="")
-    _google_calendar_api(db, empresa, "DELETE", f"/calendars/{cal}/events/{eid}?sendUpdates=none", aceitar_404=True)
-    item.google_calendar_event_id = None
-    item.google_calendar_calendario_id = None
-    item.google_calendar_etapa = None
-    item.google_calendar_assinatura = None
-    item.google_calendar_sincronizado_em = agora_utc()
-    item.google_calendar_erro = None
-    db.flush()
-    return "excluido"
-
-
-def _google_calendar_operacoes_solicitacao(db: Session, item: Solicitacao) -> tuple[Agenda | None, Agenda | None]:
-    eventos = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id).order_by(Agenda.id.asc()).all()
-    entrega = next((a for a in reversed(eventos) if (a.tipo_evento or "entrega") == "entrega"), None)
-    retirada = next((a for a in reversed(eventos) if (a.tipo_evento or "entrega") == "retirada"), None)
-    return entrega, retirada
-
-
-def _google_calendar_sincronizar_estado_atual(db: Session, empresa: Empresa, item: Solicitacao, request: Request | None = None) -> str:
-    entrega, retirada = _google_calendar_operacoes_solicitacao(db, item)
-    if retirada and retirada.status_operacional == "concluido":
-        return _google_calendar_excluir_evento(db, empresa, item)
-    if entrega and entrega.status_operacional == "concluido":
-        if retirada and retirada.roteirizado and retirada.status_operacional != "concluido":
-            return _google_calendar_enviar_evento(db, empresa, item, "retirada", retirada, request)
-        return "aguardando_retirada"
-    if entrega and entrega.roteirizado:
-        return _google_calendar_enviar_evento(db, empresa, item, "entrega", entrega, request)
-    return _google_calendar_enviar_evento(db, empresa, item, "contrato", None, request)
-
-
-def _google_calendar_status_operacao(empresa: Empresa, agenda: Agenda) -> str:
-    item = agenda.solicitacao
-    if not getattr(empresa, "google_calendar_ativo", False):
-        return "desativado"
-    if not item:
-        return "nao_sincronizado"
-    if agenda.tipo_evento == "retirada" and agenda.status_operacional == "concluido" and not item.google_calendar_event_id:
-        return "finalizado"
-    if item.google_calendar_erro:
-        return "erro"
-    if not item.google_calendar_event_id:
-        return "nao_sincronizado"
-    etapa = agenda.tipo_evento or "entrega"
-    etapa_atual = item.google_calendar_etapa or ""
-    if _GOOGLE_ETAPA_ORDEM.get(etapa_atual, -1) > _GOOGLE_ETAPA_ORDEM.get(etapa, -1):
-        return "substituido"
-    if etapa_atual != etapa:
-        return "atualizar"
-    try:
-        return "sincronizado" if item.google_calendar_assinatura == _google_calendar_assinatura(empresa, item, etapa, agenda) else "atualizar"
-    except Exception:
-        return "atualizar"
-
-
-def _google_calendar_status_contrato(db: Session, empresa: Empresa, item: Solicitacao) -> str:
-    if not getattr(empresa, "google_calendar_ativo", False):
-        return "desativado"
-    if item.google_calendar_erro:
-        return "erro"
-    if not item.google_calendar_event_id:
-        return "nao_sincronizado"
-    entrega, retirada = _google_calendar_operacoes_solicitacao(db, item)
-    if retirada and retirada.status_operacional == "concluido":
-        return "finalizado"
-    etapa = "contrato"
-    agenda = None
-    if entrega and entrega.status_operacional == "concluido" and retirada and retirada.roteirizado:
-        etapa, agenda = "retirada", retirada
-    elif entrega and entrega.roteirizado:
-        etapa, agenda = "entrega", entrega
-    if item.google_calendar_etapa != etapa:
-        return "atualizar"
-    try:
-        return "sincronizado" if item.google_calendar_assinatura == _google_calendar_assinatura(empresa, item, etapa, agenda) else "atualizar"
-    except Exception:
-        return "atualizar"
-
-
-def _google_calendar_auto_contrato(db: Session, empresa: Empresa, item: Solicitacao, request: Request | None = None) -> None:
-    if not (getattr(empresa, "google_calendar_ativo", False) and getattr(empresa, "google_calendar_contratos", True)):
-        return
-    if not _google_calendar_conectado(empresa):
-        return
-    try:
-        _google_calendar_enviar_evento(db, empresa, item, "contrato", None, request)
-        db.commit()
-    except Exception as exc:
-        logger.exception("Falha ao sincronizar contrato #%s com Google Agenda", item.id)
-        _google_calendar_registrar_erro(item, exc)
-        db.commit()
-
-
-def _google_calendar_auto_excluir(db: Session, empresa: Empresa, item: Solicitacao) -> None:
-    if not getattr(item, "google_calendar_event_id", None):
-        return
-    if not getattr(empresa, "google_calendar_ativo", False) or not _google_calendar_conectado(empresa):
-        return
-    try:
-        _google_calendar_excluir_evento(db, empresa, item)
-        db.commit()
-    except Exception as exc:
-        logger.exception("Falha ao excluir Google Agenda do contrato #%s", item.id)
-        _google_calendar_registrar_erro(item, exc)
-        db.commit()
-
-
 def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     """Monta o endereço completo a partir do snapshot do contrato/reserva."""
     dados = dados_endereco_solicitacao(item)
@@ -1572,28 +1187,6 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_gratis_mes INTEGER DEFAULT 4 NOT NULL")
     if "humiat_custo_contrato" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_custo_contrato INTEGER DEFAULT 1 NOT NULL")
-    if "google_calendar_ativo" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_ativo BOOLEAN DEFAULT false")
-    if "google_calendar_contratos" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_contratos BOOLEAN DEFAULT true")
-    if "google_calendar_operacao" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_operacao BOOLEAN DEFAULT true")
-    if "google_calendar_id" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_id VARCHAR(255) DEFAULT 'primary'")
-    if "google_calendar_reminder_1" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_reminder_1 INTEGER DEFAULT 1440")
-    if "google_calendar_reminder_2" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_reminder_2 INTEGER DEFAULT 120")
-    if "google_calendar_duracao_operacao_min" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_duracao_operacao_min INTEGER DEFAULT 30")
-    if "google_calendar_access_token" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_access_token TEXT")
-    if "google_calendar_refresh_token" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_refresh_token TEXT")
-    if "google_calendar_token_expires_at" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_token_expires_at TIMESTAMP")
-    if "google_calendar_email" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN google_calendar_email VARCHAR(160)")
 
     if "clientes" in tabelas:
         cols_cli = colunas("clientes")
@@ -1727,18 +1320,6 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_responsavel_nome VARCHAR(160)")
         if "retirada_responsavel_telefone" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN retirada_responsavel_telefone VARCHAR(40)")
-        if "google_calendar_event_id" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_event_id VARCHAR(255)")
-        if "google_calendar_calendario_id" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_calendario_id VARCHAR(255)")
-        if "google_calendar_etapa" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_etapa VARCHAR(20)")
-        if "google_calendar_assinatura" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_assinatura VARCHAR(64)")
-        if "google_calendar_sincronizado_em" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_sincronizado_em TIMESTAMP")
-        if "google_calendar_erro" not in cols_sol:
-            comandos.append("ALTER TABLE solicitacoes ADD COLUMN google_calendar_erro TEXT")
 
         if "acesso_local" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN acesso_local VARCHAR(40)")
@@ -3116,6 +2697,96 @@ def admin_sair(request: Request):
     return RedirectResponse(HUMIAT_PORTAL_URL, status_code=303)
 
 
+def _ultimo_contrato_valido_cliente(db: Session, empresa: Empresa, cliente_id: int):
+    cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
+    candidatos = (
+        db.query(Solicitacao)
+        .filter(Solicitacao.empresa_id == empresa.id, Solicitacao.cliente_id == cliente_id)
+        .filter(~Solicitacao.status.in_(list(cancelados)))
+        .order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc())
+        .all()
+    )
+    for candidato in candidatos:
+        if candidato.aceite_em or candidato.aprovado_em or candidato.status in {"reserva_confirmada", "aguardando_pagamento"}:
+            return candidato
+    return None
+
+
+def _payload_cliente_aluguel_organiza(db: Session, empresa: Empresa, item: Solicitacao) -> dict | None:
+    cliente = getattr(item, "cliente", None) or db.get(Cliente, item.cliente_id)
+    if not cliente or not (cliente.nome or "").strip() or not (cliente.telefone or "").strip():
+        return None
+    # O Connect envia sempre a visão mais atual do cliente: o contrato válido com
+    # maior data de evento. Assim editar/cancelar um contrato não deixa o Organiza
+    # preso a um mês antigo por causa da ordem das chamadas.
+    ultimo = _ultimo_contrato_valido_cliente(db, empresa, cliente.id)
+    if not ultimo or not ultimo.data_evento:
+        return None
+    return {
+        "empresa_slug": (empresa.slug or "").strip().lower(),
+        "connect_cliente_id": cliente.id,
+        "connect_solicitacao_id": ultimo.id,
+        "nome": (cliente.nome or "").strip(),
+        "telefone": (cliente.telefone or "").strip(),
+        "data_evento": ultimo.data_evento.isoformat(),
+    }
+
+
+def _enviar_cliente_aluguel_organiza(payload: dict):
+    if not ORGANIZA_CLIENTES_ALUGUEL_URL or not ORGANIZA_CLIENTES_ALUGUEL_API_KEY:
+        logger.warning("Integração de clientes de aluguel com Organiza não configurada; defina ORGANIZA_API_KEY.")
+        return
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-API-Key": ORGANIZA_CLIENTES_ALUGUEL_API_KEY,
+        "User-Agent": f"HUMIAT-Conect/{APP_VERSION}",
+    }
+    ultimo_erro = None
+    for tentativa in range(1, 4):
+        req = UrlRequest(
+            ORGANIZA_CLIENTES_ALUGUEL_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers=headers,
+        )
+        try:
+            with urlopen(req, timeout=8) as resp:
+                resp.read()
+            return
+        except HTTPError as exc:
+            detalhe = ""
+            try:
+                detalhe = exc.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                pass
+            ultimo_erro = f"HTTP {exc.code} {detalhe}"
+            # Erros de autenticação/validação não melhoram com retry.
+            if exc.code < 500:
+                break
+        except Exception as exc:
+            ultimo_erro = str(exc)
+        if tentativa < 3:
+            time_module.sleep(tentativa * 2)
+    logger.warning("Falha ao sincronizar cliente de aluguel com Organiza: %s", ultimo_erro or "erro desconhecido")
+
+
+def _sincronizar_cliente_aluguel_organiza(db: Session, empresa: Empresa, item: Solicitacao):
+    """Dispara a atualização sem bloquear o fluxo do contrato no Connect."""
+    payload = _payload_cliente_aluguel_organiza(db, empresa, item)
+    if not payload:
+        return
+    threading.Thread(target=_enviar_cliente_aluguel_organiza, args=(payload,), daemon=True).start()
+
+
+def _solicitacao_confirmada_para_lista_aluguel(item: Solicitacao) -> bool:
+    cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
+    return bool(
+        item and item.status not in cancelados and
+        (item.aceite_em or item.aprovado_em or item.status in {"reserva_confirmada", "aguardando_pagamento"})
+    )
+
+
 def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, tipo: str, motivo: str = "", observacao: str = "", usuario: str = "", solicitacao_id: int | None = None):
     anterior = int(empresa.humiat_saldo or 0)
     posterior = anterior + int(quantidade)
@@ -3130,7 +2801,9 @@ def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, 
 
 
 def _processar_humiat_aceite(db: Session, empresa: Empresa, item: Solicitacao):
-    """Consome 1 Humiat por contrato aceito, usando primeiro a franquia mensal gratuita."""
+    """Consome 1 Humiat por contrato aceito e atualiza a lista de aluguel do Organiza."""
+    # Idempotente no Organiza: toda confirmação refresca nome, telefone e último aluguel.
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     if item.humiat_processado:
         return
     aceite = item.aceite_em or agora_utc()
@@ -3181,7 +2854,7 @@ def _quitar_humiats_pendentes(db: Session, empresa: Empresa):
 def admin_geral(request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
     return templates.TemplateResponse("admin/empresas.html",
-                                      {"request": request, "empresas": empresas, "empresa": None, "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
+                                      {"request": request, "empresas": empresas, "empresa": None})
 
 
 @app.post("/admin/empresas")
@@ -3197,13 +2870,6 @@ def admin_criar_empresa(
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
         nfse_ativa: Optional[str] = Form(None),
-        google_calendar_ativo: Optional[str] = Form(None),
-        google_calendar_contratos: Optional[str] = Form(None),
-        google_calendar_operacao: Optional[str] = Form(None),
-        google_calendar_id: str = Form("primary"),
-        google_calendar_reminder_1: int = Form(1440),
-        google_calendar_reminder_2: int = Form(120),
-        google_calendar_duracao_operacao_min: int = Form(30),
         infinitepay_handle: str = Form(""),
         infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
@@ -3238,13 +2904,6 @@ def admin_criar_empresa(
         whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
         infinitepay_ativa=bool(infinitepay_ativa),
         nfse_ativa=bool(nfse_ativa),
-        google_calendar_ativo=bool(google_calendar_ativo),
-        google_calendar_contratos=bool(google_calendar_contratos),
-        google_calendar_operacao=bool(google_calendar_operacao),
-        google_calendar_id=(google_calendar_id.strip() or "primary"),
-        google_calendar_reminder_1=max(int(google_calendar_reminder_1 or 0), 0),
-        google_calendar_reminder_2=max(int(google_calendar_reminder_2 or 0), 0),
-        google_calendar_duracao_operacao_min=max(int(google_calendar_duracao_operacao_min or 30), 5),
         infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
         infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
         exige_sinal=bool(exige_sinal),
@@ -3313,8 +2972,7 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
                                       {"request": request, "empresas": empresas, "empresa": empresa,
                                        "usuarios_empresa": usuarios_empresa, "equipes": equipes,
                                        "equipes_usuario": equipes_usuario, "aceitos_mes": aceitos_mes,
-                                       "pendentes_humiat": pendentes_humiat, "movimentos_humiat": movimentos_humiat,
-                                       "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
+                                       "pendentes_humiat": pendentes_humiat, "movimentos_humiat": movimentos_humiat})
 
 
 @app.post("/admin/empresa/{empresa_id}")
@@ -3331,13 +2989,6 @@ def admin_salvar_empresa(
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
         nfse_ativa: Optional[str] = Form(None),
-        google_calendar_ativo: Optional[str] = Form(None),
-        google_calendar_contratos: Optional[str] = Form(None),
-        google_calendar_operacao: Optional[str] = Form(None),
-        google_calendar_id: str = Form("primary"),
-        google_calendar_reminder_1: int = Form(1440),
-        google_calendar_reminder_2: int = Form(120),
-        google_calendar_duracao_operacao_min: int = Form(30),
         infinitepay_handle: str = Form(""),
         infinitepay_valor_sinal: str = Form("0"),
         exige_sinal: Optional[str] = Form(None),
@@ -3368,13 +3019,6 @@ def admin_salvar_empresa(
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
     empresa.nfse_ativa = bool(nfse_ativa)
-    empresa.google_calendar_ativo = bool(google_calendar_ativo)
-    empresa.google_calendar_contratos = bool(google_calendar_contratos)
-    empresa.google_calendar_operacao = bool(google_calendar_operacao)
-    empresa.google_calendar_id = google_calendar_id.strip() or "primary"
-    empresa.google_calendar_reminder_1 = max(int(google_calendar_reminder_1 or 0), 0)
-    empresa.google_calendar_reminder_2 = max(int(google_calendar_reminder_2 or 0), 0)
-    empresa.google_calendar_duracao_operacao_min = max(int(google_calendar_duracao_operacao_min or 30), 5)
     empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
     empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
@@ -3405,104 +3049,7 @@ def admin_salvar_empresa(
     empresa.humiat_custo_contrato = max(0, int(humiat_custo_contrato or 0))
     db.commit()
     empresa_cache_invalidar(empresa.id)
-    return RedirectResponse(f"/admin/empresa/{empresa.id}", status_code=303)
-
-
-@app.get("/admin/empresa/{empresa_id}/google-calendar/conectar")
-def admin_google_calendar_conectar(
-        empresa_id: int, request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
-    empresa = db.get(Empresa, empresa_id)
-    if not empresa:
-        raise HTTPException(404)
-    if not _google_calendar_oauth_disponivel():
-        return RedirectResponse(
-            f"/admin/empresa/{empresa_id}?google_erro=" + quote("Configure GOOGLE_CALENDAR_CLIENT_ID e GOOGLE_CALENDAR_CLIENT_SECRET no Render."),
-            status_code=303,
-        )
-    state = uuid.uuid4().hex
-    request.session["google_calendar_oauth_state"] = state
-    request.session["google_calendar_oauth_empresa_id"] = empresa.id
-    redirect_uri = GOOGLE_CALENDAR_REDIRECT_URI or str(request.url_for("admin_google_calendar_callback"))
-    params = {
-        "client_id": GOOGLE_CALENDAR_CLIENT_ID,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": GOOGLE_CALENDAR_SCOPE,
-        "access_type": "offline",
-        "prompt": "consent",
-        "include_granted_scopes": "true",
-        "state": state,
-    }
-    return RedirectResponse(GOOGLE_CALENDAR_AUTH_URL + "?" + urlencode(params), status_code=303)
-
-
-@app.get("/admin/google-calendar/callback")
-def admin_google_calendar_callback(
-        request: Request, code: str = "", state: str = "", error: str = "",
-        db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
-    empresa_id = int(request.session.get("google_calendar_oauth_empresa_id") or 0)
-    esperado = str(request.session.get("google_calendar_oauth_state") or "")
-    request.session.pop("google_calendar_oauth_state", None)
-    request.session.pop("google_calendar_oauth_empresa_id", None)
-    if not empresa_id or not esperado or state != esperado:
-        raise HTTPException(400, "Retorno do Google Agenda inválido ou expirado.")
-    empresa = db.get(Empresa, empresa_id)
-    if not empresa:
-        raise HTTPException(404)
-    if error:
-        return RedirectResponse(f"/admin/empresa/{empresa_id}?google_erro=" + quote(f"Google: {error}"), status_code=303)
-    if not code:
-        return RedirectResponse(f"/admin/empresa/{empresa_id}?google_erro=" + quote("O Google não retornou o código de autorização."), status_code=303)
-    try:
-        redirect_uri = GOOGLE_CALENDAR_REDIRECT_URI or str(request.url_for("admin_google_calendar_callback"))
-        resposta = _google_calendar_token_post({
-            "client_id": GOOGLE_CALENDAR_CLIENT_ID,
-            "client_secret": GOOGLE_CALENDAR_CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        })
-        access = str(resposta.get("access_token") or "").strip()
-        refresh = str(resposta.get("refresh_token") or "").strip()
-        if not access:
-            raise RuntimeError("O Google não retornou token de acesso.")
-        empresa.google_calendar_access_token = access
-        if refresh:
-            empresa.google_calendar_refresh_token = refresh
-        empresa.google_calendar_token_expires_at = agora_utc() + timedelta(seconds=max(int(resposta.get("expires_in") or 3600), 60))
-        empresa.google_calendar_ativo = True
-        if not (empresa.google_calendar_id or "").strip():
-            empresa.google_calendar_id = "primary"
-        try:
-            req = UrlRequest(GOOGLE_CALENDAR_USERINFO_URL, headers={"Authorization": f"Bearer {access}", "Accept": "application/json"})
-            with urlopen(req, timeout=15) as resp:
-                usuario_google = json.loads(resp.read().decode("utf-8"))
-            empresa.google_calendar_email = str(usuario_google.get("email") or "")[:160] or None
-        except Exception:
-            logger.exception("Não foi possível obter o e-mail da conta Google conectada")
-        db.commit()
-        empresa_cache_invalidar(empresa.id)
-        return RedirectResponse(f"/admin/empresa/{empresa_id}?google=conectado", status_code=303)
-    except Exception as exc:
-        logger.exception("Falha no OAuth do Google Agenda")
-        db.rollback()
-        return RedirectResponse(f"/admin/empresa/{empresa_id}?google_erro=" + quote(str(exc)), status_code=303)
-
-
-@app.post("/admin/empresa/{empresa_id}/google-calendar/desconectar")
-def admin_google_calendar_desconectar(
-        empresa_id: int, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
-    empresa = db.get(Empresa, empresa_id)
-    if not empresa:
-        raise HTTPException(404)
-    empresa.google_calendar_ativo = False
-    empresa.google_calendar_access_token = None
-    empresa.google_calendar_refresh_token = None
-    empresa.google_calendar_token_expires_at = None
-    empresa.google_calendar_email = None
-    db.commit()
-    empresa_cache_invalidar(empresa.id)
-    return RedirectResponse(f"/admin/empresa/{empresa_id}?google=desconectado", status_code=303)
+    return RedirectResponse("/admin", status_code=303)
 
 
 @app.post("/admin/empresa/{empresa_id}/humiats")
@@ -5637,8 +5184,6 @@ def preparar_reservas(
             vistos_operacao.add(sol.id)
             solicitacoes_operacao.append(sol)
     _anexar_analise_estoque(db, solicitacoes_operacao)
-    for agenda_item in itens:
-        agenda_item.google_calendar_status_view = _google_calendar_status_operacao(empresa, agenda_item)
 
     return templates.TemplateResponse("admin/preparar.html", {
         "request": request,
@@ -6362,6 +5907,7 @@ def salvar_cliente_da_solicitacao(
         cliente.identificador = cliente.telefone
 
     db.commit()
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -6437,11 +5983,8 @@ def salvar_edicao_solicitacao(
 
     _invalidar_geocodificacao(item)
     db.commit()
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     _tentar_geocodificar_solicitacao(db, item)
-    if item.status in STATUS_CONTRATO_APROVADO:
-        _google_calendar_auto_contrato(db, empresa, item)
-    elif item.status in {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}:
-        _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -6503,7 +6046,7 @@ def colocar_solicitacao_em_credito(
     ).delete(synchronize_session=False)
 
     db.commit()
-    _google_calendar_auto_excluir(db, empresa, item)
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     return RedirectResponse(
         f"/painel/solicitacao/{solicitacao_id}?credito=ok",
         status_code=303,
@@ -6540,10 +6083,7 @@ def atualizar_status_solicitacao(
                 criar_eventos_operacionais(db, item)
 
     db.commit()
-    if item.status in STATUS_CONTRATO_APROVADO:
-        _google_calendar_auto_contrato(db, empresa, item)
-    elif item.status in {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}:
-        _google_calendar_auto_excluir(db, empresa, item)
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -6801,7 +6341,6 @@ def aceite_manual_solicitacao(
     criar_eventos_operacionais(db, item)
     _processar_humiat_aceite(db, empresa, item)
     db.commit()
-    _google_calendar_auto_contrato(db, empresa, item, request)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -7239,8 +6778,6 @@ def contrato_novo_salvar(
         ))
 
     db.commit()
-    if manual:
-        _google_calendar_auto_contrato(db, empresa, item, request)
     return RedirectResponse(f"/painel/solicitacao/{item.id}", status_code=303)
 
 
@@ -7457,6 +6994,7 @@ def salvar_solicitacao_completa(
     else:
         criar_eventos_operacionais(db, item)
     db.commit()
+    _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{item.id}", status_code=303)
 
@@ -10771,124 +10309,6 @@ def _anexar_responsaveis_exibicao(itens):
     return itens
 
 
-@app.post("/painel/agenda/google-calendar/sincronizar")
-def google_calendar_sincronizar_contratos(
-        request: Request,
-        solicitacao_ids: list[int] = Form(default=[]),
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)):
-    if not getattr(empresa, "google_calendar_ativo", False):
-        return redirect_preservando_filtros(request, "/painel/agenda", {"google_erro": "Google Agenda desativado nesta empresa."})
-    if not getattr(empresa, "google_calendar_contratos", True):
-        return redirect_preservando_filtros(request, "/painel/agenda", {"google_erro": "Sincronização de contratos desativada nesta empresa."})
-    if not _google_calendar_conectado(empresa):
-        return redirect_preservando_filtros(request, "/painel/agenda", {"google_erro": "Conecte a conta Google no cadastro da empresa."})
-
-    ids = sorted({int(x) for x in solicitacao_ids if int(x) > 0})
-    itens = (
-        db.query(Solicitacao)
-        .options(joinedload(Solicitacao.cliente), joinedload(Solicitacao.produto), selectinload(Solicitacao.itens))
-        .filter(Solicitacao.empresa_id == empresa.id, Solicitacao.id.in_(ids or [-1]))
-        .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc(), Solicitacao.id.asc())
-        .all()
-    )
-    hoje = datetime.now(FUSO_EMPRESA).date()
-    sincronizados = ignorados = erros = 0
-    for item in itens:
-        # Contratos só entram depois de finalizados/aceitos e apenas no período atual/futuro.
-        if item.status not in STATUS_CONTRATO_APROVADO or item.data_evento < hoje:
-            ignorados += 1
-            continue
-        entrega, _ = _google_calendar_operacoes_solicitacao(db, item)
-        # Depois de entregue, a Operação passa a ser a fonte do Google Agenda.
-        if entrega and entrega.status_operacional == "concluido":
-            ignorados += 1
-            continue
-        try:
-            resultado = _google_calendar_sincronizar_estado_atual(db, empresa, item, request)
-            if resultado in {"sincronizado", "sem_alteracao"}:
-                sincronizados += 1
-            else:
-                ignorados += 1
-        except Exception as exc:
-            _google_calendar_registrar_erro(item, exc)
-            erros += 1
-    db.commit()
-    return redirect_preservando_filtros(request, "/painel/agenda", {
-        "google_ok": sincronizados,
-        "google_ignorados": ignorados,
-        "google_erros": erros,
-    })
-
-
-@app.post("/painel/reservas/google-calendar/sincronizar")
-def google_calendar_sincronizar_operacao(
-        request: Request,
-        agenda_ids: list[int] = Form(default=[]),
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)):
-    if not getattr(empresa, "google_calendar_ativo", False):
-        return redirect_preservando_filtros(request, "/painel/reservas", {"google_erro": "Google Agenda desativado nesta empresa."})
-    if not getattr(empresa, "google_calendar_operacao", True):
-        return redirect_preservando_filtros(request, "/painel/reservas", {"google_erro": "Sincronização da Operação desativada nesta empresa."})
-    if not _google_calendar_conectado(empresa):
-        return redirect_preservando_filtros(request, "/painel/reservas", {"google_erro": "Conecte a conta Google no cadastro da empresa."})
-
-    ids = sorted({int(x) for x in agenda_ids if int(x) > 0})
-    eventos = (
-        db.query(Agenda)
-        .options(
-            joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
-            joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
-            joinedload(Agenda.solicitacao).selectinload(Solicitacao.itens),
-        )
-        .filter(Agenda.empresa_id == empresa.id, Agenda.id.in_(ids or [-1]))
-        .all()
-    )
-    # Se Entrega e Retirada do mesmo contrato estiverem no filtro, processa Entrega antes.
-    eventos.sort(key=lambda a: (a.solicitacao_id, 0 if (a.tipo_evento or "entrega") == "entrega" else 1, a.id))
-    sincronizados = ignorados = excluidos = erros = 0
-    for agenda_item in eventos:
-        item = agenda_item.solicitacao
-        if not item or item.status not in STATUS_CONTRATO_APROVADO:
-            ignorados += 1
-            continue
-        if not agenda_item.roteirizado:
-            ignorados += 1
-            continue
-        etapa = agenda_item.tipo_evento or "entrega"
-        try:
-            if etapa == "retirada" and agenda_item.status_operacional == "concluido":
-                _google_calendar_excluir_evento(db, empresa, item)
-                excluidos += 1
-                continue
-            if etapa == "retirada":
-                entrega, _ = _google_calendar_operacoes_solicitacao(db, item)
-                if entrega and entrega.status_operacional != "concluido":
-                    # Buscar só substitui Entregar depois que a entrega foi encerrada.
-                    ignorados += 1
-                    continue
-            if etapa == "entrega" and agenda_item.status_operacional == "concluido":
-                # Mantém o compromisso existente até a retirada roteirizada substituí-lo.
-                ignorados += 1
-                continue
-            resultado = _google_calendar_enviar_evento(db, empresa, item, etapa, agenda_item, request)
-            if resultado in {"sincronizado", "sem_alteracao"}:
-                sincronizados += 1
-            else:
-                ignorados += 1
-        except Exception as exc:
-            _google_calendar_registrar_erro(item, exc)
-            erros += 1
-    db.commit()
-    return redirect_preservando_filtros(request, "/painel/reservas", {
-        "google_ok": sincronizados,
-        "google_excluidos": excluidos,
-        "google_ignorados": ignorados,
-        "google_erros": erros,
-    })
-
-
 @app.get("/painel/agenda", response_class=HTMLResponse)
 def agenda(
         request: Request,
@@ -11000,8 +10420,6 @@ def agenda(
 
     _anexar_responsaveis_exibicao(itens)
     _anexar_analise_estoque(db, itens)
-    for item in itens:
-        item.google_calendar_status_view = _google_calendar_status_contrato(db, empresa, item)
     mensagens = mensagens_empresa(empresa)
     return templates.TemplateResponse("admin/agenda.html", {
         "request": request,
@@ -11127,20 +10545,6 @@ def atualizar_roteiro(
     # operacional; elas serão atualizadas somente dentro do próprio módulo de
     # Inteligência quando o usuário solicitar gerar/recalcular a rota.
     db.commit()
-    if (
-        item.tipo_evento == "retirada"
-        and item.status_operacional == "concluido"
-        and item.solicitacao
-        and item.solicitacao.google_calendar_event_id
-        and getattr(empresa, "google_calendar_ativo", False)
-    ):
-        try:
-            _google_calendar_excluir_evento(db, empresa, item.solicitacao)
-            db.commit()
-        except Exception as exc:
-            _google_calendar_registrar_erro(item.solicitacao, exc)
-            db.commit()
-            logger.exception("Falha ao excluir Google Agenda ao encerrar retirada do contrato #%s", item.solicitacao_id)
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
 
@@ -12390,7 +11794,6 @@ def cancelar_contrato(slug: str, solicitacao_id: int, db: Session = Depends(get_
         item.status = "cancelado_cliente"
         item.cancelado_em = agora_utc()
         db.commit()
-        _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao_id}", status_code=303)
 
 
@@ -12437,7 +11840,6 @@ def aceitar_contrato(slug: str, solicitacao_id: int, request: Request, aceite: O
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)
         db.commit()
-        _google_calendar_auto_contrato(db, empresa, item, request)
 
         # Após o aceite, empresas com InfinitePay seguem AUTOMATICAMENTE para
         # o checkout do SINAL. A reserva já está confirmada neste ponto; portanto,

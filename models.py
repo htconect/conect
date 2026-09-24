@@ -51,19 +51,6 @@ class Empresa(Base):
     humiat_gratis_mes = Column(Integer, nullable=False, default=4)
     humiat_custo_contrato = Column(Integer, nullable=False, default=1)
 
-    # Google Agenda: configuração e autorização são isoladas por empresa.
-    google_calendar_ativo = Column(Boolean, default=False)
-    google_calendar_contratos = Column(Boolean, default=True)
-    google_calendar_operacao = Column(Boolean, default=True)
-    google_calendar_id = Column(String(255), default="primary")
-    google_calendar_reminder_1 = Column(Integer, default=1440)
-    google_calendar_reminder_2 = Column(Integer, default=120)
-    google_calendar_duracao_operacao_min = Column(Integer, default=30)
-    google_calendar_access_token = Column(Text, nullable=True)
-    google_calendar_refresh_token = Column(Text, nullable=True)
-    google_calendar_token_expires_at = Column(DateTime, nullable=True)
-    google_calendar_email = Column(String(160), nullable=True)
-
     clientes = relationship("Cliente", back_populates="empresa")
     produtos = relationship("ProdutoServico", back_populates="empresa")
     contratos = relationship("Contrato", back_populates="empresa")
@@ -347,16 +334,6 @@ class Solicitacao(Base):
     observacoes = Column(Text)
     status = Column(String(30), default="pre_reserva")  # pre_reserva, aprovada, rejeitada, alteracao
     aceite_em = Column(DateTime, nullable=True)
-
-    # Um único evento Google acompanha o contrato durante todo o ciclo:
-    # contrato -> entrega -> retirada -> exclusão ao encerrar a retirada.
-    google_calendar_event_id = Column(String(255), nullable=True)
-    google_calendar_calendario_id = Column(String(255), nullable=True)
-    google_calendar_etapa = Column(String(20), nullable=True)
-    google_calendar_assinatura = Column(String(64), nullable=True)
-    google_calendar_sincronizado_em = Column(DateTime, nullable=True)
-    google_calendar_erro = Column(Text, nullable=True)
-
     criado_em = Column(DateTime, server_default=func.now())
 
     cliente = relationship("Cliente", back_populates="solicitacoes")
