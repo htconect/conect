@@ -39,3 +39,11 @@ services:
         value: "500"
       - key: PERFORMANCE_SLOW_SQL_MS
         value: "300"
+
+      # Google Agenda: credenciais OAuth 2.0 do aplicativo Web no Google Cloud.
+      - key: GOOGLE_CALENDAR_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CALENDAR_REDIRECT_URI
+        sync: false
