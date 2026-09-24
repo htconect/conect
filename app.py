@@ -2697,6 +2697,10 @@ def admin_sair(request: Request):
     return RedirectResponse(HUMIAT_PORTAL_URL, status_code=303)
 
 
+def _empresa_eh_karaokerj(empresa: Empresa | None) -> bool:
+    return bool(empresa and (empresa.slug or "").strip().lower() == "karaokerj")
+
+
 def _ultimo_contrato_valido_cliente(db: Session, empresa: Empresa, cliente_id: int):
     cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
     candidatos = (
@@ -2772,7 +2776,9 @@ def _enviar_cliente_aluguel_organiza(payload: dict):
 
 
 def _sincronizar_cliente_aluguel_organiza(db: Session, empresa: Empresa, item: Solicitacao):
-    """Dispara a atualização sem bloquear o fluxo do contrato no Connect."""
+    """Dispara a atualização sem bloquear o fluxo. Lista exclusiva da Karaokê RJ."""
+    if not _empresa_eh_karaokerj(empresa):
+        return
     payload = _payload_cliente_aluguel_organiza(db, empresa, item)
     if not payload:
         return
@@ -2785,6 +2791,55 @@ def _solicitacao_confirmada_para_lista_aluguel(item: Solicitacao) -> bool:
         item and item.status not in cancelados and
         (item.aceite_em or item.aprovado_em or item.status in {"reserva_confirmada", "aguardando_pagamento"})
     )
+
+
+def _validar_integracao_organiza_clientes(request: Request):
+    esperada = ORGANIZA_CLIENTES_ALUGUEL_API_KEY
+    if not esperada:
+        raise HTTPException(status_code=503, detail="ORGANIZA_API_KEY não configurada no Connect.")
+    recebida = (request.headers.get("X-API-Key") or "").strip()
+    if recebida != esperada:
+        raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+
+@app.post("/api/integracoes/organiza/clientes-aluguel/snapshot")
+def snapshot_clientes_aluguel_organiza(request: Request, db: Session = Depends(get_db)):
+    """Snapshot em lote dos clientes de aluguel, exclusivamente da Karaokê RJ."""
+    _validar_integracao_organiza_clientes(request)
+    empresa = db.query(Empresa).filter(func.lower(Empresa.slug) == "karaokerj").first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa Karaokê RJ não encontrada no Connect.")
+
+    cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
+    solicitacoes = (
+        db.query(Solicitacao)
+        .options(joinedload(Solicitacao.cliente))
+        .filter(Solicitacao.empresa_id == empresa.id)
+        .order_by(Solicitacao.cliente_id.asc(), Solicitacao.data_evento.desc(), Solicitacao.id.desc())
+        .all()
+    )
+    clientes = []
+    vistos = set()
+    for item in solicitacoes:
+        if item.cliente_id in vistos:
+            continue
+        if item.status in cancelados:
+            continue
+        if not (item.aceite_em or item.aprovado_em or item.status in {"reserva_confirmada", "aguardando_pagamento"}):
+            continue
+        cliente = item.cliente
+        if not cliente or not (cliente.nome or "").strip() or not (cliente.telefone or "").strip() or not item.data_evento:
+            continue
+        vistos.add(item.cliente_id)
+        clientes.append({
+            "empresa_slug": "karaokerj",
+            "connect_cliente_id": cliente.id,
+            "connect_solicitacao_id": item.id,
+            "nome": (cliente.nome or "").strip(),
+            "telefone": (cliente.telefone or "").strip(),
+            "data_evento": item.data_evento.isoformat(),
+        })
+    return {"ok": True, "empresa_slug": "karaokerj", "total": len(clientes), "clientes": clientes}
 
 
 def _registrar_movimento_humiat(db: Session, empresa: Empresa, quantidade: int, tipo: str, motivo: str = "", observacao: str = "", usuario: str = "", solicitacao_id: int | None = None):
