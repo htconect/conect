@@ -113,7 +113,7 @@
     <label>Item principal</label>
     <select name="produto_id">
       <option value="">Selecionar depois</option>
-      {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
+      {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
     </select>
     <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
     <label>Modelo de contrato</label>
@@ -124,12 +124,31 @@
   </section>
 
   <section class="secao-form etapa-manual">
-    <h2>6. Pagamento</h2>
-    <p class="texto-discreto">Pode ser preenchido agora para adiantar o contrato manual ou deixado em zero.</p>
-    <div class="linha">
-      <div><label>Valor total</label><input name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal"></div>
-      <div><label>Valor pago / sinal</label><input name="sinal" value="{{ form.sinal or '0,00' }}" inputmode="decimal"></div>
+    <h2>6. Valores e pagamento</h2>
+    <p class="texto-discreto">O cupom desconta somente o equipamento. O frete é somado depois do desconto.</p>
+    <label>Valor do equipamento</label>
+    <input id="valorEquipamentoManual" name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal">
+    <label>Cupom</label>
+    <select id="cupomManual" name="cupom_codigo">
+      <option value="" data-percentual="0">Sem cupom</option>
+      {% set codigos_ativos = cupons_ativos|map(attribute='codigo')|list %}
+      {% if form.cupom_codigo and form.cupom_codigo not in codigos_ativos %}
+        <option value="{{ form.cupom_codigo }}" data-percentual="{{ item.cupom_percentual if item is defined and item else 0 }}" selected>{{ form.cupom_codigo }} (salvo no contrato)</option>
+      {% endif %}
+      {% for c in cupons_ativos %}
+        <option value="{{ c.codigo }}" data-percentual="{{ c.percentual or 0 }}" {% if form.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ c.percentual|moeda_br }}%{% if c.valido_ate %} · até {{ c.valido_ate.strftime('%d/%m/%Y') }}{% endif %}</option>
+      {% endfor %}
+    </select>
+    <label>Frete</label>
+    <input id="freteManual" name="frete" data-mascara="moeda" value="{{ form.frete or '0,00' }}" inputmode="decimal">
+    <div class="resumo-financeiro-mobile" style="margin:12px 0">
+      <div><small>Equipamento</small><b id="manualEquipResumo">R$ 0,00</b></div>
+      <div><small>Desconto</small><b id="manualDescResumo">- R$ 0,00</b></div>
+      <div><small>Frete</small><b id="manualFreteResumo">R$ 0,00</b></div>
+      <div><small>Total</small><b id="manualTotalResumo">R$ 0,00</b></div>
     </div>
+    <label>Valor pago / sinal</label>
+    <input name="sinal" value="{{ form.sinal or '0,00' }}" inputmode="decimal">
   </section>
 
   <button id="btnContratoNovo">{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
@@ -139,6 +158,24 @@ function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
   const contrato = document.querySelector('select[name="contrato_id"]');
   if(contratoId && contrato) contrato.value = contratoId;
+}
+function moedaNumeroContrato(v){ return parseFloat(String(v || '0').replace(/\./g,'').replace(',','.')) || 0; }
+function formatarMoedaContrato(v){ return Number(v || 0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function aplicarValorBaseContrato(select){
+  const valor = parseFloat(select.options[select.selectedIndex]?.dataset.valorBase || '0') || 0;
+  const campo = document.getElementById('valorEquipamentoManual');
+  if(campo) campo.value = formatarMoedaContrato(valor);
+  recalcularValoresContratoManual();
+}
+function recalcularValoresContratoManual(){
+  const equip = moedaNumeroContrato(document.getElementById('valorEquipamentoManual')?.value || '0');
+  const cupom = document.getElementById('cupomManual');
+  const pct = parseFloat(cupom?.options[cupom.selectedIndex]?.dataset.percentual || '0') || 0;
+  const desconto = equip * pct / 100;
+  const frete = moedaNumeroContrato(document.getElementById('freteManual')?.value || '0');
+  const total = Math.max(equip - desconto + frete, 0);
+  const vals = {manualEquipResumo:equip,manualDescResumo:desconto,manualFreteResumo:frete,manualTotalResumo:total};
+  Object.entries(vals).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=(id==='manualDescResumo'?'- R$ ':'R$ ')+formatarMoedaContrato(v);});
 }
 function alternarTipoTelefone(){
   const marcado = document.getElementById('whatsappBrasil').checked;
@@ -177,7 +214,8 @@ async function buscarCEP(){
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); consultarEstoqueProduto(); }
+  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); consultarEstoqueProduto(); }
+  if(ev.target?.name === 'cupom_codigo') recalcularValoresContratoManual();
   if(ev.target?.name === 'modo_criacao') alternarEtapas();
   if(ev.target?.name === 'data_evento'){
     const dr=document.querySelector('input[name="retirada_data"]'); if(dr && !dr.value) dr.value=ev.target.value;
@@ -250,9 +288,13 @@ async function consultarClientePorTelefone(){
   }catch(e){st.textContent='Não foi possível consultar agora. Você pode continuar preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}
 }
 
+document.addEventListener('input', function(ev){
+  if(ev.target?.id === 'valorEquipamentoManual' || ev.target?.id === 'freteManual') recalcularValoresContratoManual();
+});
+
 document.addEventListener('DOMContentLoaded', function(){
   const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
-  alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto();
+  alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto(); recalcularValoresContratoManual();
   const tel=document.getElementById('telefoneCliente');
   if(tel){
     tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});

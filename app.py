@@ -36,7 +36,7 @@ from sqlalchemy import func, text, inspect, or_, case
 from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico
 from seed import inicializar_dados
@@ -79,7 +79,7 @@ class ControleAcessoMiddleware:
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/"):
             return "relatorios"
         prefixos_cadastro = (
-            "/painel/configuracoes", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque",
+            "/painel/configuracoes", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -342,6 +342,101 @@ def resumo_financeiro(itens):
     return {"qtd": len(itens), "total": total, "recebido": recebido, "falta": falta}
 
 
+def composicao_valores_contrato(item: Solicitacao) -> dict:
+    """Retorna a composição comercial preservando contratos legados.
+
+    O desconto incide somente sobre equipamentos. Frete é somado depois do desconto.
+    ``item.valor`` continua sendo o total líquido final usado pelo financeiro.
+    """
+    desconto = max(float(getattr(item, "valor_desconto", 0) or 0), 0.0)
+    frete = max(float(getattr(item, "valor_frete", 0) or 0), 0.0)
+    equipamentos = max(float(getattr(item, "valor_equipamentos", 0) or 0), 0.0)
+    if equipamentos <= 0.009:
+        itens = list(getattr(item, "itens", None) or [])
+        subtotal_itens = sum(max(float(getattr(it, "valor_total", 0) or 0), 0.0) for it in itens)
+        if subtotal_itens > 0.009:
+            equipamentos = subtotal_itens
+        else:
+            equipamentos = max(float(getattr(item, "valor", 0) or 0) + desconto - frete, 0.0)
+    total = max(float(getattr(item, "valor", 0) or 0), 0.0)
+    calculado = max(equipamentos - desconto + frete, 0.0)
+    if total <= 0.009 and calculado > 0.009:
+        total = calculado
+    return {
+        "equipamentos": round(equipamentos, 2),
+        "cupom_codigo": str(getattr(item, "cupom_codigo", "") or "").strip().upper(),
+        "cupom_percentual": max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0),
+        "desconto": round(desconto, 2),
+        "frete": round(frete, 2),
+        "total": round(total, 2),
+    }
+
+
+templates.env.globals["composicao_valores_contrato"] = composicao_valores_contrato
+
+
+def _normalizar_codigo_cupom(valor: str) -> str:
+    return re.sub(r"[^A-Z0-9_-]", "", str(valor or "").strip().upper())[:60]
+
+
+def _cupom_valido(db: Session, empresa_id: int, codigo: str, referencia: date | None = None) -> Cupom | None:
+    codigo_limpo = _normalizar_codigo_cupom(codigo)
+    if not codigo_limpo:
+        return None
+    cupom = db.query(Cupom).filter(
+        Cupom.empresa_id == empresa_id,
+        func.upper(Cupom.codigo) == codigo_limpo,
+        Cupom.ativo == True,
+    ).first()
+    if not cupom:
+        return None
+    referencia = referencia or datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()
+    if cupom.valido_ate and referencia > cupom.valido_ate:
+        return None
+    if float(cupom.percentual or 0) <= 0:
+        return None
+    return cupom
+
+
+def _cupons_ativos_empresa(db: Session, empresa_id: int) -> list[Cupom]:
+    return db.query(Cupom).filter(
+        Cupom.empresa_id == empresa_id,
+        Cupom.ativo == True,
+        or_(Cupom.valido_ate == None, Cupom.valido_ate >= datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()),
+    ).order_by(Cupom.codigo).all()
+
+
+def _cupom_valido_ou_snapshot(db: Session, empresa_id: int, codigo: str, item: Solicitacao | None = None) -> Cupom | None:
+    """Valida cupom novo, mas preserva a condição já aplicada ao contrato.
+
+    Assim um contrato fechado durante a campanha continua com o mesmo percentual
+    mesmo que o evento seja meses depois ou o cadastro do cupom expire/inative.
+    """
+    codigo_limpo = _normalizar_codigo_cupom(codigo)
+    if not codigo_limpo:
+        return None
+    if item:
+        codigo_salvo = _normalizar_codigo_cupom(getattr(item, "cupom_codigo", "") or "")
+        percentual_salvo = max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0)
+        if codigo_salvo == codigo_limpo and percentual_salvo > 0:
+            return Cupom(codigo=codigo_salvo, percentual=percentual_salvo, ativo=True)
+    return _cupom_valido(db, empresa_id, codigo_limpo)
+
+
+def _aplicar_composicao_comercial(item: Solicitacao, valor_equipamentos: float, frete: float, cupom: Cupom | None) -> None:
+    subtotal = max(float(valor_equipamentos or 0), 0.0)
+    valor_frete = max(float(frete or 0), 0.0)
+    percentual = max(float(cupom.percentual or 0), 0.0) if cupom else 0.0
+    desconto = round(subtotal * percentual / 100.0, 2) if percentual > 0 else 0.0
+    total = round(max(subtotal - desconto + valor_frete, 0.0), 2)
+    item.valor_equipamentos = round(subtotal, 2)
+    item.cupom_codigo = cupom.codigo.upper() if cupom else None
+    item.cupom_percentual = percentual
+    item.valor_desconto = desconto
+    item.valor_frete = round(valor_frete, 2)
+    item.valor = total
+
+
 def pagamento_sem_conciliar(item) -> bool:
     return any(not getattr(p, "conciliado_em", None) for p in getattr(item, "pagamentos", []) or [])
 
@@ -524,10 +619,15 @@ def corrigir_valores_teste(db: Session):
     alterou = False
     for item in db.query(Solicitacao).all():
         novo_valor = ajustar(item.valor)
+        novo_equipamentos = ajustar(getattr(item, "valor_equipamentos", 0))
+        novo_desconto = ajustar(getattr(item, "valor_desconto", 0))
+        novo_frete = ajustar(getattr(item, "valor_frete", 0))
         novo_sinal = ajustar(item.sinal)
         novo_pago = ajustar(item.valor_pago)
-        if (novo_valor, novo_sinal, novo_pago) != (item.valor, item.sinal, item.valor_pago):
-            item.valor, item.sinal, item.valor_pago = novo_valor, novo_sinal, novo_pago
+        antes = (item.valor, getattr(item, "valor_equipamentos", 0), getattr(item, "valor_desconto", 0), getattr(item, "valor_frete", 0), item.sinal, item.valor_pago)
+        depois = (novo_valor, novo_equipamentos, novo_desconto, novo_frete, novo_sinal, novo_pago)
+        if depois != antes:
+            item.valor, item.valor_equipamentos, item.valor_desconto, item.valor_frete, item.sinal, item.valor_pago = depois
             alterou = True
 
     for linha in db.query(ReservaItem).all():
@@ -554,12 +654,26 @@ def corrigir_valores_teste(db: Session):
 
 
 def recalcular_valores_reservas(db: Session):
-    """Mantém o valor da reserva igual à soma dos itens e corrige bases antigas."""
+    """Recalcula a composição comercial a partir dos itens sem apagar cupom/frete."""
     alterou = False
     for item in db.query(Solicitacao).all():
-        total_itens = sum((linha.valor_total or 0) for linha in item.itens)
-        if total_itens > 0 and round(float(item.valor or 0), 2) != round(float(total_itens), 2):
-            item.valor = total_itens
+        total_itens = round(sum(float(linha.valor_total or 0) for linha in item.itens), 2)
+        if total_itens <= 0:
+            continue
+        percentual = max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0)
+        frete = max(float(getattr(item, "valor_frete", 0) or 0), 0.0)
+        desconto = round(total_itens * percentual / 100.0, 2) if percentual > 0 else 0.0
+        total_final = round(max(total_itens - desconto + frete, 0.0), 2)
+        antes = (
+            round(float(getattr(item, "valor_equipamentos", 0) or 0), 2),
+            round(float(getattr(item, "valor_desconto", 0) or 0), 2),
+            round(float(item.valor or 0), 2),
+        )
+        depois = (total_itens, desconto, total_final)
+        if antes != depois:
+            item.valor_equipamentos = total_itens
+            item.valor_desconto = desconto
+            item.valor = total_final
             # Valor pago não pode ficar maior que o total da reserva.
             if item.valor_pago and item.valor_pago > item.valor:
                 item.valor_pago = item.valor
@@ -900,7 +1014,13 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     add(linhas, "Observações do cliente", getattr(cliente, "observacoes", ""))
     add(linhas, "Observações da reserva", item.observacoes)
 
-    add(linhas, "Valor total", f"R$ {moeda_br(item.valor or 0)}")
+    comp = composicao_valores_contrato(item)
+    add(linhas, "Equipamentos", f"R$ {moeda_br(comp['equipamentos'])}")
+    if comp["cupom_codigo"] and comp["desconto"] > 0:
+        add(linhas, "Cupom", f"{comp['cupom_codigo']} ({moeda_br(comp['cupom_percentual'])}%)")
+        add(linhas, "Desconto", f"- R$ {moeda_br(comp['desconto'])}")
+    add(linhas, "Frete", f"R$ {moeda_br(comp['frete'])}")
+    add(linhas, "Valor total", f"R$ {moeda_br(comp['total'])}")
     add(linhas, "Valor recebido", f"R$ {moeda_br(item.valor_pago or 0)}")
     add(linhas, "Sinal previsto", f"R$ {moeda_br(item.sinal or 0)}")
     add(linhas, "Falta", f"R$ {moeda_br(max((item.valor or 0) - (item.valor_pago or 0), 0))}")
@@ -913,6 +1033,7 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
     total = float(item.valor or 0)
     pago = float(item.valor_pago or 0)
     falta = max(total - pago, 0)
+    comp = composicao_valores_contrato(item)
     data_txt = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else "-"
     hora_txt = item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "-"
 
@@ -947,6 +1068,11 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
         *equipamentos,
         "",
         "*💰 Financeiro*",
+        f"*Equipamentos:* R$ {moeda_br(comp['equipamentos'])}",
+        *([f"*Cupom:* {comp['cupom_codigo']} ({moeda_br(comp['cupom_percentual'])}%)",
+           f"*Desconto:* - R$ {moeda_br(comp['desconto'])}"]
+          if comp['cupom_codigo'] and comp['desconto'] > 0 else []),
+        f"*Frete:* R$ {moeda_br(comp['frete'])}",
         f"*Total:* R$ {moeda_br(total)}",
         f"*Pago:* R$ {moeda_br(pago)}",
         f"*Saldo:* R$ {moeda_br(falta)}",
@@ -1236,6 +1362,17 @@ def garantir_colunas_novas():
         cols_sol = colunas("solicitacoes")
         if "valor_pago" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_pago FLOAT DEFAULT 0")
+        if "valor_equipamentos" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_equipamentos FLOAT DEFAULT 0")
+            comandos.append("UPDATE solicitacoes SET valor_equipamentos = COALESCE(valor, 0)")
+        if "cupom_codigo" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN cupom_codigo VARCHAR(60)")
+        if "cupom_percentual" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN cupom_percentual FLOAT DEFAULT 0")
+        if "valor_desconto" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_desconto FLOAT DEFAULT 0")
+        if "valor_frete" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_frete FLOAT DEFAULT 0")
         if "sinal_recebido" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN sinal_recebido BOOLEAN DEFAULT false")
         if "pagamento_confirmado_em" not in cols_sol:
@@ -2241,6 +2378,17 @@ def startup():
             if (emp.slug or "").strip().lower() == "karaokerj" and not (emp.infinitepay_handle or "").strip():
                 emp.infinitepay_handle = INFINITEPAY_HANDLE_PADRAO or "karaokerj"
                 emp.infinitepay_ativa = True
+            if (emp.slug or "").strip().lower() in {"karaokerj", "karaoke-rj"} or (emp.nome or "").strip().lower() in {"karaokê rj", "karaoke rj"}:
+                cupom_k10 = db.query(Cupom).filter(
+                    Cupom.empresa_id == emp.id, func.upper(Cupom.codigo) == "KARAOKE10"
+                ).first()
+                if not cupom_k10:
+                    db.add(Cupom(
+                        empresa_id=emp.id, codigo="KARAOKE10",
+                        descricao="10% de desconto no valor dos equipamentos. Frete não recebe desconto.",
+                        percentual=10.0, valido_ate=date(2026, 9, 30), ativo=True,
+                    ))
+                    db.commit()
             if emp.infinitepay_ativa:
                 _infinitepay_seed_taxas(db, emp.id)
                 _conta_infinitepay(db, emp.id)
@@ -4771,6 +4919,61 @@ async def salvar_configuracoes_empresa(
     return RedirectResponse("/painel", status_code=303)
 
 
+@app.get("/painel/cupons", response_class=HTMLResponse)
+def cupons(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    itens = db.query(Cupom).filter_by(empresa_id=empresa.id).order_by(Cupom.ativo.desc(), Cupom.codigo).all()
+    return templates.TemplateResponse("admin/cupons.html", {
+        "request": request, "empresa": empresa, "cupons": itens, "cupom": None
+    })
+
+
+@app.get("/painel/cupom/{cupom_id}", response_class=HTMLResponse)
+def cupom_editar(cupom_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    cupom = db.get(Cupom, cupom_id)
+    if not cupom or cupom.empresa_id != empresa.id:
+        raise HTTPException(404)
+    itens = db.query(Cupom).filter_by(empresa_id=empresa.id).order_by(Cupom.ativo.desc(), Cupom.codigo).all()
+    return templates.TemplateResponse("admin/cupons.html", {
+        "request": request, "empresa": empresa, "cupons": itens, "cupom": cupom
+    })
+
+
+@app.post("/painel/cupons")
+@app.post("/painel/cupom/{cupom_id}")
+def salvar_cupom(
+        cupom_id: int | None = None,
+        cupom_id_form: str = Form("", alias="cupom_id"),
+        codigo: str = Form(...), descricao: str = Form(""), percentual: str = Form("0"),
+        valido_ate: str = Form(""), ativo: Optional[str] = Form(None),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    codigo_limpo = _normalizar_codigo_cupom(codigo)
+    if not codigo_limpo:
+        raise HTTPException(400, "Informe um código de cupom válido.")
+    percentual_float = max(0.0, min(texto_para_float(percentual), 100.0))
+    if percentual_float <= 0:
+        raise HTTPException(400, "O percentual do cupom deve ser maior que zero.")
+    cupom_id_final = cupom_id or (int(cupom_id_form) if cupom_id_form and cupom_id_form.isdigit() else None)
+    cupom = db.get(Cupom, cupom_id_final) if cupom_id_final else None
+    if cupom and cupom.empresa_id != empresa.id:
+        raise HTTPException(404)
+    existente = db.query(Cupom).filter(
+        Cupom.empresa_id == empresa.id, func.upper(Cupom.codigo) == codigo_limpo
+    ).first()
+    if existente and (not cupom or existente.id != cupom.id):
+        raise HTTPException(400, "Já existe um cupom com este código nesta empresa.")
+    if not cupom:
+        cupom = Cupom(empresa_id=empresa.id)
+        db.add(cupom)
+    cupom.codigo = codigo_limpo
+    cupom.descricao = descricao.strip()
+    cupom.percentual = percentual_float
+    cupom.valido_ate = datetime.strptime(valido_ate, "%Y-%m-%d").date() if valido_ate else None
+    cupom.ativo = bool(ativo)
+    db.commit()
+    return RedirectResponse("/painel/cupons", status_code=303)
+
+
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
@@ -5497,6 +5700,7 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                              .limit(12).all()) if _infinitepay_habilitada(empresa) else []
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
+    cupons_ativos = _cupons_ativos_empresa(db, empresa.id)
     empresas_transferencia = (
         db.query(Empresa)
         .filter(Empresa.ativa == True, Empresa.id != empresa.id)
@@ -5530,7 +5734,8 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "hoje_iso": date.today().isoformat(),
                                        "analise_estoque": analise_estoque,
                                        "recursos_contrato": analise_estoque.get("recursos", []),
-                                       "recursos_por_produto_view": recursos_por_produto_view})
+                                       "recursos_por_produto_view": recursos_por_produto_view,
+                                       "cupons_ativos": cupons_ativos})
 
 
 
@@ -5610,7 +5815,8 @@ def _sincronizar_copia_transferencia(db: Session, origem: Solicitacao, destino: 
         "retirada_hora", "bairro", "local", "local_numero", "local_complemento",
         "local_cidade", "local_estado", "local_cep", "local_nome", "local_responsavel_nome",
         "local_responsavel_telefone", "retirada_responsavel_nome", "retirada_responsavel_telefone",
-        "acesso_local", "valor", "sinal", "valor_pago", "sinal_recebido", "pagamento_confirmado_em",
+        "acesso_local", "valor", "valor_equipamentos", "cupom_codigo", "cupom_percentual",
+        "valor_desconto", "valor_frete", "sinal", "valor_pago", "sinal_recebido", "pagamento_confirmado_em",
         "observacoes", "status", "aceite_em", "aprovado_em", "contrato_enviado_em",
         "responsavel_contrato", "responsavel_operacao",
     )
@@ -5989,6 +6195,8 @@ def salvar_edicao_solicitacao(
         local: str = Form(""),
         acesso_local: str = Form(""),
         valor: str = Form("0"),
+        cupom_codigo: str = Form(""),
+        frete: str = Form("0"),
         sinal: str = Form("0"),
         status: str = Form(""),
         observacoes: str = Form(""),
@@ -6221,6 +6429,8 @@ async def preparar_contrato(
         local: str = Form(""),
         acesso_local: str = Form(""),
         valor: str = Form("0"),
+        cupom_codigo: str = Form(""),
+        frete: str = Form("0"),
         sinal: str = Form("0"),
         observacoes: str = Form(""),
         acao: str = Form("salvar"),
@@ -6300,7 +6510,14 @@ async def preparar_contrato(
     item.contrato_id = int(contrato_id) if contrato_id else contrato_padrao_id
     db.flush()
     valor_manual = texto_para_float(valor)
-    item.valor = round(total_itens_novos, 2) if total_itens_novos > 0 else valor_manual
+    subtotal_equipamentos = round(total_itens_novos, 2) if total_itens_novos > 0 else valor_manual
+    codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
+    cupom = _cupom_valido_ou_snapshot(db, empresa.id, codigo_cupom, item) if codigo_cupom else None
+    if codigo_cupom and not cupom:
+        db.rollback()
+        erro = quote("Cupom inválido, inativo ou fora da validade.")
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={erro}", status_code=303)
+    _aplicar_composicao_comercial(item, subtotal_equipamentos, texto_para_float(frete), cupom)
     item.sinal = texto_para_float(sinal)
     item.observacoes = observacoes
     if primeiro_produto and item.hora_inicio:
@@ -6513,6 +6730,7 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
         "empresa": empresa,
         "produtos": produtos,
         "contratos": contratos,
+        "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "erro": "",
         "form": form
     })
@@ -6629,6 +6847,8 @@ def contrato_novo_salvar(
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
         valor: str = Form("0"),
+        cupom_codigo: str = Form(""),
+        frete: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
         local: str = Form(""),
@@ -6654,7 +6874,7 @@ def contrato_novo_salvar(
         "cidade": cidade, "estado": estado, "cep": cep, "produto_id": produto_id,
         "contrato_id": contrato_id, "data_evento": data_evento, "hora_inicio": hora_inicio,
         "retirada_obrigatoria": retirada_obrigatoria, "retirada_data": retirada_data,
-        "retirada_hora": retirada_hora, "valor": valor, "sinal": sinal,
+        "retirada_hora": retirada_hora, "valor": valor, "cupom_codigo": cupom_codigo, "frete": frete, "sinal": sinal,
         "local_nome": local_nome, "local": local, "acesso_local": acesso_local,
         "local_responsavel_nome": local_responsavel_nome,
         "local_responsavel_telefone": local_responsavel_telefone,
@@ -6667,6 +6887,7 @@ def contrato_novo_salvar(
             "empresa": empresa,
             "produtos": produtos,
             "contratos": contratos,
+            "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "erro": mensagem,
             "form": form
         }, status_code=400)
@@ -6761,7 +6982,12 @@ def contrato_novo_salvar(
     retirada_obrigatoria_bool = bool(retirada_obrigatoria)
     retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
     retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
-    valor_float = texto_para_float(valor)
+    valor_equipamentos_float = texto_para_float(valor)
+    codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
+    cupom = _cupom_valido_ou_snapshot(db, empresa.id, codigo_cupom, item) if codigo_cupom else None
+    if codigo_cupom and not cupom:
+        return render_erro("Cupom inválido, inativo ou fora da validade.")
+    frete_float = texto_para_float(frete)
     sinal_float = texto_para_float(sinal)
     manual = modo_criacao == "manual"
 
@@ -6788,7 +7014,9 @@ def contrato_novo_salvar(
         local_responsavel_telefone=limpar_identificador(
             local_responsavel_telefone) or local_responsavel_telefone.strip(),
         acesso_local=acesso_local.strip(),
-        valor=valor_float,
+        valor=0,
+        valor_equipamentos=0,
+        valor_frete=0,
         sinal=sinal_float,
         observacoes=observacoes.strip(),
         status="reserva_confirmada" if manual else ("aguardando_aceite" if (contrato_id or (produto and produto.contrato_id)) and produto else "pre_reserva"),
@@ -6801,6 +7029,7 @@ def contrato_novo_salvar(
     if item.retirada_obrigatoria and not item.retirada_hora:
         item.retirada_hora = item.hora_fim or item.hora_inicio
 
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
     db.add(item)
     db.flush()
 
@@ -6812,8 +7041,8 @@ def contrato_novo_salvar(
             nome=produto.nome,
             descricao=produto.descricao,
             quantidade=1,
-            valor_unitario=valor_float,
-            valor_total=valor_float
+            valor_unitario=valor_equipamentos_float,
+            valor_total=valor_equipamentos_float
         ))
 
     if manual:
@@ -6866,7 +7095,9 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
         "retirada_hora": item.retirada_hora.strftime("%H:%M") if item.retirada_hora else (item.hora_fim.strftime("%H:%M") if item.hora_fim else ""),
         "produto_id": str(item.produto_id or ""),
         "contrato_id": str(item.contrato_id or ""),
-        "valor": moeda_br(item.valor or 0),
+        "valor": moeda_br(composicao_valores_contrato(item)["equipamentos"]),
+        "cupom_codigo": getattr(item, "cupom_codigo", "") or "",
+        "frete": moeda_br(getattr(item, "valor_frete", 0) or 0),
         "sinal": moeda_br(item.sinal or 0),
         "local_nome": item.local_nome or "",
         "local": item.local or "",
@@ -6897,6 +7128,7 @@ def editar_solicitacao_completa(
         "empresa": empresa,
         "produtos": produtos,
         "contratos": contratos,
+        "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "erro": "",
         "form": form_solicitacao_completo(item),
         "modo_edicao": True,
@@ -6929,6 +7161,8 @@ def salvar_solicitacao_completa(
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
         valor: str = Form("0"),
+        cupom_codigo: str = Form(""),
+        frete: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
         local: str = Form(""),
@@ -6951,7 +7185,7 @@ def salvar_solicitacao_completa(
         cep=cep, produto_id=produto_id, contrato_id=contrato_id, data_evento=data_evento,
         hora_inicio=hora_inicio, retirada_obrigatoria=retirada_obrigatoria,
         retirada_data=retirada_data, retirada_hora=retirada_hora,
-        valor=valor, sinal=sinal, local_nome=local_nome, local=local,
+        valor=valor, cupom_codigo=cupom_codigo, frete=frete, sinal=sinal, local_nome=local_nome, local=local,
         acesso_local=acesso_local, local_responsavel_nome=local_responsavel_nome,
         local_responsavel_telefone=local_responsavel_telefone, observacoes=observacoes,
         modo_criacao="manual"
@@ -6960,6 +7194,7 @@ def salvar_solicitacao_completa(
     def render_erro(mensagem: str):
         return templates.TemplateResponse("admin/contrato_novo.html", {
             "request": request, "empresa": empresa, "produtos": produtos, "contratos": contratos,
+            "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "erro": mensagem, "form": form, "modo_edicao": True, "item": item
         }, status_code=400)
 
@@ -7001,7 +7236,12 @@ def salvar_solicitacao_completa(
     retirada_obrigatoria_bool = bool(retirada_obrigatoria)
     retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
     retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
-    valor_float = texto_para_float(valor)
+    valor_equipamentos_float = texto_para_float(valor)
+    codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
+    cupom = _cupom_valido(db, empresa.id, codigo_cupom) if codigo_cupom else None
+    if codigo_cupom and not cupom:
+        return render_erro("Cupom inválido, inativo ou fora da validade.")
+    frete_float = texto_para_float(frete)
     sinal_float = texto_para_float(sinal)
 
     item.produto_id = produto.id if produto else None
@@ -7024,7 +7264,7 @@ def salvar_solicitacao_completa(
     item.local_responsavel_telefone = limpar_identificador(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.acesso_local = acesso_local.strip()
-    item.valor = valor_float
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
     item.sinal = sinal_float
     item.observacoes = observacoes.strip()
     salvar_endereco_cliente(
@@ -7041,8 +7281,8 @@ def salvar_solicitacao_completa(
         item_principal.produto_id = produto.id
         item_principal.nome = produto.nome
         item_principal.descricao = produto.descricao
-        item_principal.valor_unitario = valor_float
-        item_principal.valor_total = valor_float
+        item_principal.valor_unitario = valor_equipamentos_float
+        item_principal.valor_total = valor_equipamentos_float
 
     if item.status == "aguardando_nova_data":
         retirar_solicitacao_da_operacao(db, item)
@@ -7111,6 +7351,9 @@ def usar_solicitacao_como_base(
     if not origem or origem.empresa_id != empresa.id:
         raise HTTPException(404)
 
+    comp_origem = composicao_valores_contrato(origem)
+    cupom_base = _cupom_valido(db, empresa.id, comp_origem["cupom_codigo"]) if comp_origem["cupom_codigo"] else None
+
     nova = Solicitacao(
         empresa_id=empresa.id,
         cliente_id=origem.cliente_id,
@@ -7130,7 +7373,12 @@ def usar_solicitacao_como_base(
         local_responsavel_nome=origem.local_responsavel_nome,
         local_responsavel_telefone=origem.local_responsavel_telefone,
         acesso_local=origem.acesso_local,
-        valor=origem.valor,
+        valor=0,
+        valor_equipamentos=0,
+        cupom_codigo=None,
+        cupom_percentual=0,
+        valor_desconto=0,
+        valor_frete=0,
         sinal=origem.sinal,
         valor_pago=0,
         sinal_recebido=False,
@@ -7139,6 +7387,9 @@ def usar_solicitacao_como_base(
         aceite_em=None,
         aprovado_em=None,
     )
+    # "Usar como base" cria um novo contrato: o cupom só é reaproveitado se ainda
+    # estiver válido no momento da nova criação. Frete e valores de equipamento podem ser copiados.
+    _aplicar_composicao_comercial(nova, comp_origem["equipamentos"], comp_origem["frete"], cupom_base)
     db.add(nova)
     db.flush()
 

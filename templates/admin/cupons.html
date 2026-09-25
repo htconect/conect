@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<h1>Cupons</h1>
+<p class="texto-discreto">Cadastre cupons por empresa. O desconto é aplicado somente sobre o valor dos equipamentos; o frete é somado depois.</p>
+
+<div class="box">
+  <form method="post" action="{% if cupom %}/painel/cupom/{{ cupom.id }}{% else %}/painel/cupons{% endif %}" class="form-mobile-simples">
+    {% if cupom %}<input type="hidden" name="cupom_id" value="{{ cupom.id }}">{% endif %}
+    <h2>{% if cupom %}Editar cupom{% else %}Novo cupom{% endif %}</h2>
+    <label>Código</label>
+    <input name="codigo" value="{{ cupom.codigo if cupom else '' }}" placeholder="Ex.: KARAOKE10" required style="text-transform:uppercase">
+    <label>Descrição</label>
+    <input name="descricao" value="{{ cupom.descricao if cupom else '' }}" placeholder="Ex.: campanha de setembro">
+    <div class="linha">
+      <div>
+        <label>Desconto (%)</label>
+        <input name="percentual" inputmode="decimal" value="{{ cupom.percentual|moeda_br if cupom else '10,00' }}" required>
+      </div>
+      <div>
+        <label>Válido até</label>
+        <input type="date" name="valido_ate" value="{{ cupom.valido_ate.isoformat() if cupom and cupom.valido_ate else '' }}">
+      </div>
+    </div>
+    <label class="check"><input type="checkbox" name="ativo" value="1" {% if not cupom or cupom.ativo %}checked{% endif %}> Cupom ativo</label>
+    <button type="submit">{% if cupom %}Atualizar cupom{% else %}Cadastrar cupom{% endif %}</button>
+  </form>
+</div>
+
+<div class="grid">
+{% for c in cupons %}
+  <div class="card">
+    <h3>{{ c.codigo }}</h3>
+    <p><b>{{ c.percentual|moeda_br }}% de desconto</b></p>
+    {% if c.descricao %}<p>{{ c.descricao }}</p>{% endif %}
+    <p>Validade: <b>{{ c.valido_ate.strftime('%d/%m/%Y') if c.valido_ate else 'Sem data final' }}</b></p>
+    <p>Status: <b>{{ 'Ativo' if c.ativo else 'Inativo' }}</b></p>
+    <a href="/painel/cupom/{{ c.id }}">Editar</a>
+  </div>
+{% else %}
+  <div class="card"><p>Nenhum cupom cadastrado.</p></div>
+{% endfor %}
+</div>
+{% endblock %}

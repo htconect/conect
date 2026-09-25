@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block conteudo %}
+{% set comp = composicao_valores_contrato(item) %}
 {% set total = item.valor or 0 %}
 {% set pago = item.valor_pago or 0 %}
 {% set falta_real = total - pago %}
@@ -286,7 +287,7 @@
         <select name="produto_id">
           <option value="">Selecione</option>
           {% for p in produtos %}
-            <option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
+            <option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
           {% endfor %}
         </select>
         <div class="linha">
@@ -298,6 +299,30 @@
     </div>
 
     <button type="button" class="secundario largura-total" onclick="adicionarItem()">+ Adicionar outro item</button>
+
+    <div class="box" id="composicaoComercial" style="margin-top:12px">
+      <h3 style="margin-top:0">Valores do contrato</h3>
+      <p class="texto-discreto">O desconto do cupom é aplicado somente sobre os equipamentos. O frete é somado depois do desconto.</p>
+      <label>Cupom</label>
+      <select name="cupom_codigo" id="cupomCodigo">
+        <option value="" data-percentual="0">Sem cupom</option>
+        {% set codigos_ativos = cupons_ativos|map(attribute='codigo')|list %}
+        {% if item.cupom_codigo and item.cupom_codigo not in codigos_ativos %}
+          <option value="{{ item.cupom_codigo }}" data-percentual="{{ item.cupom_percentual or 0 }}" selected>{{ item.cupom_codigo }} — {{ item.cupom_percentual|moeda_br }}% (salvo no contrato)</option>
+        {% endif %}
+        {% for c in cupons_ativos %}
+          <option value="{{ c.codigo }}" data-percentual="{{ c.percentual or 0 }}" {% if item.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ c.percentual|moeda_br }}%{% if c.valido_ate %} · até {{ c.valido_ate.strftime('%d/%m/%Y') }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      <label>Frete</label>
+      <input name="frete" id="valorFrete" data-mascara="moeda" inputmode="decimal" value="{{ comp.frete|moeda_br }}">
+      <div class="resumo-financeiro-mobile" style="margin-top:12px">
+        <div><small>Equipamentos</small><b id="resumoEquipamentos">R$ {{ comp.equipamentos|moeda_br }}</b></div>
+        <div><small>Desconto</small><b id="resumoDesconto">- R$ {{ comp.desconto|moeda_br }}</b></div>
+        <div><small>Frete</small><b id="resumoFrete">R$ {{ comp.frete|moeda_br }}</b></div>
+        <div><small>Total</small><b id="resumoTotalComercial">R$ {{ comp.total|moeda_br }}</b></div>
+      </div>
+    </div>
 
     <div class="box" id="previewRecursosEquipamentos" style="margin-top:12px">
       <h3 style="margin-top:0">Recursos padrão calculados</h3>
@@ -319,7 +344,7 @@
 
     <label>Observações do contrato</label>
     <textarea name="observacoes" placeholder="Opcional">{{ item.observacoes or '' }}</textarea>
-    <input type="hidden" name="valor" value="{{ item.valor|moeda_br }}">
+    <input type="hidden" name="valor" value="{{ comp.equipamentos|moeda_br }}">
     <input type="hidden" name="sinal" value="{{ item.sinal|moeda_br }}">
 
     <button name="acao" value="salvar" class="largura-total">Salvar equipamentos</button>
@@ -339,6 +364,13 @@
     </div>
   </div>
 
+  <div class="box" style="margin:10px 0 14px;padding:12px">
+    <div class="linha-local"><span>Equipamentos</span><b>R$ {{ comp.equipamentos|moeda_br }}</b></div>
+    {% if comp.cupom_codigo and comp.desconto > 0 %}
+      <div class="linha-local"><span>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_percentual|moeda_br }}%)</span><b>- R$ {{ comp.desconto|moeda_br }}</b></div>
+    {% endif %}
+    <div class="linha-local"><span>Frete</span><b>R$ {{ comp.frete|moeda_br }}</b></div>
+  </div>
   <div class="resumo-financeiro-mobile">
     <div><small>Total</small><b>R$ {{ total|moeda_br }}</b></div>
     <div><small>Pago</small><b>R$ {{ pago|moeda_br }}</b></div>
@@ -544,6 +576,14 @@ function alternarRecursoContrato(check){
   const hidden = linha ? linha.querySelector('.recurso-ativo-contrato') : null;
   if(hidden) hidden.value = check.checked ? '1' : '0';
 }
+function aplicarValorBaseProduto(select){
+  const linha = select.closest('.item-reserva');
+  if(!linha) return;
+  const campo = linha.querySelector('input[name="valor_unitario"]');
+  const valor = parseFloat(select.options[select.selectedIndex]?.dataset.valorBase || '0') || 0;
+  if(campo) campo.value = valor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  recalcularResumoComercial();
+}
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
   const contrato = document.getElementById('contratoAutomatico');
@@ -558,16 +598,20 @@ function aplicarContratoPadrao(select){
 document.addEventListener('change', function(ev){
   if(ev.target && ev.target.name === 'produto_id'){
     aplicarContratoPadrao(ev.target);
+    aplicarValorBaseProduto(ev.target);
     recalcularPreviewRecursos();
   }
-  if(ev.target && ev.target.name === 'quantidade') recalcularPreviewRecursos();
+  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); }
+  if(ev.target && ev.target.name === 'cupom_codigo') recalcularResumoComercial();
 });
 document.addEventListener('input', function(ev){
-  if(ev.target && ev.target.name === 'quantidade') recalcularPreviewRecursos();
+  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); }
+  if(ev.target && (ev.target.name === 'valor_unitario' || ev.target.name === 'frete')) recalcularResumoComercial();
 });
 document.addEventListener('DOMContentLoaded', function(){
   document.querySelectorAll('select[name="produto_id"]').forEach(aplicarContratoPadrao);
   recalcularPreviewRecursos();
+  recalcularResumoComercial();
 });
 
 function adicionarItem(){
@@ -582,11 +626,13 @@ function adicionarItem(){
   });
   container.appendChild(clone);
   recalcularPreviewRecursos();
+  recalcularResumoComercial();
 }
 function removerItem(botao){
   const linha = botao.closest('.item-reserva');
   if(linha) linha.remove();
   recalcularPreviewRecursos();
+  recalcularResumoComercial();
 }
 function toggleBloco(id){
   const el = document.getElementById(id);
@@ -596,6 +642,27 @@ function toggleBloco(id){
 }
 function moedaParaNumero(valor){
   return parseFloat(String(valor || '0').replace(/\./g,'').replace(',','.')) || 0;
+}
+function moedaBRNumero(valor){
+  return Number(valor || 0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function recalcularResumoComercial(){
+  let equipamentos = 0;
+  document.querySelectorAll('#itensReserva .item-reserva').forEach(linha => {
+    const qtd = Math.max(1, parseInt(linha.querySelector('input[name="quantidade"]')?.value || '1',10) || 1);
+    const unit = moedaParaNumero(linha.querySelector('input[name="valor_unitario"]')?.value || '0');
+    equipamentos += qtd * unit;
+  });
+  const cupom = document.getElementById('cupomCodigo');
+  const percentual = parseFloat(cupom?.options[cupom.selectedIndex]?.dataset.percentual || '0') || 0;
+  const desconto = equipamentos * percentual / 100;
+  const frete = moedaParaNumero(document.getElementById('valorFrete')?.value || '0');
+  const total = Math.max(equipamentos - desconto + frete, 0);
+  const mapa = {resumoEquipamentos:equipamentos,resumoDesconto:desconto,resumoFrete:frete,resumoTotalComercial:total};
+  Object.entries(mapa).forEach(([id,valor]) => {
+    const el=document.getElementById(id); if(!el) return;
+    el.textContent = (id==='resumoDesconto' ? '- R$ ' : 'R$ ') + moedaBRNumero(valor);
+  });
 }
 document.addEventListener('submit', function(ev){
   const form = ev.target;

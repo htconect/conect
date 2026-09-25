@@ -261,6 +261,15 @@
 
         <details class="registrar-pagamento-operacao">
             <summary>Registrar pagamento</summary>
+            {% set comp_pag = composicao_valores_contrato(a.solicitacao) %}
+            <div class="box" style="margin:10px 0;padding:10px">
+                <div class="linha-local"><span>Equipamentos</span><b>R$ {{ comp_pag.equipamentos|moeda_br }}</b></div>
+                {% if comp_pag.cupom_codigo and comp_pag.desconto > 0 %}
+                <div class="linha-local"><span>Cupom {{ comp_pag.cupom_codigo }} ({{ comp_pag.cupom_percentual|moeda_br }}%)</span><b>- R$ {{ comp_pag.desconto|moeda_br }}</b></div>
+                {% endif %}
+                <div class="linha-local"><span>Frete</span><b>R$ {{ comp_pag.frete|moeda_br }}</b></div>
+                <div class="linha-local"><span>Total</span><b>R$ {{ comp_pag.total|moeda_br }}</b></div>
+            </div>
             <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/pagamento"
                   class="form-pagamento-operacao">
                 <input type="hidden" name="retorno" value="{{ request.url }}">

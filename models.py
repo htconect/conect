@@ -223,6 +223,22 @@ class Contrato(Base):
     empresa = relationship("Empresa", back_populates="contratos")
 
 
+class Cupom(Base):
+    __tablename__ = "cupons"
+    __table_args__ = (UniqueConstraint("empresa_id", "codigo", name="uq_cupom_empresa_codigo"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    codigo = Column(String(60), nullable=False, index=True)
+    descricao = Column(String(240), nullable=True)
+    percentual = Column(Float, nullable=False, default=0)
+    valido_ate = Column(Date, nullable=True)
+    ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+
+
 class ProdutoServico(Base):
     __tablename__ = "produtos_servicos"
 
@@ -316,6 +332,13 @@ class Solicitacao(Base):
     retirada_responsavel_telefone = Column(String(40))
     acesso_local = Column(String(40))
     valor = Column(Float, default=0)
+    # Composição comercial do contrato. ``valor`` permanece sendo o total líquido final
+    # para compatibilidade com todo o Financeiro/InfinitePay já existente.
+    valor_equipamentos = Column(Float, default=0)
+    cupom_codigo = Column(String(60), nullable=True)
+    cupom_percentual = Column(Float, default=0)
+    valor_desconto = Column(Float, default=0)
+    valor_frete = Column(Float, default=0)
     sinal = Column(Float, default=0)
     valor_pago = Column(Float, default=0)
     sinal_recebido = Column(Boolean, default=False)
