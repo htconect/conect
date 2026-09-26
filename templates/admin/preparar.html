@@ -31,27 +31,22 @@
 </form>
 
 {% if request.query_params.get('google_erro') %}<div class="alerta-operacao-pagamento">{{ request.query_params.get('google_erro') }}</div>{% endif %}
-{% if (request.query_params.get('google_ok') is not none) or (empresa.google_calendar_ativo and empresa.google_calendar_operacao) %}
-<div class="google-sync-operacao">
-    {% if request.query_params.get('google_ok') is not none %}
-    <div class="box google-sync-status"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} finalizado(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
-    {% endif %}
+{% if request.query_params.get('google_ok') is not none %}
+<div class="box google-sync-status"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} finalizado(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
+{% endif %}
+
+<section class="operacao-ferramentas">
     {% if empresa.google_calendar_ativo and empresa.google_calendar_operacao %}
     <form method="post" action="/painel/reservas/google-calendar/sincronizar" class="acoes google-sync-form">
         {% for a in itens %}<input type="hidden" name="agenda_ids" value="{{ a.id }}">{% endfor %}
         <button type="submit" class="botao-mini principal" {% if not itens %}disabled{% endif %}><i class="bi bi-calendar-check"></i> Sincronizar Google</button>
     </form>
     {% endif %}
-</div>
-{% endif %}
-
-<section class="operacao-ferramentas">
     <button type="button" class="botao-mini principal" id="calcularTemposOperacao">
         <i class="bi bi-clock-history"></i> Calcular tempo
     </button>
-    <small id="statusCalculoTempos" class="texto-discreto">Usa a ordem roteirizada manualmente. Não calcula peso nem capacidade.</small>
     <details class="adicionar-pausa-loja">
-        <summary class="botao-mini"><i class="bi bi-house-door"></i> Voltar à loja</summary>
+        <summary class="botao-mini"><i class="bi bi-house-door"></i> Parada na loja</summary>
         <form method="post" action="/painel/reservas/pausa-loja" class="form-pausa-loja">
             <p class="texto-discreto">Insere uma pausa manual na sequência. Não altera nenhum contrato.</p>
             <div class="linha">
@@ -59,7 +54,7 @@
                 <div><label>Hora</label><input type="time" name="hora_pausa" required></div>
                 <div><label>Equipe</label><select name="equipe_id" required>{% for e in equipes %}<option value="{{ e.id }}" {% if e.id == equipe_id %}selected{% endif %}>{{ e.nome }}</option>{% endfor %}</select></div>
             </div>
-            <button type="submit" class="botao-mini principal">Adicionar card Voltar à loja</button>
+            <button type="submit" class="botao-mini principal">Adicionar card Parada na loja</button>
         </form>
     </details>
 </section>
@@ -73,12 +68,12 @@
     {% if linha.tipo_linha == 'pausa' %}
     {% set p = linha.pausa %}
     {% set pausa_concluida = p.status == 'concluido' %}
-    <details class="linha-preparo linha-operacao pausa-loja {% if pausa_concluida %}concluido{% endif %}" data-operacao-chave="pausa-{{ p.id }}">
+    <details class="linha-preparo linha-operacao pausa-loja {% if pausa_concluida %}concluido{% endif %}" data-operacao-chave="pausa-{{ p.id }}" data-operacao-data="{{ p.data.isoformat() if p.data else '' }}" data-operacao-equipe-id="{{ p.equipe_id or '' }}">
         <summary>
             <div class="bolinha-operacao bolinha-pausa" aria-label="pausa"></div>
             <div class="operacao-data-card"><small>{{ p.hora_inicio.strftime('%H:%M') if p.hora_inicio else '--' }}</small><strong>{{ p.data.strftime('%d/%m') if p.data else '-' }}</strong></div>
             <div class="info-agenda operacao-info-card">
-                <b>Voltar à loja</b>
+                <b>Parada na loja</b>
                 <small>{{ endereco_loja_operacao or 'Endereço da loja não configurado' }}</small>
                 <small class="tempo-equipe-resumo" data-equipe-tempo hidden></small>
                 <small class="tempo-operacao-resumo" data-tempo-resumo hidden></small>
@@ -100,7 +95,7 @@
                 {% if not pausa_concluida %}
                 <form method="post" action="/painel/reservas/pausa-loja/{{ p.id }}/concluir"><button type="submit" class="botao-mini principal">Encerrar pausa</button></form>
                 {% endif %}
-                <form method="post" action="/painel/reservas/pausa-loja/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este card Voltar à loja?')"><button type="submit" class="botao-mini">Excluir</button></form>
+                <form method="post" action="/painel/reservas/pausa-loja/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este card Parada na loja?')"><button type="submit" class="botao-mini">Excluir</button></form>
             </div>
         </div>
     </details>
@@ -154,7 +149,7 @@
     {% set url_maps = '/painel/solicitacao/' ~ a.solicitacao_id ~ '/iniciar-rota?provedor=maps' %}
     <details
             class="linha-preparo linha-operacao {{ tipo }} {% if concluido %}concluido{% endif %} {% if retirada_obrigatoria %}roteiro-retirada-obrigatoria{% elif entrega_fora_data %}roteiro-outra-data{% elif tipo == 'retirada' %}roteiro-retirada{% elif roteirizado %}roteiro-salvo{% endif %}"
-            data-agenda-id="{{ a.id }}" data-operacao-chave="agenda-{{ a.id }}">
+            data-agenda-id="{{ a.id }}" data-operacao-chave="agenda-{{ a.id }}" data-operacao-data="{{ a.data.isoformat() if a.data else '' }}" data-operacao-equipe-id="{{ a.equipe_id or '' }}">
         <summary>
             <div class="bolinha-operacao" aria-label="{{ tipo }}"></div>
             <div class="operacao-data-card">
@@ -465,9 +460,12 @@ Digite o número da opção:`, '1');
     } catch (_) { /* não impede o WhatsApp caso a rede oscile */ }
   }
 
-  // Depois de "Calcular tempo", o aviso A caminho leva a previsão real do trecho
-  // atual. O cálculo usa somente deslocamento; instalação/desmontagem continuam
-  // exibidas separadamente no card e não atrasam artificialmente o ETA do cliente.
+  // Ao iniciar o deslocamento, recalcula apenas a data/equipe deste card e
+  // somente as etapas ainda pendentes. O ETA enviado ao cliente usa apenas o
+  // trecho que começa agora; tempos operacionais alimentam a próxima etapa.
+  if(b.dataset.abrirRota === '1'){
+    await recalcularTemposDaEtapa(b, true);
+  }
   if(b.dataset.abrirRota === '1' && b.dataset.deslocamentoMin){
     const minutos = Math.max(0, parseInt(b.dataset.deslocamentoMin, 10) || 0);
     const chegada = new Date(Date.now() + minutos * 60000);
@@ -535,10 +533,13 @@ function abrirNavegacaoPreferida(elemento){
   window.location.href = wazeWeb || maps;
 }
 
-document.addEventListener('click', function(e){
+document.addEventListener('click', async function(e){
   const botao = e.target.closest('a.botao-rota');
   if(!botao) return;
   e.preventDefault();
+  // "Iniciar rota" sempre refaz os tempos só daquele dia/equipe antes de abrir
+  // a navegação. Entregas, retiradas e paradas já concluídas ficam fora do cálculo.
+  await recalcularTemposDaEtapa(botao, true);
   abrirNavegacaoPreferida(botao);
 });
 
@@ -553,57 +554,119 @@ document.addEventListener('click', function(e){
   window.open(`https://wa.me/${tel}?text=${encodeURIComponent(mensagem)}`,'_blank');
 });
 
+function formatarDuracao(minutos){
+  const total=Math.max(0, parseInt(minutos,10)||0);
+  if(total<60) return `${total} min`;
+  const horas=Math.floor(total/60);
+  const resto=total%60;
+  return resto ? `${horas}h${String(resto).padStart(2,'0')}` : `${horas}h`;
+}
+
+function aplicarTemposOperacao(dados){
+  (dados.resultados||[]).forEach(r=>{
+    const card=document.querySelector(`[data-operacao-chave="${r.chave}"]`);
+    if(!card) return;
+    const equipeTempo=card.querySelector('[data-equipe-tempo]');
+    const resumo=card.querySelector('[data-tempo-resumo]');
+    const detalhe=card.querySelector('[data-tempo-detalhe]');
+    const deslocamento=Math.max(0, parseInt(r.deslocamento_min,10)||0);
+    const chegada=Math.max(0, parseInt(r.tempo_chegada_min ?? r.intervalo_desde_anterior_min,10)||0);
+    const anterior=Math.max(0, parseInt(r.servico_anterior_min,10)||0);
+    const atual=Math.max(0, parseInt(r.servico_atual_min ?? r.servico_min,10)||0);
+    const labelAnterior=(r.servico_anterior_label||'').trim();
+    const labelAtual=(r.servico_atual_label||r.servico_label||'').trim();
+
+    if(equipeTempo){
+      equipeTempo.textContent=`Equipe tempo: ${formatarDuracao(deslocamento)}`;
+      equipeTempo.hidden=false;
+    }
+    if(resumo){
+      resumo.textContent=`Tempo de chegada: ${formatarDuracao(chegada)}`;
+      resumo.hidden=false;
+    }
+    if(detalhe){
+      const distancia=(r.distancia_km!==null && r.distancia_km!==undefined)
+        ? ` · ${Number(r.distancia_km).toLocaleString('pt-BR',{maximumFractionDigits:1})} km` : '';
+      let calculo=`${r.origem} → ${r.destino}: ${formatarDuracao(deslocamento)} de trajeto${distancia}`;
+      if(anterior>0 && labelAnterior){
+        calculo += ` + ${formatarDuracao(anterior)} de ${labelAnterior.toLowerCase()} = ${formatarDuracao(chegada)}`;
+      } else {
+        calculo += ` = ${formatarDuracao(chegada)}`;
+      }
+      if(atual>0 && labelAtual){
+        calculo += `. Nesta etapa: ${labelAtual} ${formatarDuracao(atual)}.`;
+      } else {
+        calculo += '.';
+      }
+      if(r.fonte_tempo === 'estimativa_sem_coordenadas'){
+        calculo += ' Atenção: estimativa sem localização confirmada.';
+      }
+      detalhe.textContent=calculo;
+      detalhe.hidden=false;
+    }
+    const caminho=card.querySelector('.botao-a-caminho');
+    if(caminho) caminho.dataset.deslocamentoMin=String(deslocamento);
+  });
+}
+
+async function buscarTemposOperacao(inicio,fim,equipe,{botao=null,silencioso=false}={}){
+  if(!equipe){
+    if(!silencioso) alert('Selecione uma equipe para calcular os tempos.');
+    return false;
+  }
+  let textoOriginal='';
+  if(botao){
+    botao.disabled=true;
+    textoOriginal=botao.innerHTML;
+    botao.innerHTML='<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Calculando...';
+  }
+  try{
+    const corpo=new URLSearchParams({data_inicial:inicio,data_final:fim,equipe_id:equipe});
+    const resposta=await fetch('/painel/reservas/calcular-tempos',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},
+      body:corpo.toString()
+    });
+    const dados=await resposta.json();
+    if(!resposta.ok || !dados.ok) throw new Error(dados.detail || 'Não foi possível calcular os tempos.');
+    aplicarTemposOperacao(dados);
+    return true;
+  }catch(err){
+    if(!silencioso) alert(err.message || 'Erro ao calcular tempos.');
+    console.warn('Falha ao recalcular tempos da operação', err);
+    return false;
+  }finally{
+    if(botao){
+      botao.disabled=false;
+      botao.innerHTML=textoOriginal;
+    }
+  }
+}
+
+async function recalcularTemposDaEtapa(elemento,silencioso=false){
+  const card=elemento?.closest?.('[data-operacao-data][data-operacao-equipe-id]');
+  const data=(card?.dataset.operacaoData||'').trim();
+  const equipe=(card?.dataset.operacaoEquipeId||'').trim();
+  if(!data || !equipe) return false;
+  // Início = fim garante que nenhum outro dia será tocado.
+  return await buscarTemposOperacao(data,data,equipe,{silencioso});
+}
+
 async function calcularTemposOperacao(){
   const botao=document.getElementById('calcularTemposOperacao');
-  const status=document.getElementById('statusCalculoTempos');
   const filtro=document.getElementById('filtroOperacao');
   if(!botao || !filtro) return;
   const equipe=filtro.querySelector('[name="equipe_id"]')?.value || '';
   const inicio=filtro.querySelector('[name="data_inicial"]')?.value || '';
   const fim=filtro.querySelector('[name="data_final"]')?.value || '';
-  if(!equipe){ alert('Selecione uma equipe para calcular os tempos.'); return; }
-
-  botao.disabled=true;
-  const textoOriginal=botao.innerHTML;
-  botao.innerHTML='<span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Calculando...';
-  if(status) status.textContent='Calculando deslocamentos e tempos operacionais na ordem manual...';
-  try{
-    const corpo=new URLSearchParams({data_inicial:inicio,data_final:fim,equipe_id:equipe});
-    const resposta=await fetch('/painel/reservas/calcular-tempos',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:corpo.toString()});
-    const dados=await resposta.json();
-    if(!resposta.ok || !dados.ok) throw new Error(dados.detail || 'Não foi possível calcular os tempos.');
-
-    (dados.resultados||[]).forEach(r=>{
-      const card=document.querySelector(`[data-operacao-chave="${r.chave}"]`);
-      if(!card) return;
-      const equipeTempo=card.querySelector('[data-equipe-tempo]');
-      const resumo=card.querySelector('[data-tempo-resumo]');
-      const detalhe=card.querySelector('[data-tempo-detalhe]');
-      if(equipeTempo){ equipeTempo.textContent=`Equipe tempo: ${r.deslocamento_min} min`; equipeTempo.hidden=false; }
-      if(resumo){ resumo.textContent=`Tempo para etapas: ${r.intervalo_desde_anterior_min} min`; resumo.hidden=false; }
-      if(detalhe){
-        const distancia=(r.distancia_km!==null && r.distancia_km!==undefined) ? ` · ${Number(r.distancia_km).toLocaleString('pt-BR',{maximumFractionDigits:1})} km` : '';
-        detalhe.textContent=`${r.origem} → ${r.destino}: ${r.deslocamento_min} min de deslocamento${distancia} · ${r.servico_label}: ${r.servico_min} min.`;
-        detalhe.hidden=false;
-      }
-      const caminho=card.querySelector('.botao-a-caminho');
-      if(caminho) caminho.dataset.deslocamentoMin=String(r.deslocamento_min);
-    });
-    if(status) status.textContent=`Tempos calculados. Montagem ${dados.parametros.montagem_min} min · desmontagem ${dados.parametros.desmontagem_min} min · pausa na loja ${dados.parametros.pausa_loja_min} min. Ordem manual preservada.`;
-  }catch(err){
-    if(status) status.textContent=err.message || 'Erro ao calcular tempos.';
-    alert(err.message || 'Erro ao calcular tempos.');
-  }finally{
-    botao.disabled=false;
-    botao.innerHTML=textoOriginal;
-  }
+  await buscarTemposOperacao(inicio,fim,equipe,{botao,silencioso:false});
 }
 
 document.getElementById('calcularTemposOperacao')?.addEventListener('click', calcularTemposOperacao);
 </script>
 
 <style>
-    .google-sync-operacao{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0}.google-sync-status{margin:0!important}.google-sync-form{margin:0!important}.operacao-ferramentas{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin:10px 0 14px}.operacao-ferramentas>small{align-self:center}.adicionar-pausa-loja{position:relative}.adicionar-pausa-loja>summary{list-style:none;cursor:pointer}.adicionar-pausa-loja>summary::-webkit-details-marker{display:none}.adicionar-pausa-loja[open] .form-pausa-loja{display:block}.form-pausa-loja{position:absolute;z-index:20;right:0;top:42px;width:min(620px,92vw);background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:14px;box-shadow:0 18px 48px rgba(15,23,42,.16)}.pausa-loja{border-left:4px solid #8b5cf6!important}.pausa-loja .bolinha-pausa{background:#8b5cf6!important}.pausa-loja .operacao-info-card em{background:#ede9fe;color:#5b21b6}.tempo-equipe-resumo,.tempo-operacao-resumo{font-weight:800;color:#1d4ed8!important}.tempo-operacao-calculado{margin:8px 0;padding:10px 12px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-weight:800;font-size:13px}.solicitar-pagamento-saldo{width:100%;justify-content:center;margin:8px 0;background:#16a34a!important;color:#fff!important}.acoes-rota form{margin:0}
+    .google-sync-status{margin:10px 0!important}.google-sync-form{margin:0!important}.operacao-ferramentas{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px}.operacao-ferramentas form{margin:0}.adicionar-pausa-loja{position:relative}.adicionar-pausa-loja>summary{list-style:none;cursor:pointer}.adicionar-pausa-loja>summary::-webkit-details-marker{display:none}.adicionar-pausa-loja[open] .form-pausa-loja{display:block}.form-pausa-loja{position:absolute;z-index:20;right:0;top:42px;width:min(620px,92vw);background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:14px;box-shadow:0 18px 48px rgba(15,23,42,.16)}.pausa-loja{border-left:4px solid #8b5cf6!important}.pausa-loja .bolinha-pausa{background:#8b5cf6!important}.pausa-loja .operacao-info-card em{background:#ede9fe;color:#5b21b6}.tempo-equipe-resumo,.tempo-operacao-resumo{font-weight:800;color:#1d4ed8!important}.tempo-operacao-calculado{margin:8px 0;padding:10px 12px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-weight:800;font-size:13px}.solicitar-pagamento-saldo{width:100%;justify-content:center;margin:8px 0;background:#16a34a!important;color:#fff!important}.acoes-rota form{margin:0}
     .observacoes-contrato-operacao{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;margin:8px 0}
     .observacoes-contrato-operacao b{display:block;margin-bottom:4px}
     .observacoes-contrato-operacao p{margin:0;white-space:pre-wrap}

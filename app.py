@@ -6208,10 +6208,16 @@ def calcular_tempos_operacao_manual(
     db: Session = Depends(get_db),
     empresa: Empresa = Depends(empresa_logada),
 ):
-    """Calcula somente tempos da sequência roteirizada manualmente.
+    """Calcula tempos da sequência que o operador roteirizou manualmente.
 
-    Não reorganiza a rota e não consulta peso, capacidade, compartimentos ou veículo.
-    Reaproveita apenas deslocamento e tempos operacionais da Inteligência.
+    Regras:
+    - não reorganiza a rota;
+    - não consulta peso, capacidade, compartimentos ou veículo;
+    - usa somente entregas/retiradas ainda pendentes e paradas na loja pendentes;
+    - ``Equipe tempo`` é apenas o deslocamento entre o ponto anterior e o atual;
+    - ``Tempo de chegada`` é o deslocamento + o serviço executado no ponto anterior
+      (instalação, desmontagem ou parada na loja);
+    - os parâmetros operacionais vêm da configuração já existente da Inteligência.
     """
     permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
     if equipe_id not in permitidas:
@@ -6225,6 +6231,7 @@ def calcular_tempos_operacao_manual(
         fim = inicio
 
     cfg = _config_rota(db, empresa.id)
+
     agendas = (
         db.query(Agenda)
         .options(joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente))
@@ -6234,7 +6241,6 @@ def calcular_tempos_operacao_manual(
             Agenda.roteirizado == True,
             Agenda.data >= inicio,
             Agenda.data <= fim,
-            Agenda.status_operacional != "concluido",
         )
         .all()
     )
@@ -6245,10 +6251,38 @@ def calcular_tempos_operacao_manual(
             PausaOperacional.equipe_id == equipe_id,
             PausaOperacional.data >= inicio,
             PausaOperacional.data <= fim,
-            PausaOperacional.status != "concluido",
         )
         .all()
     )
+
+    # Antes de usar a estimativa genérica, tenta localizar os endereços pendentes.
+    # Isso evita vários trechos aparecerem como 30 min apenas porque ainda não
+    # existiam coordenadas salvas para a loja ou para o contrato.
+    houve_geocodificacao = False
+    try:
+        if not _coordenadas_validas_brasil(cfg.latitude_loja, cfg.longitude_loja):
+            houve_geocodificacao = _garantir_localizacao_loja(db, cfg) or houve_geocodificacao
+    except Exception:
+        logger.exception("[OPERACAO] falha ao localizar a loja para cálculo manual")
+
+    solicitacoes_vistas = set()
+    for agenda_item in agendas:
+        sol = agenda_item.solicitacao
+        if not sol or sol.id in solicitacoes_vistas:
+            continue
+        solicitacoes_vistas.add(sol.id)
+        if (sol.status_geocodificacao or "").strip().lower() == "localizado" and _coordenadas_validas_brasil(sol.latitude, sol.longitude):
+            continue
+        try:
+            if _tentar_geocodificar_solicitacao(db, sol, commit=False):
+                houve_geocodificacao = True
+        except Exception:
+            logger.exception("[OPERACAO] falha ao localizar contrato #%s para cálculo manual", sol.id)
+    if houve_geocodificacao:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
     linhas = []
     for a in agendas:
@@ -6258,6 +6292,7 @@ def calcular_tempos_operacao_manual(
             "data": a.data,
             "hora": a.hora_inicio or time.max,
             "agenda": a,
+            "pendente": a.status_operacional != "concluido",
         })
     for pausa in pausas:
         linhas.append({
@@ -6266,6 +6301,7 @@ def calcular_tempos_operacao_manual(
             "data": pausa.data,
             "hora": pausa.hora_inicio or time.max,
             "pausa": pausa,
+            "pendente": pausa.status != "concluido",
         })
     linhas.sort(key=lambda x: (x["data"] or date.max, x["hora"] or time.max, x["chave"]))
 
@@ -6275,6 +6311,8 @@ def calcular_tempos_operacao_manual(
     local_anterior = "Loja"
     bairro_anterior = (cfg.endereco_loja or "Loja")
     servico_anterior = 0
+    servico_anterior_label = ""
+    tipo_anterior = "loja"
 
     loja_tem_coord = _coordenadas_validas_brasil(cfg.latitude_loja, cfg.longitude_loja)
 
@@ -6286,54 +6324,85 @@ def calcular_tempos_operacao_manual(
             local_anterior = "Loja"
             bairro_anterior = (cfg.endereco_loja or "Loja")
             servico_anterior = 0
+            servico_anterior_label = ""
+            tipo_anterior = "loja"
 
         tipo = linha["tipo"]
         if tipo == "loja":
             lat_destino = float(cfg.latitude_loja) if loja_tem_coord else None
             lon_destino = float(cfg.longitude_loja) if loja_tem_coord else None
             bairro_destino = cfg.endereco_loja or "Loja"
-            destino = "Voltar à loja"
+            destino = "Loja"
             servico = max(0, int(cfg.minutos_parada_loja or 0))
-            servico_label = "Pausa na loja"
+            servico_label = "Parada na loja"
         else:
             agenda = linha["agenda"]
             sol = agenda.solicitacao
-            coord_ok = bool(sol and (sol.status_geocodificacao or "").strip().lower() == "localizado" and _coordenadas_validas_brasil(sol.latitude, sol.longitude))
+            coord_ok = bool(
+                sol
+                and (sol.status_geocodificacao or "").strip().lower() == "localizado"
+                and _coordenadas_validas_brasil(sol.latitude, sol.longitude)
+            )
             lat_destino = float(sol.latitude) if coord_ok else None
             lon_destino = float(sol.longitude) if coord_ok else None
             bairro_destino = (agenda.bairro or (sol.bairro if sol else "") or "")
             destino = (sol.cliente.nome if sol and sol.cliente else agenda.titulo) or agenda.titulo
             if tipo == "retirada":
                 servico = max(0, int(cfg.minutos_desmontagem or 0))
-                servico_label = "Desmontagem/retirada"
+                servico_label = "Desmontagem"
             else:
                 servico = max(0, int(cfg.minutos_montagem or 0))
                 servico_label = "Instalação"
 
         distancia = None
         deslocamento = None
+        fonte_tempo = "estimativa"
         if lat_anterior is not None and lon_anterior is not None and lat_destino is not None and lon_destino is not None:
-            distancia, deslocamento, _ = _trecho_rodoviario(lat_anterior, lon_anterior, lat_destino, lon_destino, cfg)
+            distancia, deslocamento, fonte_tempo = _trecho_rodoviario(
+                lat_anterior, lon_anterior, lat_destino, lon_destino, cfg,
+                forcar_recalculo=True,
+            )
         if deslocamento is None:
             deslocamento = _deslocamento_estimado_sem_coordenadas(bairro_anterior, bairro_destino)
+            fonte_tempo = "estimativa_sem_coordenadas"
 
         deslocamento = max(0, int(deslocamento or 0))
-        resultados.append({
-            "chave": linha["chave"],
-            "tipo": tipo,
-            "origem": local_anterior,
-            "destino": destino,
-            "deslocamento_min": deslocamento,
-            "distancia_km": round(float(distancia or 0), 1) if distancia is not None else None,
-            "servico_min": servico,
-            "servico_label": servico_label,
-            "intervalo_desde_anterior_min": deslocamento + max(0, int(servico_anterior or 0)),
-        })
+        servico_anterior_int = max(0, int(servico_anterior or 0))
+        tempo_chegada = deslocamento + servico_anterior_int
 
+        if linha.get("pendente", True):
+            resultados.append({
+                "chave": linha["chave"],
+                "tipo": tipo,
+                "origem": local_anterior,
+                "destino": destino,
+                "deslocamento_min": deslocamento,
+                "distancia_km": round(float(distancia or 0), 1) if distancia is not None else None,
+                "fonte_tempo": fonte_tempo,
+                "servico_atual_min": servico,
+                "servico_atual_label": servico_label,
+                "servico_anterior_min": servico_anterior_int,
+                "servico_anterior_label": servico_anterior_label,
+                "tipo_anterior": tipo_anterior,
+                "tempo_chegada_min": tempo_chegada,
+                # Compatibilidade com o front-end da versão anterior.
+                "servico_min": servico,
+                "servico_label": servico_label,
+                "intervalo_desde_anterior_min": tempo_chegada,
+            })
+
+        # Etapas concluídas servem apenas como origem física do próximo trecho.
+        # O tempo de instalação/desmontagem/parada delas não é somado novamente.
         lat_anterior, lon_anterior = lat_destino, lon_destino
         bairro_anterior = bairro_destino
         local_anterior = destino
-        servico_anterior = servico
+        if linha.get("pendente", True):
+            servico_anterior = servico
+            servico_anterior_label = servico_label
+        else:
+            servico_anterior = 0
+            servico_anterior_label = ""
+        tipo_anterior = tipo
 
     return {
         "ok": True,
@@ -6341,9 +6410,12 @@ def calcular_tempos_operacao_manual(
         "parametros": {
             "montagem_min": max(0, int(cfg.minutos_montagem or 0)),
             "desmontagem_min": max(0, int(cfg.minutos_desmontagem or 0)),
-            "pausa_loja_min": max(0, int(cfg.minutos_parada_loja or 0)),
+            "parada_loja_min": max(0, int(cfg.minutos_parada_loja or 0)),
         },
-        "observacao": "A ordem manual foi preservada. Peso e capacidade não participam deste cálculo.",
+        "observacao": (
+            "Ordem manual preservada. Foram consideradas apenas etapas pendentes. "
+            "Peso, capacidade e otimização automática não participam deste cálculo."
+        ),
     }
 
 
@@ -13688,7 +13760,7 @@ def _distancia_km(lat1, lon1, lat2, lon2):
 _CACHE_TRECHOS_RODOVIARIOS: dict[tuple, tuple[float, int, str]] = {}
 
 
-def _trecho_rodoviario(lat1, lon1, lat2, lon2, cfg=None):
+def _trecho_rodoviario(lat1, lon1, lat2, lon2, cfg=None, forcar_recalculo: bool = False):
     """Retorna distância por ruas e duração operacional do trecho.
 
     Usa OSRM para calcular a rota viária real. Como o serviço público não fornece
@@ -13702,7 +13774,7 @@ def _trecho_rodoviario(lat1, lon1, lat2, lon2, cfg=None):
         chave = tuple(round(float(v), 5) for v in (lat1, lon1, lat2, lon2))
     except Exception:
         return None, None, "coordenadas_invalidas"
-    if chave in _CACHE_TRECHOS_RODOVIARIOS:
+    if not forcar_recalculo and chave in _CACHE_TRECHOS_RODOVIARIOS:
         return _CACHE_TRECHOS_RODOVIARIOS[chave]
 
     fator_trafego = max(1.0, min(2.5, float(os.getenv("ROTA_FATOR_TRAFICO", "1.35") or 1.35)))

@@ -617,8 +617,16 @@ function aplicarValorBaseProduto(select){
   const linha = select.closest('.item-reserva');
   if(!linha) return;
   const campo = linha.querySelector('input[name="valor_unitario"]');
+  if(!campo) return;
+  // Preenche o preço-base somente em item novo/zerado. Valores digitados manualmente
+  // pertencem ao contrato e não podem ser substituídos pelo cadastro do produto.
+  const atual = moedaParaNumero(campo.value || '0');
+  if(atual > 0){
+    recalcularResumoComercial();
+    return;
+  }
   const valor = parseFloat(select.options[select.selectedIndex]?.dataset.valorBase || '0') || 0;
-  if(campo) campo.value = valor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  campo.value = valor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   recalcularResumoComercial();
 }
 function aplicarContratoPadrao(select){
