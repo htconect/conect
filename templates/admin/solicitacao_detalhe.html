@@ -465,11 +465,48 @@
           {% endif %}
         </div>
       </div>
-      {% if not p.conciliado_em %}
-      <form method="post" action="/painel/solicitacao/{{ item.id }}/pagamento/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este pagamento?')">
-        <button class="remover-item-texto" type="submit">Excluir</button>
-      </form>
-      {% endif %}
+      <div class="pagamento-acoes-inline">
+        <details class="pagamento-edicao-inline">
+          <summary class="botao-editar-pagamento">Editar</summary>
+          <form method="post" action="/painel/pagamento/{{ p.id }}/editar" class="form-editar-pagamento" onsubmit="return confirm('Salvar a correção deste pagamento sem remover os vínculos existentes?')">
+            <input type="hidden" name="retorno" value="/painel/solicitacao/{{ item.id }}#pagamento">
+            <label>Valor recebido
+              <input name="valor_pago" value="{{ p.valor|moeda_br }}" inputmode="decimal" required>
+            </label>
+            <label>Data
+              <input type="date" name="data_pagamento" value="{{ p.data_pagamento.isoformat() }}" required>
+            </label>
+            <label>Forma
+              <select name="forma_pagamento">
+                <option value="pix" {% if (p.forma_pagamento or '')|lower == 'pix' %}selected{% endif %}>PIX</option>
+                <option value="dinheiro" {% if (p.forma_pagamento or '')|lower == 'dinheiro' %}selected{% endif %}>Dinheiro</option>
+                <option value="cartao" {% if (p.forma_pagamento or '')|lower in ['cartao','cartão'] %}selected{% endif %}>Cartão</option>
+              </select>
+            </label>
+            <label>Comprovante no nome do cliente?
+              <select name="comprovante_no_nome_cliente" onchange="this.closest('form').querySelector('[data-nome-comprovante]').style.display=this.value==='nao'?'grid':'none'">
+                <option value="sim" {% if p.comprovante_no_nome_cliente %}selected{% endif %}>Sim</option>
+                <option value="nao" {% if not p.comprovante_no_nome_cliente %}selected{% endif %}>Não</option>
+              </select>
+            </label>
+            <label data-nome-comprovante style="{% if p.comprovante_no_nome_cliente %}display:none{% else %}display:grid{% endif %}">Nome no comprovante
+              <input name="nome_comprovante" value="{{ p.nome_comprovante or '' }}">
+            </label>
+            <label class="pagamento-edicao-observacao">Observação
+              <input name="observacoes_pagamento" value="{{ p.observacoes or '' }}">
+            </label>
+            {% if p.conciliado_em %}
+              <p class="texto-discreto pagamento-vinculo-aviso">Este pagamento está vinculado/conciliado. A edição corrige o pagamento sem excluir o vínculo.</p>
+            {% endif %}
+            <button class="btn-krj-primary" type="submit">Salvar correção</button>
+          </form>
+        </details>
+        {% if not p.conciliado_em %}
+        <form method="post" action="/painel/solicitacao/{{ item.id }}/pagamento/{{ p.id }}/excluir" onsubmit="return confirm('Excluir este pagamento?')">
+          <button class="remover-item-texto" type="submit">Excluir</button>
+        </form>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>

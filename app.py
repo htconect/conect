@@ -10514,8 +10514,10 @@ def editar_pagamento_financeiro(
         data_pagamento: str = Form(""),
         valor_pago: str = Form("0"),
         forma_pagamento: str = Form("pix"),
+        comprovante_no_nome_cliente: str = Form(""),
         nome_comprovante: str = Form(""),
         observacoes_pagamento: str = Form(""),
+        retorno: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -10541,12 +10543,21 @@ def editar_pagamento_financeiro(
     pagamento.data_pagamento = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else date.today()
     pagamento.valor = valor
     pagamento.forma_pagamento = forma_pagamento
-    pagamento.nome_comprovante = nome_comprovante.strip() or (item.cliente.nome if item.cliente else "")
+    if comprovante_no_nome_cliente in {"sim", "nao"}:
+        pagamento.comprovante_no_nome_cliente = comprovante_no_nome_cliente == "sim"
+    if pagamento.comprovante_no_nome_cliente:
+        pagamento.nome_comprovante = (item.cliente.nome if item.cliente else "")
+    else:
+        pagamento.nome_comprovante = nome_comprovante.strip() or pagamento.nome_comprovante
     pagamento.observacoes = observacoes_pagamento.strip()
+
+    # Editar corrige o lançamento sem desfazer vínculos existentes.
+    # Quando a origem é InfinitePay, o movimento automático espelhado acompanha
+    # a correção de valor/data; vínculos bancários manuais continuam preservados.
     _sincronizar_movimento_infinitepay(db, pagamento)
     _aplicar_total_pagamento_solicitacao(item, novo_total)
     db.commit()
-    voltar = request.headers.get("referer") or "/painel/financeiro"
+    voltar = retorno.strip() if retorno.strip().startswith("/") else (request.headers.get("referer") or "/painel/financeiro")
     return RedirectResponse(voltar, status_code=303)
 
 

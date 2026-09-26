@@ -1751,3 +1751,17 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
 @media(max-width:380px){.humiat-packages{grid-template-columns:1fr}}
 
 .ajuda-campo{display:block;margin-top:4px;font-size:11px;line-height:1.25;opacity:.7;font-weight:500}
+
+
+/* Connect 1.0.61 — correção de pagamento sem desfazer vínculo */
+.pagamento-acoes-inline{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.pagamento-edicao-inline{position:relative}
+.botao-editar-pagamento{list-style:none;cursor:pointer;border:1px solid #2563eb;background:#fff;color:#1d4ed8;border-radius:10px;padding:8px 12px;font-weight:800;font-size:13px;white-space:nowrap}
+.botao-editar-pagamento::-webkit-details-marker{display:none}
+.pagamento-edicao-inline[open] .botao-editar-pagamento{background:#eff6ff}
+.form-editar-pagamento{position:absolute;z-index:30;right:0;top:42px;width:min(520px,calc(100vw - 36px));display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;background:#fff;border:1px solid #dbe5f4;border-radius:14px;box-shadow:0 18px 48px rgba(15,23,42,.18)}
+.form-editar-pagamento label{display:grid;gap:5px;font-size:12px;font-weight:800;color:#334155}
+.form-editar-pagamento input,.form-editar-pagamento select{width:100%;min-height:42px;border:1px solid #cbd5e1;border-radius:10px;padding:9px 10px;background:#fff;color:#0f172a}
+.pagamento-edicao-observacao,.pagamento-vinculo-aviso,.form-editar-pagamento>button{grid-column:1/-1}
+.pagamento-vinculo-aviso{margin:0;padding:9px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0}
+@media(max-width:700px){.pagamento-acoes-inline{justify-content:flex-start;width:100%}.form-editar-pagamento{position:fixed;left:12px;right:12px;top:80px;width:auto;max-height:calc(100vh - 100px);overflow:auto;grid-template-columns:1fr}.pagamento-edicao-observacao,.pagamento-vinculo-aviso,.form-editar-pagamento>button{grid-column:auto}}
