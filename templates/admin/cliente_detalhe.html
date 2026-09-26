@@ -83,6 +83,13 @@
       <input name="email" type="email" value="{{ cliente.email or '' }}">
     </label>
 
+    <label>Como você conheceu a gente?
+      <select name="como_conheceu">
+        <option value="">Selecione</option>
+        {% for origem in COMO_CONHECEU_OPCOES %}<option value="{{ origem }}" {% if cliente.como_conheceu == origem %}selected{% endif %}>{{ origem }}</option>{% endfor %}
+      </select>
+    </label>
+
     <label>CEP
       <input name="cep" inputmode="numeric" value="{{ cliente.cep or '' }}">
     </label>

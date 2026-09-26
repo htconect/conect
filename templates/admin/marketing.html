@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<section class="cabecalho-mobile">
+  <a class="voltar" href="/painel">← Início</a>
+  <h1>Origem e campanhas</h1>
+  <p class="texto-discreto">Acompanhe como os clientes chegam até a empresa e o resultado dos contratos ligados à campanha KARAOKE10.</p>
+</section>
+
+{% if atualizado %}<div class="box aviso"><b>Resultado atualizado.</b> {{ atualizado }} contrato(s) com KARAOKE10 foram conferidos no Organiza.</div>{% endif %}
+
+<section class="box painel-marketing-secao">
+  <div class="marketing-cabecalho">
+    <div><h2>Campanha KARAOKE10</h2><p class="texto-discreto">Conta somente contrato com o cupom KARAOKE10 cujo cliente também constava na campanha do Organiza.</p></div>
+    <form method="post" action="/painel/marketing/atualizar-campanha"><button class="botao btn-krj-outline" type="submit">Atualizar resultado</button></form>
+  </div>
+  <div class="marketing-metricas">
+    <div><small>Contratos</small><b>{{ campanha_resumo.contratos }}</b></div>
+    <div><small>Valor vendido</small><b>R$ {{ campanha_resumo.valor_vendido|moeda_br }}</b></div>
+    <div><small>Desconto concedido</small><b>R$ {{ campanha_resumo.desconto|moeda_br }}</b></div>
+    <div><small>Recebido</small><b>R$ {{ campanha_resumo.recebido|moeda_br }}</b></div>
+  </div>
+  <div class="lista-mobile marketing-lista">
+    {% for i in campanha_itens %}
+      <a class="card-lista" href="/painel/solicitacao/{{ i.id }}">
+        <div><b>{{ i.cliente.nome if i.cliente else 'Cliente' }}</b><small>{{ i.campanha_organiza_nome or 'Campanha Organiza' }} · {{ i.data_evento.strftime('%d/%m/%Y') }}</small></div>
+        <span>R$ {{ i.valor|moeda_br }}</span>
+      </a>
+    {% else %}<p class="texto-discreto">Nenhum contrato confirmado como resultado da campanha ainda.</p>{% endfor %}
+  </div>
+</section>
+
+<section class="box painel-marketing-secao">
+  <h2>Como você conheceu a gente?</h2>
+  <p class="texto-discreto">O campo pertence ao cadastro do cliente e vale para toda a empresa.</p>
+  <div class="origens-tabela">
+    <div class="origens-head"><b>Origem</b><b>Clientes</b><b>Contratos</b><b>Valor vendido</b></div>
+    {% for o in origens %}
+      <div class="origens-row"><span>{{ o.nome }}</span><b>{{ o.clientes }}</b><b>{{ o.contratos }}</b><span>R$ {{ o.valor|moeda_br }}</span></div>
+    {% else %}<p class="texto-discreto">Ainda não há origem informada nos cadastros.</p>{% endfor %}
+  </div>
+</section>
+
+<style>
+.painel-marketing-secao{display:grid;gap:14px;margin-bottom:16px}.marketing-cabecalho{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}.marketing-cabecalho h2,.painel-marketing-secao h2{margin:0}.marketing-metricas{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.marketing-metricas>div{padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;display:grid;gap:4px}.marketing-metricas small{color:#64748b;font-size:11px}.marketing-metricas b{font-size:15px}.marketing-lista{margin-top:2px}.origens-tabela{display:grid}.origens-head,.origens-row{display:grid;grid-template-columns:minmax(180px,1.5fr) .6fr .7fr 1fr;gap:12px;align-items:center;padding:10px 8px;border-bottom:1px solid #e2e8f0}.origens-head{font-size:11px;text-transform:uppercase;color:#64748b}.origens-row{font-size:13px}@media(max-width:700px){.marketing-cabecalho{display:grid}.marketing-metricas{grid-template-columns:1fr 1fr}.origens-head{display:none}.origens-row{grid-template-columns:1fr 1fr}.origens-row span:first-child{grid-column:1/-1;font-weight:800}}
+</style>
+{% endblock %}

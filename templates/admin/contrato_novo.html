@@ -43,6 +43,11 @@
     </div>
     <label>E-mail</label>
     <input id="emailCliente" name="email" value="{{ form.email or '' }}" type="email">
+    <label>Como você conheceu a gente?</label>
+    <select id="comoConheceuCliente" name="como_conheceu">
+      <option value="">Selecione</option>
+      {% for origem in COMO_CONHECEU_OPCOES %}<option value="{{ origem }}" {% if form.como_conheceu == origem %}selected{% endif %}>{{ origem }}</option>{% endfor %}
+    </select>
   </section>
 
   <section class="secao-form">
@@ -283,7 +288,7 @@ async function consultarClientePorTelefone(){
   const st=document.getElementById('statusBuscaCliente'); st.textContent='Consultando cadastro...';
   if(window.mostrarCarregando) mostrarCarregando('Consultando cadastro','Localizando cliente e endereços já utilizados.');
   try{const r=await fetch(`/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();
-    if(d.encontrado){document.getElementById('nomeCliente').value=d.cliente.nome||'';document.getElementById('cpfCliente').value=d.cliente.cpf||'';document.getElementById('cnpjCliente').value=d.cliente.cnpj||'';document.getElementById('emailCliente').value=d.cliente.email||'';travarDadosCliente(true);mostrarEnderecos(d.enderecos);st.textContent='Cadastro encontrado. Mantenha o endereço atual, escolha um já utilizado ou digite um novo.';}
+    if(d.encontrado){document.getElementById('nomeCliente').value=d.cliente.nome||'';document.getElementById('cpfCliente').value=d.cliente.cpf||'';document.getElementById('cnpjCliente').value=d.cliente.cnpj||'';document.getElementById('emailCliente').value=d.cliente.email||'';const origem=document.getElementById('comoConheceuCliente');if(origem&&d.cliente.como_conheceu)origem.value=d.cliente.como_conheceu;travarDadosCliente(true);mostrarEnderecos(d.enderecos);st.textContent='Cadastro encontrado. Mantenha o endereço atual, escolha um já utilizado ou digite um novo.';}
     else{travarDadosCliente(false);mostrarEnderecos([]);st.textContent='Novo cliente. Complete os dados abaixo.';}
   }catch(e){st.textContent='Não foi possível consultar agora. Você pode continuar preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}
 }

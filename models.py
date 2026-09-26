@@ -157,6 +157,7 @@ class Cliente(Base):
     estado = Column(String(40))
     cep = Column(String(20))
     observacoes = Column(Text)
+    como_conheceu = Column(String(40), nullable=True, index=True)
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
     criado_em = Column(DateTime, server_default=func.now())
 
@@ -339,6 +340,9 @@ class Solicitacao(Base):
     cupom_percentual = Column(Float, default=0)
     valor_desconto = Column(Float, default=0)
     valor_frete = Column(Float, default=0)
+    campanha_organiza_id = Column(Integer, nullable=True, index=True)
+    campanha_organiza_nome = Column(String(180), nullable=True)
+    campanha_resultado = Column(Boolean, nullable=False, default=False, index=True)
     sinal = Column(Float, default=0)
     valor_pago = Column(Float, default=0)
     sinal_recebido = Column(Boolean, default=False)

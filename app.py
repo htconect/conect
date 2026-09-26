@@ -76,7 +76,7 @@ class ControleAcessoMiddleware:
             return "buscar_cliente"
         if path == "/painel/financeiro" or path.startswith("/painel/financeiro/") or path == "/painel/evolucao-financeira" or path.startswith("/painel/evolucao-financeira/"):
             return "financeiro"
-        if path == "/painel/relatorios" or path.startswith("/painel/relatorios/"):
+        if path == "/painel/relatorios" or path.startswith("/painel/relatorios/") or path == "/painel/marketing" or path.startswith("/painel/marketing/"):
             return "relatorios"
         prefixos_cadastro = (
             "/painel/configuracoes", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
@@ -148,6 +148,62 @@ ORGANIZA_CLIENTES_ALUGUEL_URL = os.getenv(
 ORGANIZA_CLIENTES_ALUGUEL_API_KEY = (
     os.getenv("ORGANIZA_API_KEY", "").strip() or os.getenv("CONNECT_API_KEY", "").strip()
 )
+
+ORGANIZA_CAMPANHA_RESULTADO_URL = os.getenv(
+    "ORGANIZA_CAMPANHA_RESULTADO_URL",
+    "https://www.humiat.com.br/api/integracoes/connect/campanha-karaoke10",
+).strip()
+
+COMO_CONHECEU_OPCOES = [
+    "Já sou cliente",
+    "Indicação",
+    "Facebook / Instagram",
+    "Google",
+    "WhatsApp / Status",
+    "Site",
+    "Evento / Festa",
+]
+templates.env.globals["COMO_CONHECEU_OPCOES"] = COMO_CONHECEU_OPCOES
+
+
+def _normalizar_como_conheceu(valor: str | None) -> str | None:
+    texto = (valor or "").strip()
+    return texto if texto in COMO_CONHECEU_OPCOES else None
+
+
+def _consultar_organiza_campanha_karaoke10(telefone: str | None) -> dict | None:
+    """Consulta a participação do cliente na campanha sem impedir o contrato em caso de falha."""
+    chave = ORGANIZA_CLIENTES_ALUGUEL_API_KEY
+    telefone_limpo = limpar_identificador(telefone or "")
+    if not chave or not ORGANIZA_CAMPANHA_RESULTADO_URL or not telefone_limpo:
+        return None
+    url = ORGANIZA_CAMPANHA_RESULTADO_URL + "?" + urlencode({"telefone": telefone_limpo})
+    req = UrlRequest(url, headers={"X-API-Key": chave, "Accept": "application/json", "User-Agent": f"HUMIAT-Conect/{APP_VERSION}"})
+    try:
+        with urlopen(req, timeout=5) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+            return dados if isinstance(dados, dict) else None
+    except Exception as exc:
+        logger.warning("Não foi possível consultar participação KARAOKE10 no Organiza: %s", exc)
+        return None
+
+
+def _atualizar_resultado_campanha_karaoke10(item: Solicitacao, cliente: Cliente | None) -> None:
+    codigo = _normalizar_codigo_cupom(getattr(item, "cupom_codigo", "") or "")
+    if codigo != "KARAOKE10":
+        item.campanha_resultado = False
+        item.campanha_organiza_id = None
+        item.campanha_organiza_nome = None
+        return
+    dados = _consultar_organiza_campanha_karaoke10(getattr(cliente, "telefone", "") if cliente else "")
+    if dados is None:
+        # Falha externa não apaga um vínculo já confirmado anteriormente.
+        return
+    participou = bool(dados.get("participou"))
+    item.campanha_resultado = participou
+    item.campanha_organiza_id = int(dados.get("campanha_id")) if participou and str(dados.get("campanha_id") or "").isdigit() else None
+    item.campanha_organiza_nome = str(dados.get("campanha_nome") or "")[:180] or None if participou else None
+
 
 
 def _humiat_login_connect_url(modo: str = "sistema") -> str:
@@ -1318,6 +1374,8 @@ def garantir_colunas_novas():
         cols_cli = colunas("clientes")
         if "data_nascimento" not in cols_cli:
             comandos.append("ALTER TABLE clientes ADD COLUMN data_nascimento DATE")
+        if "como_conheceu" not in cols_cli:
+            comandos.append("ALTER TABLE clientes ADD COLUMN como_conheceu VARCHAR(40)")
 
     if "produtos_servicos" in tabelas:
         cols_prod = colunas("produtos_servicos")
@@ -1373,6 +1431,12 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_desconto FLOAT DEFAULT 0")
         if "valor_frete" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_frete FLOAT DEFAULT 0")
+        if "campanha_organiza_id" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN campanha_organiza_id INTEGER")
+        if "campanha_organiza_nome" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN campanha_organiza_nome VARCHAR(180)")
+        if "campanha_resultado" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN campanha_resultado BOOLEAN DEFAULT false NOT NULL")
         if "sinal_recebido" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN sinal_recebido BOOLEAN DEFAULT false")
         if "pagamento_confirmado_em" not in cols_sol:
@@ -4151,6 +4215,59 @@ def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
     return templates.TemplateResponse("admin/relatorios.html", {"request": request, "empresa": empresa})
 
 
+@app.get("/painel/marketing", response_class=HTMLResponse)
+def painel_marketing(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
+    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id).all()
+    origem_clientes = {op: 0 for op in COMO_CONHECEU_OPCOES}
+    origem_clientes["Não informado"] = 0
+    for c in clientes:
+        origem_clientes[c.como_conheceu if c.como_conheceu in COMO_CONHECEU_OPCOES else "Não informado"] += 1
+
+    solicitacoes = (db.query(Solicitacao).options(joinedload(Solicitacao.cliente))
+                    .filter(Solicitacao.empresa_id == empresa.id, ~Solicitacao.status.in_(cancelados)).all())
+    origem_contratos = {op: {"contratos": 0, "valor": 0.0} for op in list(COMO_CONHECEU_OPCOES) + ["Não informado"]}
+    for item in solicitacoes:
+        origem = item.cliente.como_conheceu if item.cliente and item.cliente.como_conheceu in COMO_CONHECEU_OPCOES else "Não informado"
+        origem_contratos[origem]["contratos"] += 1
+        origem_contratos[origem]["valor"] += float(item.valor or 0)
+
+    origens = []
+    for nome in list(COMO_CONHECEU_OPCOES) + ["Não informado"]:
+        qtd_cli = origem_clientes.get(nome, 0)
+        qtd_con = origem_contratos[nome]["contratos"]
+        if qtd_cli or qtd_con:
+            origens.append({"nome": nome, "clientes": qtd_cli, "contratos": qtd_con, "valor": origem_contratos[nome]["valor"]})
+
+    campanha_itens = [i for i in solicitacoes if bool(i.campanha_resultado) and _normalizar_codigo_cupom(i.cupom_codigo or "") == "KARAOKE10"]
+    campanha_resumo = {
+        "contratos": len(campanha_itens),
+        "valor_vendido": sum(float(i.valor or 0) for i in campanha_itens),
+        "desconto": sum(float(i.valor_desconto or 0) for i in campanha_itens),
+        "recebido": sum(float(i.valor_pago or 0) for i in campanha_itens),
+    }
+    return templates.TemplateResponse("admin/marketing.html", {
+        "request": request, "empresa": empresa, "origens": origens,
+        "campanha_itens": campanha_itens, "campanha_resumo": campanha_resumo,
+        "atualizado": request.query_params.get("atualizado", ""),
+    })
+
+
+@app.post("/painel/marketing/atualizar-campanha")
+def painel_marketing_atualizar_campanha(db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    itens = db.query(Solicitacao).options(joinedload(Solicitacao.cliente)).filter(
+        Solicitacao.empresa_id == empresa.id, func.upper(Solicitacao.cupom_codigo) == "KARAOKE10"
+    ).all()
+    atualizados = 0
+    for item in itens:
+        antes = bool(item.campanha_resultado)
+        _atualizar_resultado_campanha_karaoke10(item, item.cliente)
+        if bool(item.campanha_resultado) != antes or item.campanha_resultado:
+            atualizados += 1
+    db.commit()
+    return RedirectResponse(f"/painel/marketing?atualizado={atualizados}", status_code=303)
+
+
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     """Home leve: somente leitura, agregações consolidadas e relacionamentos pré-carregados."""
@@ -6132,6 +6249,7 @@ def salvar_cliente_da_solicitacao(
         estado: str = Form(""),
         cep: str = Form(""),
         observacoes: str = Form(""),
+        como_conheceu: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -6153,6 +6271,7 @@ def salvar_cliente_da_solicitacao(
     cliente.estado = estado.strip().upper()
     cliente.cep = limpar_identificador(cep)
     cliente.observacoes = observacoes.strip()
+    cliente.como_conheceu = _normalizar_como_conheceu(como_conheceu) or cliente.como_conheceu
 
     if data_nascimento:
         try:
@@ -6518,6 +6637,7 @@ async def preparar_contrato(
         erro = quote("Cupom inválido, inativo ou fora da validade.")
         return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={erro}", status_code=303)
     _aplicar_composicao_comercial(item, subtotal_equipamentos, texto_para_float(frete), cupom)
+    _atualizar_resultado_campanha_karaoke10(item, item.cliente)
     item.sinal = texto_para_float(sinal)
     item.observacoes = observacoes
     if primeiro_produto and item.hora_inicio:
@@ -6797,7 +6917,7 @@ def api_publico_cliente_por_telefone(slug: str, telefone: str, db: Session = Dep
                 salvar_endereco_cliente(db, empresa.id, c.id, c.endereco, c.numero, c.complemento, c.bairro, c.cidade, c.estado, c.cep)
         db.commit()
         enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
-    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
+    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel, "como_conheceu": cliente.como_conheceu or ''}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
 
 
 @app.get("/api/clientes/por-telefone")
@@ -6820,7 +6940,7 @@ def api_cliente_por_telefone(request: Request, telefone: str, db: Session = Depe
                 salvar_endereco_cliente(db, empresa.id, c.id, c.endereco, c.numero, c.complemento, c.bairro, c.cidade, c.estado, c.cep)
         db.commit()
         enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
-    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
+    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel, "como_conheceu": cliente.como_conheceu or ''}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
 
 
 @app.post("/painel/contrato-novo")
@@ -6856,6 +6976,7 @@ def contrato_novo_salvar(
         local_responsavel_nome: str = Form(""),
         local_responsavel_telefone: str = Form(""),
         observacoes: str = Form(""),
+        como_conheceu: str = Form(""),
         modo_criacao: str = Form("whatsapp"),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
@@ -6878,7 +6999,7 @@ def contrato_novo_salvar(
         "local_nome": local_nome, "local": local, "acesso_local": acesso_local,
         "local_responsavel_nome": local_responsavel_nome,
         "local_responsavel_telefone": local_responsavel_telefone,
-        "observacoes": observacoes, "modo_criacao": modo_criacao,
+        "observacoes": observacoes, "como_conheceu": como_conheceu, "modo_criacao": modo_criacao,
     }
 
     def render_erro(mensagem: str):
@@ -6962,6 +7083,7 @@ def contrato_novo_salvar(
     cliente.estado = estado.strip()
     cliente.cep = cep.strip()
     cliente.observacoes = observacoes.strip()
+    cliente.como_conheceu = _normalizar_como_conheceu(como_conheceu) or cliente.como_conheceu
     db.flush()
     salvar_endereco_cliente(
         db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep,
@@ -7030,6 +7152,7 @@ def contrato_novo_salvar(
         item.retirada_hora = item.hora_fim or item.hora_inicio
 
     _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
+    _atualizar_resultado_campanha_karaoke10(item, cliente)
     db.add(item)
     db.flush()
 
@@ -7265,6 +7388,7 @@ def salvar_solicitacao_completa(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.acesso_local = acesso_local.strip()
     _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
+    _atualizar_resultado_campanha_karaoke10(item, cliente)
     item.sinal = sinal_float
     item.observacoes = observacoes.strip()
     salvar_endereco_cliente(
@@ -7390,6 +7514,7 @@ def usar_solicitacao_como_base(
     # "Usar como base" cria um novo contrato: o cupom só é reaproveitado se ainda
     # estiver válido no momento da nova criação. Frete e valores de equipamento podem ser copiados.
     _aplicar_composicao_comercial(nova, comp_origem["equipamentos"], comp_origem["frete"], cupom_base)
+    _atualizar_resultado_campanha_karaoke10(nova, origem.cliente)
     db.add(nova)
     db.flush()
 
@@ -7425,6 +7550,7 @@ def atualizar_cliente_dados(
         estado: str = Form(""),
         cep: str = Form(""),
         observacoes: str = Form(""),
+        como_conheceu: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -7445,6 +7571,7 @@ def atualizar_cliente_dados(
     cliente.estado = estado.strip()
     cliente.cep = limpar_identificador(cep)
     cliente.observacoes = observacoes.strip()
+    cliente.como_conheceu = _normalizar_como_conheceu(como_conheceu) or cliente.como_conheceu
 
     if empresa.identificador_principal == "cpf" and cliente.cpf:
         cliente.identificador = cliente.cpf
@@ -11575,7 +11702,7 @@ def salvar_pre_cadastro(
         local_nome: str = Form(""), acesso_local: str = Form(""), local_responsavel_nome: str = Form(""),
         local_responsavel_telefone: str = Form(""),
         data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
-        acao: str = Form("salvar"), responsavel_token: str = Form(""),
+        como_conheceu: str = Form(""), acao: str = Form("salvar"), responsavel_token: str = Form(""),
         db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -11602,7 +11729,7 @@ def salvar_pre_cadastro(
         "bairro": bairro, "cidade": cidade, "estado": estado, "cep": cep, "local": local, "local_nome": local_nome,
         "acesso_local": acesso_local, "local_responsavel_nome": local_responsavel_nome,
         "local_responsavel_telefone": local_responsavel_telefone, "data_evento": data_evento,
-        "hora_inicio": hora_inicio, "observacoes": observacoes
+        "hora_inicio": hora_inicio, "observacoes": observacoes, "como_conheceu": como_conheceu
     }
 
     def render_erro(codigo: str):
@@ -11654,6 +11781,7 @@ def salvar_pre_cadastro(
     cliente.estado = estado
     cliente.cep = cep
     cliente.observacoes = observacoes
+    cliente.como_conheceu = _normalizar_como_conheceu(como_conheceu) or cliente.como_conheceu
     db.flush()
     salvar_endereco_cliente(
         db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep,
@@ -12023,6 +12151,7 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Reque
             "data_evento": item.data_evento.isoformat() if item.data_evento else "",
             "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
             "observacoes": item.observacoes or item.cliente.observacoes or "",
+            "como_conheceu": item.cliente.como_conheceu or "",
         },
         "campos_cfg": {ce.campo.chave: ce for ce in
                        db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
@@ -12039,7 +12168,7 @@ def salvar_dados_contrato_cliente(
         cep: str = Form(""), local: str = Form(""), local_nome: str = Form(""), acesso_local: str = Form(""),
         local_responsavel_nome: str = Form(""), local_responsavel_telefone: str = Form(""),
         data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
-        db: Session = Depends(get_db)
+        como_conheceu: str = Form(""), db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = db.get(Solicitacao, solicitacao_id)
@@ -12063,6 +12192,7 @@ def salvar_dados_contrato_cliente(
     cliente.estado = estado.strip()
     cliente.cep = limpar_identificador(cep) or cep.strip()
     cliente.observacoes = observacoes.strip()
+    cliente.como_conheceu = _normalizar_como_conheceu(como_conheceu) or cliente.como_conheceu
     cliente.identificador = cliente.cpf or cliente.cnpj or cliente.telefone or limpar_identificador(identificador) or cliente.identificador
 
     item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
