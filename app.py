@@ -38,7 +38,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
     ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -1252,6 +1252,20 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
 
     return "\n".join(linhas).strip()
 
+
+def montar_mensagem_whatsapp_saldo_operacao(request: Request, empresa: Empresa, item: Solicitacao) -> str:
+    """Mensagem da Operação para solicitar somente o saldo pendente da reserva."""
+    saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0.0)
+    link = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+    link = f"{link}?pagamento=1#etapa-pagamento"
+    cliente = (item.cliente.nome if item.cliente else "cliente") or "cliente"
+    return (
+        f"Olá, {cliente}.\n\n"
+        f"Sua reserva possui um saldo restante de *R$ {moeda_br(saldo)}*.\n\n"
+        "Para efetuar o pagamento, acesse o link abaixo:\n"
+        f"{link}\n\n"
+        f"Equipe {empresa.nome}"
+    )
 
 
 MENSAGEM_OPERACAO_PREPARACAO_APROVADA = (
@@ -4305,11 +4319,14 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         resumo_operacao = db.query(
             func.sum(case((Agenda.tipo_evento == "entrega", 1), else_=0)).label("entregas"),
             func.sum(case((Agenda.tipo_evento == "retirada", 1), else_=0)).label("retiradas"),
-        ).filter(
+            func.sum(case(((Agenda.tipo_evento == "entrega") & (Agenda.data == hoje), 1), else_=0)).label("entregas_hoje"),
+            func.sum(case(((Agenda.tipo_evento == "retirada") & (Agenda.data == hoje), 1), else_=0)).label("retiradas_hoje"),
+        ).join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
             Agenda.empresa_id == empresa.id,
             Agenda.data >= inicio_semana,
             Agenda.data <= fim_semana,
             Agenda.status_operacional != "concluido",
+            Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
         ).one()
 
     with perf_stage("home.totais_cadastros"):
@@ -4459,6 +4476,8 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
     operacao_entregar_qtd = int(resumo_operacao.entregas or 0)
     operacao_buscar_qtd = int(resumo_operacao.retiradas or 0)
     operacao_periodo_qtd = operacao_entregar_qtd + operacao_buscar_qtd
+    tarefas_hoje_entregas = int(resumo_operacao.entregas_hoje or 0)
+    tarefas_hoje_retiradas = int(resumo_operacao.retiradas_hoje or 0)
 
     aceitos_humiat_mes = int(resumo_solicitacoes.humiat_aceitos or 0)
     gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
@@ -4490,6 +4509,10 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
         "operacao_periodo_qtd": operacao_periodo_qtd,
         "operacao_entregar_qtd": operacao_entregar_qtd,
         "operacao_buscar_qtd": operacao_buscar_qtd,
+        "tarefas_hoje_entregas": tarefas_hoje_entregas,
+        "tarefas_hoje_retiradas": tarefas_hoje_retiradas,
+        "tarefas_hoje_contratos_pendentes": pendentes,
+        "tarefas_hoje_data": hoje.isoformat(),
         "inicio_semana": inicio_semana,
         "fim_semana": fim_semana,
         "humiat_aceitos_mes": aceitos_humiat_mes,
@@ -5521,6 +5544,48 @@ def preparar_reservas(
 
     itens = sorted(itens, key=chave_operacao)
 
+    # A Operação pode inserir pausas manuais de retorno à loja. Elas entram na
+    # sequência exclusivamente pela data/hora escolhida pelo operador e nunca
+    # alteram contrato, entrega, retirada ou a Inteligência Logística.
+    pausas_q = db.query(PausaOperacional).filter(
+        PausaOperacional.empresa_id == empresa.id,
+        PausaOperacional.data >= inicio_filtro,
+        PausaOperacional.data <= fim_filtro,
+    )
+    if equipe_id:
+        pausas_q = pausas_q.filter(PausaOperacional.equipe_id == equipe_id)
+    if not mostrar_concluidas:
+        pausas_q = pausas_q.filter(PausaOperacional.status != "concluido")
+    if situacao_rota == "nao_roteirizado":
+        pausas_q = pausas_q.filter(text("1=0"))
+    pausas_operacao = pausas_q.options(joinedload(PausaOperacional.equipe)).all()
+
+    itens_timeline = [
+        {"tipo_linha": "agenda", "agenda": a, "data": a.data, "hora": hora_roteirizada(a), "id": a.id}
+        for a in itens
+    ]
+    itens_timeline.extend(
+        {"tipo_linha": "pausa", "pausa": p, "data": p.data, "hora": p.hora_inicio or time.max, "id": p.id}
+        for p in pausas_operacao
+    )
+    itens_timeline.sort(key=lambda linha: (linha.get("data") or date.max, linha.get("hora") or time.max, 1 if linha["tipo_linha"] == "pausa" else 0, linha.get("id") or 0))
+
+    cfg_operacao = _config_rota(db, empresa.id)
+    endereco_loja_operacao = (cfg_operacao.endereco_loja or "").strip()
+    url_waze_loja = f"https://www.waze.com/ul?q={quote(endereco_loja_operacao)}&navigate=yes" if endereco_loja_operacao else ""
+    url_maps_loja = f"https://www.google.com/maps/dir/?api=1&destination={quote(endereco_loja_operacao)}" if endereco_loja_operacao else ""
+
+    # Prepara a solicitação de saldo uma única vez por contrato exibido. O link é
+    # a página permanente da reserva; ela própria decide se continua uma cobrança
+    # InfinitePay existente ou oferece somente o saldo restante.
+    for agenda_item in itens:
+        sol = agenda_item.solicitacao
+        if not sol or hasattr(sol, "mensagem_saldo_operacao_view"):
+            continue
+        saldo = max(float(sol.valor or 0) - float(sol.valor_pago or 0), 0.0)
+        sol.saldo_operacao_view = saldo
+        sol.mensagem_saldo_operacao_view = montar_mensagem_whatsapp_saldo_operacao(request, empresa, sol) if saldo > 0.009 else ""
+
     # Mapa de vínculo entre ENTREGA e RETIRADA da mesma solicitação.
     # A consulta ignora os filtros da tela para permitir localizar também
     # operações concluídas ou fora do período atualmente selecionado.
@@ -5564,7 +5629,9 @@ def preparar_reservas(
         "request": request,
         "empresa": empresa,
         "itens": itens,
-        "total_itens": len(itens),
+        "itens_timeline": itens_timeline,
+        "pausas_operacao": pausas_operacao,
+        "total_itens": len(itens) + len(pausas_operacao),
         "data_inicial": data_inicial,
         "data_final": data_final,
         "mostrar_entregas": mostrar_entregas,
@@ -5573,7 +5640,227 @@ def preparar_reservas(
         "equipes": equipes, "equipe_id": equipe_id, "situacao_rota": situacao_rota,
         "mensagens": mensagens_empresa(empresa),
         "operacoes_vinculadas": operacoes_vinculadas,
+        "config_operacao": cfg_operacao,
+        "endereco_loja_operacao": endereco_loja_operacao,
+        "url_waze_loja": url_waze_loja,
+        "url_maps_loja": url_maps_loja,
+        "hoje_iso": date.today().isoformat(),
     })
+
+
+@app.post("/painel/reservas/pausa-loja")
+def criar_pausa_operacao_loja(
+    request: Request,
+    data_pausa: str = Form(...),
+    hora_pausa: str = Form(...),
+    equipe_id: int = Form(...),
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
+    if equipe_id not in permitidas:
+        raise HTTPException(403, "Equipe não permitida para este usuário.")
+    try:
+        data_obj = datetime.strptime((data_pausa or "").strip(), "%Y-%m-%d").date()
+        hora_obj = datetime.strptime((hora_pausa or "").strip(), "%H:%M").time()
+    except ValueError:
+        raise HTTPException(400, "Informe data e hora válidas para voltar à loja.")
+
+    pausa = PausaOperacional(
+        empresa_id=empresa.id,
+        equipe_id=equipe_id,
+        data=data_obj,
+        hora_inicio=hora_obj,
+        status="pendente",
+        criado_por=(request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"),
+    )
+    db.add(pausa)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/reservas", status_code=303)
+
+
+@app.post("/painel/reservas/pausa-loja/{pausa_id}/concluir")
+def concluir_pausa_operacao_loja(
+    pausa_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    pausa = db.query(PausaOperacional).filter_by(id=pausa_id, empresa_id=empresa.id).first()
+    if not pausa:
+        raise HTTPException(404)
+    permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
+    if pausa.equipe_id not in permitidas:
+        raise HTTPException(403)
+    pausa.status = "concluido"
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/reservas", status_code=303)
+
+
+@app.post("/painel/reservas/pausa-loja/{pausa_id}/excluir")
+def excluir_pausa_operacao_loja(
+    pausa_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    pausa = db.query(PausaOperacional).filter_by(id=pausa_id, empresa_id=empresa.id).first()
+    if not pausa:
+        raise HTTPException(404)
+    permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
+    if pausa.equipe_id not in permitidas:
+        raise HTTPException(403)
+    db.delete(pausa)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/reservas", status_code=303)
+
+
+@app.post("/painel/reservas/calcular-tempos")
+def calcular_tempos_operacao_manual(
+    request: Request,
+    data_inicial: str = Form(...),
+    data_final: str = Form(...),
+    equipe_id: int = Form(...),
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Calcula somente tempos da sequência roteirizada manualmente.
+
+    Não reorganiza a rota e não consulta peso, capacidade, compartimentos ou veículo.
+    Reaproveita apenas deslocamento e tempos operacionais da Inteligência.
+    """
+    permitidas = {e.id for e in equipes_visiveis_usuario(request, db, empresa.id)}
+    if equipe_id not in permitidas:
+        raise HTTPException(403, "Equipe não permitida para este usuário.")
+    try:
+        inicio = datetime.strptime((data_inicial or "").strip(), "%Y-%m-%d").date()
+        fim = datetime.strptime((data_final or "").strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Período inválido.")
+    if fim < inicio:
+        fim = inicio
+
+    cfg = _config_rota(db, empresa.id)
+    agendas = (
+        db.query(Agenda)
+        .options(joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente))
+        .filter(
+            Agenda.empresa_id == empresa.id,
+            Agenda.equipe_id == equipe_id,
+            Agenda.roteirizado == True,
+            Agenda.data >= inicio,
+            Agenda.data <= fim,
+            Agenda.status_operacional != "concluido",
+        )
+        .all()
+    )
+    pausas = (
+        db.query(PausaOperacional)
+        .filter(
+            PausaOperacional.empresa_id == empresa.id,
+            PausaOperacional.equipe_id == equipe_id,
+            PausaOperacional.data >= inicio,
+            PausaOperacional.data <= fim,
+            PausaOperacional.status != "concluido",
+        )
+        .all()
+    )
+
+    linhas = []
+    for a in agendas:
+        linhas.append({
+            "chave": f"agenda-{a.id}",
+            "tipo": a.tipo_evento or "entrega",
+            "data": a.data,
+            "hora": a.hora_inicio or time.max,
+            "agenda": a,
+        })
+    for pausa in pausas:
+        linhas.append({
+            "chave": f"pausa-{pausa.id}",
+            "tipo": "loja",
+            "data": pausa.data,
+            "hora": pausa.hora_inicio or time.max,
+            "pausa": pausa,
+        })
+    linhas.sort(key=lambda x: (x["data"] or date.max, x["hora"] or time.max, x["chave"]))
+
+    resultados = []
+    dia_atual = None
+    lat_anterior = lon_anterior = None
+    local_anterior = "Loja"
+    bairro_anterior = (cfg.endereco_loja or "Loja")
+    servico_anterior = 0
+
+    loja_tem_coord = _coordenadas_validas_brasil(cfg.latitude_loja, cfg.longitude_loja)
+
+    for linha in linhas:
+        if linha["data"] != dia_atual:
+            dia_atual = linha["data"]
+            lat_anterior = float(cfg.latitude_loja) if loja_tem_coord else None
+            lon_anterior = float(cfg.longitude_loja) if loja_tem_coord else None
+            local_anterior = "Loja"
+            bairro_anterior = (cfg.endereco_loja or "Loja")
+            servico_anterior = 0
+
+        tipo = linha["tipo"]
+        if tipo == "loja":
+            lat_destino = float(cfg.latitude_loja) if loja_tem_coord else None
+            lon_destino = float(cfg.longitude_loja) if loja_tem_coord else None
+            bairro_destino = cfg.endereco_loja or "Loja"
+            destino = "Voltar à loja"
+            servico = max(0, int(cfg.minutos_parada_loja or 0))
+            servico_label = "Pausa na loja"
+        else:
+            agenda = linha["agenda"]
+            sol = agenda.solicitacao
+            coord_ok = bool(sol and (sol.status_geocodificacao or "").strip().lower() == "localizado" and _coordenadas_validas_brasil(sol.latitude, sol.longitude))
+            lat_destino = float(sol.latitude) if coord_ok else None
+            lon_destino = float(sol.longitude) if coord_ok else None
+            bairro_destino = (agenda.bairro or (sol.bairro if sol else "") or "")
+            destino = (sol.cliente.nome if sol and sol.cliente else agenda.titulo) or agenda.titulo
+            if tipo == "retirada":
+                servico = max(0, int(cfg.minutos_desmontagem or 0))
+                servico_label = "Desmontagem/retirada"
+            else:
+                servico = max(0, int(cfg.minutos_montagem or 0))
+                servico_label = "Instalação"
+
+        distancia = None
+        deslocamento = None
+        if lat_anterior is not None and lon_anterior is not None and lat_destino is not None and lon_destino is not None:
+            distancia, deslocamento, _ = _trecho_rodoviario(lat_anterior, lon_anterior, lat_destino, lon_destino, cfg)
+        if deslocamento is None:
+            deslocamento = _deslocamento_estimado_sem_coordenadas(bairro_anterior, bairro_destino)
+
+        deslocamento = max(0, int(deslocamento or 0))
+        resultados.append({
+            "chave": linha["chave"],
+            "tipo": tipo,
+            "origem": local_anterior,
+            "destino": destino,
+            "deslocamento_min": deslocamento,
+            "distancia_km": round(float(distancia or 0), 1) if distancia is not None else None,
+            "servico_min": servico,
+            "servico_label": servico_label,
+            "intervalo_desde_anterior_min": deslocamento + max(0, int(servico_anterior or 0)),
+        })
+
+        lat_anterior, lon_anterior = lat_destino, lon_destino
+        bairro_anterior = bairro_destino
+        local_anterior = destino
+        servico_anterior = servico
+
+    return {
+        "ok": True,
+        "resultados": resultados,
+        "parametros": {
+            "montagem_min": max(0, int(cfg.minutos_montagem or 0)),
+            "desmontagem_min": max(0, int(cfg.minutos_desmontagem or 0)),
+            "pausa_loja_min": max(0, int(cfg.minutos_parada_loja or 0)),
+        },
+        "observacao": "A ordem manual foi preservada. Peso e capacidade não participam deste cálculo.",
+    }
 
 
 @app.get("/painel/agenda/{agenda_id}/localizar-vinculada")

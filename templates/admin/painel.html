@@ -1,5 +1,38 @@
 {% extends "base.html" %}
 {% block conteudo %}
+<div id="popupTarefasHoje" class="tarefas-hoje-overlay" data-dia="{{ tarefas_hoje_data }}" hidden>
+  <section class="tarefas-hoje-card" role="dialog" aria-modal="true" aria-labelledby="tituloTarefasHoje">
+    <button type="button" class="tarefas-hoje-fechar" id="fecharTarefasHoje" aria-label="Fechar">×</button>
+    <div class="tarefas-hoje-icone"><i class="bi bi-calendar-check"></i></div>
+    <div>
+      <small class="tarefas-hoje-kicker">Resumo do dia</small>
+      <h2 id="tituloTarefasHoje">Tarefas de hoje</h2>
+    </div>
+    <div class="tarefas-hoje-resumo">
+      <div><strong>{{ tarefas_hoje_entregas }}</strong><span>entrega{% if tarefas_hoje_entregas != 1 %}s{% endif %}</span></div>
+      <div><strong>{{ tarefas_hoje_retiradas }}</strong><span>retirada{% if tarefas_hoje_retiradas != 1 %}s{% endif %}</span></div>
+    </div>
+    <div class="tarefas-hoje-mais">
+      <b>Mais informações</b>
+      <p>Você tem <strong>{{ tarefas_hoje_contratos_pendentes }}</strong> contrato{% if tarefas_hoje_contratos_pendentes != 1 %}s{% endif %} pendente{% if tarefas_hoje_contratos_pendentes != 1 %}s{% endif %}.</p>
+    </div>
+  </section>
+</div>
+<style>
+.tarefas-hoje-overlay{position:fixed;inset:0;z-index:2200;background:rgba(15,23,42,.48);display:grid;place-items:center;padding:18px}.tarefas-hoje-overlay[hidden]{display:none}.tarefas-hoje-card{position:relative;width:min(430px,100%);background:#fff;border-radius:22px;padding:22px;box-shadow:0 24px 70px rgba(15,23,42,.25);border:1px solid #e2e8f0}.tarefas-hoje-fechar{position:absolute;right:12px;top:10px;width:38px;height:38px;border:0;background:#f1f5f9;color:#334155;border-radius:50%;font-size:26px;line-height:1;cursor:pointer}.tarefas-hoje-icone{width:48px;height:48px;border-radius:14px;background:#eef2ff;display:grid;place-items:center;font-size:22px;margin-bottom:12px}.tarefas-hoje-kicker{font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em}.tarefas-hoje-card h2{margin:3px 0 14px}.tarefas-hoje-resumo{display:grid;grid-template-columns:1fr 1fr;gap:10px}.tarefas-hoje-resumo>div{padding:14px;border-radius:15px;background:#f8fafc;border:1px solid #e2e8f0}.tarefas-hoje-resumo strong{display:block;font-size:1.7rem}.tarefas-hoje-resumo span{color:#475569;font-weight:700}.tarefas-hoje-mais{margin-top:12px;padding:14px;border-radius:15px;background:#fff7ed;border:1px solid #fed7aa}.tarefas-hoje-mais p{margin:5px 0 0;color:#7c2d12}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  const popup=document.getElementById('popupTarefasHoje');
+  if(!popup) return;
+  const chave='conect_tarefas_hoje_'+(popup.dataset.dia||'');
+  if(sessionStorage.getItem(chave)!=='fechado') popup.hidden=false;
+  document.getElementById('fecharTarefasHoje')?.addEventListener('click', function(){
+    popup.hidden=true;
+    sessionStorage.setItem(chave,'fechado');
+  });
+});
+</script>
 <section class="humiat-wallet-card" aria-label="Carteira Humiat">
     <div class="humiat-wallet-top">
         <div class="humiat-brand-block">

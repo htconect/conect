@@ -563,6 +563,26 @@ class Agenda(Base):
     equipe = relationship("Equipe")
 
 
+class PausaOperacional(Base):
+    """Pausa manual da Operação, independente da Inteligência Logística.
+
+    É usada para representar um retorno intermediário à loja sem alterar contrato,
+    entrega, retirada ou ordem definida pelo operador.
+    """
+    __tablename__ = "pausas_operacionais"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    equipe_id = Column(Integer, ForeignKey("equipes.id"), nullable=False, index=True)
+    data = Column(Date, nullable=False, index=True)
+    hora_inicio = Column(Time, nullable=False)
+    status = Column(String(20), nullable=False, default="pendente")
+    criado_por = Column(String(120), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    equipe = relationship("Equipe")
+
+
 class ContaFinanceira(Base):
     __tablename__ = "contas_financeiras"
 
