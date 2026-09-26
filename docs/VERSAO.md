@@ -1,18 +1,15 @@
-# HUMIAT Conect — Versão 1.0.62
+# HUMIAT Conect — Versão 1.0.63
 
-Evolução da Operação manual.
+## Operação
+- Exibe **Equipe tempo** = deslocamento puro entre endereços na ordem roteirizada manualmente.
+- Exibe **Tempo para etapas** = deslocamento + tempo operacional da etapa anterior.
+- Mantém instalação, desmontagem e pausa configuradas na Inteligência apenas como parâmetros de tempo.
+- Não calcula peso/capacidade e não reorganiza a rota.
 
-- Novo botão **Solicitar pagamento do saldo** nos cards com valor pendente.
-- O WhatsApp envia o link permanente da reserva direcionado à etapa de pagamento e informa o saldo restante.
-- Novo popup **Tarefas de hoje** ao entrar no Connect, apenas informativo, com entregas, retiradas e contratos pendentes.
-- Novo card manual **Voltar à loja**, usado como pausa operacional sem alterar contratos ou concluir entregas/retiradas.
-- Novo botão **Calcular tempo** na Operação.
-- O cálculo preserva exatamente a ordem roteirizada manualmente.
-- Reaproveita deslocamento, tempo de instalação, desmontagem/retirada e parada na loja já configurados na Inteligência.
-- Peso, capacidade do veículo, compartimentos e otimização automática não participam desse cálculo.
-- O card mostra o tempo entre as etapas e o detalhamento de deslocamento + serviço.
-- Após calcular, o botão **A caminho** inclui no WhatsApp uma previsão de chegada baseada no tempo do trecho atual.
+## Google Agenda
+- Restaurados OAuth/configuração por empresa e botões **Sincronizar Google** em Contratos e Operação.
+- Mantém um único evento por contrato e atualiza para Entrega/Retirada conforme sincronização operacional.
+- Contrato finalizado/aceito volta a sincronizar automaticamente quando a empresa estiver conectada ao Google; ao encerrar a retirada, o evento é removido.
 
-Commit sugerido:
-
-`Connect 1.0.62 - evolui operacao manual com saldo, tarefas, pausa na loja e calculo de tempo`
+Commit Git/Render:
+`Connect 1.0.63 - separa tempo de equipe e etapas e restaura Google Agenda`

@@ -30,6 +30,21 @@
     </div>
 </form>
 
+{% if request.query_params.get('google_erro') %}<div class="alerta-operacao-pagamento">{{ request.query_params.get('google_erro') }}</div>{% endif %}
+{% if (request.query_params.get('google_ok') is not none) or (empresa.google_calendar_ativo and empresa.google_calendar_operacao) %}
+<div class="google-sync-operacao">
+    {% if request.query_params.get('google_ok') is not none %}
+    <div class="box google-sync-status"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} finalizado(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
+    {% endif %}
+    {% if empresa.google_calendar_ativo and empresa.google_calendar_operacao %}
+    <form method="post" action="/painel/reservas/google-calendar/sincronizar" class="acoes google-sync-form">
+        {% for a in itens %}<input type="hidden" name="agenda_ids" value="{{ a.id }}">{% endfor %}
+        <button type="submit" class="botao-mini principal" {% if not itens %}disabled{% endif %}><i class="bi bi-calendar-check"></i> Sincronizar Google</button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+
 <section class="operacao-ferramentas">
     <button type="button" class="botao-mini principal" id="calcularTemposOperacao">
         <i class="bi bi-clock-history"></i> Calcular tempo
@@ -65,6 +80,7 @@
             <div class="info-agenda operacao-info-card">
                 <b>Voltar à loja</b>
                 <small>{{ endereco_loja_operacao or 'Endereço da loja não configurado' }}</small>
+                <small class="tempo-equipe-resumo" data-equipe-tempo hidden></small>
                 <small class="tempo-operacao-resumo" data-tempo-resumo hidden></small>
                 <em>PAUSA</em>
             </div>
@@ -170,6 +186,7 @@
                 {% if observacao_card %}
                 <small class="observacao-destaque">{{ observacao_card }}</small>
                 {% endif %}
+                <small class="tempo-equipe-resumo" data-equipe-tempo hidden></small>
                 <small class="tempo-operacao-resumo" data-tempo-resumo hidden></small>
                 <em>{{ 'RETIRADA' if tipo == 'retirada' else 'ENTREGA' }}</em>
             </div>
@@ -181,6 +198,8 @@
                 {% else %}
                     Não roteirizado
                 {% endif %}
+                {% set gs = a.google_calendar_status_view or 'nao_sincronizado' %}
+                {% if empresa.google_calendar_ativo and empresa.google_calendar_operacao %}<small>Google: {% if gs == 'sincronizado' %}Sincronizado{% elif gs == 'atualizar' %}Atualizar{% elif gs == 'erro' %}Erro{% elif gs == 'finalizado' %}Finalizado{% elif gs == 'substituido' %}Substituído{% else %}Não sincronizado{% endif %}</small>{% endif %}
             </div>
             <span class="seta-card seta-expandir">⌄</span>
         </summary>
@@ -557,10 +576,11 @@ async function calcularTemposOperacao(){
     (dados.resultados||[]).forEach(r=>{
       const card=document.querySelector(`[data-operacao-chave="${r.chave}"]`);
       if(!card) return;
+      const equipeTempo=card.querySelector('[data-equipe-tempo]');
       const resumo=card.querySelector('[data-tempo-resumo]');
       const detalhe=card.querySelector('[data-tempo-detalhe]');
-      const resumoTexto=`Tempo entre etapas: ${r.intervalo_desde_anterior_min} min`;
-      if(resumo){ resumo.textContent=resumoTexto; resumo.hidden=false; }
+      if(equipeTempo){ equipeTempo.textContent=`Equipe tempo: ${r.deslocamento_min} min`; equipeTempo.hidden=false; }
+      if(resumo){ resumo.textContent=`Tempo para etapas: ${r.intervalo_desde_anterior_min} min`; resumo.hidden=false; }
       if(detalhe){
         const distancia=(r.distancia_km!==null && r.distancia_km!==undefined) ? ` · ${Number(r.distancia_km).toLocaleString('pt-BR',{maximumFractionDigits:1})} km` : '';
         detalhe.textContent=`${r.origem} → ${r.destino}: ${r.deslocamento_min} min de deslocamento${distancia} · ${r.servico_label}: ${r.servico_min} min.`;
@@ -583,7 +603,7 @@ document.getElementById('calcularTemposOperacao')?.addEventListener('click', cal
 </script>
 
 <style>
-    .operacao-ferramentas{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin:10px 0 14px}.operacao-ferramentas>small{align-self:center}.adicionar-pausa-loja{position:relative}.adicionar-pausa-loja>summary{list-style:none;cursor:pointer}.adicionar-pausa-loja>summary::-webkit-details-marker{display:none}.adicionar-pausa-loja[open] .form-pausa-loja{display:block}.form-pausa-loja{position:absolute;z-index:20;right:0;top:42px;width:min(620px,92vw);background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:14px;box-shadow:0 18px 48px rgba(15,23,42,.16)}.pausa-loja{border-left:4px solid #8b5cf6!important}.pausa-loja .bolinha-pausa{background:#8b5cf6!important}.pausa-loja .operacao-info-card em{background:#ede9fe;color:#5b21b6}.tempo-operacao-resumo{font-weight:800;color:#1d4ed8!important}.tempo-operacao-calculado{margin:8px 0;padding:10px 12px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-weight:800;font-size:13px}.solicitar-pagamento-saldo{width:100%;justify-content:center;margin:8px 0;background:#16a34a!important;color:#fff!important}.acoes-rota form{margin:0}
+    .google-sync-operacao{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0}.google-sync-status{margin:0!important}.google-sync-form{margin:0!important}.operacao-ferramentas{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;margin:10px 0 14px}.operacao-ferramentas>small{align-self:center}.adicionar-pausa-loja{position:relative}.adicionar-pausa-loja>summary{list-style:none;cursor:pointer}.adicionar-pausa-loja>summary::-webkit-details-marker{display:none}.adicionar-pausa-loja[open] .form-pausa-loja{display:block}.form-pausa-loja{position:absolute;z-index:20;right:0;top:42px;width:min(620px,92vw);background:#fff;border:1px solid #dbe3ee;border-radius:14px;padding:14px;box-shadow:0 18px 48px rgba(15,23,42,.16)}.pausa-loja{border-left:4px solid #8b5cf6!important}.pausa-loja .bolinha-pausa{background:#8b5cf6!important}.pausa-loja .operacao-info-card em{background:#ede9fe;color:#5b21b6}.tempo-equipe-resumo,.tempo-operacao-resumo{font-weight:800;color:#1d4ed8!important}.tempo-operacao-calculado{margin:8px 0;padding:10px 12px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-weight:800;font-size:13px}.solicitar-pagamento-saldo{width:100%;justify-content:center;margin:8px 0;background:#16a34a!important;color:#fff!important}.acoes-rota form{margin:0}
     .observacoes-contrato-operacao{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;margin:8px 0}
     .observacoes-contrato-operacao b{display:block;margin-bottom:4px}
     .observacoes-contrato-operacao p{margin:0;white-space:pre-wrap}
