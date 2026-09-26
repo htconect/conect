@@ -46,7 +46,7 @@
         <i class="bi bi-clock-history"></i> Calcular tempo
     </button>
     <details class="adicionar-pausa-loja">
-        <summary class="botao-mini"><i class="bi bi-house-door"></i> Parada na loja</summary>
+        <summary class="botao-mini principal"><i class="bi bi-house-door"></i> Parada na loja</summary>
         <form method="post" action="/painel/reservas/pausa-loja" class="form-pausa-loja">
             <p class="texto-discreto">Insere uma pausa manual na sequência. Não altera nenhum contrato.</p>
             <div class="linha">
@@ -577,11 +577,11 @@ function aplicarTemposOperacao(dados){
     const labelAtual=(r.servico_atual_label||r.servico_label||'').trim();
 
     if(equipeTempo){
-      equipeTempo.textContent=`Equipe tempo: ${formatarDuracao(deslocamento)}`;
+      equipeTempo.textContent=`Deslocamento: ${formatarDuracao(deslocamento)}`;
       equipeTempo.hidden=false;
     }
     if(resumo){
-      resumo.textContent=`Tempo de chegada: ${formatarDuracao(chegada)}`;
+      resumo.textContent=`Chegada: ${formatarDuracao(chegada)}`;
       resumo.hidden=false;
     }
     if(detalhe){
