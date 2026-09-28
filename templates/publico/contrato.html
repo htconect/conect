@@ -57,7 +57,7 @@
       {% if item.cliente.cpf %}<p><b>CPF:</b> {{ item.cliente.cpf }}</p>{% endif %}
       {% if item.cliente.cnpj %}<p><b>CNPJ:</b> {{ item.cliente.cnpj }}</p>{% endif %}
       {% if item.cliente.email %}<p><b>E-mail:</b> {{ item.cliente.email }}</p>{% endif %}
-      {% if empresa.mostrar_suporte_contrato and (empresa.suporte_inicio or empresa.suporte_fim) %}<p><b>Suporte:</b> {{ empresa.suporte_inicio or '--:--' }} às {{ empresa.suporte_fim or '--:--' }}</p>{% endif %}
+      {% if suporte_contrato %}<p><b>Suporte técnico deste contrato:</b> {{ suporte_contrato[0] }} às {{ suporte_contrato[1] }}</p>{% endif %}
     </div>
   </details>
 
@@ -71,6 +71,7 @@
       {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
       <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</p>
       {% if item.acesso_local %}<p><b>Acesso:</b> {{ item.acesso_local }}</p>{% endif %}
+      <p><b>Retirada:</b> {{ retirada_texto }}</p>
       {% if item.observacoes %}<p><b>Observações:</b> {{ item.observacoes }}</p>{% endif %}
       <h3 style="margin-top:16px">Produtos e serviços</h3>
       {% for it in itens_reserva %}

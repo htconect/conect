@@ -121,6 +121,11 @@
       {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
     </select>
     <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
+    <div id="recursosNovoContrato" class="box" style="margin-top:10px" hidden>
+      <h3 style="margin-top:0">Recursos desta locação</h3>
+      <p class="texto-discreto">Ajuste agora as quantidades antes de salvar o contrato.</p>
+      <div id="listaRecursosNovoContrato"></div>
+    </div>
     <label>Modelo de contrato</label>
     <select name="contrato_id">
       <option value="">Selecionar depois</option>
@@ -159,6 +164,29 @@
   <button id="btnContratoNovo">{% if modo_edicao %}Salvar alterações{% else %}Criar{% endif %}</button>
 </form>
 <script>
+const RECURSOS_POR_PRODUTO = {{ recursos_por_produto_view|default({})|tojson }};
+const RECURSOS_ATUAIS_CONTRATO = {{ recursos_atuais_view|default({})|tojson }};
+const PRODUTO_INICIAL_CONTRATO = String({{ (form.produto_id if form.produto_id is defined else '')|tojson }});
+const SOLICITACAO_ATUAL_ID = {{ item.id if modo_edicao and item is defined and item else 0 }};
+function atualizarRecursosNovoContrato(){
+  const produto=document.querySelector('select[name="produto_id"]');
+  const box=document.getElementById('recursosNovoContrato');
+  const lista=document.getElementById('listaRecursosNovoContrato');
+  if(!produto || !box || !lista) return;
+  const produtoId=String(produto.value||'');
+  const recursos=RECURSOS_POR_PRODUTO[produtoId]||[];
+  if(!recursos.length){ box.hidden=true; lista.innerHTML=''; return; }
+  box.hidden=false;
+  lista.innerHTML=recursos.map(r=>{
+    const atual = produtoId === PRODUTO_INICIAL_CONTRATO ? RECURSOS_ATUAIS_CONTRATO[String(r.id)] : null;
+    const ativo = atual ? Boolean(atual.ativo) : true;
+    const qtd = atual ? Number(atual.quantidade || 0) : Number(r.quantidade || 0);
+    return `<div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
+      <div><input type="hidden" name="recurso_preview_id" value="${r.id}"><input type="hidden" name="recurso_preview_ativo" value="${ativo?'1':'0'}" class="recurso-novo-ativo"><label class="check" style="margin:0"><input type="checkbox" ${ativo?'checked':''} onchange="this.closest('.linha').querySelector('.recurso-novo-ativo').value=this.checked?'1':'0'"> ${r.nome}</label></div>
+      <div><label>Qtd. nesta locação</label><input name="recurso_preview_quantidade" type="number" min="0" value="${qtd}"></div>
+    </div>`;
+  }).join('');
+}
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
   const contrato = document.querySelector('select[name="contrato_id"]');
@@ -219,7 +247,7 @@ async function buscarCEP(){
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); consultarEstoqueProduto(); }
+  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
   if(ev.target?.name === 'cupom_codigo') recalcularValoresContratoManual();
   if(ev.target?.name === 'modo_criacao') alternarEtapas();
   if(ev.target?.name === 'data_evento'){
@@ -235,19 +263,22 @@ async function consultarEstoqueProduto(){
   const box=document.getElementById('avisoEstoqueProduto');
   if(!produto || !data || !box || !produto.value || !data.value){ if(box) box.hidden=true; return; }
   try{
-    const r=await fetch(`/api/estoque/produto/${encodeURIComponent(produto.value)}?data=${encodeURIComponent(data.value)}`);
+    const extra = SOLICITACAO_ATUAL_ID ? `&solicitacao_id=${SOLICITACAO_ATUAL_ID}` : '';
+    const r=await fetch(`/api/estoque/produto/${encodeURIComponent(produto.value)}?data=${encodeURIComponent(data.value)}${extra}`);
     if(!r.ok){ box.hidden=true; return; }
     const d=await r.json();
     const problemas=[];
-    if(d.disponiveis <= 0) problemas.push(`<b>Sem disponibilidade real para ${d.produto} nesta data.</b>`);
-    else if(d.limitado_recursos) problemas.push(`<b>Atenção: o estoque de itens de apoio limita ${d.produto} a ${d.disponiveis} unidade(s).</b>`);
+    const disponivel = Number(d.disponiveis || 0) > 0;
+    problemas.push(disponivel
+      ? `<b style="color:#16803a">Equipamento disponível · ${d.disponiveis} unidade(s) livre(s)</b>`
+      : `<b style="color:#c62828">Equipamento indisponível para esta data</b>`);
+    if(disponivel && d.limitado_recursos) problemas.push(`<b>Atenção: o estoque de itens de apoio limita ${d.produto} a ${d.disponiveis} unidade(s).</b>`);
     (d.recursos||[]).forEach(x=>{
       if(x.capacidade_produto < d.disponivel_fisico){
         problemas.push(`${x.nome}: estoque ${x.estoque_total}, comprometido ${x.comprometido}, livre ${x.disponivel}, usa ${x.por_unidade} por produto.`);
       }
     });
-    if(problemas.length){ box.innerHTML=problemas.map(x=>`<div>${x}</div>`).join(''); box.hidden=false; }
-    else box.hidden=true;
+    box.innerHTML=problemas.map(x=>`<div>${x}</div>`).join(''); box.hidden=false;
   }catch(e){ box.hidden=true; }
 }
 
@@ -298,7 +329,7 @@ document.addEventListener('input', function(ev){
 });
 
 document.addEventListener('DOMContentLoaded', function(){
-  const produto=document.querySelector('select[name="produto_id"]'); if(produto) aplicarContratoPadrao(produto);
+  const produto=document.querySelector('select[name="produto_id"]'); if(produto){ aplicarContratoPadrao(produto); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
   alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto(); recalcularValoresContratoManual();
   const tel=document.getElementById('telefoneCliente');
   if(tel){

@@ -1353,7 +1353,55 @@ def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     return linhas
 
 
-def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "texto") -> list[str]:
+def _time_hhmm(valor, padrao: str) -> time:
+    texto = str(valor or padrao).strip() or padrao
+    try:
+        return datetime.strptime(texto[:5], "%H:%M").time()
+    except (TypeError, ValueError):
+        return datetime.strptime(padrao, "%H:%M").time()
+
+
+def horario_suporte_contrato(empresa: Empresa, item: Solicitacao) -> tuple[str, str] | None:
+    """Faixa de suporte deste contrato, limitada à janela geral da empresa.
+
+    Ex.: contrato 12:00-16:00 => suporte 12:00-16:00.
+    Contrato 18:00-22:00 => suporte 18:00-22:00.
+    """
+    if not item or not item.hora_inicio:
+        return None
+    data_base = item.data_evento or date.today()
+    inicio_evento = datetime.combine(data_base, item.hora_inicio)
+    if item.hora_fim:
+        fim_evento = datetime.combine(data_base, item.hora_fim)
+        if fim_evento <= inicio_evento:
+            fim_evento += timedelta(days=1)
+    else:
+        duracao = 240
+        if getattr(item, "produto", None) and getattr(item.produto, "duracao_minutos", None):
+            duracao = max(1, int(item.produto.duracao_minutos or 240))
+        fim_evento = inicio_evento + timedelta(minutes=duracao)
+
+    inicio_geral = datetime.combine(data_base, _time_hhmm(getattr(empresa, "suporte_inicio", ""), "09:00"))
+    fim_geral = datetime.combine(data_base, _time_hhmm(getattr(empresa, "suporte_fim", ""), "22:00"))
+    inicio = max(inicio_evento, inicio_geral)
+    fim = min(fim_evento, fim_geral)
+    if fim <= inicio:
+        return None
+    return inicio.strftime("%H:%M"), fim.strftime("%H:%M")
+
+
+def texto_retirada_contrato(item: Solicitacao) -> str:
+    """Texto contratual da retirada normal ou obrigatória."""
+    if retirada_obrigatoria_ativa(item):
+        data_ret = item.retirada_data or item.data_evento
+        hora_ret = item.retirada_hora or item.hora_fim or item.hora_inicio
+        data_txt = data_ret.strftime("%d/%m/%Y") if data_ret else "data combinada"
+        hora_txt = hora_ret.strftime("%H:%M") if hora_ret else "horário combinado"
+        return f"Retirada obrigatória em {data_txt} às {hora_txt}."
+    return "Retirada a partir das 08:00, conforme a nossa rota operacional."
+
+
+def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "texto", empresa: Empresa | None = None) -> list[str]:
     """Lista todas as informações preenchidas do contrato/reserva para PDF e WhatsApp.
     formato='whatsapp' usa negrito com *campo*.
     """
@@ -1388,6 +1436,11 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     add(linhas, "Data do evento", fmt_data(item.data_evento))
     add(linhas, "Hora de início", fmt_hora(item.hora_inicio))
     add(linhas, "Hora de fim", fmt_hora(item.hora_fim))
+    if empresa:
+        faixa_suporte = horario_suporte_contrato(empresa, item)
+        if faixa_suporte:
+            add(linhas, "Suporte técnico", f"{faixa_suporte[0]} às {faixa_suporte[1]}")
+    add(linhas, "Retirada", texto_retirada_contrato(item))
 
     add(linhas, "Nome do local", item.local_nome)
     add(linhas, "Endereço do evento", item.local)
@@ -1452,6 +1505,10 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
         "",
         "*📅 Início do evento*",
         f"{data_txt} às {hora_txt}",
+        "",
+        *(["*🛠️ Suporte técnico*", f"{horario_suporte_contrato(empresa, item)[0]} às {horario_suporte_contrato(empresa, item)[1]}", ""] if horario_suporte_contrato(empresa, item) else []),
+        "*🚚 Retirada*",
+        texto_retirada_contrato(item),
         "",
         "*📍 Local*",
         endereco_texto or "-",
@@ -1689,6 +1746,9 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN suporte_fim VARCHAR(5)")
     if "mostrar_suporte_contrato" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mostrar_suporte_contrato BOOLEAN DEFAULT false")
+    # Regra global: janela geral de suporte encerra às 22:00 em todas as empresas.
+    # O contrato usa apenas a parcela dessa janela que coincide com a duração da locação.
+    comandos.append("UPDATE empresas SET suporte_fim = '22:00' WHERE COALESCE(suporte_fim, '') <> '22:00'")
     if "logo_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN logo_url VARCHAR(300)")
     if "tema" not in cols_emp:
@@ -3039,11 +3099,10 @@ def _previsao_retirada_operacional(reserva: Solicitacao, entrega: Agenda | None 
         prazo_dias = max(0, int(reserva.produto.prazo_retirada_dias or 0))
 
     data_entrega = (entrega.data if entrega and entrega.data else reserva.data_evento)
-    hora_entrega = (
-        (entrega.hora_fim or entrega.hora_inicio) if entrega
-        else (reserva.hora_fim or reserva.hora_inicio)
-    )
-    return data_entrega + timedelta(days=prazo_dias), hora_entrega
+    data_prevista = data_entrega + timedelta(days=prazo_dias)
+    # Retirada comum entra na rota a partir das 08:00; a roteirização pode
+    # posicioná-la depois conforme a sequência operacional.
+    return data_prevista, time(8, 0)
 
 
 def _criar_ou_obter_retirada_prevista(db: Session, reserva: Solicitacao, entrega: Agenda | None = None) -> Agenda:
@@ -3572,8 +3631,8 @@ def admin_criar_empresa(
         infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
         infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
         exige_sinal=bool(exige_sinal),
-        suporte_inicio=suporte_inicio.strip(),
-        suporte_fim=suporte_fim.strip(),
+        suporte_inicio=suporte_inicio.strip() or "09:00",
+        suporte_fim="22:00",
         mostrar_suporte_contrato=bool(mostrar_suporte_contrato),
         logo_url="",
         logo_idb_url="",
@@ -3702,8 +3761,8 @@ def admin_salvar_empresa(
     empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
     empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
-    empresa.suporte_inicio = suporte_inicio.strip()
-    empresa.suporte_fim = suporte_fim.strip()
+    empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
+    empresa.suporte_fim = "22:00"
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
@@ -4199,6 +4258,32 @@ def _mapa_recursos_produtos(db: Session, empresa_id: int) -> dict[int, dict[int,
             1, int(vinculo.quantidade_por_unidade or 1)
         )
     return mapa
+
+
+def _recursos_por_produto_view(db: Session, empresa_id: int) -> dict:
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa_id)
+    por_id = {r.id: r for r in itens_estoque}
+    mapa = _mapa_recursos_produtos(db, empresa_id)
+    return {
+        str(produto_id): [
+            {"id": rid, "nome": por_id[rid].nome, "quantidade": qtd}
+            for rid, qtd in vinculos.items() if rid in por_id
+        ]
+        for produto_id, vinculos in mapa.items()
+    }
+
+
+def _recursos_atuais_view(db: Session, item: Solicitacao | None) -> dict:
+    if not item or not getattr(item, "id", None):
+        return {}
+    analise = _analise_estoque_solicitacao(db, item)
+    return {
+        str(r["id"]): {
+            "ativo": bool(r.get("ativo_no_contrato")),
+            "quantidade": int(r.get("necessario", 0) if r.get("ativo_no_contrato") else 0),
+        }
+        for r in analise.get("recursos", [])
+    }
 
 
 def _requisitos_solicitacao_padrao(item: Solicitacao, mapa_produtos: dict[int, dict[int, int]]) -> dict[int, int]:
@@ -5502,8 +5587,8 @@ async def salvar_configuracoes_empresa(
         if linha and 0 < taxa < 100:
             linha.taxa_percentual = taxa
             linha.ativa = True
-    empresa.suporte_inicio = suporte_inicio.strip()
-    empresa.suporte_fim = suporte_fim.strip()
+    empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
+    empresa.suporte_fim = "22:00"
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
@@ -7427,6 +7512,9 @@ async def preparar_contrato(
     produto_ids = form.getlist("produto_id")
     quantidades = form.getlist("quantidade")
     valores_unitarios = form.getlist("valor_unitario")
+    recurso_preview_ids = form.getlist("recurso_preview_id")
+    recurso_preview_ativos = form.getlist("recurso_preview_ativo")
+    recurso_preview_quantidades = form.getlist("recurso_preview_quantidade")
 
     assinatura_anterior = sorted(
         (int(ri.produto_id), max(1, int(ri.quantidade or 1)))
@@ -7469,9 +7557,33 @@ async def preparar_contrato(
         if primeiro_produto is None:
             primeiro_produto = produto
 
-    if assinatura_anterior != sorted(assinatura_nova):
-        # Mudou a composição do contrato: volta ao consumo padrão dos produtos.
-        # O usuário poderá desmarcar/ajustar novamente os recursos no card do contrato.
+    # Os recursos agora são editáveis antes de salvar os equipamentos. Se o navegador
+    # enviou o preview, gravamos os ajustes junto com esta mesma operação.
+    if recurso_preview_ids:
+        mapa_recursos = _mapa_recursos_produtos(db, empresa.id)
+        recursos_validos = set()
+        for pid, _qtd in assinatura_nova:
+            recursos_validos.update(mapa_recursos.get(int(pid), {}).keys())
+        db.query(SolicitacaoRecurso).filter_by(
+            empresa_id=empresa.id, solicitacao_id=item.id
+        ).delete(synchronize_session=False)
+        for idx, bruto_id in enumerate(recurso_preview_ids):
+            try:
+                rid = int(bruto_id)
+            except (TypeError, ValueError):
+                continue
+            if rid not in recursos_validos:
+                continue
+            ativo = str(recurso_preview_ativos[idx] if idx < len(recurso_preview_ativos) else "0") == "1"
+            try:
+                qtd = int(recurso_preview_quantidades[idx] if idx < len(recurso_preview_quantidades) else 0)
+            except (TypeError, ValueError):
+                qtd = 0
+            db.add(SolicitacaoRecurso(
+                empresa_id=empresa.id, solicitacao_id=item.id, item_estoque_id=rid,
+                quantidade=max(0, qtd) if ativo else 0,
+            ))
+    elif assinatura_anterior != sorted(assinatura_nova):
         db.query(SolicitacaoRecurso).filter_by(
             empresa_id=empresa.id, solicitacao_id=item.id
         ).delete(synchronize_session=False)
@@ -7704,6 +7816,7 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
         "produtos": produtos,
         "contratos": contratos,
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
+        "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
         "erro": "",
         "form": form
     })
@@ -7831,6 +7944,9 @@ def contrato_novo_salvar(
         observacoes: str = Form(""),
         como_conheceu: str = Form(""),
         modo_criacao: str = Form("whatsapp"),
+        recurso_preview_id: list[str] = Form(default=[]),
+        recurso_preview_ativo: list[str] = Form(default=[]),
+        recurso_preview_quantidade: list[str] = Form(default=[]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -7862,6 +7978,7 @@ def contrato_novo_salvar(
             "produtos": produtos,
             "contratos": contratos,
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
+            "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
             "erro": mensagem,
             "form": form
         }, status_code=400)
@@ -8021,6 +8138,22 @@ def contrato_novo_salvar(
             valor_total=valor_equipamentos_float
         ))
 
+    if produto and recurso_preview_id:
+        recursos_validos = set(_mapa_recursos_produtos(db, empresa.id).get(int(produto.id), {}).keys())
+        for idx, bruto_id in enumerate(recurso_preview_id):
+            try:
+                rid = int(bruto_id)
+            except (TypeError, ValueError):
+                continue
+            if rid not in recursos_validos:
+                continue
+            ativo = str(recurso_preview_ativo[idx] if idx < len(recurso_preview_ativo) else "0") == "1"
+            try:
+                qtd = int(recurso_preview_quantidade[idx] if idx < len(recurso_preview_quantidade) else 0)
+            except (TypeError, ValueError):
+                qtd = 0
+            db.add(SolicitacaoRecurso(empresa_id=empresa.id, solicitacao_id=item.id, item_estoque_id=rid, quantidade=max(0, qtd) if ativo else 0))
+
     if manual:
         _processar_humiat_aceite(db, empresa, item)
 
@@ -8105,6 +8238,8 @@ def editar_solicitacao_completa(
         "produtos": produtos,
         "contratos": contratos,
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
+        "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
+        "recursos_atuais_view": _recursos_atuais_view(db, item),
         "erro": "",
         "form": form_solicitacao_completo(item),
         "modo_edicao": True,
@@ -8146,6 +8281,9 @@ def salvar_solicitacao_completa(
         local_responsavel_nome: str = Form(""),
         local_responsavel_telefone: str = Form(""),
         observacoes: str = Form(""),
+        recurso_preview_id: list[str] = Form(default=[]),
+        recurso_preview_ativo: list[str] = Form(default=[]),
+        recurso_preview_quantidade: list[str] = Form(default=[]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -8171,6 +8309,8 @@ def salvar_solicitacao_completa(
         return templates.TemplateResponse("admin/contrato_novo.html", {
             "request": request, "empresa": empresa, "produtos": produtos, "contratos": contratos,
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
+            "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
+            "recursos_atuais_view": _recursos_atuais_view(db, item),
             "erro": mensagem, "form": form, "modo_edicao": True, "item": item
         }, status_code=400)
 
@@ -8260,6 +8400,23 @@ def salvar_solicitacao_completa(
         item_principal.descricao = produto.descricao
         item_principal.valor_unitario = valor_equipamentos_float
         item_principal.valor_total = valor_equipamentos_float
+
+    if produto and recurso_preview_id:
+        recursos_validos = set(_mapa_recursos_produtos(db, empresa.id).get(int(produto.id), {}).keys())
+        db.query(SolicitacaoRecurso).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
+        for idx_recurso, bruto_id in enumerate(recurso_preview_id):
+            try:
+                rid = int(bruto_id)
+            except (TypeError, ValueError):
+                continue
+            if rid not in recursos_validos:
+                continue
+            ativo = str(recurso_preview_ativo[idx_recurso] if idx_recurso < len(recurso_preview_ativo) else "0") == "1"
+            try:
+                qtd = int(recurso_preview_quantidade[idx_recurso] if idx_recurso < len(recurso_preview_quantidade) else 0)
+            except (TypeError, ValueError):
+                qtd = 0
+            db.add(SolicitacaoRecurso(empresa_id=empresa.id, solicitacao_id=item.id, item_estoque_id=rid, quantidade=max(0, qtd) if ativo else 0))
 
     if item.status == "aguardando_nova_data":
         retirar_solicitacao_da_operacao(db, item)
@@ -11549,6 +11706,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
 def api_estoque_produto(
         produto_id: int,
         data: str = "",
+        solicitacao_id: int = 0,
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
@@ -11560,11 +11718,17 @@ def api_estoque_produto(
     except ValueError:
         raise HTTPException(422, "Data inválida")
 
-    alugados = _alugado_por_produto_data(db, empresa.id, data_consulta).get(produto.id, 0)
+    reservas_data = _reservas_ativas_na_data(db, empresa.id, data_consulta, solicitacao_id or None)
+    alugados = sum(
+        max(1, int(ri.quantidade or 1))
+        for reserva in reservas_data
+        for ri in (reserva.itens or [])
+        if ri.produto_id and int(ri.produto_id) == int(produto.id)
+    )
     total = max(0, int(produto.quantidade_disponivel or 0))
     disponivel_fisico = max(total - int(alugados or 0), 0)
     mapa = _mapa_recursos_produtos(db, empresa.id)
-    comprometido = _comprometimento_recursos_data(db, empresa.id, data_consulta)
+    comprometido = _comprometimento_recursos_data(db, empresa.id, data_consulta, solicitacao_id or None)
     itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
     disponiveis, recursos = _limite_recursos_produto(
         produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico
@@ -12862,7 +13026,7 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
     c.setFont("Helvetica-Bold", 11);
     c.drawString(40, y, "Dados preenchidos");
     y -= 16
-    for linha in linhas_informacoes_preenchidas_contrato(item, formato="texto"):
+    for linha in linhas_informacoes_preenchidas_contrato(item, formato="texto", empresa=empresa):
         if y < 110:
             c.showPage();
             y = h - 70
@@ -13055,6 +13219,8 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
         "sinal_primeiro_pagamento": sinal_primeiro_pagamento,
         "opcoes_pagamento": opcoes_pagamento,
         "erro_aceite": request.query_params.get("erro") == "aceite",
+        "suporte_contrato": horario_suporte_contrato(empresa, item),
+        "retirada_texto": texto_retirada_contrato(item),
     }, headers={"Cache-Control": "no-store"})
 
 

@@ -97,15 +97,16 @@
     <div class="linha">
       <div>
         <label>Suporte início</label>
-        <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '' }}">
+        <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '09:00' }}">
       </div>
       <div>
-        <label>Suporte fim</label>
-        <input name="suporte_fim" type="time" step="1800" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '' }}">
+        <label>Suporte fim (máximo 22:00)</label>
+        <input name="suporte_fim" type="time" step="1800" max="22:00" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '22:00' }}">
       </div>
     </div>
 
-    <label class="check"><input type="checkbox" name="mostrar_suporte_contrato" value="1" {% if empresa and empresa.mostrar_suporte_contrato %}checked{% endif %}> Mostrar horário de suporte no contrato</label>
+    <input type="hidden" name="mostrar_suporte_contrato" value="1">
+    <p class="texto-discreto">O contrato mostra automaticamente somente o período de suporte que coincide com a duração da locação, limitado até 22:00.</p>
 
     <h2>Logo da empresa</h2>
     {% if empresa and (empresa.logo_url or empresa.logo_idb_url) %}

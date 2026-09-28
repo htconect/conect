@@ -290,6 +290,7 @@
             <option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" {% if linha and linha.produto_id == p.id %}selected{% endif %}>{{ p.nome }}</option>
           {% endfor %}
         </select>
+        <div class="status-disponibilidade-equipamento texto-discreto" style="margin-top:6px" aria-live="polite"></div>
         <div class="linha">
           <div><label>Qtd.</label><input name="quantidade" type="number" min="1" value="{{ linha.quantidade if linha else 1 }}"></div>
           <div><label>Unitário</label><input name="valor_unitario" inputmode="decimal" value="{{ (linha.valor_unitario|moeda_br) if linha else '0,00' }}"></div>
@@ -325,8 +326,8 @@
     </div>
 
     <div class="box" id="previewRecursosEquipamentos" style="margin-top:12px">
-      <h3 style="margin-top:0">Recursos padrão calculados</h3>
-      <p class="texto-discreto">O sistema soma os recursos dos equipamentos e quantidades acima. Depois de salvar, você pode editar ou desmarcar cada recurso deste contrato.</p>
+      <h3 style="margin-top:0">Recursos desta locação</h3>
+      <p class="texto-discreto">Selecione o equipamento e ajuste os recursos agora, antes de salvar. As quantidades abaixo serão gravadas junto com os equipamentos.</p>
       <div id="listaPreviewRecursos"><small class="texto-discreto">Selecione os equipamentos para calcular os recursos.</small></div>
     </div>
 
@@ -586,6 +587,11 @@
 
 <script>
 const RECURSOS_POR_PRODUTO = {{ recursos_por_produto_view|tojson }};
+const RECURSOS_PREVIEW_MANUAIS = {
+  {% for recurso in recursos_contrato or [] %}
+  "{{ recurso.id }}": {ativo: {{ 'true' if recurso.ativo_no_contrato else 'false' }}, quantidade: {{ recurso.necessario if recurso.ativo_no_contrato else 0 }}},
+  {% endfor %}
+};
 function recalcularPreviewRecursos(){
   const totais = {};
   document.querySelectorAll('#itensReserva .item-reserva').forEach(linha => {
@@ -595,7 +601,7 @@ function recalcularPreviewRecursos(){
     const qtdProduto = Math.max(1, parseInt(qtdCampo?.value || '1', 10) || 1);
     (RECURSOS_POR_PRODUTO[produtoId] || []).forEach(r => {
       const chave = String(r.id);
-      if(!totais[chave]) totais[chave] = {nome:r.nome, quantidade:0};
+      if(!totais[chave]) totais[chave] = {id:r.id,nome:r.nome, quantidade:0};
       totais[chave].quantidade += (parseInt(r.quantidade || 0, 10) || 0) * qtdProduto;
     });
   });
@@ -606,8 +612,59 @@ function recalcularPreviewRecursos(){
     box.innerHTML = '<small class="texto-discreto">Nenhum recurso padrão vinculado aos equipamentos selecionados.</small>';
     return;
   }
-  box.innerHTML = linhas.map(r => `<div class="linha-local"><b>${r.nome}</b><span>${r.quantidade}</span></div>`).join('');
+  box.innerHTML = linhas.map(r => {
+    const salvo = RECURSOS_PREVIEW_MANUAIS[String(r.id)];
+    const ativo = salvo ? salvo.ativo : true;
+    const qtd = salvo ? salvo.quantidade : r.quantidade;
+    return `<div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
+      <div>
+        <input type="hidden" name="recurso_preview_id" value="${r.id}">
+        <input type="hidden" name="recurso_preview_ativo" value="${ativo ? '1':'0'}" class="recurso-preview-ativo">
+        <label class="check" style="margin:0"><input type="checkbox" class="recurso-preview-check" data-recurso-id="${r.id}" ${ativo?'checked':''}> ${r.nome}</label>
+      </div>
+      <div><label>Qtd. nesta locação</label><input class="recurso-preview-quantidade" data-recurso-id="${r.id}" name="recurso_preview_quantidade" type="number" min="0" value="${qtd}"></div>
+    </div>`;
+  }).join('');
 }
+async function consultarDisponibilidadeLinha(select){
+  const linha = select.closest('.item-reserva');
+  const status = linha?.querySelector('.status-disponibilidade-equipamento');
+  const data = document.querySelector('#formEquipamentos input[name="data_evento"]')?.value || '';
+  if(!status) return;
+  if(!select.value || !data){ status.textContent=''; return; }
+  status.textContent='Consultando disponibilidade...';
+  status.style.color='';
+  try{
+    const r = await fetch(`/api/estoque/produto/${encodeURIComponent(select.value)}?data=${encodeURIComponent(data)}&solicitacao_id={{ item.id }}`);
+    if(!r.ok) throw new Error('estoque');
+    const d = await r.json();
+    const qtdPedida = Math.max(1, parseInt(linha?.querySelector('input[name="quantidade"]')?.value || '1', 10) || 1);
+    if((d.disponiveis||0) >= qtdPedida){
+      status.textContent = `Equipamento disponível · ${d.disponiveis} unidade(s) livre(s)`;
+      status.style.color = '#16803a';
+      status.style.fontWeight = '700';
+    }else{
+      status.textContent = 'Equipamento indisponível para esta data';
+      status.style.color = '#c62828';
+      status.style.fontWeight = '700';
+    }
+  }catch(e){ status.textContent='Não foi possível consultar a disponibilidade agora.'; status.style.color=''; }
+}
+document.addEventListener('change', function(ev){
+  if(ev.target?.classList?.contains('recurso-preview-check')){
+    const linha=ev.target.closest('.linha'); const hid=linha?.querySelector('.recurso-preview-ativo');
+    if(hid) hid.value=ev.target.checked?'1':'0';
+    const id=String(ev.target.dataset.recursoId||''); const qtd=linha?.querySelector('.recurso-preview-quantidade');
+    RECURSOS_PREVIEW_MANUAIS[id]={ativo:ev.target.checked, quantidade:parseInt(qtd?.value||'0',10)||0};
+  }
+});
+document.addEventListener('input', function(ev){
+  if(ev.target?.classList?.contains('recurso-preview-quantidade')){
+    const linha=ev.target.closest('.linha'); const check=linha?.querySelector('.recurso-preview-check');
+    const id=String(ev.target.dataset.recursoId||'');
+    RECURSOS_PREVIEW_MANUAIS[id]={ativo:check ? check.checked : true, quantidade:Math.max(0,parseInt(ev.target.value||'0',10)||0)};
+  }
+});
 function alternarRecursoContrato(check){
   const linha = check.closest('.linha');
   const hidden = linha ? linha.querySelector('.recurso-ativo-contrato') : null;
@@ -645,16 +702,17 @@ document.addEventListener('change', function(ev){
     aplicarContratoPadrao(ev.target);
     aplicarValorBaseProduto(ev.target);
     recalcularPreviewRecursos();
+    consultarDisponibilidadeLinha(ev.target);
   }
-  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); }
+  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); const sel=ev.target.closest('.item-reserva')?.querySelector('select[name="produto_id"]'); if(sel) consultarDisponibilidadeLinha(sel); }
   if(ev.target && ev.target.name === 'cupom_codigo') recalcularResumoComercial();
 });
 document.addEventListener('input', function(ev){
-  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); }
+  if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); const sel=ev.target.closest('.item-reserva')?.querySelector('select[name="produto_id"]'); if(sel) consultarDisponibilidadeLinha(sel); }
   if(ev.target && (ev.target.name === 'valor_unitario' || ev.target.name === 'frete')) recalcularResumoComercial();
 });
 document.addEventListener('DOMContentLoaded', function(){
-  document.querySelectorAll('select[name="produto_id"]').forEach(aplicarContratoPadrao);
+  document.querySelectorAll('select[name="produto_id"]').forEach(sel => { aplicarContratoPadrao(sel); consultarDisponibilidadeLinha(sel); });
   recalcularPreviewRecursos();
   recalcularResumoComercial();
 });
@@ -669,6 +727,7 @@ function adicionarItem(){
     if(campo.name === 'quantidade') campo.value = 1;
     if(campo.name === 'valor_unitario') campo.value = '0,00';
   });
+  const statusClone=clone.querySelector('.status-disponibilidade-equipamento'); if(statusClone){ statusClone.textContent=''; statusClone.style.color=''; }
   container.appendChild(clone);
   recalcularPreviewRecursos();
   recalcularResumoComercial();
