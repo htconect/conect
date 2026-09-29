@@ -32,7 +32,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
-from sqlalchemy.exc import IntegrityError
 
 from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL
 from database import Base, engine, get_db, SessionLocal
@@ -99,17 +98,6 @@ templates.env.globals["APP_VERSION"] = APP_VERSION
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
-
-FINANCEIRO_CATEGORIAS = [
-    ("casa", "Casa"),
-    ("empresa", "Empresa"),
-    ("aluguel", "Aluguel"),
-    ("venda", "Venda"),
-    ("manutencao", "Manutenção"),
-    ("repasse", "Repasse"),
-]
-FINANCEIRO_CATEGORIAS_VALIDAS = {valor for valor, _ in FINANCEIRO_CATEGORIAS}
-FINANCEIRO_CATEGORIAS_ROTULOS = dict(FINANCEIRO_CATEGORIAS)
 
 # InfinitePay — mesma integração usada pela Karaoke RJ no SolVoz.
 INFINITEPAY_HANDLE_PADRAO = os.getenv("INFINITEPAY_HANDLE", "karaokerj").strip().lstrip("$")
@@ -387,51 +375,6 @@ def agora_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def hoje_local() -> date:
-    """Data civil da operação no fuso da empresa (Rio de Janeiro / UTC-3)."""
-    return datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()
-
-
-def novo_codigo_pagamento() -> str:
-    """Código idempotente enviado pelo formulário para impedir pagamento duplicado."""
-    return f"MAN-{hoje_local().strftime('%Y%m%d')}-{uuid.uuid4().hex[:10].upper()}"
-
-
-def _data_pagamento_infinitepay(dados: dict | None) -> Optional[date]:
-    """Usa a data informada pela InfinitePay quando disponível; senão usa a data local."""
-    if not isinstance(dados, dict):
-        return None
-    for chave in ("paid_at", "payment_date", "transaction_date", "paid_date"):
-        bruto = dados.get(chave)
-        if bruto in (None, ""):
-            continue
-        try:
-            if isinstance(bruto, (int, float)):
-                dt = datetime.fromtimestamp(float(bruto), tz=timezone.utc)
-                return dt.astimezone(FUSO_EMPRESA).date()
-            texto_data = str(bruto).strip()
-            if not texto_data:
-                continue
-            normalizada = texto_data.replace("Z", "+00:00")
-            try:
-                dt = datetime.fromisoformat(normalizada)
-                if dt.tzinfo is None:
-                    return dt.date()
-                return dt.astimezone(FUSO_EMPRESA).date()
-            except ValueError:
-                for formato in ("%Y-%m-%d", "%d/%m/%Y"):
-                    try:
-                        return datetime.strptime(texto_data[:10], formato).date()
-                    except ValueError:
-                        pass
-        except Exception:
-            continue
-    return None
-
-
-templates.env.globals["novo_codigo_pagamento"] = novo_codigo_pagamento
-
-
 def redirect_preservando_filtros(request: Request, fallback: str = "/painel/financeiro",
                                  extras: dict | None = None) -> RedirectResponse:
     url = request.headers.get("referer") or fallback
@@ -465,45 +408,6 @@ def resumo_financeiro(itens):
     recebido = sum(float(getattr(i, "valor_pago", 0) or 0) for i in itens)
     falta = sum(valor_falta(i) for i in itens)
     return {"qtd": len(itens), "total": total, "recebido": recebido, "falta": falta}
-
-
-def _resumo_categorias_movimentos(lancamentos_banco, lancamentos_manuais):
-    """Agrupa movimentos reais por categoria para leitura mensal de entradas/saídas."""
-    mapa = {}
-    for lanc in list(lancamentos_banco or []) + list(lancamentos_manuais or []):
-        categoria = str(getattr(lanc, "categoria", "") or "").strip() or "sem_categoria"
-        linha = mapa.setdefault(categoria, {
-            "categoria": categoria,
-            "rotulo": FINANCEIRO_CATEGORIAS_ROTULOS.get(categoria, "Sem categoria" if categoria == "sem_categoria" else categoria.title()),
-            "entradas": 0.0,
-            "saidas": 0.0,
-            "saldo": 0.0,
-            "quantidade": 0,
-        })
-        valor = float(getattr(lanc, "valor", 0) or 0)
-        linha["quantidade"] += 1
-        if valor >= 0:
-            linha["entradas"] += valor
-        else:
-            linha["saidas"] += abs(valor)
-        linha["saldo"] += valor
-    ordem = {valor: indice for indice, (valor, _) in enumerate(FINANCEIRO_CATEGORIAS)}
-    return sorted(mapa.values(), key=lambda x: (ordem.get(x["categoria"], 999), x["rotulo"].lower()))
-
-
-def _relatorio_categorias_mes(db: Session, empresa_id: int, inicio: date, fim: date):
-    banco = db.query(LancamentoBanco).filter(
-        LancamentoBanco.empresa_id == empresa_id,
-        LancamentoBanco.data >= inicio,
-        LancamentoBanco.data <= fim,
-    ).all()
-    manuais = db.query(LancamentoManualFinanceiro).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa_id,
-        LancamentoManualFinanceiro.tipo == "real",
-        LancamentoManualFinanceiro.data >= inicio,
-        LancamentoManualFinanceiro.data <= fim,
-    ).all()
-    return _resumo_categorias_movimentos(banco, manuais)
 
 
 def composicao_valores_contrato(item: Solicitacao) -> dict:
@@ -929,7 +833,7 @@ def ajustar_hora_texto(hora_texto, horas: int) -> str:
 
 
 def periodo_semana_atual():
-    hoje = hoje_local()
+    hoje = date.today()
     inicio = hoje - timedelta(days=hoje.weekday())
     fim = inicio + timedelta(days=6)
     return inicio, fim
@@ -1465,7 +1369,7 @@ def horario_suporte_contrato(empresa: Empresa, item: Solicitacao) -> tuple[str, 
     """
     if not item or not item.hora_inicio:
         return None
-    data_base = item.data_evento or hoje_local()
+    data_base = item.data_evento or date.today()
     inicio_evento = datetime.combine(data_base, item.hora_inicio)
     if item.hora_fim:
         fim_evento = datetime.combine(data_base, item.hora_fim)
@@ -1943,12 +1847,6 @@ def garantir_colunas_novas():
             ativo BOOLEAN DEFAULT true NOT NULL,
             CONSTRAINT uq_veiculo_produto_carga UNIQUE (veiculo_id, produto_id)
         )""")
-
-    if "pagamentos" in tabelas:
-        cols_pag = colunas("pagamentos")
-        if "codigo_registro" not in cols_pag:
-            comandos.append("ALTER TABLE pagamentos ADD COLUMN codigo_registro VARCHAR(64)")
-        comandos.append("CREATE UNIQUE INDEX IF NOT EXISTS ux_pagamentos_codigo_registro ON pagamentos (codigo_registro)")
 
     if "solicitacoes" in tabelas:
         cols_sol = colunas("solicitacoes")
@@ -2860,12 +2758,9 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         "venda": "venda",
         "manutencao": "manutencao",
         "manutenção": "manutencao",
-        "atualizacao": "atualizacao",
-        "atualização": "atualizacao",
-        "estoque": "estoque",
     }
     if tipo not in aliases:
-        raise HTTPException(status_code=422, detail="tipo deve ser venda, manutencao, atualizacao ou estoque.")
+        raise HTTPException(status_code=422, detail="tipo deve ser 'venda' ou 'manutencao'.")
     tipo = aliases[tipo]
 
     try:
@@ -2879,8 +2774,8 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     except (InvalidOperation, ValueError):
         raise HTTPException(status_code=422, detail="valor ou falta_receber inválido.")
 
-    if valor < 0:
-        raise HTTPException(status_code=422, detail="valor não pode ser negativo.")
+    if valor <= 0:
+        raise HTTPException(status_code=422, detail="valor deve ser maior que zero.")
     if falta_receber < 0:
         falta_receber = Decimal("0")
 
@@ -2981,8 +2876,6 @@ def startup():
     db = SessionLocal()
     try:
         inicializar_dados(db)
-        normalizar_pagamentos_infinitepay_legados(db)
-        corrigir_pagamentos_infinitepay_valor_real(db)
         for emp in db.query(Empresa).all():
             # Atualiza somente a antiga mensagem padrão de aceite; mensagens personalizadas são preservadas.
             if str(getattr(emp, "mensagem_aceite", "") or "").strip() == MENSAGEM_ACEITE_LEGADA.strip():
@@ -4959,7 +4852,7 @@ def painel_marketing_atualizar_campanha(db: Session = Depends(get_db), empresa: 
 @app.get("/painel", response_class=HTMLResponse)
 def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     """Home leve: somente leitura, agregações consolidadas e relacionamentos pré-carregados."""
-    hoje = hoje_local()
+    hoje = date.today()
     inicio_semana, fim_semana = periodo_semana_atual()
     status_pendentes = ["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite", "aceite_pagamento_pendente"]
     status_agenda_inativos = {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}
@@ -6320,7 +6213,7 @@ def preparar_reservas(
         "endereco_loja_operacao": endereco_loja_operacao,
         "url_waze_loja": url_waze_loja,
         "url_maps_loja": url_maps_loja,
-        "hoje_iso": hoje_local().isoformat(),
+        "hoje_iso": date.today().isoformat(),
     })
 
 
@@ -6644,7 +6537,7 @@ def localizar_operacao_vinculada(
     data_vinculada = vinculada.data or (
         vinculada.solicitacao.data_evento if vinculada.solicitacao else None
     )
-    data_texto = data_vinculada.isoformat() if data_vinculada else hoje_local().isoformat()
+    data_texto = data_vinculada.isoformat() if data_vinculada else date.today().isoformat()
     parametros = {
         "data_inicial": data_texto,
         "data_final": data_texto,
@@ -6883,7 +6776,7 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "infinitepay_ttl_horas": INFINITEPAY_CHECKOUT_TTL_HOURS,
                                        "fluxo_infinitepay": _infinitepay_habilitada(empresa),
                                        "pagamento_manual_sugerido": _valor_pagamento_manual_sugerido(empresa, item),
-                                       "hoje_iso": hoje_local().isoformat(),
+                                       "hoje_iso": date.today().isoformat(),
                                        "analise_estoque": analise_estoque,
                                        "recursos_contrato": analise_estoque.get("recursos", []),
                                        "recursos_por_produto_view": recursos_por_produto_view,
@@ -8268,7 +8161,7 @@ def contrato_novo_salvar(
         db.add(Pagamento(
             empresa_id=empresa.id,
             solicitacao_id=item.id,
-            data_pagamento=hoje_local(),
+            data_pagamento=date.today(),
             valor=sinal_float,
             forma_pagamento="pix",
             comprovante_no_nome_cliente=True,
@@ -9215,7 +9108,7 @@ def evolucao_financeira(
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
 
     garantir_historico_evolucao_karaoke_rj(db, empresa)
-    ano_atual = hoje_local().year
+    ano_atual = date.today().year
     ano_final = int(ano_final or max(ano_atual, 2026))
     ano_final = max(2026, min(ano_final, 2100))
     anos = [ano_final - 2, ano_final - 1, ano_final]
@@ -9325,8 +9218,13 @@ def financeiro(
     # GET financeiro é somente leitura. A correção de ordem antiga não roda em toda abertura.
     contas = garantir_contas_financeiras(db, empresa.id)
     conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
+    conta_principal = next(
+        (c for c in contas if (c.nome or "").strip().casefold() == "banco principal"),
+        next((c for c in contas if (c.tipo or "").strip().casefold() == "banco"), None),
+    )
+    importacao_habilitada = bool(conta and conta_principal and conta.id == conta_principal.id)
 
-    hoje = hoje_local()
+    hoje = date.today()
 
     # Existe um único mês/ano mestre: o seletor dos cards superiores.
     # Ao trocar esse mês, o período detalhado abaixo nasce automaticamente do
@@ -9588,7 +9486,7 @@ def financeiro(
     contratos_receber = q_contratos_receber.order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc()).all()
     total_contratos_receber = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_receber)
 
-    hoje = hoje_local()
+    hoje = date.today()
     contratos_vencidos = [c for c in contratos_receber if c.data_evento and c.data_evento < hoje]
     contratos_em_dia = [c for c in contratos_receber if not c.data_evento or c.data_evento >= hoje]
     total_contratos_vencidos = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_vencidos)
@@ -9653,9 +9551,6 @@ def financeiro(
     saidas = sum(abs(float(l.valor or 0)) for l in banco_cards if (l.valor or 0) < 0) + sum(
         abs(float(l.valor or 0)) for l in manuais_cards if l.tipo == "real" and (l.valor or 0) < 0)
     saldo_real = entradas - saidas
-    relatorio_categorias = _resumo_categorias_movimentos(banco_cards, [
-        l for l in manuais_cards if l.tipo == "real"
-    ])
     total_receber = sum(
         saldo_titulo(l) for l in manuais_cards if l.tipo == "receber" and not l.recebido)
     total_pagar = sum(
@@ -9905,19 +9800,17 @@ def financeiro(
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
-    # 1.0.68: o Organiza envia somente quatro saldos globais atuais.
-    # Registros antigos por cliente/pagamento permanecem no banco como histórico,
-    # mas não entram mais na posição financeira nem em vínculos.
     todos_lancamentos_organiza = (
         db.query(LancamentoOrganiza)
-        .filter(
-            LancamentoOrganiza.empresa_id == empresa.id,
-            LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
-        )
+        .filter(LancamentoOrganiza.empresa_id == empresa.id)
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .all()
     )
-    registros_organiza_disponiveis = []
+    registros_organiza_disponiveis = [
+        item for item in todos_lancamentos_organiza
+        if item.id not in ids_organiza_vinculados_legado
+        and valor_vinculado_por_organiza.get(item.id, 0.0) < abs(float(item.valor or 0)) - 0.01
+    ]
 
     saldo_organiza_por_banco = {}
     candidatos_organiza = {}
@@ -9944,7 +9837,19 @@ def financeiro(
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
-    status_organiza_por_item = {item.id: "consulta" for item in todos_lancamentos_organiza}
+    status_organiza_por_item = {}
+    for item in todos_lancamentos_organiza:
+        if item.id in bancos_por_organiza:
+            status_organiza_por_item[item.id] = "vinculado"
+            continue
+        pago = float(valor_vinculado_por_organiza.get(item.id, 0.0) or 0.0)
+        total = abs(float(item.valor or 0))
+        if pago >= total - 0.01:
+            status_organiza_por_item[item.id] = "vinculado"
+        elif pago > 0.01:
+            status_organiza_por_item[item.id] = "parcial"
+        else:
+            status_organiza_por_item[item.id] = "pendente"
 
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
@@ -10049,12 +9954,7 @@ def financeiro(
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
         for item in todos_lancamentos_organiza
-        if item.tipo != "estoque" and item.data_pagamento and inicio <= item.data_pagamento <= fim
-    )
-    total_organiza_pagar_posicao = sum(
-        max(float(item.valor or 0), 0.0)
-        for item in todos_lancamentos_organiza
-        if item.tipo == "estoque" and item.data_pagamento and inicio <= item.data_pagamento <= fim
+        if item.data_pagamento and inicio <= item.data_pagamento <= fim
     )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
@@ -10074,11 +9974,12 @@ def financeiro(
         total_manual_receber_posicao + total_contratos_receber_posicao
         + total_organiza_receber_posicao + total_interempresa_receber_posicao
     )
-    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao + total_organiza_pagar_posicao
+    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao
     saldo_projetado_posicao = saldo_todos + total_receber_posicao - total_pagar_posicao
 
     return templates.TemplateResponse("admin/financeiro.html", {
         "request": request, "empresa": empresa, "contas": contas, "conta": conta,
+        "conta_principal": conta_principal, "importacao_habilitada": importacao_habilitada, "hoje": hoje,
         "data_inicial": data_inicial, "data_final": data_final, "categoria": categoria, "busca": busca,
         "status_sistema": status_sistema,
         "mes_cards": mes_cards_inicio.strftime("%Y-%m"),
@@ -10140,15 +10041,13 @@ def financeiro(
         "saldo_vinculo_por_manual": saldo_vinculo_por_manual,
         "candidatos_titulo_por_banco": candidatos_titulo_por_banco,
         "candidatos_titulo_por_manual": candidatos_titulo_por_manual,
-        "relatorio_categorias": relatorio_categorias,
-        "hoje_iso": hoje_local().isoformat(),
-        "categorias": FINANCEIRO_CATEGORIAS
+        "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("venda", "Venda"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 
 
 
 def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[date] = None):
-    hoje = hoje_local()
+    hoje = date.today()
     ate_data = ate_data or hoje
     corte_banco = min(ate_data, hoje)
     inicio_ano = corte_banco.replace(month=1, day=1)
@@ -10201,16 +10100,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
 
     receber_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
         LancamentoOrganiza.empresa_id == empresa_id,
-        LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
-        LancamentoOrganiza.tipo != "estoque",
         LancamentoOrganiza.falta_receber > 0,
-        LancamentoOrganiza.data_pagamento <= ate_data,
-    ).scalar() or 0)
-    pagar_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.valor), 0)).filter(
-        LancamentoOrganiza.empresa_id == empresa_id,
-        LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
-        LancamentoOrganiza.tipo == "estoque",
-        LancamentoOrganiza.valor > 0,
         LancamentoOrganiza.data_pagamento <= ate_data,
     ).scalar() or 0)
 
@@ -10246,7 +10136,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         )
 
     total_receber = receber_manual + receber_contratos + receber_organiza + receber_interempresa
-    total_pagar = pagar_manual + pagar_repasses + pagar_organiza
+    total_pagar = pagar_manual + pagar_repasses
     return {
         "banco": saldo_banco,
         "receber": total_receber,
@@ -10258,7 +10148,6 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         "receber_organiza": receber_organiza,
         "receber_interempresa": receber_interempresa,
         "pagar_repasses": pagar_repasses,
-        "pagar_organiza": pagar_organiza,
     }
 
 
@@ -10318,7 +10207,7 @@ def _relatorio_financeiro_mensal(db: Session, empresa_id: int, mes_ref: str):
     return inicio_mes, fim_mes, semanas, total
 
 
-def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None, categorias=None):
+def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None):
     # Gera um XLSX simples e válido sem dependência adicional.
     linhas = [
         ["Relatório financeiro mensal", "", "", "", "", "", "", "", "", "", ""],
@@ -10354,17 +10243,6 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None, categor
             ["A pagar", "", "", "", "", posicao["pagar"], "", "", "", "", ""],
             ["Saldo projetado", "", "", "", "", posicao["projetado"], "", "", "", "", ""],
         ])
-    if categorias is not None:
-        linhas.extend([
-            ["", "", "", "", "", "", "", "", "", "", ""],
-            ["MOVIMENTO POR CATEGORIA", "", "", "", "", "", "", "", "", "", ""],
-            ["Categoria", "Lançamentos", "Entrou", "Saiu", "Saldo", "", "", "", "", "", ""],
-        ])
-        for item in categorias:
-            linhas.append([
-                item["rotulo"], item["quantidade"], item["entradas"], item["saidas"], item["saldo"],
-                "", "", "", "", "", ""
-            ])
 
     def coluna_excel(numero):
         resultado = ""
@@ -10442,260 +10320,6 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None, categor
     return buffer.getvalue()
 
 
-
-@app.get("/painel/financeiro/relatorio", response_class=HTMLResponse)
-def financeiro_relatorio_filtrado(
-        request: Request,
-        conta_id: int = 0,
-        data_inicial: str = "",
-        data_final: str = "",
-        categoria: str = "",
-        busca: str = "",
-        status_sistema: str = "pendente",
-        mes_cards: str = "",
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)
-):
-    """Relatório de movimentos reais usando os mesmos filtros ativos da tela Financeiro."""
-    if not usuario_pode_financeiro(request, empresa, db):
-        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
-
-    contas = garantir_contas_financeiras(db, empresa.id)
-    conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
-    hoje = hoje_local()
-
-    try:
-        mes_inicio = datetime.strptime(mes_cards, "%Y-%m").date().replace(day=1) if mes_cards else hoje.replace(day=1)
-    except ValueError:
-        mes_inicio = hoje.replace(day=1)
-    indice = mes_inicio.year * 12 + mes_inicio.month
-    proximo_mes = date(indice // 12, indice % 12 + 1, 1)
-    mes_fim = proximo_mes - timedelta(days=1)
-
-    def _data_filtro(valor: str, padrao: date) -> date:
-        try:
-            d = datetime.strptime(valor, "%Y-%m-%d").date() if valor else padrao
-        except ValueError:
-            d = padrao
-        return max(mes_inicio, min(d, mes_fim))
-
-    inicio = _data_filtro(data_inicial, mes_inicio)
-    fim = _data_filtro(data_final, mes_fim)
-    if inicio > fim:
-        fim = inicio
-
-    q_banco = db.query(LancamentoBanco).options(joinedload(LancamentoBanco.conta)).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.data >= inicio,
-        LancamentoBanco.data <= fim,
-    )
-    q_manual = db.query(LancamentoManualFinanceiro).options(
-        joinedload(LancamentoManualFinanceiro.conta),
-        joinedload(LancamentoManualFinanceiro.pagamento),
-    ).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa.id,
-        LancamentoManualFinanceiro.tipo == "real",
-        LancamentoManualFinanceiro.data >= inicio,
-        LancamentoManualFinanceiro.data <= fim,
-    )
-
-    if conta:
-        q_banco = q_banco.filter(LancamentoBanco.conta_id == conta.id)
-        q_manual = q_manual.filter(LancamentoManualFinanceiro.conta_id == conta.id)
-
-    if categoria == "sem_categoria":
-        q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
-        q_manual = q_manual.filter(or_(LancamentoManualFinanceiro.categoria == None, LancamentoManualFinanceiro.categoria == ""))
-    elif categoria:
-        q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
-        q_manual = q_manual.filter(LancamentoManualFinanceiro.categoria == categoria)
-
-    if busca:
-        termo = busca.strip()
-        like = f"%{termo}%"
-        valor_busca = None
-        if re.fullmatch(r"[Rr$\s0-9.,-]+", termo):
-            try:
-                valor_busca = texto_para_float(termo.replace("R$", "").replace("r$", "").strip())
-            except Exception:
-                valor_busca = None
-        filtros_banco = [LancamentoBanco.historico.ilike(like)]
-        filtros_manual = [LancamentoManualFinanceiro.descricao.ilike(like)]
-        if valor_busca is not None:
-            filtros_banco.append(func.abs(LancamentoBanco.valor - valor_busca) < 0.01)
-            filtros_manual.append(func.abs(LancamentoManualFinanceiro.valor - valor_busca) < 0.01)
-        q_banco = q_banco.filter(or_(*filtros_banco))
-        q_manual = q_manual.filter(or_(*filtros_manual))
-
-    banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.id.desc()).all()
-    manuais = q_manual.order_by(LancamentoManualFinanceiro.data.desc(), LancamentoManualFinanceiro.id.desc()).all()
-    categorias_resumo = _resumo_categorias_movimentos(banco, manuais)
-
-    movimentos = []
-    for item in banco:
-        valor = float(item.valor or 0)
-        movimentos.append({
-            "data": item.data,
-            "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
-            "categoria_valor": (item.categoria or "").strip(),
-            "tipo_movimento": "banco",
-            "descricao": item.historico or item.documento or "Lançamento bancário",
-            "conta": item.conta.nome if getattr(item, "conta", None) else "-",
-            "origem": "Banco",
-            "entrada": valor if valor > 0 else 0.0,
-            "saida": abs(valor) if valor < 0 else 0.0,
-            "valor": valor,
-            "id": item.id,
-        })
-    for item in manuais:
-        valor = float(item.valor or 0)
-        movimentos.append({
-            "data": item.data,
-            "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
-            "categoria_valor": (item.categoria or "").strip(),
-            "tipo_movimento": "manual",
-            "descricao": item.descricao or "Lançamento manual",
-            "conta": item.conta.nome if getattr(item, "conta", None) else "-",
-            "origem": _origem_lancamento_financeiro(item),
-            "entrada": valor if valor > 0 else 0.0,
-            "saida": abs(valor) if valor < 0 else 0.0,
-            "valor": valor,
-            "id": item.id,
-        })
-    movimentos.sort(key=lambda x: (x["data"], x["id"]), reverse=True)
-
-    entradas = sum(m["entrada"] for m in movimentos)
-    saidas = sum(m["saida"] for m in movimentos)
-    saldo = entradas - saidas
-    categoria_rotulo = "Todas as categorias"
-    if categoria == "sem_categoria":
-        categoria_rotulo = "Sem categoria"
-    elif categoria:
-        categoria_rotulo = FINANCEIRO_CATEGORIAS_ROTULOS.get(categoria, categoria.title())
-
-    return templates.TemplateResponse("admin/financeiro_relatorio.html", {
-        "request": request,
-        "empresa": empresa,
-        "conta": conta,
-        "inicio": inicio,
-        "fim": fim,
-        "categoria": categoria,
-        "categoria_rotulo": categoria_rotulo,
-        "busca": busca,
-        "status_sistema": status_sistema,
-        "mes_cards": mes_inicio.strftime("%Y-%m"),
-        "movimentos": movimentos,
-        "categorias_resumo": categorias_resumo,
-        "entradas": entradas,
-        "saidas": saidas,
-        "saldo": saldo,
-        "categorias": FINANCEIRO_CATEGORIAS,
-        "categorias_salvas": request.query_params.get("categorias_salvas", ""),
-        "categorias_bloqueadas": request.query_params.get("categorias_bloqueadas", ""),
-    })
-
-
-@app.post("/painel/financeiro/relatorio/categorias")
-async def financeiro_relatorio_salvar_categorias(
-        request: Request,
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)
-):
-    """Corrige somente a categoria dos movimentos exibidos no relatório.
-
-    Data, descrição, conta e valor não são alterados. Vínculos financeiros
-    sensíveis são preservados; quando uma troca conflita com um vínculo
-    existente, a linha é ignorada e contabilizada como bloqueada.
-    """
-    if not usuario_pode_financeiro(request, empresa, db):
-        raise HTTPException(403, "Usuário sem permissão para alterar o financeiro.")
-
-    form = await request.form()
-    alteracoes_banco = []
-    alteracoes_manual = []
-    for chave, valor in form.multi_items():
-        chave = str(chave or "")
-        categoria_nova = str(valor or "").strip()
-        if categoria_nova not in FINANCEIRO_CATEGORIAS_VALIDAS:
-            continue
-        if chave.startswith("categoria_banco_"):
-            try:
-                alteracoes_banco.append((int(chave.rsplit("_", 1)[-1]), categoria_nova))
-            except (TypeError, ValueError):
-                continue
-        elif chave.startswith("categoria_manual_"):
-            try:
-                alteracoes_manual.append((int(chave.rsplit("_", 1)[-1]), categoria_nova))
-            except (TypeError, ValueError):
-                continue
-
-    banco_ids = [i for i, _ in alteracoes_banco]
-    manual_ids = [i for i, _ in alteracoes_manual]
-    banco_por_id = {x.id: x for x in db.query(LancamentoBanco).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.id.in_(banco_ids) if banco_ids else False,
-    ).all()} if banco_ids else {}
-    manual_por_id = {x.id: x for x in db.query(LancamentoManualFinanceiro).filter(
-        LancamentoManualFinanceiro.empresa_id == empresa.id,
-        LancamentoManualFinanceiro.tipo == "real",
-        LancamentoManualFinanceiro.id.in_(manual_ids) if manual_ids else False,
-    ).all()} if manual_ids else {}
-
-    salvos = 0
-    bloqueados = 0
-
-    for lancamento_id, categoria_nova in alteracoes_banco:
-        lanc = banco_por_id.get(lancamento_id)
-        if not lanc or categoria_nova == (lanc.categoria or "").strip():
-            continue
-        possui_organiza = db.query(VinculoOrganizaFinanceiro.id).filter(
-            VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
-        ).first()
-        possui_repasse = db.query(VinculoRepasseBanco.id).filter(
-            VinculoRepasseBanco.lancamento_banco_id == lanc.id
-        ).first()
-        if possui_organiza or (possui_repasse and categoria_nova != "repasse"):
-            bloqueados += 1
-            continue
-        lanc.categoria = categoria_nova
-        lanc.categoria_confirmada = True
-        salvos += 1
-
-    for lancamento_id, categoria_nova in alteracoes_manual:
-        lanc = manual_por_id.get(lancamento_id)
-        if not lanc or categoria_nova == (lanc.categoria or "").strip():
-            continue
-        possui_organiza = db.query(VinculoOrganizaFinanceiro.id).filter(
-            VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id
-        ).first()
-        possui_titulo = db.query(VinculoTituloFinanceiro.id).filter(
-            VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
-        ).first()
-        # Movimentos de contrato/InfinitePay e baixas já vinculadas não são
-        # desmontados por uma correção de relatório. Mantém o vínculo intacto.
-        if possui_organiza or possui_titulo or (lanc.pagamento_id and categoria_nova != "aluguel"):
-            bloqueados += 1
-            continue
-        lanc.categoria = categoria_nova
-        salvos += 1
-
-    if salvos:
-        db.commit()
-
-    params = {
-        "conta_id": form.get("conta_id", "0"),
-        "data_inicial": form.get("data_inicial", ""),
-        "data_final": form.get("data_final", ""),
-        "categoria": form.get("filtro_categoria", ""),
-        "busca": form.get("busca", ""),
-        "status_sistema": form.get("status_sistema", "pendente"),
-        "mes_cards": form.get("mes_cards", ""),
-        "categorias_salvas": str(salvos),
-        "categorias_bloqueadas": str(bloqueados),
-    }
-    return RedirectResponse(f"/painel/financeiro/relatorio?{urlencode(params)}", status_code=303)
-
-
 @app.get("/painel/financeiro/relatorio-mensal.xlsx")
 def financeiro_relatorio_excel(
         request: Request,
@@ -10707,8 +10331,7 @@ def financeiro_relatorio_excel(
         raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
     inicio_mes, fim_mes, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
     posicao = _posicao_financeira_atual(db, empresa.id, fim_mes)
-    categorias_mes = _relatorio_categorias_mes(db, empresa.id, inicio_mes, fim_mes)
-    conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao, categorias_mes)
+    conteudo = _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao)
     nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.xlsx"
     return Response(
         conteudo,
@@ -10736,7 +10359,6 @@ def financeiro_relatorio_pdf(
 
     inicio_mes, fim_mes, semanas, total = _relatorio_financeiro_mensal(db, empresa.id, mes)
     posicao = _posicao_financeira_atual(db, empresa.id, fim_mes)
-    categorias_mes = _relatorio_categorias_mes(db, empresa.id, inicio_mes, fim_mes)
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=28, leftMargin=28, topMargin=28, bottomMargin=28)
     estilos = getSampleStyleSheet()
@@ -10799,25 +10421,6 @@ def financeiro_relatorio_pdf(
         ("TOPPADDING", (0, 0), (-1, -1), 8),
     ]))
     elementos.append(tabela)
-    elementos.extend([Spacer(1, 16), Paragraph("Movimento por categoria", estilos["Heading2"])])
-    dados_cat = [["Categoria", "Lançamentos", "Entrou", "Saiu", "Saldo"]]
-    for item in categorias_mes:
-        dados_cat.append([
-            item["rotulo"], str(item["quantidade"]), moeda(item["entradas"]),
-            moeda(item["saidas"]), moeda(item["saldo"]),
-        ])
-    if len(dados_cat) == 1:
-        dados_cat.append(["Sem movimentos", "0", moeda(0), moeda(0), moeda(0)])
-    tabela_cat = Table(dados_cat, colWidths=[130, 70, 90, 90, 90], repeatRows=1)
-    tabela_cat.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#EAF2FF")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CBD5E1")),
-        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
-        ("TOPPADDING", (0, 0), (-1, -1), 7),
-    ]))
-    elementos.append(tabela_cat)
     doc.build(elementos)
     nome = f"relatorio-financeiro-{inicio_mes.strftime('%Y-%m')}.pdf"
     return Response(
@@ -10981,6 +10584,80 @@ def financeiro_desvincular_titulo(
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
 
 
+
+@app.post("/painel/financeiro/titulo/{titulo_id}/pagar")
+def financeiro_pagar_titulo(
+        request: Request,
+        titulo_id: int,
+        conta_id: int = Form(...),
+        data_pagamento: str = Form(...),
+        valor: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Baixa uma conta a pagar criando a saída financeira já vinculada ao título."""
+    titulo = db.get(LancamentoManualFinanceiro, titulo_id)
+    if not titulo or titulo.empresa_id != empresa.id or titulo.tipo != "pagar":
+        raise HTTPException(404)
+
+    conta = db.get(ContaFinanceira, conta_id)
+    if not conta or conta.empresa_id != empresa.id or not conta.ativa:
+        raise HTTPException(400, "Selecione um banco/conta válido para o pagamento.")
+
+    try:
+        data_baixa = datetime.strptime(data_pagamento, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Informe uma data de pagamento válida.")
+
+    total_baixado = _total_baixado_titulo(db, titulo.id)
+    saldo_titulo = max(abs(float(titulo.valor or 0)) - total_baixado, 0.0)
+    if saldo_titulo <= 0.01:
+        _atualizar_status_titulo(db, titulo)
+        db.commit()
+        raise HTTPException(400, "Esta conta a pagar já está quitada.")
+
+    valor_pagamento = abs(float(texto_para_float(valor) or 0))
+    if valor_pagamento <= 0.01:
+        raise HTTPException(400, "Informe um valor de pagamento maior que zero.")
+    if valor_pagamento > saldo_titulo + 0.01:
+        raise HTTPException(400, f"O pagamento não pode ultrapassar o saldo de R$ {saldo_titulo:.2f}.")
+    valor_pagamento = min(valor_pagamento, saldo_titulo)
+
+    proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.conta_id == conta.id,
+    ).scalar() or 0) + 1
+
+    movimento = LancamentoManualFinanceiro(
+        empresa_id=empresa.id,
+        conta_id=conta.id,
+        data=data_baixa,
+        descricao=titulo.descricao,
+        valor=-valor_pagamento,
+        categoria=titulo.categoria,
+        tipo="real",
+        recebido=False,
+        ordem=proxima_ordem,
+    )
+    db.add(movimento)
+    db.flush()
+
+    db.add(VinculoTituloFinanceiro(
+        empresa_id=empresa.id,
+        titulo_id=titulo.id,
+        lancamento_manual_id=movimento.id,
+        valor=valor_pagamento,
+        criado_por=request.session.get("usuario_nome") or "Financeiro",
+    ))
+    db.flush()
+    _atualizar_status_titulo(db, titulo)
+    db.commit()
+
+    destino = f"/painel/financeiro?conta_id={conta.id}"
+    return redirect_preservando_filtros(request, destino)
+
+
 @app.post("/painel/financeiro/titulo/{lancamento_id}/excluir")
 def financeiro_excluir_titulo(
         request: Request,
@@ -11027,6 +10704,19 @@ def financeiro_importar_extrato(
     conta = db.get(ContaFinanceira, conta_id)
     if not conta or conta.empresa_id != empresa.id:
         raise HTTPException(404)
+    conta_principal = db.query(ContaFinanceira).filter(
+        ContaFinanceira.empresa_id == empresa.id,
+        ContaFinanceira.ativa == True,
+        func.lower(ContaFinanceira.nome) == "banco principal",
+    ).order_by(ContaFinanceira.id).first()
+    if conta_principal is None:
+        conta_principal = db.query(ContaFinanceira).filter(
+            ContaFinanceira.empresa_id == empresa.id,
+            ContaFinanceira.ativa == True,
+            func.lower(ContaFinanceira.tipo) == "banco",
+        ).order_by(ContaFinanceira.id).first()
+    if not conta_principal or conta.id != conta_principal.id:
+        raise HTTPException(400, "A importação de extrato só é permitida no Banco Principal.")
     registros = ler_extrato_upload(arquivo)
     importados = 0
     duplicados = 0
@@ -11081,59 +10771,6 @@ def financeiro_importar_extrato(
                                          "conciliados": conciliados})
 
 
-@app.post("/painel/financeiro/banco/categorias-lote")
-async def financeiro_categorias_banco_lote(
-        request: Request,
-        db: Session = Depends(get_db),
-        empresa: Empresa = Depends(empresa_logada)
-):
-    """Salva de uma vez as categorias dos lançamentos bancários visíveis."""
-    form = await request.form()
-    alteracoes = []
-    for chave, categoria in form.multi_items():
-        if not str(chave).startswith("categoria_banco_"):
-            continue
-        try:
-            lancamento_id = int(str(chave).rsplit("_", 1)[-1])
-        except (TypeError, ValueError):
-            continue
-        categoria = str(categoria or "").strip()
-        if categoria not in FINANCEIRO_CATEGORIAS_VALIDAS:
-            continue
-        alteracoes.append((lancamento_id, categoria))
-
-    ids = [item[0] for item in alteracoes]
-    por_id = {l.id: l for l in db.query(LancamentoBanco).filter(
-        LancamentoBanco.empresa_id == empresa.id,
-        LancamentoBanco.id.in_(ids) if ids else False,
-    ).all()} if ids else {}
-
-    salvos = 0
-    bloqueados = 0
-    for lancamento_id, categoria in alteracoes:
-        lanc = por_id.get(lancamento_id)
-        if not lanc:
-            continue
-        if categoria != lanc.categoria:
-            possui_organiza = db.query(VinculoOrganizaFinanceiro.id).filter(
-                VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
-            ).first()
-            possui_repasse = db.query(VinculoRepasseBanco.id).filter(
-                VinculoRepasseBanco.lancamento_banco_id == lanc.id
-            ).first()
-            if possui_organiza or (possui_repasse and categoria != "repasse"):
-                bloqueados += 1
-                continue
-        lanc.categoria = categoria
-        lanc.categoria_confirmada = True
-        salvos += 1
-    db.commit()
-    return redirect_preservando_filtros(
-        request, "/painel/financeiro",
-        {"categorias_salvas": salvos, "categorias_bloqueadas": bloqueados}
-    )
-
-
 @app.post("/painel/financeiro/banco/{lancamento_id}/categoria")
 def financeiro_categoria_banco(
         request: Request,
@@ -11146,7 +10783,7 @@ def financeiro_categoria_banco(
     lanc = db.get(LancamentoBanco, lancamento_id)
     if not lanc or lanc.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in FINANCEIRO_CATEGORIAS_VALIDAS:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if categoria != lanc.categoria and db.query(VinculoOrganizaFinanceiro).filter(
         VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
@@ -11525,7 +11162,7 @@ def financeiro_lancamento_manual(
         raise HTTPException(400, "Movimento bancário exige uma conta válida.")
     if conta and conta.empresa_id != empresa.id:
         raise HTTPException(404)
-    if categoria not in FINANCEIRO_CATEGORIAS_VALIDAS:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if tipo not in ["real", "receber", "pagar"]:
         raise HTTPException(400, "Tipo inválido.")
@@ -11629,7 +11266,7 @@ def financeiro_editar_manual(
         or db.query(VinculoOrganizaFinanceiro).filter(VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id).first()
     ):
         raise HTTPException(400, "Movimento vinculado. Desvincule as baixas antes de editar.")
-    if categoria not in FINANCEIRO_CATEGORIAS_VALIDAS:
+    if categoria not in ["casa", "empresa", "aluguel", "venda", "manutencao", "repasse"]:
         raise HTTPException(400, "Categoria inválida.")
     if categoria != lanc.categoria and db.query(VinculoOrganizaFinanceiro).filter(
         VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id
@@ -11823,7 +11460,7 @@ def financeiro_marcar_recebido(
     db.add(LancamentoManualFinanceiro(
         empresa_id=empresa.id,
         conta_id=lanc.conta_id,
-        data=hoje_local(),
+        data=date.today(),
         descricao=f"Recebido: {lanc.descricao}",
         valor=abs(lanc.valor or 0),
         categoria=lanc.categoria,
@@ -11844,7 +11481,6 @@ def confirmar_pagamento(
         comprovante_no_nome_cliente: str = Form("sim"),
         nome_comprovante: str = Form(""),
         observacoes_pagamento: str = Form(""),
-        codigo_pagamento: str = Form(""),
         retorno: str = Form(""),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
@@ -11861,28 +11497,17 @@ def confirmar_pagamento(
     # Pagamento pode ser informado antes ou depois do aceite.
     # Depois do aceite, ao atingir o sinal mínimo exigido, o lançamento manual também
     # confirma a reserva; antes do aceite ele permanece apenas como registro financeiro.
-    codigo_limpo = str(codigo_pagamento or "").strip()[:64]
-    if codigo_limpo:
-        existente_codigo = db.query(Pagamento).filter(
-            Pagamento.empresa_id == empresa.id,
-            Pagamento.codigo_registro == codigo_limpo,
-        ).first()
-        if existente_codigo:
-            # Mesmo formulário enviado duas vezes: mantém um único registro.
-            return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
-
     valor = texto_para_float(valor_pago)
     if valor <= 0:
         return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
     total_atual = sum(float(p.valor or 0) for p in (item.pagamentos or []))
     novo_total = total_atual + valor
     validar_total_pagamentos(item, novo_total)
-    data_ref = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else hoje_local()
+    data_ref = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else date.today()
     no_nome = comprovante_no_nome_cliente == "sim"
     pagamento = Pagamento(
         empresa_id=empresa.id,
         solicitacao=item,
-        codigo_registro=codigo_limpo or novo_codigo_pagamento(),
         data_pagamento=data_ref,
         valor=valor,
         forma_pagamento=forma_pagamento,
@@ -11898,69 +11523,16 @@ def confirmar_pagamento(
     # o link público reflete a mesma situação financeira, independentemente da origem.
     if item.status in {"aceite_pagamento_pendente", "aguardando_pagamento"} and _pagamento_suficiente_para_confirmar(item, empresa):
         _aprovar_contrato_apos_pagamento(db, empresa, item)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Proteção final contra dois POSTs simultâneos com o mesmo código.
-        db.rollback()
-        if codigo_limpo and db.query(Pagamento.id).filter(
-            Pagamento.empresa_id == empresa.id,
-            Pagamento.codigo_registro == codigo_limpo,
-        ).first():
-            return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
-        raise
+    db.commit()
     return RedirectResponse(retorno or f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
 def _pagamento_origem_infinitepay(pagamento: Pagamento) -> bool:
-    codigo = str(getattr(pagamento, "codigo_registro", "") or "").strip().upper()
     return (
         str(getattr(pagamento, "usuario_registro", "") or "").strip().lower() == "infinitepay"
         or str(getattr(pagamento, "conciliado_por", "") or "").strip().lower() == "infinitepay"
         or "infinitepay" in str(getattr(pagamento, "observacoes", "") or "").lower()
-        or codigo.startswith("IP-")
     )
-
-
-def _origem_lancamento_financeiro(lancamento: LancamentoManualFinanceiro) -> str:
-    """Rótulo visual da origem do movimento para facilitar a leitura do Financeiro."""
-    pagamento = getattr(lancamento, "pagamento", None)
-    descricao = str(getattr(lancamento, "descricao", "") or "").lower()
-    return "Online" if (pagamento and _pagamento_origem_infinitepay(pagamento)) or "infinitepay" in descricao else "Manual"
-
-
-def normalizar_pagamentos_infinitepay_legados(db: Session) -> int:
-    """Padroniza pagamentos antigos da InfinitePay como origem Online.
-
-    Versões antigas podiam criar o pagamento antes do campo de origem ser
-    preenchido. A cobrança, o código IP-* e o texto InfinitePay continuam
-    identificando com segurança esses registros históricos.
-    """
-    ids_cobrancas = [
-        pid for (pid,) in db.query(InfinitePayCobranca.pagamento_id).filter(
-            InfinitePayCobranca.pagamento_id.isnot(None)
-        ).all() if pid
-    ]
-    filtros = [
-        Pagamento.codigo_registro.ilike("IP-%"),
-        Pagamento.observacoes.ilike("%InfinitePay%"),
-    ]
-    if ids_cobrancas:
-        filtros.append(Pagamento.id.in_(ids_cobrancas))
-    pagamentos = db.query(Pagamento).filter(or_(*filtros)).all()
-    alterados = 0
-    for pagamento in pagamentos:
-        if str(pagamento.usuario_registro or "").strip().lower() != "infinitepay":
-            pagamento.usuario_registro = "InfinitePay"
-            alterados += 1
-        # Não sobrescreve um usuário de conciliação já registrado. O campo
-        # usuario_registro é suficiente para a identificação visual Online.
-    if alterados:
-        db.commit()
-    return alterados
-
-
-templates.env.globals["origem_lancamento_financeiro"] = _origem_lancamento_financeiro
 
 
 def _sincronizar_movimento_infinitepay(db: Session, pagamento: Pagamento) -> None:
@@ -12071,7 +11643,7 @@ def editar_pagamento_financeiro(
     novo_total = total_sem_este + valor
     validar_total_pagamentos(item, novo_total)
 
-    pagamento.data_pagamento = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else hoje_local()
+    pagamento.data_pagamento = datetime.strptime(data_pagamento, "%Y-%m-%d").date() if data_pagamento else date.today()
     pagamento.valor = valor
     pagamento.forma_pagamento = forma_pagamento
     if comprovante_no_nome_cliente in {"sim", "nao"}:
@@ -12136,7 +11708,7 @@ def conciliar_pagamento_financeiro(
 @app.get("/painel/disponibilidade", response_class=HTMLResponse)
 def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: Session = Depends(get_db),
                     empresa: Empresa = Depends(empresa_logada)):
-    data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else hoje_local()
+    data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
 
     garantir_itens_estoque_padrao(db, empresa.id)
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
@@ -12235,7 +11807,7 @@ def api_estoque_produto(
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
     try:
-        data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else hoje_local()
+        data_consulta = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
     except ValueError:
         raise HTTPException(422, "Data inválida")
 
@@ -13161,59 +12733,6 @@ def _aprovar_contrato_infinitepay(db: Session, empresa: Empresa, item: Solicitac
     _aprovar_contrato_apos_pagamento(db, empresa, item)
 
 
-def corrigir_pagamentos_infinitepay_valor_real(db: Session) -> int:
-    """Corrige registros legados que gravaram o valor da cobrança em vez do valor efetivamente pago.
-
-    ``paid_amount`` pode ser maior que ``amount`` quando há acréscimos/taxas. Por isso
-    nunca elevamos o contrato acima do valor esperado; apenas reduzimos quando a própria
-    InfinitePay informou um valor pago menor.
-    """
-    corrigidos = 0
-    alterados = 0
-    cobrancas = db.query(InfinitePayCobranca).filter(
-        InfinitePayCobranca.pagamento_id != None,
-        InfinitePayCobranca.paid_amount_centavos > 0,
-    ).all()
-    for cobranca in cobrancas:
-        pagamento = db.get(Pagamento, cobranca.pagamento_id)
-        if not pagamento:
-            continue
-        esperado = max(int(cobranca.valor_centavos or 0), 0)
-        informado = max(int(cobranca.paid_amount_centavos or 0), 0)
-        efetivo = min(informado, esperado) if esperado > 0 else informado
-        if efetivo <= 0:
-            continue
-        valor_efetivo = efetivo / 100.0
-        codigo_ip = f"IP-{str(cobranca.transaction_nsu or cobranca.order_nsu or '').strip()}"[:64]
-        if codigo_ip and not pagamento.codigo_registro:
-            ja_usado = db.query(Pagamento.id).filter(
-                Pagamento.id != pagamento.id,
-                Pagamento.codigo_registro == codigo_ip,
-            ).first()
-            if not ja_usado:
-                pagamento.codigo_registro = codigo_ip
-                alterados += 1
-        if abs(float(pagamento.valor or 0) - valor_efetivo) <= 0.009:
-            continue
-        pagamento.valor = valor_efetivo
-        movimentos = db.query(LancamentoManualFinanceiro).filter(
-            LancamentoManualFinanceiro.empresa_id == pagamento.empresa_id,
-            LancamentoManualFinanceiro.pagamento_id == pagamento.id,
-            LancamentoManualFinanceiro.tipo == "real",
-        ).all()
-        for movimento in movimentos:
-            movimento.valor = valor_efetivo
-            movimento.data = pagamento.data_pagamento
-        item = db.get(Solicitacao, pagamento.solicitacao_id)
-        if item:
-            recalcular_pagamento_solicitacao(db, item)
-        corrigidos += 1
-        alterados += 1
-    if alterados:
-        db.commit()
-    return corrigidos
-
-
 def _registrar_pagamento_infinitepay(
     db: Session,
     cobranca: InfinitePayCobranca,
@@ -13223,14 +12742,7 @@ def _registrar_pagamento_infinitepay(
     capture_method: str = "",
     installments: int = 0,
     paid_amount_centavos: int = 0,
-    data_pagamento: Optional[date] = None,
 ) -> bool:
-    # Trava a cobrança durante o registro para webhook e retorno não criarem duas baixas.
-    cobranca_travada = db.query(InfinitePayCobranca).filter(
-        InfinitePayCobranca.id == cobranca.id
-    ).with_for_update().first()
-    if cobranca_travada:
-        cobranca = cobranca_travada
     if cobranca.status == "PAGO" and cobranca.pagamento_id:
         return True
     empresa = db.get(Empresa, cobranca.empresa_id)
@@ -13238,34 +12750,13 @@ def _registrar_pagamento_infinitepay(
     if not empresa or not item or item.empresa_id != empresa.id:
         return False
 
-    codigo_ip = f"IP-{str(transaction_nsu or cobranca.order_nsu).strip()}"[:64]
     pagamento = db.get(Pagamento, cobranca.pagamento_id) if cobranca.pagamento_id else None
-    if not pagamento and codigo_ip:
-        pagamento = db.query(Pagamento).filter(
-            Pagamento.empresa_id == empresa.id,
-            Pagamento.codigo_registro == codigo_ip,
-        ).first()
-        if pagamento:
-            cobranca.pagamento_id = pagamento.id
-
-    esperado_centavos = max(int(cobranca.valor_centavos or 0), 0)
-    informado_centavos = int(paid_amount_centavos or 0)
-    if informado_centavos <= 0:
-        informado_centavos = esperado_centavos
-    recebido_centavos = informado_centavos
-    if esperado_centavos > 0:
-        recebido_centavos = min(informado_centavos, esperado_centavos)
-    valor_recebido = float(recebido_centavos) / 100.0
-    if valor_recebido <= 0.009:
-        return False
-
     if not pagamento:
         pagamento = Pagamento(
             empresa_id=empresa.id,
             solicitacao_id=item.id,
-            codigo_registro=codigo_ip or f"IP-{uuid.uuid4().hex[:20].upper()}",
-            data_pagamento=data_pagamento or hoje_local(),
-            valor=valor_recebido,
+            data_pagamento=date.today(),
+            valor=float(cobranca.valor_centavos or 0) / 100.0,
             forma_pagamento=_forma_pagamento_infinitepay(capture_method),
             comprovante_no_nome_cliente=True,
             nome_comprovante=item.cliente.nome if item.cliente else "Cliente",
@@ -13277,11 +12768,6 @@ def _registrar_pagamento_infinitepay(
         db.add(pagamento)
         db.flush()
         cobranca.pagamento_id = pagamento.id
-    else:
-        # Reprocessamento idempotente: nunca cria segundo pagamento e mantém o valor real pago.
-        pagamento.valor = valor_recebido
-        pagamento.data_pagamento = data_pagamento or pagamento.data_pagamento or hoje_local()
-        pagamento.forma_pagamento = _forma_pagamento_infinitepay(capture_method)
 
     conta = _conta_infinitepay(db, empresa.id)
     lancamento = db.query(LancamentoManualFinanceiro).filter_by(
@@ -13305,10 +12791,6 @@ def _registrar_pagamento_infinitepay(
             pagamento_id=pagamento.id,
             ordem=proxima_ordem,
         ))
-    else:
-        lancamento.data = pagamento.data_pagamento
-        lancamento.valor = float(pagamento.valor or 0)
-        lancamento.recebido = True
 
     recalcular_pagamento_solicitacao(db, item)
     if _pagamento_suficiente_para_confirmar(item, empresa):
@@ -13319,9 +12801,7 @@ def _registrar_pagamento_infinitepay(
     cobranca.receipt_url = str(receipt_url or "")[:1000]
     cobranca.capture_method = str(capture_method or "")[:40]
     cobranca.installments = int(installments or 0)
-    # Mantém o valor bruto informado pela InfinitePay para auditoria. O contrato
-    # recebe no máximo o valor esperado da cobrança, evitando crédito acima do devido.
-    cobranca.paid_amount_centavos = informado_centavos
+    cobranca.paid_amount_centavos = int(paid_amount_centavos or cobranca.valor_centavos or 0)
     cobranca.pago_em = cobranca.pago_em or agora_utc()
 
     # Assim que uma cobrança é paga, nenhuma outra cobrança aberta do mesmo
@@ -14170,7 +13650,6 @@ def _processar_retorno_infinitepay(
                         capture_method=str(check.get("capture_method") or capture_method or ""),
                         installments=int(check.get("installments") or 0),
                         paid_amount_centavos=int(check.get("paid_amount") or amount),
-                        data_pagamento=_data_pagamento_infinitepay(check),
                     )
         except Exception:
             logger.exception("Falha no payment_check InfinitePay %s", cobranca.order_nsu)
@@ -14181,10 +13660,7 @@ def _processar_retorno_infinitepay(
         # Primeiro pagamento = antes desta cobrança não havia valor recebido.
         # Evita depender da quantidade de lançamentos, que pode conter ajustes
         # manuais ou registros legados.
-        informado_agora = max(int(cobranca.paid_amount_centavos or cobranca.valor_centavos or 0), 0)
-        esperado_agora = max(int(cobranca.valor_centavos or 0), 0)
-        efetivo_agora = min(informado_agora, esperado_agora) if esperado_agora > 0 else informado_agora
-        valor_pago_agora = max(float(efetivo_agora) / 100.0, 0.0)
+        valor_pago_agora = max(float(cobranca.valor_centavos or 0) / 100.0, 0.0)
         valor_pago_total = max(float(item.valor_pago or 0), 0.0)
         valor_antes_desta_cobranca = max(valor_pago_total - valor_pago_agora, 0.0)
         primeiro_pagamento = valor_antes_desta_cobranca <= 0.009
@@ -14431,7 +13907,6 @@ async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
         capture_method=str(payload.get("capture_method") or ""),
         installments=int(payload.get("installments") or 0),
         paid_amount_centavos=int(payload.get("paid_amount") or amount),
-        data_pagamento=_data_pagamento_infinitepay(payload),
     )
     return JSONResponse({"success": bool(ok), "message": None if ok else "Falha ao registrar pagamento"}, status_code=200 if ok else 500)
 
@@ -14621,7 +14096,7 @@ def _endereco_operacao(agenda: Agenda):
 def _hora_somar(hora_base: time | None, minutos: int, padrao: time = time(8, 0)) -> time:
     """Soma minutos a um horário sem depender da data real do evento."""
     base = hora_base or padrao
-    return (datetime.combine(hoje_local(), base) + timedelta(minutes=max(0, int(minutos or 0)))).time()
+    return (datetime.combine(date.today(), base) + timedelta(minutes=max(0, int(minutos or 0)))).time()
 
 
 def _respeitar_horario_minimo_cliente(instante: datetime, cfg: ConfiguracaoRotaInteligente, tipo: str | None = None) -> datetime:
@@ -14677,7 +14152,7 @@ def _limite_operacao(agenda: Agenda, cfg: ConfiguracaoRotaInteligente, tipo: str
         return time(23, 59), False
 
     inicio = sol.hora_inicio if sol and sol.hora_inicio else agenda.hora_inicio
-    base = datetime.combine(hoje_local(), inicio)
+    base = datetime.combine(date.today(), inicio)
     return (base - timedelta(minutes=max(0, int(cfg.antecedencia_entrega or 60)))).time(), False
 
 
@@ -16150,9 +15625,9 @@ def calcular_localizacoes_automaticas(
     db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)
 ):
     try:
-        data_filtro = datetime.strptime(data_operacao, "%Y-%m-%d").date() if data_operacao else hoje_local()
+        data_filtro = datetime.strptime(data_operacao, "%Y-%m-%d").date() if data_operacao else date.today()
     except Exception:
-        data_filtro = hoje_local()
+        data_filtro = date.today()
     cfg = _config_rota(db, empresa.id)
     candidatos = _montar_candidatos_rota(db, empresa, data_filtro, equipe_id or None, cfg, time(7, 0))
     itens = []
@@ -16254,9 +15729,9 @@ def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empr
 def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     garantir_agenda_reservas(db, empresa.id)
     try:
-        data_filtro = datetime.strptime(data, "%Y-%m-%d").date() if data else hoje_local()
+        data_filtro = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
     except Exception:
-        data_filtro = hoje_local()
+        data_filtro = date.today()
     cfg = _config_rota(db, empresa.id)
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()

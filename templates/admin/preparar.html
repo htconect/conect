@@ -348,7 +348,6 @@
             </div>
             <form method="post" action="/painel/solicitacao/{{ a.solicitacao_id }}/pagamento"
                   class="form-pagamento-operacao">
-                <input type="hidden" name="codigo_pagamento" value="{{ novo_codigo_pagamento() }}">
                 <input type="hidden" name="retorno" value="{{ request.url }}">
                 <div class="linha">
                     <div>
@@ -369,7 +368,7 @@
                 <div class="linha">
                     <div>
                         <label>Data do pagamento</label>
-                        <input type="date" name="data_pagamento" value="{{ hoje_iso }}">
+                        <input type="date" name="data_pagamento">
                     </div>
                     <div>
                         <label>Comprovante no nome do cliente?</label>

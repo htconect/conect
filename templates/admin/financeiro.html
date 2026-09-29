@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260928-fin5">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260929-fin5">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -13,15 +13,19 @@
     </div>
     <div class="financeiro-topo-acoes">
       <a href="/painel/evolucao-financeira" class="btn-evolucao-financeira"><i class="bi bi-graph-up-arrow"></i> Evolução</a>
-      <a class="btn-relatorio-financeiro" target="_blank"
-         href="/painel/financeiro/relatorio?conta_id={{ conta.id if conta else 0 }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca|urlencode }}&status_sistema={{ status_sistema }}&mes_cards={{ mes_cards }}">
-        <i class="bi bi-file-earmark-bar-graph"></i> Relatório
-      </a>
+      <div class="relatorio-topo">
+        <span>Relatório {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
+        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
+        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
+      </div>
       {% if conta %}
       <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
         <input type="hidden" name="conta_id" value="{{ conta.id }}">
-        <label class="btn-importar-topo" for="arquivo-extrato-topo">⇧ Importar</label>
-        <input id="arquivo-extrato-topo" type="file" name="arquivo" accept=".csv,.xlsx,.xls" required>
+        <label class="btn-importar-topo{% if not importacao_habilitada %} desabilitado{% endif %}" for="arquivo-extrato-topo"
+               title="{% if importacao_habilitada %}Importar extrato do Banco Principal{% else %}A importação só é permitida no Banco Principal{% endif %}">
+          ⇧ Importar
+        </label>
+        <input id="arquivo-extrato-topo" type="file" name="arquivo" accept=".csv,.xlsx,.xls" required {% if not importacao_habilitada %}disabled{% endif %}>
       </form>
       {% endif %}
     </div>
@@ -73,6 +77,8 @@
     </div>
   </div>
 
+  
+
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros financeiro-filtros-auto" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
       <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
@@ -90,9 +96,6 @@
 
   {% if request.query_params.get('importados') is not none %}
   <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
-  {% endif %}
-  {% if request.query_params.get('categorias_salvas') is not none %}
-  <div class="financeiro-alerta">Categorias salvas: <b>{{ request.query_params.get('categorias_salvas', '0') }}</b>{% if request.query_params.get('categorias_bloqueadas', '0') != '0' %} · <b>{{ request.query_params.get('categorias_bloqueadas', '0') }}</b> bloqueadas por vínculo existente{% endif %}</div>
   {% endif %}
 
   <div class="financeiro-acoes-faixa">
@@ -138,7 +141,7 @@
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
         <input type="hidden" name="tipo" value="real">
-        <label>Data<input type="date" name="data" value="{{ hoje_iso }}" required></label>
+        <label>Data<input type="date" name="data" value="{{ data_final }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="Descrição" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required></label>
         <label>Tipo
@@ -157,7 +160,7 @@
     <div class="manual-modal-painel" data-manual-painel="receber">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="tipo" value="receber">
-        <label>Previsão<input type="date" name="data" value="{{ hoje_iso }}" required></label>
+        <label>Previsão<input type="date" name="data" value="{{ data_final }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A receber" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
         <label>Tipo
@@ -180,7 +183,7 @@
     <div class="manual-modal-painel" data-manual-painel="pagar">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="tipo" value="pagar">
-        <label>Vencimento<input type="date" name="data" value="{{ hoje_iso }}" required></label>
+        <label>Vencimento<input type="date" name="data" value="{{ data_final }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A pagar" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
         <label>Tipo
@@ -242,10 +245,39 @@
     </form>
   </dialog>
 
+  <dialog id="dlg-pagar-titulo" class="modal-vinculo modal-pagar-titulo">
+    <div class="modal-vinculo-cabecalho">
+      <div>
+        <strong>Pagar conta</strong>
+        <small id="pagar-titulo-descricao">Confirme banco, data e valor do pagamento.</small>
+      </div>
+      <button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-pagar-titulo').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </div>
+    <form method="post" id="form-pagar-titulo" class="manual-modal-form preserve-scroll">
+      <label>Banco
+        <select name="conta_id" id="pagar-titulo-conta" required>
+          {% for c in contas %}
+          <option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Data do pagamento
+        <input type="date" name="data_pagamento" id="pagar-titulo-data" value="{{ hoje.isoformat() }}" required>
+      </label>
+      <label class="campo-largo">Valor
+        <input name="valor" id="pagar-titulo-valor" data-mascara="moeda" required>
+        <small id="pagar-titulo-saldo"></small>
+      </label>
+      <div class="modal-vinculo-rodape campo-largo">
+        <button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-pagar-titulo').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Confirmar pagamento</button>
+      </div>
+    </form>
+  </dialog>
+
 <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
-      <form id="categorias-banco-lote" method="post" action="/painel/financeiro/banco/categorias-lote" class="preserve-scroll"></form>
-      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <button form="categorias-banco-lote" type="submit" class="botao-pequeno"><i class="bi bi-check2-all" aria-hidden="true"></i> Salvar categorias</button></span></div>
+      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span></div>
       <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
       <table class="tabela-banco">
         <colgroup>
@@ -264,9 +296,11 @@
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
             <td>
-              <select form="categorias-banco-lote" name="categoria_banco_{{ l.id }}" class="select-tipo-banco {{ 'confirmado' if l.categoria_confirmada else '' }}">
+              <form id="categoria-banco-{{ l.id }}" method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll"></form>
+              <select form="categoria-banco-{{ l.id }}" name="categoria" class="select-tipo-banco">
                 {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
               </select>
+              <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
             </td>
             <td class="vinculo-compacto">
               {% set vinculos_conta = vinculos_titulo_por_banco.get(l.id, []) %}
@@ -397,6 +431,8 @@
             </td>
 
 <td class="acoes-linha">
+              <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo"><i class="bi bi-check2"></i></button>
+              
               {% if not l.pagamento and not l.organiza_lancamento_id and not vinculos_por_banco.get(l.id) and not vinculos_titulo_por_banco.get(l.id) %}
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
               {% else %}<span class="texto-discreto" title="Desvincule antes de excluir"><i class="bi bi-lock"></i></span>{% endif %}
@@ -406,7 +442,7 @@
         {% for m in manuais_reais %}
           <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento or m.organiza_lancamento_id or vinculos_titulo_por_manual.get(m.id) or vinculos_organiza_por_manual.get(m.id) else '' }}">
             <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
-            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>{{ origem_lancamento_financeiro(m)|lower }}</small></td>
+            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
             <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
             <td>
               <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
@@ -425,7 +461,7 @@
 
               {% if (m.valor or 0)|abs > 0.01 %}
               <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
-                <div class="modal-vinculo-cabecalho"><div><strong>Movimento {{ origem_lancamento_financeiro(m)|lower }}</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+                <div class="modal-vinculo-cabecalho"><div><strong>Vincular movimento manual</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
                 <div class="modal-vinculo-historico">{{ m.descricao }}</div>
 
                 {% if vinculos_conta_manual %}
@@ -524,7 +560,6 @@
                 <td class="cliente-cell">
                   <strong>Connect</strong>
                   <a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>
-                  {% if p.codigo_registro %}<small>Código: {{ p.codigo_registro }}</small>{% endif %}
                 </td>
                 <td><span class="tipo-chip aluguel">Aluguel</span></td>
                 <td class="positivo">R$ {{ p.valor|moeda_br }}</td>
@@ -553,11 +588,19 @@
                 </td>
                 <td>
                   <span class="tipo-chip {{ item.tipo }}">
-                    {{ 'Venda' if item.tipo == 'venda' else ('Manutenção' if item.tipo == 'manutencao' else ('Atualização' if item.tipo == 'atualizacao' else 'Estoque / Compras')) }}
+                    {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
                   </span>
                 </td>
                 <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
-                <td><span class="badge-ok">Sincronizado · consulta</span></td>
+                <td>
+                  {% if status_org == 'vinculado' %}
+                    <span class="badge-ok">Vinculado</span>
+                  {% elif status_org == 'parcial' %}
+                    <span class="badge-pendente">Parcial · R$ {{ valor_org_vinc|moeda_br }}</span>
+                  {% else %}
+                    <span class="badge-pendente">Pendente</span>
+                  {% endif %}
+                </td>
               </tr>
               {% endif %}
             {% endfor %}
@@ -651,7 +694,7 @@
               {% endfor %}
 
               {% for item in lancamentos_organiza_financeiro %}
-                {% if item.tipo != 'estoque' and (item.falta_receber or 0) > 0.01 %}
+                {% if (item.falta_receber or 0) > 0.01 %}
                 <tr>
                   <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
                   <td class="cliente-cell">
@@ -660,11 +703,11 @@
                   </td>
                   <td>
                     <span class="tipo-chip {{ item.tipo }}">
-                      {{ 'Venda' if item.tipo == 'venda' else ('Manutenção' if item.tipo == 'manutencao' else ('Atualização' if item.tipo == 'atualizacao' else 'Estoque / Compras')) }}
+                      {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
                     </span>
                   </td>
                   <td class="positivo">R$ {{ item.falta_receber|moeda_br }}</td>
-                  <td><span class="badge-ok">Saldo do Organiza</span></td>
+                  <td><span class="badge-pendente">A receber</span></td>
                 </tr>
                 {% endif %}
               {% endfor %}
@@ -708,6 +751,10 @@
                 <td class="acoes-titulo-pagar">
                   {% if baixado_p > 0.01 %}<span class="badge-pendente">Parcial · pago R$ {{ baixado_p|moeda_br }}</span>
                   {% else %}<span class="badge-pendente">A pagar</span>{% endif %}
+                  <button type="button" class="botao-pequeno btn-pagar-titulo" title="Pagar esta conta"
+                          data-id="{{ p.id }}" data-descricao="{{ p.descricao|e }}" data-saldo="{{ '%.2f'|format(saldo_p) }}">
+                    <i class="bi bi-cash-coin" aria-hidden="true"></i> Pagar
+                  </button>
                   <button type="button" class="botao-icone btn-editar-pagar" title="Editar conta a pagar" aria-label="Editar conta a pagar"
                           data-id="{{ p.id }}" data-data="{{ p.data.isoformat() }}" data-descricao="{{ p.descricao|e }}" data-valor="{{ '%.2f'|format(p.valor or 0) }}" data-categoria="{{ p.categoria }}">
                     <i class="bi bi-pencil-square" aria-hidden="true"></i>
@@ -716,18 +763,6 @@
                     <form method="post" action="/painel/financeiro/titulo/{{ p.id }}/excluir" class="preserve-scroll" style="display:inline" onsubmit="return confirm('Excluir esta conta a pagar?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
                   {% endif %}
                 </td>
-              </tr>
-              {% endif %}
-            {% endfor %}
-
-            {% for item in lancamentos_organiza_financeiro %}
-              {% if item.tipo == 'estoque' and (item.valor or 0) > 0.01 %}
-              <tr>
-                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
-                <td class="cliente-cell"><strong>Estoque / Compras</strong><small>{{ item.descricao or 'Saldo enviado pelo Organiza' }}</small></td>
-                <td><span class="tipo-chip">Estoque</span></td>
-                <td class="negativo">R$ {{ item.valor|moeda_br }}</td>
-                <td><span class="badge-ok">Saldo do Organiza</span></td>
               </tr>
               {% endif %}
             {% endfor %}
@@ -754,7 +789,7 @@
               </tr>
               {% endif %}
             {% else %}
-              {% if not pagar and not lancamentos_organiza_financeiro %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
+              {% if not pagar %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
             {% endfor %}
             </tbody>
           </table>
@@ -860,6 +895,24 @@
       buscaAuto.addEventListener('change', function(){ salvarScrolls(); filtrosAuto.submit(); });
     }
   }
+
+  document.querySelectorAll('.btn-pagar-titulo').forEach(function(botao){
+    botao.addEventListener('click', function(){
+      var dlg = document.getElementById('dlg-pagar-titulo');
+      var form = document.getElementById('form-pagar-titulo');
+      if(!dlg || !form) return;
+      form.action = '/painel/financeiro/titulo/' + this.dataset.id + '/pagar';
+      var descricao = this.dataset.descricao || 'Conta a pagar';
+      var saldo = parseFloat(this.dataset.saldo || '0');
+      var descEl = document.getElementById('pagar-titulo-descricao');
+      var saldoEl = document.getElementById('pagar-titulo-saldo');
+      var valorEl = document.getElementById('pagar-titulo-valor');
+      if(descEl) descEl.textContent = descricao;
+      if(saldoEl) saldoEl.textContent = 'Saldo em aberto: R$ ' + saldo.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      if(valorEl) valorEl.value = saldo.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      dlg.showModal();
+    });
+  });
 
   document.querySelectorAll('.btn-editar-pagar').forEach(function(botao){
     botao.addEventListener('click', function(){

@@ -1867,28 +1867,21 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 /* v1.0.53 — atalho para análise histórica */
 .btn-evolucao-financeira{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border:1px solid #b9d2ff;border-radius:10px;text-decoration:none;background:#f4f8ff;color:#0f3d91;font-weight:800;white-space:nowrap}
 
-/* v1.0.69 — categorias em lote e resumo mensal por categoria */
-.financeiro-categorias-mes{margin:12px 0}
-.financeiro-categorias-mes .titulo-tabela{align-items:center}
-.financeiro-categorias-mes .tabela-scroll{max-height:260px}
-.tabela-categorias-mes th:nth-child(n+2),
-.tabela-categorias-mes td:nth-child(n+2){text-align:right}
-.titulo-tabela button.botao-pequeno{margin-left:8px;vertical-align:middle}
-.select-tipo-banco.confirmado{border-color:#bbf7d0;background:#f0fdf4}
-
-/* 1.0.70 - relatório usa exatamente os filtros ativos do Financeiro */
-.btn-relatorio-financeiro{
-  height:36px;
-  padding:0 14px;
-  border-radius:10px;
-  background:#2563eb;
-  color:#fff;
-  display:inline-flex;
-  align-items:center;
-  gap:7px;
-  justify-content:center;
-  font-weight:900;
-  text-decoration:none;
-  box-shadow:0 8px 16px rgba(37,99,235,.18);
+/* v1.0.68 — pagamento direto de títulos e importação exclusiva no Banco Principal */
+.btn-importar-topo.desabilitado{
+  background:#cbd5e1!important;
+  color:#64748b!important;
+  cursor:not-allowed;
+  box-shadow:none;
+  pointer-events:none;
 }
-.btn-relatorio-financeiro:hover{background:#1d4ed8;color:#fff}
+.btn-pagar-titulo{
+  margin-left:6px;
+  background:#ecfdf3;
+  border-color:#86efac;
+  color:#067647;
+  font-weight:900;
+}
+.btn-pagar-titulo:hover{background:#dcfce7}
+.modal-pagar-titulo .manual-modal-form{padding:14px}
+.modal-pagar-titulo #pagar-titulo-saldo{display:block;margin-top:5px;color:#64748b;font-weight:700}

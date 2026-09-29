@@ -422,7 +422,6 @@
   {% endif %}
 
   <form id="formPagamento" method="post" action="/painel/solicitacao/{{ item.id }}/pagamento" class="form-mobile-simples bloco-oculto" onsubmit="return validarPagamentoReserva(this)">
-    <input type="hidden" name="codigo_pagamento" value="{{ novo_codigo_pagamento() }}">
     <label>Valor recebido</label>
     <input name="valor_pago" value="{{ pagamento_manual_sugerido|moeda_br }}" required inputmode="decimal" data-max="{{ '%.2f'|format(falta) }}" {% if falta <= 0 %}disabled{% endif %}>
     <label>Forma</label>
@@ -458,7 +457,6 @@
         <small>{{ p.data_pagamento.strftime('%d/%m/%Y') }} · {{ "Conciliado" if p.conciliado_em else "Pendente" }}</small>
         <div class="pagamento-detalhes-consulta">
           <span><strong>Data:</strong> {{ p.data_pagamento.strftime('%d/%m/%Y') }}</span>
-          {% if p.codigo_registro %}<span><strong>Código:</strong> {{ p.codigo_registro }}</span>{% endif %}
           <span><strong>Comprovante no nome do cliente:</strong> {{ "Sim" if p.comprovante_no_nome_cliente else "Não" }}</span>
           {% if p.nome_comprovante %}
           <span><strong>Nome no comprovante:</strong> {{ p.nome_comprovante }}</span>

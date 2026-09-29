@@ -14,18 +14,7 @@
     </div>
     <div class="tarefas-hoje-mais">
       <b>Mais informações</b>
-      <p>
-        {% set popup_sinais = (pendencias_sinal|length) if empresa.exige_sinal else 0 %}
-        {% set popup_pendencias = pendencias_agenda|length %}
-        {% set popup_envios = pendencias_envio_contrato|length %}
-        {% if popup_sinais or popup_pendencias or popup_envios %}
-          {% if popup_sinais %}<strong>{{ popup_sinais }}</strong> sinal{% if popup_sinais != 1 %}is{% endif %}{% endif %}
-          {% if popup_pendencias %}{% if popup_sinais %} · {% endif %}<strong>{{ popup_pendencias }}</strong> pendência{% if popup_pendencias != 1 %}s{% endif %}{% endif %}
-          {% if popup_envios %}{% if popup_sinais or popup_pendencias %} · {% endif %}<strong>{{ popup_envios }}</strong> aguardando envio{% endif %}
-        {% else %}
-          Nenhuma pendência.
-        {% endif %}
-      </p>
+      <p>Você tem <strong>{{ tarefas_hoje_contratos_pendentes }}</strong> contrato{% if tarefas_hoje_contratos_pendentes != 1 %}s{% endif %} pendente{% if tarefas_hoje_contratos_pendentes != 1 %}s{% endif %}.</p>
     </div>
   </section>
 </div>

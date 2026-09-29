@@ -1,8 +1,16 @@
-# HUMIAT Conect — Versão 1.0.73
+# HUMIAT Conect — Versão 1.0.68
 
-## Atualizações
-- Padroniza pagamentos antigos da InfinitePay como **Online** no Financeiro e no relatório.
-- Mantém pagamentos digitados manualmente como **Manual**.
-- No relatório financeiro existente, permite alterar somente a **categoria** de vários movimentos e salvar tudo no final.
-- Data, descrição, conta e valor não são alterados pela correção de categoria.
-- Vínculos financeiros existentes são preservados para evitar alterações acidentais em conciliações.
+## Financeiro
+- A aba **A pagar** ganhou o botão **Pagar** em cada título manual em aberto.
+- O pagamento abre uma caixa com **Banco**, **Data do pagamento** e **Valor**.
+- O banco vem pré-selecionado conforme o filtro atual do Financeiro e pode ser alterado no combo antes da confirmação.
+- Ao confirmar, o Connect cria a saída financeira na conta escolhida e já vincula essa saída ao título, sem exigir novo lançamento e vínculo manual.
+- Pagamentos parciais continuam suportados; o título permanece parcial até quitar o saldo.
+- O botão **Importar** só fica habilitado quando o filtro estiver no **Banco Principal**.
+- O backend também bloqueia importações direcionadas a qualquer outra conta, mesmo que a requisição seja enviada manualmente.
+
+## Contratos / Operação
+Mantidos os ajustes da versão 1.0.67 para suporte, retirada, disponibilidade e recursos.
+
+## Commit sugerido
+`Connect 1.0.68 - simplifica pagamento de contas e restringe importacao ao banco principal`
