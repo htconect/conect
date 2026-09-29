@@ -9218,9 +9218,12 @@ def financeiro(
     # GET financeiro é somente leitura. A correção de ordem antiga não roda em toda abertura.
     contas = garantir_contas_financeiras(db, empresa.id)
     conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
+    # Importação é exclusiva do cadastro nomeado Banco Principal.
+    # Não usar fallback para outra conta do tipo banco: se o filtro estiver em
+    # qualquer outra conta, o botão permanece desabilitado.
     conta_principal = next(
         (c for c in contas if (c.nome or "").strip().casefold() == "banco principal"),
-        next((c for c in contas if (c.tipo or "").strip().casefold() == "banco"), None),
+        None,
     )
     importacao_habilitada = bool(conta and conta_principal and conta.id == conta_principal.id)
 
@@ -10709,12 +10712,6 @@ def financeiro_importar_extrato(
         ContaFinanceira.ativa == True,
         func.lower(ContaFinanceira.nome) == "banco principal",
     ).order_by(ContaFinanceira.id).first()
-    if conta_principal is None:
-        conta_principal = db.query(ContaFinanceira).filter(
-            ContaFinanceira.empresa_id == empresa.id,
-            ContaFinanceira.ativa == True,
-            func.lower(ContaFinanceira.tipo) == "banco",
-        ).order_by(ContaFinanceira.id).first()
     if not conta_principal or conta.id != conta_principal.id:
         raise HTTPException(400, "A importação de extrato só é permitida no Banco Principal.")
     registros = ler_extrato_upload(arquivo)

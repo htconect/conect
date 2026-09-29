@@ -1,16 +1,20 @@
-# HUMIAT Conect — Versão 1.0.68
+# HUMIAT Conect — Versão 1.0.74
 
-## Financeiro
-- A aba **A pagar** ganhou o botão **Pagar** em cada título manual em aberto.
-- O pagamento abre uma caixa com **Banco**, **Data do pagamento** e **Valor**.
-- O banco vem pré-selecionado conforme o filtro atual do Financeiro e pode ser alterado no combo antes da confirmação.
-- Ao confirmar, o Connect cria a saída financeira na conta escolhida e já vincula essa saída ao título, sem exigir novo lançamento e vínculo manual.
-- Pagamentos parciais continuam suportados; o título permanece parcial até quitar o saldo.
-- O botão **Importar** só fica habilitado quando o filtro estiver no **Banco Principal**.
-- O backend também bloqueia importações direcionadas a qualquer outra conta, mesmo que a requisição seja enviada manualmente.
+## Financeiro — pagamento direto no A Pagar
+- Cada título em aberto mantém o botão **Pagar**.
+- O popup usa o banco selecionado no filtro como padrão e mantém o **combo de bancos** disponível para troca antes da confirmação.
+- Data do pagamento e saldo em aberto são preenchidos automaticamente e podem ser ajustados antes de confirmar.
+- A confirmação cria a saída financeira e vincula a baixa ao próprio título, sem redigitar descrição/categoria e sem vínculo manual posterior.
+- Pagamentos parciais continuam suportados.
 
-## Contratos / Operação
-Mantidos os ajustes da versão 1.0.67 para suporte, retirada, disponibilidade e recursos.
+## Financeiro — importação protegida
+- **Importar** fica habilitado exclusivamente quando o filtro está no cadastro chamado **Banco Principal**.
+- Em qualquer outra conta o botão permanece desabilitado.
+- O backend também rejeita importação para qualquer conta diferente do **Banco Principal**.
+- Removido o fallback que poderia tratar outro banco como principal quando o cadastro nomeado não fosse encontrado.
+
+## Base preservada
+- Mantidas as alterações da versão 1.0.73, incluindo a padronização de pagamentos InfinitePay como **Online** e a edição em lote de categorias no relatório financeiro.
 
 ## Commit sugerido
-`Connect 1.0.68 - simplifica pagamento de contas e restringe importacao ao banco principal`
+`Connect 1.0.74 - aplica pagamento direto e restringe importacao ao Banco Principal sobre a base 1.0.73`
