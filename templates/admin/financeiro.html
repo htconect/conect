@@ -13,11 +13,10 @@
     </div>
     <div class="financeiro-topo-acoes">
       <a href="/painel/evolucao-financeira" class="btn-evolucao-financeira"><i class="bi bi-graph-up-arrow"></i> Evolução</a>
-      <div class="relatorio-topo">
-        <span>Relatório {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
-        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
-        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
-      </div>
+      <a class="btn-relatorio-financeiro" target="_blank"
+         href="/painel/financeiro/relatorio?conta_id={{ conta.id if conta else 0 }}&data_inicial={{ data_inicial }}&data_final={{ data_final }}&categoria={{ categoria }}&busca={{ busca|urlencode }}&status_sistema={{ status_sistema }}&mes_cards={{ mes_cards }}">
+        <i class="bi bi-file-earmark-bar-graph"></i> Relatório
+      </a>
       {% if conta %}
       <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
         <input type="hidden" name="conta_id" value="{{ conta.id }}">
@@ -73,31 +72,6 @@
       </div>
     </div>
   </div>
-
-  <section class="box financeiro-categorias-mes">
-    <div class="titulo-tabela">
-      <h2><i class="bi bi-pie-chart" aria-hidden="true"></i> Movimento mensal por categoria</h2>
-      <span>{{ mes_cards_inicio.strftime('%m/%Y') }}</span>
-    </div>
-    <div class="tabela-scroll">
-      <table class="tabela-banco tabela-categorias-mes">
-        <thead><tr><th>Categoria</th><th>Lançamentos</th><th>Entrou</th><th>Saiu</th><th>Saldo</th></tr></thead>
-        <tbody>
-        {% for r in relatorio_categorias %}
-          <tr>
-            <td><b>{{ r.rotulo }}</b></td>
-            <td>{{ r.quantidade }}</td>
-            <td class="positivo">R$ {{ r.entradas|moeda_br }}</td>
-            <td class="negativo">R$ {{ r.saidas|moeda_br }}</td>
-            <td class="{{ 'positivo' if r.saldo >= 0 else 'negativo' }}"><b>R$ {{ r.saldo|moeda_br }}</b></td>
-          </tr>
-        {% else %}
-          <tr><td colspan="5">Nenhum movimento real neste mês.</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
 
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros financeiro-filtros-auto" data-loading-title="CONECT" data-loading-text="Atualizando informações...">

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block body_class %}tela-relatorio-financeiro{% endblock %}
+{% block head_extra %}
+<style>
+body.tela-relatorio-financeiro{background:#f5f7fb}.rel-fin{max-width:1380px;margin:0 auto;padding:24px}.rel-fin-topo{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:18px}.rel-fin-topo h1{margin:3px 0 5px;font-size:28px}.rel-fin-topo p{margin:0;color:#64748b}.rel-fin-acoes{display:flex;gap:8px}.rel-fin-acoes a,.rel-fin-acoes button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;text-decoration:none;cursor:pointer}.rel-fin-acoes a{background:#fff;border:1px solid #cbd5e1;color:#0f172a}.rel-fin-acoes button{background:#2563eb;color:#fff}.rel-fin-filtros,.rel-fin-cards,.rel-fin-box{background:#fff;border:1px solid #dbe5f1;border-radius:14px;box-shadow:0 8px 22px rgba(15,23,42,.04)}.rel-fin-filtros{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px}.rel-fin-filtros span{font-size:12px;color:#64748b}.rel-fin-filtros b{display:block;color:#0f172a;margin-top:2px}.rel-fin-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-bottom:12px;overflow:hidden}.rel-fin-card{padding:16px;border-right:1px solid #e2e8f0}.rel-fin-card:last-child{border-right:0}.rel-fin-card small{display:block;color:#64748b}.rel-fin-card b{display:block;font-size:22px;margin-top:4px}.positivo{color:#07883e}.negativo{color:#c62828}.rel-fin-box{padding:14px;margin-bottom:12px}.rel-fin-box h2{font-size:18px;margin:0 0 12px}.rel-fin table{width:100%;border-collapse:collapse;font-size:13px}.rel-fin th{background:#edf3f9;text-align:left;padding:9px;border:1px solid #d7e0ea;font-size:11px;text-transform:uppercase}.rel-fin td{padding:9px;border:1px solid #e1e7ef;vertical-align:top}.rel-fin td.numero,.rel-fin th.numero{text-align:right}.rel-fin .sem-dados{text-align:center;color:#64748b;padding:24px}@media print{.rel-fin-acoes{display:none}.rel-fin{max-width:none;padding:0}.rel-fin-box,.rel-fin-filtros,.rel-fin-cards{box-shadow:none;break-inside:avoid}body.tela-relatorio-financeiro .topo-app,body.tela-relatorio-financeiro .nav-inferior{display:none!important}}
+</style>
+{% endblock %}
+{% block conteudo %}
+<div class="rel-fin">
+  <div class="rel-fin-topo">
+    <div>
+      <small>FINANCEIRO</small>
+      <h1>Relatório</h1>
+      <p>Resultado dos mesmos filtros aplicados na tela do Financeiro.</p>
+    </div>
+    <div class="rel-fin-acoes">
+      <a href="/painel/financeiro?conta_id={{ conta.id if conta else 0 }}&data_inicial={{ inicio.isoformat() }}&data_final={{ fim.isoformat() }}&categoria={{ categoria }}&busca={{ busca|urlencode }}&status_sistema={{ status_sistema }}&mes_cards={{ mes_cards }}">Voltar</a>
+      <button type="button" onclick="window.print()">Imprimir</button>
+    </div>
+  </div>
+
+  <div class="rel-fin-filtros">
+    <div><span>Período</span><b>{{ inicio.strftime('%d/%m/%Y') }} a {{ fim.strftime('%d/%m/%Y') }}</b></div>
+    <div><span>Conta</span><b>{{ conta.nome if conta else 'Todas as contas' }}</b></div>
+    <div><span>Categoria</span><b>{{ categoria_rotulo }}</b></div>
+    {% if busca %}<div><span>Busca</span><b>{{ busca }}</b></div>{% endif %}
+  </div>
+
+  <div class="rel-fin-cards">
+    <div class="rel-fin-card"><small>Entrou</small><b class="positivo">R$ {{ entradas|moeda_br }}</b></div>
+    <div class="rel-fin-card"><small>Saiu</small><b class="negativo">R$ {{ saidas|moeda_br }}</b></div>
+    <div class="rel-fin-card"><small>Saldo</small><b class="{{ 'positivo' if saldo >= 0 else 'negativo' }}">R$ {{ saldo|moeda_br }}</b></div>
+  </div>
+
+  <section class="rel-fin-box">
+    <h2>Resumo por categoria</h2>
+    <table>
+      <thead><tr><th>Categoria</th><th class="numero">Lançamentos</th><th class="numero">Entrou</th><th class="numero">Saiu</th><th class="numero">Saldo</th></tr></thead>
+      <tbody>
+      {% for r in categorias_resumo %}
+        <tr>
+          <td><b>{{ r.rotulo }}</b></td>
+          <td class="numero">{{ r.quantidade }}</td>
+          <td class="numero positivo">R$ {{ r.entradas|moeda_br }}</td>
+          <td class="numero negativo">R$ {{ r.saidas|moeda_br }}</td>
+          <td class="numero {{ 'positivo' if r.saldo >= 0 else 'negativo' }}"><b>R$ {{ r.saldo|moeda_br }}</b></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="sem-dados">Nenhum movimento encontrado com estes filtros.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="rel-fin-box">
+    <h2>Movimentos filtrados</h2>
+    <table>
+      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Conta</th><th>Origem</th><th class="numero">Entrou</th><th class="numero">Saiu</th></tr></thead>
+      <tbody>
+      {% for m in movimentos %}
+        <tr>
+          <td>{{ m.data.strftime('%d/%m/%Y') }}</td>
+          <td>{{ m.categoria }}</td>
+          <td>{{ m.descricao }}</td>
+          <td>{{ m.conta }}</td>
+          <td>{{ m.origem }}</td>
+          <td class="numero positivo">{% if m.entrada %}R$ {{ m.entrada|moeda_br }}{% else %}—{% endif %}</td>
+          <td class="numero negativo">{% if m.saida %}R$ {{ m.saida|moeda_br }}{% else %}—{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="sem-dados">Nenhum movimento encontrado com estes filtros.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+{% endblock %}

@@ -10441,6 +10441,149 @@ def _xlsx_relatorio_financeiro(inicio_mes, semanas, total, posicao=None, categor
     return buffer.getvalue()
 
 
+
+@app.get("/painel/financeiro/relatorio", response_class=HTMLResponse)
+def financeiro_relatorio_filtrado(
+        request: Request,
+        conta_id: int = 0,
+        data_inicial: str = "",
+        data_final: str = "",
+        categoria: str = "",
+        busca: str = "",
+        status_sistema: str = "pendente",
+        mes_cards: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Relatório de movimentos reais usando os mesmos filtros ativos da tela Financeiro."""
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+
+    contas = garantir_contas_financeiras(db, empresa.id)
+    conta = next((c for c in contas if c.id == conta_id), None) if conta_id else (contas[0] if contas else None)
+    hoje = hoje_local()
+
+    try:
+        mes_inicio = datetime.strptime(mes_cards, "%Y-%m").date().replace(day=1) if mes_cards else hoje.replace(day=1)
+    except ValueError:
+        mes_inicio = hoje.replace(day=1)
+    indice = mes_inicio.year * 12 + mes_inicio.month
+    proximo_mes = date(indice // 12, indice % 12 + 1, 1)
+    mes_fim = proximo_mes - timedelta(days=1)
+
+    def _data_filtro(valor: str, padrao: date) -> date:
+        try:
+            d = datetime.strptime(valor, "%Y-%m-%d").date() if valor else padrao
+        except ValueError:
+            d = padrao
+        return max(mes_inicio, min(d, mes_fim))
+
+    inicio = _data_filtro(data_inicial, mes_inicio)
+    fim = _data_filtro(data_final, mes_fim)
+    if inicio > fim:
+        fim = inicio
+
+    q_banco = db.query(LancamentoBanco).options(joinedload(LancamentoBanco.conta)).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.data >= inicio,
+        LancamentoBanco.data <= fim,
+    )
+    q_manual = db.query(LancamentoManualFinanceiro).options(joinedload(LancamentoManualFinanceiro.conta)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.data >= inicio,
+        LancamentoManualFinanceiro.data <= fim,
+    )
+
+    if conta:
+        q_banco = q_banco.filter(LancamentoBanco.conta_id == conta.id)
+        q_manual = q_manual.filter(LancamentoManualFinanceiro.conta_id == conta.id)
+
+    if categoria == "sem_categoria":
+        q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
+        q_manual = q_manual.filter(or_(LancamentoManualFinanceiro.categoria == None, LancamentoManualFinanceiro.categoria == ""))
+    elif categoria:
+        q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
+        q_manual = q_manual.filter(LancamentoManualFinanceiro.categoria == categoria)
+
+    if busca:
+        termo = busca.strip()
+        like = f"%{termo}%"
+        valor_busca = None
+        if re.fullmatch(r"[Rr$\s0-9.,-]+", termo):
+            try:
+                valor_busca = texto_para_float(termo.replace("R$", "").replace("r$", "").strip())
+            except Exception:
+                valor_busca = None
+        filtros_banco = [LancamentoBanco.historico.ilike(like)]
+        filtros_manual = [LancamentoManualFinanceiro.descricao.ilike(like)]
+        if valor_busca is not None:
+            filtros_banco.append(func.abs(LancamentoBanco.valor - valor_busca) < 0.01)
+            filtros_manual.append(func.abs(LancamentoManualFinanceiro.valor - valor_busca) < 0.01)
+        q_banco = q_banco.filter(or_(*filtros_banco))
+        q_manual = q_manual.filter(or_(*filtros_manual))
+
+    banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.id.desc()).all()
+    manuais = q_manual.order_by(LancamentoManualFinanceiro.data.desc(), LancamentoManualFinanceiro.id.desc()).all()
+    categorias_resumo = _resumo_categorias_movimentos(banco, manuais)
+
+    movimentos = []
+    for item in banco:
+        valor = float(item.valor or 0)
+        movimentos.append({
+            "data": item.data,
+            "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
+            "descricao": item.historico or item.documento or "Lançamento bancário",
+            "conta": item.conta.nome if getattr(item, "conta", None) else "-",
+            "origem": "Banco",
+            "entrada": valor if valor > 0 else 0.0,
+            "saida": abs(valor) if valor < 0 else 0.0,
+            "valor": valor,
+            "id": item.id,
+        })
+    for item in manuais:
+        valor = float(item.valor or 0)
+        movimentos.append({
+            "data": item.data,
+            "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
+            "descricao": item.descricao or "Lançamento manual",
+            "conta": item.conta.nome if getattr(item, "conta", None) else "-",
+            "origem": "Manual",
+            "entrada": valor if valor > 0 else 0.0,
+            "saida": abs(valor) if valor < 0 else 0.0,
+            "valor": valor,
+            "id": item.id,
+        })
+    movimentos.sort(key=lambda x: (x["data"], x["id"]), reverse=True)
+
+    entradas = sum(m["entrada"] for m in movimentos)
+    saidas = sum(m["saida"] for m in movimentos)
+    saldo = entradas - saidas
+    categoria_rotulo = "Todas as categorias"
+    if categoria == "sem_categoria":
+        categoria_rotulo = "Sem categoria"
+    elif categoria:
+        categoria_rotulo = FINANCEIRO_CATEGORIAS_ROTULOS.get(categoria, categoria.title())
+
+    return templates.TemplateResponse("admin/financeiro_relatorio.html", {
+        "request": request,
+        "empresa": empresa,
+        "conta": conta,
+        "inicio": inicio,
+        "fim": fim,
+        "categoria": categoria,
+        "categoria_rotulo": categoria_rotulo,
+        "busca": busca,
+        "status_sistema": status_sistema,
+        "mes_cards": mes_inicio.strftime("%Y-%m"),
+        "movimentos": movimentos,
+        "categorias_resumo": categorias_resumo,
+        "entradas": entradas,
+        "saidas": saidas,
+        "saldo": saldo,
+    })
+
+
 @app.get("/painel/financeiro/relatorio-mensal.xlsx")
 def financeiro_relatorio_excel(
         request: Request,
