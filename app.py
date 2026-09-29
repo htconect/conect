@@ -2758,9 +2758,12 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         "venda": "venda",
         "manutencao": "manutencao",
         "manutenção": "manutencao",
+        "atualizacao": "atualizacao",
+        "atualização": "atualizacao",
+        "estoque": "estoque",
     }
     if tipo not in aliases:
-        raise HTTPException(status_code=422, detail="tipo deve ser 'venda' ou 'manutencao'.")
+        raise HTTPException(status_code=422, detail="tipo deve ser venda, manutencao, atualizacao ou estoque.")
     tipo = aliases[tipo]
 
     try:
@@ -2774,8 +2777,8 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     except (InvalidOperation, ValueError):
         raise HTTPException(status_code=422, detail="valor ou falta_receber inválido.")
 
-    if valor <= 0:
-        raise HTTPException(status_code=422, detail="valor deve ser maior que zero.")
+    if valor < 0:
+        raise HTTPException(status_code=422, detail="valor não pode ser negativo.")
     if falta_receber < 0:
         falta_receber = Decimal("0")
 
@@ -9795,17 +9798,19 @@ def financeiro(
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
+    # 1.0.68: o Organiza envia somente quatro saldos globais atuais.
+    # Registros antigos por cliente/pagamento permanecem no banco como histórico,
+    # mas não entram mais na posição financeira nem em vínculos.
     todos_lancamentos_organiza = (
         db.query(LancamentoOrganiza)
-        .filter(LancamentoOrganiza.empresa_id == empresa.id)
+        .filter(
+            LancamentoOrganiza.empresa_id == empresa.id,
+            LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
+        )
         .order_by(LancamentoOrganiza.data_pagamento.desc(), LancamentoOrganiza.id.desc())
         .all()
     )
-    registros_organiza_disponiveis = [
-        item for item in todos_lancamentos_organiza
-        if item.id not in ids_organiza_vinculados_legado
-        and valor_vinculado_por_organiza.get(item.id, 0.0) < abs(float(item.valor or 0)) - 0.01
-    ]
+    registros_organiza_disponiveis = []
 
     saldo_organiza_por_banco = {}
     candidatos_organiza = {}
@@ -9832,19 +9837,7 @@ def financeiro(
         for l in (*lancamentos_banco_organiza, *lancamentos_manuais_organiza)
         if l.organiza_lancamento_id
     }
-    status_organiza_por_item = {}
-    for item in todos_lancamentos_organiza:
-        if item.id in bancos_por_organiza:
-            status_organiza_por_item[item.id] = "vinculado"
-            continue
-        pago = float(valor_vinculado_por_organiza.get(item.id, 0.0) or 0.0)
-        total = abs(float(item.valor or 0))
-        if pago >= total - 0.01:
-            status_organiza_por_item[item.id] = "vinculado"
-        elif pago > 0.01:
-            status_organiza_por_item[item.id] = "parcial"
-        else:
-            status_organiza_por_item[item.id] = "pendente"
+    status_organiza_por_item = {item.id: "consulta" for item in todos_lancamentos_organiza}
 
     candidatos_manual = {
         m.id: melhores_vinculos_para_manual(m, pagamentos_pendentes_vinculo)
@@ -9949,7 +9942,12 @@ def financeiro(
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
         for item in todos_lancamentos_organiza
-        if item.data_pagamento and inicio <= item.data_pagamento <= fim
+        if item.tipo != "estoque" and item.data_pagamento and inicio <= item.data_pagamento <= fim
+    )
+    total_organiza_pagar_posicao = sum(
+        max(float(item.valor or 0), 0.0)
+        for item in todos_lancamentos_organiza
+        if item.tipo == "estoque" and item.data_pagamento and inicio <= item.data_pagamento <= fim
     )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
@@ -9969,7 +9967,7 @@ def financeiro(
         total_manual_receber_posicao + total_contratos_receber_posicao
         + total_organiza_receber_posicao + total_interempresa_receber_posicao
     )
-    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao
+    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao + total_organiza_pagar_posicao
     saldo_projetado_posicao = saldo_todos + total_receber_posicao - total_pagar_posicao
 
     return templates.TemplateResponse("admin/financeiro.html", {
@@ -10094,7 +10092,16 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
 
     receber_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
         LancamentoOrganiza.empresa_id == empresa_id,
+        LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
+        LancamentoOrganiza.tipo != "estoque",
         LancamentoOrganiza.falta_receber > 0,
+        LancamentoOrganiza.data_pagamento <= ate_data,
+    ).scalar() or 0)
+    pagar_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.valor), 0)).filter(
+        LancamentoOrganiza.empresa_id == empresa_id,
+        LancamentoOrganiza.id_externo.like("ORGANIZA-SALDO-%"),
+        LancamentoOrganiza.tipo == "estoque",
+        LancamentoOrganiza.valor > 0,
         LancamentoOrganiza.data_pagamento <= ate_data,
     ).scalar() or 0)
 
@@ -10130,7 +10137,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         )
 
     total_receber = receber_manual + receber_contratos + receber_organiza + receber_interempresa
-    total_pagar = pagar_manual + pagar_repasses
+    total_pagar = pagar_manual + pagar_repasses + pagar_organiza
     return {
         "banco": saldo_banco,
         "receber": total_receber,
@@ -10142,6 +10149,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         "receber_organiza": receber_organiza,
         "receber_interempresa": receber_interempresa,
         "pagar_repasses": pagar_repasses,
+        "pagar_organiza": pagar_organiza,
     }
 
 

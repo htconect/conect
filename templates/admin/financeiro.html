@@ -555,19 +555,11 @@
                 </td>
                 <td>
                   <span class="tipo-chip {{ item.tipo }}">
-                    {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
+                    {{ 'Venda' if item.tipo == 'venda' else ('Manutenção' if item.tipo == 'manutencao' else ('Atualização' if item.tipo == 'atualizacao' else 'Estoque / Compras')) }}
                   </span>
                 </td>
                 <td class="positivo">R$ {{ item.valor|moeda_br }}</td>
-                <td>
-                  {% if status_org == 'vinculado' %}
-                    <span class="badge-ok">Vinculado</span>
-                  {% elif status_org == 'parcial' %}
-                    <span class="badge-pendente">Parcial · R$ {{ valor_org_vinc|moeda_br }}</span>
-                  {% else %}
-                    <span class="badge-pendente">Pendente</span>
-                  {% endif %}
-                </td>
+                <td><span class="badge-ok">Sincronizado · consulta</span></td>
               </tr>
               {% endif %}
             {% endfor %}
@@ -661,7 +653,7 @@
               {% endfor %}
 
               {% for item in lancamentos_organiza_financeiro %}
-                {% if (item.falta_receber or 0) > 0.01 %}
+                {% if item.tipo != 'estoque' and (item.falta_receber or 0) > 0.01 %}
                 <tr>
                   <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
                   <td class="cliente-cell">
@@ -670,11 +662,11 @@
                   </td>
                   <td>
                     <span class="tipo-chip {{ item.tipo }}">
-                      {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
+                      {{ 'Venda' if item.tipo == 'venda' else ('Manutenção' if item.tipo == 'manutencao' else ('Atualização' if item.tipo == 'atualizacao' else 'Estoque / Compras')) }}
                     </span>
                   </td>
                   <td class="positivo">R$ {{ item.falta_receber|moeda_br }}</td>
-                  <td><span class="badge-pendente">A receber</span></td>
+                  <td><span class="badge-ok">Saldo do Organiza</span></td>
                 </tr>
                 {% endif %}
               {% endfor %}
@@ -730,6 +722,18 @@
               {% endif %}
             {% endfor %}
 
+            {% for item in lancamentos_organiza_financeiro %}
+              {% if item.tipo == 'estoque' and (item.valor or 0) > 0.01 %}
+              <tr>
+                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                <td class="cliente-cell"><strong>Estoque / Compras</strong><small>{{ item.descricao or 'Saldo enviado pelo Organiza' }}</small></td>
+                <td><span class="tipo-chip">Estoque</span></td>
+                <td class="negativo">R$ {{ item.valor|moeda_br }}</td>
+                <td><span class="badge-ok">Saldo do Organiza</span></td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+
             {% for r in repasses_sistema %}
               {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
               {% set falta_repasse = (r.valor_repasse or 0) - valor_pago_repasse %}
@@ -752,7 +756,7 @@
               </tr>
               {% endif %}
             {% else %}
-              {% if not pagar %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
+              {% if not pagar and not lancamentos_organiza_financeiro %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
             {% endfor %}
             </tbody>
           </table>
