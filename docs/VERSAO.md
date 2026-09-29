@@ -1,11 +1,9 @@
-# HUMIAT Conect — Versão 1.0.67
+# HUMIAT Conect — Versão 1.0.69
 
 ## Atualizações
-- Suporte contratual calculado pela duração da locação, limitado à janela geral de suporte até 22:00.
-- Retirada normal informada a partir das 08:00 conforme a rota; retirada obrigatória mantém a data e hora contratadas.
-- Contrato, PDF e WhatsApp exibem as informações de suporte e retirada.
-- Ao selecionar equipamento no contrato, o atendente vê disponibilidade em verde/vermelho imediatamente.
-- Recursos do equipamento podem ser ajustados antes de salvar e são gravados junto com os equipamentos.
-
-## Commit sugerido
-`Connect 1.0.67 - ajusta suporte retirada disponibilidade e recursos no contrato`
+- Categorias bancárias podem ser ajustadas em várias linhas e confirmadas de uma só vez.
+- Relatório mensal por categoria com Entrou, Saiu, Saldo e quantidade de lançamentos, também no Excel/PDF.
+- Datas financeiras passam a respeitar o fuso local do Rio de Janeiro.
+- Registro de pagamento manual ganhou código idempotente para impedir duplicidade por duplo envio.
+- InfinitePay evita duplicidade pela transação e registra o valor efetivo recebido sem ultrapassar o valor esperado da cobrança.
+- Correção automática de registros InfinitePay legados cujo valor registrado ficou acima do valor efetivamente informado pela cobrança.

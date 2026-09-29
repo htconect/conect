@@ -1866,3 +1866,12 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 
 /* v1.0.53 — atalho para análise histórica */
 .btn-evolucao-financeira{display:inline-flex;align-items:center;gap:6px;padding:8px 11px;border:1px solid #b9d2ff;border-radius:10px;text-decoration:none;background:#f4f8ff;color:#0f3d91;font-weight:800;white-space:nowrap}
+
+/* v1.0.69 — categorias em lote e resumo mensal por categoria */
+.financeiro-categorias-mes{margin:12px 0}
+.financeiro-categorias-mes .titulo-tabela{align-items:center}
+.financeiro-categorias-mes .tabela-scroll{max-height:260px}
+.tabela-categorias-mes th:nth-child(n+2),
+.tabela-categorias-mes td:nth-child(n+2){text-align:right}
+.titulo-tabela button.botao-pequeno{margin-left:8px;vertical-align:middle}
+.select-tipo-banco.confirmado{border-color:#bbf7d0;background:#f0fdf4}

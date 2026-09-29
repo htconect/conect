@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260922-fin4">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20260928-fin5">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -74,7 +74,30 @@
     </div>
   </div>
 
-  
+  <section class="box financeiro-categorias-mes">
+    <div class="titulo-tabela">
+      <h2><i class="bi bi-pie-chart" aria-hidden="true"></i> Movimento mensal por categoria</h2>
+      <span>{{ mes_cards_inicio.strftime('%m/%Y') }}</span>
+    </div>
+    <div class="tabela-scroll">
+      <table class="tabela-banco tabela-categorias-mes">
+        <thead><tr><th>Categoria</th><th>Lançamentos</th><th>Entrou</th><th>Saiu</th><th>Saldo</th></tr></thead>
+        <tbody>
+        {% for r in relatorio_categorias %}
+          <tr>
+            <td><b>{{ r.rotulo }}</b></td>
+            <td>{{ r.quantidade }}</td>
+            <td class="positivo">R$ {{ r.entradas|moeda_br }}</td>
+            <td class="negativo">R$ {{ r.saidas|moeda_br }}</td>
+            <td class="{{ 'positivo' if r.saldo >= 0 else 'negativo' }}"><b>R$ {{ r.saldo|moeda_br }}</b></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5">Nenhum movimento real neste mês.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <div class="financeiro-filtros-card">
     <form method="get" class="financeiro-filtros financeiro-filtros-auto" data-loading-title="CONECT" data-loading-text="Atualizando informações...">
@@ -93,6 +116,9 @@
 
   {% if request.query_params.get('importados') is not none %}
   <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
+  {% endif %}
+  {% if request.query_params.get('categorias_salvas') is not none %}
+  <div class="financeiro-alerta">Categorias salvas: <b>{{ request.query_params.get('categorias_salvas', '0') }}</b>{% if request.query_params.get('categorias_bloqueadas', '0') != '0' %} · <b>{{ request.query_params.get('categorias_bloqueadas', '0') }}</b> bloqueadas por vínculo existente{% endif %}</div>
   {% endif %}
 
   <div class="financeiro-acoes-faixa">
@@ -138,7 +164,7 @@
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="conta_id" value="{{ conta.id if conta else '' }}">
         <input type="hidden" name="tipo" value="real">
-        <label>Data<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label>Data<input type="date" name="data" value="{{ hoje_iso }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="Descrição" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" data-allow-negative="1" placeholder="Valor (+ ou -)" required></label>
         <label>Tipo
@@ -157,7 +183,7 @@
     <div class="manual-modal-painel" data-manual-painel="receber">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="tipo" value="receber">
-        <label>Previsão<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label>Previsão<input type="date" name="data" value="{{ hoje_iso }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A receber" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
         <label>Tipo
@@ -180,7 +206,7 @@
     <div class="manual-modal-painel" data-manual-painel="pagar">
       <form method="post" action="/painel/financeiro/manual" class="manual-modal-form preserve-scroll">
         <input type="hidden" name="tipo" value="pagar">
-        <label>Vencimento<input type="date" name="data" value="{{ data_final }}" required></label>
+        <label>Vencimento<input type="date" name="data" value="{{ hoje_iso }}" required></label>
         <label class="campo-largo">Descrição<input name="descricao" placeholder="A pagar" required></label>
         <label>Valor<input name="valor" data-mascara="moeda" placeholder="Valor" required></label>
         <label>Tipo
@@ -244,7 +270,8 @@
 
 <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
-      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span></div>
+      <form id="categorias-banco-lote" method="post" action="/painel/financeiro/banco/categorias-lote" class="preserve-scroll"></form>
+      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <button form="categorias-banco-lote" type="submit" class="botao-pequeno"><i class="bi bi-check2-all" aria-hidden="true"></i> Salvar categorias</button></span></div>
       <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
       <table class="tabela-banco">
         <colgroup>
@@ -263,11 +290,9 @@
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
             <td>
-              <form id="categoria-banco-{{ l.id }}" method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll"></form>
-              <select form="categoria-banco-{{ l.id }}" name="categoria" class="select-tipo-banco">
+              <select form="categorias-banco-lote" name="categoria_banco_{{ l.id }}" class="select-tipo-banco {{ 'confirmado' if l.categoria_confirmada else '' }}">
                 {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
               </select>
-              <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
             </td>
             <td class="vinculo-compacto">
               {% set vinculos_conta = vinculos_titulo_por_banco.get(l.id, []) %}
@@ -398,8 +423,6 @@
             </td>
 
 <td class="acoes-linha">
-              <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo"><i class="bi bi-check2"></i></button>
-              
               {% if not l.pagamento and not l.organiza_lancamento_id and not vinculos_por_banco.get(l.id) and not vinculos_titulo_por_banco.get(l.id) %}
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
               {% else %}<span class="texto-discreto" title="Desvincule antes de excluir"><i class="bi bi-lock"></i></span>{% endif %}
@@ -527,6 +550,7 @@
                 <td class="cliente-cell">
                   <strong>Connect</strong>
                   <a href="/painel/solicitacao/{{ p.solicitacao_id }}">{{ p.nome_comprovante or p.solicitacao.cliente.nome }}</a>
+                  {% if p.codigo_registro %}<small>Código: {{ p.codigo_registro }}</small>{% endif %}
                 </td>
                 <td><span class="tipo-chip aluguel">Aluguel</span></td>
                 <td class="positivo">R$ {{ p.valor|moeda_br }}</td>

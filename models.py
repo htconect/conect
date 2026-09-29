@@ -506,6 +506,7 @@ class Pagamento(Base):
     __tablename__ = "pagamentos"
 
     id = Column(Integer, primary_key=True)
+    codigo_registro = Column(String(64), nullable=True, unique=True, index=True)
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False)
     solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=False)
     data_pagamento = Column(Date, nullable=False)
