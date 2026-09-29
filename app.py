@@ -2865,6 +2865,49 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
     } for r in registros]
 
 
+def normalizar_pagamentos_infinitepay_historicos(db: Session) -> int:
+    """Normaliza a origem de pagamentos antigos da InfinitePay sem alterar lançamentos manuais reais.
+
+    A integração atual já grava ``usuario_registro=InfinitePay``. Bases antigas podem ter
+    pagamentos ligados a uma cobrança InfinitePay ou a um movimento automático cuja
+    descrição contém InfinitePay, mas ainda manter o usuário como Manual/Financeiro.
+    """
+    ids_pagamentos = {
+        pid for (pid,) in db.query(InfinitePayCobranca.pagamento_id).filter(
+            InfinitePayCobranca.pagamento_id != None
+        ).all() if pid
+    }
+    ids_pagamentos.update(
+        pid for (pid,) in db.query(LancamentoManualFinanceiro.pagamento_id).filter(
+            LancamentoManualFinanceiro.pagamento_id != None,
+            func.lower(func.coalesce(LancamentoManualFinanceiro.descricao, "")).like("%infinitepay%"),
+        ).all() if pid
+    )
+    ids_pagamentos.update(
+        pid for (pid,) in db.query(Pagamento.id).filter(
+            func.lower(func.coalesce(Pagamento.observacoes, "")).like("%infinitepay%")
+        ).all() if pid
+    )
+    if not ids_pagamentos:
+        return 0
+
+    alterados = 0
+    for pagamento in db.query(Pagamento).filter(Pagamento.id.in_(ids_pagamentos)).all():
+        mudou = False
+        if str(pagamento.usuario_registro or "").strip().casefold() != "infinitepay":
+            pagamento.usuario_registro = "InfinitePay"
+            mudou = True
+        # Não apaga o responsável de conciliação existente. Preenche somente quando vazio.
+        if not str(pagamento.conciliado_por or "").strip():
+            pagamento.conciliado_por = "InfinitePay"
+            mudou = True
+        if mudou:
+            alterados += 1
+    if alterados:
+        db.commit()
+    return alterados
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
@@ -2876,6 +2919,7 @@ def startup():
     db = SessionLocal()
     try:
         inicializar_dados(db)
+        normalizar_pagamentos_infinitepay_historicos(db)
         for emp in db.query(Empresa).all():
             # Atualiza somente a antiga mensagem padrão de aceite; mensagens personalizadas são preservadas.
             if str(getattr(emp, "mensagem_aceite", "") or "").strip() == MENSAGEM_ACEITE_LEGADA.strip():
@@ -9331,21 +9375,21 @@ def financeiro(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real"
     )
-    # A receber e A pagar obedecem exatamente ao intervalo de datas escolhido
-    # dentro do mês mestre. Títulos não têm banco previsto: o banco só nasce
-    # quando uma baixa real é vinculada ao título.
+    # A receber e A pagar carregam os saldos anteriores ainda em aberto.
+    # A data original do título é preservada; o mês selecionado define apenas
+    # o limite máximo. Assim, uma conta de setembro não quitada continua
+    # aparecendo em outubro como pendência anterior, sem alterar a competência.
+    # Títulos não têm banco previsto: a conta é definida somente na baixa real.
     q_receber = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "receber",
         LancamentoManualFinanceiro.recebido == False,
-        LancamentoManualFinanceiro.data >= inicio,
         LancamentoManualFinanceiro.data <= fim,
     )
     q_pagar = db.query(LancamentoManualFinanceiro).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "pagar",
         LancamentoManualFinanceiro.recebido == False,
-        LancamentoManualFinanceiro.data >= inicio,
         LancamentoManualFinanceiro.data <= fim,
     )
     if conta:
@@ -9401,6 +9445,13 @@ def financeiro(
     manuais_reais = q_manual_real.order_by(LancamentoManualFinanceiro.data.desc(),
                                            LancamentoManualFinanceiro.ordem.asc(),
                                            LancamentoManualFinanceiro.id.asc()).all()
+    # Origem visual do Financeiro: movimentos automáticos da InfinitePay são Online.
+    # O modelo continua sendo o mesmo para preservar compatibilidade com saldos/vínculos;
+    # somente lançamentos realmente digitados pelo atendente permanecem Manual.
+    movimentos_online_ids = {
+        m.id for m in manuais_reais
+        if _movimento_origem_infinitepay(m)
+    }
     receber = q_receber.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
     pagar = q_pagar.order_by(LancamentoManualFinanceiro.data.asc(), LancamentoManualFinanceiro.id.asc()).all()
 
@@ -9471,12 +9522,12 @@ def financeiro(
         # Pagamentos já lançados em rascunhos continuam disponíveis para conciliação,
         # mas o restante não é cobrado enquanto o contrato não estiver aprovado.
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-        Solicitacao.data_evento >= inicio,
+        # Saldos de contratos anteriores continuam visíveis até serem recebidos.
         Solicitacao.data_evento <= fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009
     )
-    # A receber de contratos segue o mesmo intervalo de datas do filtro detalhado.
-    # O mês mestre define o limite e o usuário pode reduzir apenas os dias.
+    # A receber de contratos inclui saldos de meses anteriores ainda em aberto.
+    # A data do evento permanece original; não há reprogramação automática.
     if busca:
         like = f"%{busca.strip()}%"
         filtros_contrato = [Cliente.nome.ilike(like)]
@@ -9693,8 +9744,8 @@ def financeiro(
         Solicitacao.empresa_transferida_id != None,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0
     )
+    # Repasses a pagar também carregam pendências de competências anteriores.
     q_repasses = q_repasses.filter(
-        Solicitacao.data_evento >= mes_cards_inicio,
         Solicitacao.data_evento <= mes_cards_fim,
     )
     if busca:
@@ -9882,7 +9933,8 @@ def financeiro(
     # Reutiliza a consulta já realizada e limita somente a exibição.
     lancamentos_organiza_financeiro = [
         item for item in todos_lancamentos_organiza
-        if item.data_pagamento and inicio <= item.data_pagamento <= fim
+        if item.data_pagamento and item.data_pagamento <= fim
+        and max(float(item.falta_receber or 0), 0.0) > 0.01
     ][:500]
 
     # Transferências internas recebidas: na empresa de destino o valor já pago pelo
@@ -9893,7 +9945,6 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.transferencia_origem_id != None,
-        Solicitacao.data_evento >= inicio,
         Solicitacao.data_evento <= fim,
     ).all()
     origens_ids = [c.transferencia_origem_id for c in copias_transferencia if c.transferencia_origem_id]
@@ -9932,14 +9983,12 @@ def financeiro(
             "saldo": max(total - pago, 0),
         })
 
-    # Posição financeira do intervalo visível: A receber e A pagar seguem
-    # exatamente data inicial/final. O saldo bancário mantém a regra acumulada
-    # já validada e não é recalculado por este filtro.
+    # Posição financeira do mês inclui também saldos anteriores ainda em aberto.
+    # O saldo bancário mantém a regra acumulada já validada.
     contratos_posicao = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
-        Solicitacao.data_evento >= inicio,
         Solicitacao.data_evento <= fim,
         (func.coalesce(Solicitacao.valor, 0) - func.coalesce(Solicitacao.valor_pago, 0)) > 0.009,
     ).all()
@@ -9948,16 +9997,16 @@ def financeiro(
     )
     total_manual_receber_posicao = sum(
         saldo_titulo(t) for t in titulos_receber_abertos
-        if t.data and inicio <= t.data <= fim
+        if t.data and t.data <= fim
     )
     total_manual_pagar_posicao = sum(
         saldo_titulo(t) for t in titulos_pagar_abertos
-        if t.data and inicio <= t.data <= fim
+        if t.data and t.data <= fim
     )
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
         for item in todos_lancamentos_organiza
-        if item.data_pagamento and inicio <= item.data_pagamento <= fim
+        if item.data_pagamento and item.data_pagamento <= fim
     )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
@@ -9965,7 +10014,6 @@ def financeiro(
         Solicitacao.empresa_id == empresa.id,
         Solicitacao.cancelado_em == None,
         Solicitacao.empresa_transferida_id != None,
-        Solicitacao.data_evento >= inicio,
         Solicitacao.data_evento <= fim,
         func.coalesce(Solicitacao.valor_repasse, 0) > 0,
     ).all()
@@ -9991,7 +10039,8 @@ def financeiro(
         "semanas_cards": semanas_cards,
         "semana_cards_inicio": semana_cards_inicio, "semana_cards_fim": semana_cards_fim,
         "timedelta": timedelta,
-        "banco": banco, "manuais_reais": manuais_reais, "receber": receber, "pagar": pagar, "pagamentos_sistema": pagamentos_sistema,
+        "banco": banco, "manuais_reais": manuais_reais, "movimentos_online_ids": movimentos_online_ids,
+        "receber": receber, "pagar": pagar, "pagamentos_sistema": pagamentos_sistema,
         "contratos_receber": contratos_receber, "total_contratos_receber": total_contratos_receber,
         "quantidade_contratos_cards": quantidade_contratos_cards,
         "quantidade_contratos_cards_proprios": quantidade_contratos_cards_proprios,
@@ -10651,6 +10700,79 @@ def financeiro_pagar_titulo(
         titulo_id=titulo.id,
         lancamento_manual_id=movimento.id,
         valor=valor_pagamento,
+        criado_por=request.session.get("usuario_nome") or "Financeiro",
+    ))
+    db.flush()
+    _atualizar_status_titulo(db, titulo)
+    db.commit()
+
+    destino = f"/painel/financeiro?conta_id={conta.id}"
+    return redirect_preservando_filtros(request, destino)
+
+
+@app.post("/painel/financeiro/titulo/{titulo_id}/receber")
+def financeiro_receber_titulo(
+        request: Request,
+        titulo_id: int,
+        conta_id: int = Form(...),
+        data_recebimento: str = Form(...),
+        valor: str = Form(...),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Baixa uma conta a receber criando a entrada financeira já vinculada ao título."""
+    titulo = db.get(LancamentoManualFinanceiro, titulo_id)
+    if not titulo or titulo.empresa_id != empresa.id or titulo.tipo != "receber":
+        raise HTTPException(404)
+
+    conta = db.get(ContaFinanceira, conta_id)
+    if not conta or conta.empresa_id != empresa.id or not conta.ativa:
+        raise HTTPException(400, "Selecione um banco/conta válido para o recebimento.")
+
+    try:
+        data_baixa = datetime.strptime(data_recebimento, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Informe uma data de recebimento válida.")
+
+    total_baixado = _total_baixado_titulo(db, titulo.id)
+    saldo_titulo = max(abs(float(titulo.valor or 0)) - total_baixado, 0.0)
+    if saldo_titulo <= 0.01:
+        _atualizar_status_titulo(db, titulo)
+        db.commit()
+        raise HTTPException(400, "Esta conta a receber já está quitada.")
+
+    valor_recebimento = abs(float(texto_para_float(valor) or 0))
+    if valor_recebimento <= 0.01:
+        raise HTTPException(400, "Informe um valor de recebimento maior que zero.")
+    if valor_recebimento > saldo_titulo + 0.01:
+        raise HTTPException(400, f"O recebimento não pode ultrapassar o saldo de R$ {saldo_titulo:.2f}.")
+    valor_recebimento = min(valor_recebimento, saldo_titulo)
+
+    proxima_ordem = int(db.query(func.coalesce(func.max(LancamentoManualFinanceiro.ordem), 0)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.conta_id == conta.id,
+    ).scalar() or 0) + 1
+
+    movimento = LancamentoManualFinanceiro(
+        empresa_id=empresa.id,
+        conta_id=conta.id,
+        data=data_baixa,
+        descricao=titulo.descricao,
+        valor=valor_recebimento,
+        categoria=titulo.categoria,
+        tipo="real",
+        recebido=False,
+        ordem=proxima_ordem,
+    )
+    db.add(movimento)
+    db.flush()
+
+    db.add(VinculoTituloFinanceiro(
+        empresa_id=empresa.id,
+        titulo_id=titulo.id,
+        lancamento_manual_id=movimento.id,
+        valor=valor_recebimento,
         criado_por=request.session.get("usuario_nome") or "Financeiro",
     ))
     db.flush()
@@ -11530,6 +11652,16 @@ def _pagamento_origem_infinitepay(pagamento: Pagamento) -> bool:
         or str(getattr(pagamento, "conciliado_por", "") or "").strip().lower() == "infinitepay"
         or "infinitepay" in str(getattr(pagamento, "observacoes", "") or "").lower()
     )
+
+
+def _movimento_origem_infinitepay(movimento: LancamentoManualFinanceiro) -> bool:
+    """Distingue movimento automático Online da InfinitePay de lançamento Manual."""
+    pagamento = getattr(movimento, "pagamento", None)
+    if pagamento and _pagamento_origem_infinitepay(pagamento):
+        return True
+    # Compatibilidade com movimentos automáticos legados que tinham vínculo/descrição,
+    # mas não receberam a identificação correta no Pagamento.
+    return "infinitepay" in str(getattr(movimento, "descricao", "") or "").casefold()
 
 
 def _sincronizar_movimento_infinitepay(db: Session, pagamento: Pagamento) -> None:

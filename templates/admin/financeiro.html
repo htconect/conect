@@ -275,6 +275,36 @@
     </form>
   </dialog>
 
+  <dialog id="dlg-receber-titulo" class="modal-vinculo modal-receber-titulo">
+    <div class="modal-vinculo-cabecalho">
+      <div>
+        <strong>Receber conta</strong>
+        <small id="receber-titulo-descricao">Confirme banco, data e valor do recebimento.</small>
+      </div>
+      <button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-receber-titulo').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </div>
+    <form method="post" id="form-receber-titulo" class="manual-modal-form preserve-scroll">
+      <label>Banco
+        <select name="conta_id" id="receber-titulo-conta" required>
+          {% for c in contas %}
+          <option value="{{ c.id }}" {% if conta and conta.id == c.id %}selected{% endif %}>{{ c.nome }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Data do recebimento
+        <input type="date" name="data_recebimento" id="receber-titulo-data" value="{{ hoje.isoformat() }}" required>
+      </label>
+      <label class="campo-largo">Valor
+        <input name="valor" id="receber-titulo-valor" data-mascara="moeda" required>
+        <small id="receber-titulo-saldo"></small>
+      </label>
+      <div class="modal-vinculo-rodape campo-largo">
+        <button type="button" class="botao-perigo btn-modal-cancelar" onclick="document.getElementById('dlg-receber-titulo').close()"><i class="bi bi-x-circle" aria-hidden="true"></i> Cancelar</button>
+        <button type="submit" class="botao-pequeno btn-modal-confirmar"><i class="bi bi-check-circle" aria-hidden="true"></i> Confirmar recebimento</button>
+      </div>
+    </form>
+  </dialog>
+
 <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
       <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span></div>
@@ -442,7 +472,7 @@
         {% for m in manuais_reais %}
           <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento or m.organiza_lancamento_id or vinculos_titulo_por_manual.get(m.id) or vinculos_organiza_por_manual.get(m.id) else '' }}">
             <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
-            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
+            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>{{ 'Online' if m.id in movimentos_online_ids else 'Manual' }}</small></td>
             <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
             <td>
               <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
@@ -461,7 +491,7 @@
 
               {% if (m.valor or 0)|abs > 0.01 %}
               <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
-                <div class="modal-vinculo-cabecalho"><div><strong>Vincular movimento manual</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+                <div class="modal-vinculo-cabecalho"><div><strong>Vincular movimento {{ 'Online' if m.id in movimentos_online_ids else 'Manual' }}</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
                 <div class="modal-vinculo-historico">{{ m.descricao }}</div>
 
                 {% if vinculos_conta_manual %}
@@ -656,6 +686,7 @@
                   <td>{{ r.data_evento.strftime('%d/%m') }}</td>
                   <td class="cliente-cell">
                     <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
+                    {% if r.data_evento and r.data_evento < mes_cards_inicio %}<small><b>Pendência anterior · {{ r.data_evento.strftime('%m/%Y') }}</b></small>{% endif %}
                     {% if r.empresa_transferida %}<small>Transferido → {{ r.empresa_transferida.nome }}</small>{% endif %}
                   </td>
                   <td><span class="tipo-chip aluguel">Aluguel</span></td>
@@ -676,7 +707,7 @@
                 {% set saldo_r = (r.valor or 0) - baixado %}
                 <tr>
                   <td>{{ r.data.strftime('%d/%m') }}</td>
-                  <td class="cliente-cell"><strong>{{ r.descricao }}</strong><small>Manual · valor original R$ {{ r.valor|moeda_br }}</small></td>
+                  <td class="cliente-cell"><strong>{{ r.descricao }}</strong><small>Manual · valor original R$ {{ r.valor|moeda_br }}</small>{% if r.data and r.data < mes_cards_inicio %}<small><b>Pendência anterior · {{ r.data.strftime('%m/%Y') }}</b></small>{% endif %}</td>
                   <td>
                     {% if r.categoria == 'manutencao' %}<span class="tipo-chip manutencao">Manutenção</span>
                     {% elif r.categoria == 'venda' %}<span class="tipo-chip venda">Venda</span>
@@ -684,9 +715,14 @@
                     {% else %}<span class="tipo-chip">{{ r.categoria|capitalize }}</span>{% endif %}
                   </td>
                   <td class="positivo">R$ {{ saldo_r|moeda_br }}</td>
-                  <td>
+                  <td class="acoes-titulo-receber">
                     {% if baixado > 0.01 %}<span class="badge-pendente">Parcial · recebido R$ {{ baixado|moeda_br }}</span>
-                    {% else %}<span class="badge-pendente">A receber</span>
+                    {% else %}<span class="badge-pendente">A receber</span>{% endif %}
+                    <button type="button" class="botao-pequeno btn-receber-titulo" title="Receber esta conta"
+                            data-id="{{ r.id }}" data-descricao="{{ r.descricao|e }}" data-saldo="{{ '%.2f'|format(saldo_r) }}">
+                      <i class="bi bi-cash-coin" aria-hidden="true"></i> Receber
+                    </button>
+                    {% if baixado <= 0.01 %}
                       <form method="post" action="/painel/financeiro/titulo/{{ r.id }}/excluir" class="preserve-scroll" style="display:inline" onsubmit="return confirm('Excluir esta conta a receber?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
                     {% endif %}
                   </td>
@@ -699,6 +735,7 @@
                   <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
                   <td class="cliente-cell">
                     <strong>{{ item.cliente or '-' }}</strong>
+                    {% if item.data_pagamento and item.data_pagamento < mes_cards_inicio %}<small><b>Pendência anterior · {{ item.data_pagamento.strftime('%m/%Y') }}</b></small>{% endif %}
                     {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
                   </td>
                   <td>
@@ -724,7 +761,7 @@
       <div class="financeiro-painel-aba" data-painel-fin="pagar">
         <div class="sistema-toolbar">
           <strong>Todos os valores a pagar</strong>
-          <span class="sistema-toolbar-info">Contas manuais e repasses pendentes/parciais.</span>
+          <span class="sistema-toolbar-info">Até o fim do mês selecionado + saldos anteriores em aberto.</span>
         </div>
 
         <div class="sistema-scroll-unico">
@@ -739,7 +776,7 @@
               {% if saldo_p > 0.01 %}
               <tr>
                 <td>{{ p.data.strftime('%d/%m') }}</td>
-                <td class="cliente-cell"><strong>{{ p.descricao }}</strong><small>Manual · valor original R$ {{ p.valor|moeda_br }}</small></td>
+                <td class="cliente-cell"><strong>{{ p.descricao }}</strong><small>Manual · valor original R$ {{ p.valor|moeda_br }}</small>{% if p.data and p.data < mes_cards_inicio %}<small><b>Pendência anterior · {{ p.data.strftime('%m/%Y') }}</b></small>{% endif %}</td>
                 <td>
                   {% if p.categoria == 'manutencao' %}<span class="tipo-chip manutencao">Manutenção</span>
                   {% elif p.categoria == 'venda' %}<span class="tipo-chip venda">Venda</span>
@@ -775,6 +812,7 @@
                 <td>{{ r.data_evento.strftime('%d/%m') }}</td>
                 <td class="cliente-cell">
                   <a href="/painel/solicitacao/{{ r.id }}">{{ r.cliente.nome }}</a>
+                  {% if r.data_evento and r.data_evento < mes_cards_inicio %}<small><b>Pendência anterior · {{ r.data_evento.strftime('%m/%Y') }}</b></small>{% endif %}
                   <small>→ {{ r.empresa_transferida.nome if r.empresa_transferida else 'Empresa' }}</small>
                 </td>
                 <td><span class="tipo-chip repasse">Repasse</span></td>
@@ -895,6 +933,24 @@
       buscaAuto.addEventListener('change', function(){ salvarScrolls(); filtrosAuto.submit(); });
     }
   }
+
+  document.querySelectorAll('.btn-receber-titulo').forEach(function(botao){
+    botao.addEventListener('click', function(){
+      var dlg = document.getElementById('dlg-receber-titulo');
+      var form = document.getElementById('form-receber-titulo');
+      if(!dlg || !form) return;
+      form.action = '/painel/financeiro/titulo/' + this.dataset.id + '/receber';
+      var descricao = this.dataset.descricao || 'Conta a receber';
+      var saldo = parseFloat(this.dataset.saldo || '0');
+      var descEl = document.getElementById('receber-titulo-descricao');
+      var saldoEl = document.getElementById('receber-titulo-saldo');
+      var valorEl = document.getElementById('receber-titulo-valor');
+      if(descEl) descEl.textContent = descricao;
+      if(saldoEl) saldoEl.textContent = 'Saldo em aberto: R$ ' + saldo.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      if(valorEl) valorEl.value = saldo.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+      dlg.showModal();
+    });
+  });
 
   document.querySelectorAll('.btn-pagar-titulo').forEach(function(botao){
     botao.addEventListener('click', function(){
