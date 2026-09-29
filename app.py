@@ -2981,6 +2981,7 @@ def startup():
     db = SessionLocal()
     try:
         inicializar_dados(db)
+        normalizar_pagamentos_infinitepay_legados(db)
         corrigir_pagamentos_infinitepay_valor_real(db)
         for emp in db.query(Empresa).all():
             # Atualiza somente a antiga mensagem padrão de aceite; mensagens personalizadas são preservadas.
@@ -10488,7 +10489,10 @@ def financeiro_relatorio_filtrado(
         LancamentoBanco.data >= inicio,
         LancamentoBanco.data <= fim,
     )
-    q_manual = db.query(LancamentoManualFinanceiro).options(joinedload(LancamentoManualFinanceiro.conta)).filter(
+    q_manual = db.query(LancamentoManualFinanceiro).options(
+        joinedload(LancamentoManualFinanceiro.conta),
+        joinedload(LancamentoManualFinanceiro.pagamento),
+    ).filter(
         LancamentoManualFinanceiro.empresa_id == empresa.id,
         LancamentoManualFinanceiro.tipo == "real",
         LancamentoManualFinanceiro.data >= inicio,
@@ -10533,6 +10537,8 @@ def financeiro_relatorio_filtrado(
         movimentos.append({
             "data": item.data,
             "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
+            "categoria_valor": (item.categoria or "").strip(),
+            "tipo_movimento": "banco",
             "descricao": item.historico or item.documento or "Lançamento bancário",
             "conta": item.conta.nome if getattr(item, "conta", None) else "-",
             "origem": "Banco",
@@ -10546,9 +10552,11 @@ def financeiro_relatorio_filtrado(
         movimentos.append({
             "data": item.data,
             "categoria": FINANCEIRO_CATEGORIAS_ROTULOS.get((item.categoria or "").strip(), "Sem categoria" if not (item.categoria or "").strip() else (item.categoria or "").title()),
+            "categoria_valor": (item.categoria or "").strip(),
+            "tipo_movimento": "manual",
             "descricao": item.descricao or "Lançamento manual",
             "conta": item.conta.nome if getattr(item, "conta", None) else "-",
-            "origem": "Manual",
+            "origem": _origem_lancamento_financeiro(item),
             "entrada": valor if valor > 0 else 0.0,
             "saida": abs(valor) if valor < 0 else 0.0,
             "valor": valor,
@@ -10581,7 +10589,111 @@ def financeiro_relatorio_filtrado(
         "entradas": entradas,
         "saidas": saidas,
         "saldo": saldo,
+        "categorias": FINANCEIRO_CATEGORIAS,
+        "categorias_salvas": request.query_params.get("categorias_salvas", ""),
+        "categorias_bloqueadas": request.query_params.get("categorias_bloqueadas", ""),
     })
+
+
+@app.post("/painel/financeiro/relatorio/categorias")
+async def financeiro_relatorio_salvar_categorias(
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Corrige somente a categoria dos movimentos exibidos no relatório.
+
+    Data, descrição, conta e valor não são alterados. Vínculos financeiros
+    sensíveis são preservados; quando uma troca conflita com um vínculo
+    existente, a linha é ignorada e contabilizada como bloqueada.
+    """
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para alterar o financeiro.")
+
+    form = await request.form()
+    alteracoes_banco = []
+    alteracoes_manual = []
+    for chave, valor in form.multi_items():
+        chave = str(chave or "")
+        categoria_nova = str(valor or "").strip()
+        if categoria_nova not in FINANCEIRO_CATEGORIAS_VALIDAS:
+            continue
+        if chave.startswith("categoria_banco_"):
+            try:
+                alteracoes_banco.append((int(chave.rsplit("_", 1)[-1]), categoria_nova))
+            except (TypeError, ValueError):
+                continue
+        elif chave.startswith("categoria_manual_"):
+            try:
+                alteracoes_manual.append((int(chave.rsplit("_", 1)[-1]), categoria_nova))
+            except (TypeError, ValueError):
+                continue
+
+    banco_ids = [i for i, _ in alteracoes_banco]
+    manual_ids = [i for i, _ in alteracoes_manual]
+    banco_por_id = {x.id: x for x in db.query(LancamentoBanco).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.id.in_(banco_ids) if banco_ids else False,
+    ).all()} if banco_ids else {}
+    manual_por_id = {x.id: x for x in db.query(LancamentoManualFinanceiro).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa.id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.id.in_(manual_ids) if manual_ids else False,
+    ).all()} if manual_ids else {}
+
+    salvos = 0
+    bloqueados = 0
+
+    for lancamento_id, categoria_nova in alteracoes_banco:
+        lanc = banco_por_id.get(lancamento_id)
+        if not lanc or categoria_nova == (lanc.categoria or "").strip():
+            continue
+        possui_organiza = db.query(VinculoOrganizaFinanceiro.id).filter(
+            VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
+        ).first()
+        possui_repasse = db.query(VinculoRepasseBanco.id).filter(
+            VinculoRepasseBanco.lancamento_banco_id == lanc.id
+        ).first()
+        if possui_organiza or (possui_repasse and categoria_nova != "repasse"):
+            bloqueados += 1
+            continue
+        lanc.categoria = categoria_nova
+        lanc.categoria_confirmada = True
+        salvos += 1
+
+    for lancamento_id, categoria_nova in alteracoes_manual:
+        lanc = manual_por_id.get(lancamento_id)
+        if not lanc or categoria_nova == (lanc.categoria or "").strip():
+            continue
+        possui_organiza = db.query(VinculoOrganizaFinanceiro.id).filter(
+            VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id
+        ).first()
+        possui_titulo = db.query(VinculoTituloFinanceiro.id).filter(
+            VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
+        ).first()
+        # Movimentos de contrato/InfinitePay e baixas já vinculadas não são
+        # desmontados por uma correção de relatório. Mantém o vínculo intacto.
+        if possui_organiza or possui_titulo or (lanc.pagamento_id and categoria_nova != "aluguel"):
+            bloqueados += 1
+            continue
+        lanc.categoria = categoria_nova
+        salvos += 1
+
+    if salvos:
+        db.commit()
+
+    params = {
+        "conta_id": form.get("conta_id", "0"),
+        "data_inicial": form.get("data_inicial", ""),
+        "data_final": form.get("data_final", ""),
+        "categoria": form.get("filtro_categoria", ""),
+        "busca": form.get("busca", ""),
+        "status_sistema": form.get("status_sistema", "pendente"),
+        "mes_cards": form.get("mes_cards", ""),
+        "categorias_salvas": str(salvos),
+        "categorias_bloqueadas": str(bloqueados),
+    }
+    return RedirectResponse(f"/painel/financeiro/relatorio?{urlencode(params)}", status_code=303)
 
 
 @app.get("/painel/financeiro/relatorio-mensal.xlsx")
@@ -11801,11 +11913,54 @@ def confirmar_pagamento(
 
 
 def _pagamento_origem_infinitepay(pagamento: Pagamento) -> bool:
+    codigo = str(getattr(pagamento, "codigo_registro", "") or "").strip().upper()
     return (
         str(getattr(pagamento, "usuario_registro", "") or "").strip().lower() == "infinitepay"
         or str(getattr(pagamento, "conciliado_por", "") or "").strip().lower() == "infinitepay"
         or "infinitepay" in str(getattr(pagamento, "observacoes", "") or "").lower()
+        or codigo.startswith("IP-")
     )
+
+
+def _origem_lancamento_financeiro(lancamento: LancamentoManualFinanceiro) -> str:
+    """Rótulo visual da origem do movimento para facilitar a leitura do Financeiro."""
+    pagamento = getattr(lancamento, "pagamento", None)
+    descricao = str(getattr(lancamento, "descricao", "") or "").lower()
+    return "Online" if (pagamento and _pagamento_origem_infinitepay(pagamento)) or "infinitepay" in descricao else "Manual"
+
+
+def normalizar_pagamentos_infinitepay_legados(db: Session) -> int:
+    """Padroniza pagamentos antigos da InfinitePay como origem Online.
+
+    Versões antigas podiam criar o pagamento antes do campo de origem ser
+    preenchido. A cobrança, o código IP-* e o texto InfinitePay continuam
+    identificando com segurança esses registros históricos.
+    """
+    ids_cobrancas = [
+        pid for (pid,) in db.query(InfinitePayCobranca.pagamento_id).filter(
+            InfinitePayCobranca.pagamento_id.isnot(None)
+        ).all() if pid
+    ]
+    filtros = [
+        Pagamento.codigo_registro.ilike("IP-%"),
+        Pagamento.observacoes.ilike("%InfinitePay%"),
+    ]
+    if ids_cobrancas:
+        filtros.append(Pagamento.id.in_(ids_cobrancas))
+    pagamentos = db.query(Pagamento).filter(or_(*filtros)).all()
+    alterados = 0
+    for pagamento in pagamentos:
+        if str(pagamento.usuario_registro or "").strip().lower() != "infinitepay":
+            pagamento.usuario_registro = "InfinitePay"
+            alterados += 1
+        # Não sobrescreve um usuário de conciliação já registrado. O campo
+        # usuario_registro é suficiente para a identificação visual Online.
+    if alterados:
+        db.commit()
+    return alterados
+
+
+templates.env.globals["origem_lancamento_financeiro"] = _origem_lancamento_financeiro
 
 
 def _sincronizar_movimento_infinitepay(db: Session, pagamento: Pagamento) -> None:

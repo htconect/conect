@@ -2,7 +2,7 @@
 {% block body_class %}tela-relatorio-financeiro{% endblock %}
 {% block head_extra %}
 <style>
-body.tela-relatorio-financeiro{background:#f5f7fb}.rel-fin{max-width:1380px;margin:0 auto;padding:24px}.rel-fin-topo{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:18px}.rel-fin-topo h1{margin:3px 0 5px;font-size:28px}.rel-fin-topo p{margin:0;color:#64748b}.rel-fin-acoes{display:flex;gap:8px}.rel-fin-acoes a,.rel-fin-acoes button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;text-decoration:none;cursor:pointer}.rel-fin-acoes a{background:#fff;border:1px solid #cbd5e1;color:#0f172a}.rel-fin-acoes button{background:#2563eb;color:#fff}.rel-fin-filtros,.rel-fin-cards,.rel-fin-box{background:#fff;border:1px solid #dbe5f1;border-radius:14px;box-shadow:0 8px 22px rgba(15,23,42,.04)}.rel-fin-filtros{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px}.rel-fin-filtros span{font-size:12px;color:#64748b}.rel-fin-filtros b{display:block;color:#0f172a;margin-top:2px}.rel-fin-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-bottom:12px;overflow:hidden}.rel-fin-card{padding:16px;border-right:1px solid #e2e8f0}.rel-fin-card:last-child{border-right:0}.rel-fin-card small{display:block;color:#64748b}.rel-fin-card b{display:block;font-size:22px;margin-top:4px}.positivo{color:#07883e}.negativo{color:#c62828}.rel-fin-box{padding:14px;margin-bottom:12px}.rel-fin-box h2{font-size:18px;margin:0 0 12px}.rel-fin table{width:100%;border-collapse:collapse;font-size:13px}.rel-fin th{background:#edf3f9;text-align:left;padding:9px;border:1px solid #d7e0ea;font-size:11px;text-transform:uppercase}.rel-fin td{padding:9px;border:1px solid #e1e7ef;vertical-align:top}.rel-fin td.numero,.rel-fin th.numero{text-align:right}.rel-fin .sem-dados{text-align:center;color:#64748b;padding:24px}@media print{.rel-fin-acoes{display:none}.rel-fin{max-width:none;padding:0}.rel-fin-box,.rel-fin-filtros,.rel-fin-cards{box-shadow:none;break-inside:avoid}body.tela-relatorio-financeiro .topo-app,body.tela-relatorio-financeiro .nav-inferior{display:none!important}}
+body.tela-relatorio-financeiro{background:#f5f7fb}.rel-fin{max-width:1380px;margin:0 auto;padding:24px}.rel-fin-topo{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:18px}.rel-fin-topo h1{margin:3px 0 5px;font-size:28px}.rel-fin-topo p{margin:0;color:#64748b}.rel-fin-acoes{display:flex;gap:8px}.rel-fin-acoes a,.rel-fin-acoes button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;text-decoration:none;cursor:pointer}.rel-fin-acoes a{background:#fff;border:1px solid #cbd5e1;color:#0f172a}.rel-fin-acoes button{background:#2563eb;color:#fff}.rel-fin-filtros,.rel-fin-cards,.rel-fin-box{background:#fff;border:1px solid #dbe5f1;border-radius:14px;box-shadow:0 8px 22px rgba(15,23,42,.04)}.rel-fin-filtros{padding:12px 16px;display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px}.rel-fin-filtros span{font-size:12px;color:#64748b}.rel-fin-filtros b{display:block;color:#0f172a;margin-top:2px}.rel-fin-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-bottom:12px;overflow:hidden}.rel-fin-card{padding:16px;border-right:1px solid #e2e8f0}.rel-fin-card:last-child{border-right:0}.rel-fin-card small{display:block;color:#64748b}.rel-fin-card b{display:block;font-size:22px;margin-top:4px}.positivo{color:#07883e}.negativo{color:#c62828}.rel-fin-box{padding:14px;margin-bottom:12px}.rel-fin-box h2{font-size:18px;margin:0 0 12px}.rel-fin table{width:100%;border-collapse:collapse;font-size:13px}.rel-fin th{background:#edf3f9;text-align:left;padding:9px;border:1px solid #d7e0ea;font-size:11px;text-transform:uppercase}.rel-fin td{padding:9px;border:1px solid #e1e7ef;vertical-align:top}.rel-fin td.numero,.rel-fin th.numero{text-align:right}.rel-fin .sem-dados{text-align:center;color:#64748b;padding:24px}.rel-fin-box-topo{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.rel-fin-box-topo h2{margin:0}.rel-fin-salvar{border:0;border-radius:10px;background:#2563eb;color:#fff;padding:9px 14px;font-weight:800;cursor:pointer}.rel-fin-editar-categoria{min-width:145px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:7px 9px;font-weight:700;color:#0f172a}.rel-fin-alerta{margin-bottom:12px;padding:11px 14px;border-radius:12px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a}.rel-fin-dica{margin:-4px 0 12px;color:#64748b;font-size:12px}@media print{.rel-fin-acoes{display:none}.rel-fin{max-width:none;padding:0}.rel-fin-box,.rel-fin-filtros,.rel-fin-cards{box-shadow:none;break-inside:avoid}body.tela-relatorio-financeiro .topo-app,body.tela-relatorio-financeiro .nav-inferior{display:none!important}}
 </style>
 {% endblock %}
 {% block conteudo %}
@@ -32,6 +32,12 @@ body.tela-relatorio-financeiro{background:#f5f7fb}.rel-fin{max-width:1380px;marg
     <div class="rel-fin-card"><small>Saldo</small><b class="{{ 'positivo' if saldo >= 0 else 'negativo' }}">R$ {{ saldo|moeda_br }}</b></div>
   </div>
 
+  {% if categorias_salvas != '' %}
+  <div class="rel-fin-alerta">
+    Categorias alteradas: <b>{{ categorias_salvas }}</b>{% if categorias_bloqueadas and categorias_bloqueadas != '0' %} · <b>{{ categorias_bloqueadas }}</b> mantidas por possuírem vínculo financeiro{% endif %}.
+  </div>
+  {% endif %}
+
   <section class="rel-fin-box">
     <h2>Resumo por categoria</h2>
     <table>
@@ -53,25 +59,45 @@ body.tela-relatorio-financeiro{background:#f5f7fb}.rel-fin{max-width:1380px;marg
   </section>
 
   <section class="rel-fin-box">
-    <h2>Movimentos filtrados</h2>
-    <table>
-      <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Conta</th><th>Origem</th><th class="numero">Entrou</th><th class="numero">Saiu</th></tr></thead>
-      <tbody>
-      {% for m in movimentos %}
-        <tr>
-          <td>{{ m.data.strftime('%d/%m/%Y') }}</td>
-          <td>{{ m.categoria }}</td>
-          <td>{{ m.descricao }}</td>
-          <td>{{ m.conta }}</td>
-          <td>{{ m.origem }}</td>
-          <td class="numero positivo">{% if m.entrada %}R$ {{ m.entrada|moeda_br }}{% else %}—{% endif %}</td>
-          <td class="numero negativo">{% if m.saida %}R$ {{ m.saida|moeda_br }}{% else %}—{% endif %}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="7" class="sem-dados">Nenhum movimento encontrado com estes filtros.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <form id="form-categorias-relatorio" method="post" action="/painel/financeiro/relatorio/categorias">
+      <input type="hidden" name="conta_id" value="{{ conta.id if conta else 0 }}">
+      <input type="hidden" name="data_inicial" value="{{ inicio.isoformat() }}">
+      <input type="hidden" name="data_final" value="{{ fim.isoformat() }}">
+      <input type="hidden" name="filtro_categoria" value="{{ categoria }}">
+      <input type="hidden" name="busca" value="{{ busca }}">
+      <input type="hidden" name="status_sistema" value="{{ status_sistema }}">
+      <input type="hidden" name="mes_cards" value="{{ mes_cards }}">
+      <div class="rel-fin-box-topo">
+        <h2>Movimentos filtrados</h2>
+        {% if movimentos %}<button type="submit" class="rel-fin-salvar">Salvar categorias</button>{% endif %}
+      </div>
+      <p class="rel-fin-dica">Aqui a correção altera somente a categoria. Data, descrição, conta e valor permanecem exatamente como estão.</p>
+      <table>
+        <thead><tr><th>Data</th><th>Categoria</th><th>Fornecedor / descrição</th><th>Conta</th><th>Origem</th><th class="numero">Entrou</th><th class="numero">Saiu</th></tr></thead>
+        <tbody>
+        {% for m in movimentos %}
+          <tr>
+            <td>{{ m.data.strftime('%d/%m/%Y') }}</td>
+            <td>
+              <select name="categoria_{{ m.tipo_movimento }}_{{ m.id }}" class="rel-fin-editar-categoria" aria-label="Categoria de {{ m.descricao }}">
+                {% if not m.categoria_valor %}<option value="" selected disabled>Escolha...</option>{% endif %}
+                {% for valor, rotulo in categorias %}
+                  <option value="{{ valor }}" {% if m.categoria_valor == valor %}selected{% endif %}>{{ rotulo }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>{{ m.descricao }}</td>
+            <td>{{ m.conta }}</td>
+            <td>{{ m.origem }}</td>
+            <td class="numero positivo">{% if m.entrada %}R$ {{ m.entrada|moeda_br }}{% else %}—{% endif %}</td>
+            <td class="numero negativo">{% if m.saida %}R$ {{ m.saida|moeda_br }}{% else %}—{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="sem-dados">Nenhum movimento encontrado com estes filtros.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </form>
   </section>
 </div>
 {% endblock %}

@@ -406,7 +406,7 @@
         {% for m in manuais_reais %}
           <tr class="linha-manual {{ 'linha-vinculada' if m.pagamento or m.organiza_lancamento_id or vinculos_titulo_por_manual.get(m.id) or vinculos_organiza_por_manual.get(m.id) else '' }}">
             <td><input form="manual-edit-{{ m.id }}" type="date" name="data" value="{{ m.data.isoformat() }}" class="input-data-mini" required></td>
-            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>manual</small></td>
+            <td class="hist-cell"><input form="manual-edit-{{ m.id }}" name="descricao" value="{{ m.descricao }}" class="input-desc-mini" required><small>{{ origem_lancamento_financeiro(m)|lower }}</small></td>
             <td><input form="manual-edit-{{ m.id }}" name="valor" data-mascara="moeda" data-allow-negative="1" value="{{ m.valor|moeda_br }}" class="input-valor-mini {{ 'positivo' if m.valor >= 0 else 'negativo' }}" required></td>
             <td>
               <select form="manual-edit-{{ m.id }}" name="categoria" class="input-tipo-mini">
@@ -425,7 +425,7 @@
 
               {% if (m.valor or 0)|abs > 0.01 %}
               <dialog id="dlg-manual-{{ m.id }}" class="modal-vinculo">
-                <div class="modal-vinculo-cabecalho"><div><strong>Vincular movimento manual</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
+                <div class="modal-vinculo-cabecalho"><div><strong>Movimento {{ origem_lancamento_financeiro(m)|lower }}</strong><small>{{ m.data.strftime('%d/%m/%Y') }} · R$ {{ m.valor|moeda_br }}</small></div><button type="button" class="botao-icone modal-fechar" onclick="document.getElementById('dlg-manual-{{ m.id }}').close()"><i class="bi bi-x-lg" aria-hidden="true"></i></button></div>
                 <div class="modal-vinculo-historico">{{ m.descricao }}</div>
 
                 {% if vinculos_conta_manual %}
