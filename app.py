@@ -4105,7 +4105,10 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, db: Session = Depen
     email = (usuario_h.get("email") or "").strip().lower()
     telefone = usuario_h.get("telefone") or ""
     nome = (usuario_h.get("nome") or email or "Usuário Humiat").strip()
-    slug = (empresa_h.get("slug") or dados.get("destino_slug") or "").strip().lower()
+    # Para o Connect, o Humiat ID pode enviar um slug local/legado em destino_slug.
+    # Ex.: empresa global vivikaraoke -> slug local vivioke.
+    # O alias precisa ter prioridade sobre o slug global da empresa.
+    slug = (dados.get("destino_slug") or empresa_h.get("slug") or "").strip().lower()
 
     empresa = None
     if slug:
