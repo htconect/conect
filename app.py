@@ -6651,6 +6651,7 @@ def _endereco_evento_igual_cliente_nfse(item: Solicitacao) -> bool:
 @app.get("/painel/solicitacao/{solicitacao_id}/nfse-organiza")
 def gerar_nfse_no_organiza(
         solicitacao_id: int,
+        cliente_cnpj: str = "",
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -6659,29 +6660,26 @@ def gerar_nfse_no_organiza(
         raise HTTPException(404)
     if not bool(getattr(empresa, "nfse_ativa", False)):
         return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=NFS-e não está habilitada para esta empresa.", status_code=303)
-    cliente = item.cliente
-    if not cliente:
-        raise HTTPException(400, "Contrato sem cliente.")
-    documento = limpar_identificador(cliente.cnpj or cliente.cpf or "")
-    if len(documento) not in (11, 14):
-        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe CPF/CNPJ do cliente antes de gerar a NFS-e.", status_code=303)
+
+    # O CNPJ usado como tomador da NFS-e é informado no momento do envio.
+    # Ele não altera o CPF/CNPJ nem qualquer outro dado do cliente/contrato no Connect.
+    cnpj = limpar_identificador(cliente_cnpj or "")
+    if len(cnpj) != 14:
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Informe um CNPJ válido com 14 dígitos para enviar a NFS-e ao Organiza.",
+            status_code=303,
+        )
     if not item.data_evento:
-        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe a data do evento antes de gerar a NFS-e.", status_code=303)
+        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe a data do evento antes de enviar a NFS-e.", status_code=303)
+
+    # O Connect envia somente o que o Organiza não consegue obter sozinho:
+    # CNPJ escolhido, identificação do contrato, valor e todos os dados do evento.
     params = {
         "origem": "connect",
         "connect_empresa_id": str(empresa.id),
         "connect_contrato_id": str(item.id),
-        "cliente_nome": cliente.nome or "",
-        "cliente_documento": documento,
-        "cliente_email": cliente.email or "",
-        "cliente_telefone": cliente.telefone or cliente.identificador or "",
-        "cliente_cep": cliente.cep or "",
-        "cliente_logradouro": cliente.endereco or "",
-        "cliente_numero": cliente.numero or "",
-        "cliente_complemento": cliente.complemento or "",
-        "cliente_bairro": cliente.bairro or "",
-        "cliente_municipio": cliente.cidade or "",
-        "cliente_uf": cliente.estado or "",
+        "cliente_cnpj": cnpj,
+        "valor_total": f"{float(item.valor or 0):.2f}",
         "evento_data_inicio": item.data_evento.isoformat(),
         "evento_data_fim": (item.retirada_data or item.data_evento).isoformat(),
         "evento_descricao": _texto_nfse_equipamentos(item) or "Aluguel de Karaokê",
@@ -6693,7 +6691,6 @@ def gerar_nfse_no_organiza(
         "evento_bairro": item.bairro or "",
         "evento_municipio": item.local_cidade or "",
         "evento_uf": item.local_estado or "",
-        "valor_total": f"{float(item.valor or 0):.2f}",
     }
     destino = f"{ORGANIZA_NFSE_URL}?{urlencode(params)}"
     return RedirectResponse(destino, status_code=303)

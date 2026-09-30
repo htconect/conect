@@ -561,10 +561,24 @@
         <b>NFS-e de serviço</b>
         <small class="texto-discreto" style="display:block">Envia ao Organiza somente os dados do contrato necessários para preparar a NFS-e de aluguel.</small>
       </div>
-      <a class="botao btn-krj-primary" href="/painel/solicitacao/{{ item.id }}/nfse-organiza">Gerar NFS-e no Organiza</a>
+      <button class="botao btn-krj-primary" type="button" onclick="enviarNfseOrganiza({{ item.id }}, {{ (item.cliente.cnpj if item.cliente and item.cliente.cnpj else '')|tojson }})">Enviar NFS-e para o Organiza</button>
     </div>
   </div>
   {% endif %}
+  <script>
+    function enviarNfseOrganiza(solicitacaoId, cnpjAtual) {
+      const valorInicial = String(cnpjAtual || '').replace(/\D/g, '');
+      const informado = window.prompt('Informe o CNPJ do tomador da NFS-e:', valorInicial);
+      if (informado === null) return;
+      const cnpj = String(informado).replace(/\D/g, '');
+      if (cnpj.length !== 14) {
+        window.alert('Informe um CNPJ válido com 14 dígitos.');
+        return;
+      }
+      const destino = `/painel/solicitacao/${solicitacaoId}/nfse-organiza?cliente_cnpj=${encodeURIComponent(cnpj)}`;
+      window.location.href = destino;
+    }
+  </script>
 </section>
 
 <details class="accordion">
