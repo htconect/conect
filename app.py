@@ -9938,10 +9938,18 @@ def financeiro(
             )
 
     # Organiza fica separado dos lançamentos nativos do Connect.
-    # Reutiliza a consulta já realizada e limita somente a exibição.
+    # Venda, manutenção e atualização são saldos A RECEBER.
+    # Estoque/compras é saldo A PAGAR.
     lancamentos_organiza_financeiro = [
         item for item in todos_lancamentos_organiza
-        if item.data_pagamento and item.data_pagamento <= fim
+        if item.tipo != "estoque"
+        and item.data_pagamento and item.data_pagamento <= fim
+        and max(float(item.falta_receber or 0), 0.0) > 0.01
+    ][:500]
+    lancamentos_organiza_pagar = [
+        item for item in todos_lancamentos_organiza
+        if item.tipo == "estoque"
+        and item.data_pagamento and item.data_pagamento <= fim
         and max(float(item.falta_receber or 0), 0.0) > 0.01
     ][:500]
 
@@ -10014,7 +10022,14 @@ def financeiro(
     total_organiza_receber_posicao = sum(
         max(float(item.falta_receber or 0), 0.0)
         for item in todos_lancamentos_organiza
-        if item.data_pagamento and item.data_pagamento <= fim
+        if item.tipo != "estoque"
+        and item.data_pagamento and item.data_pagamento <= fim
+    )
+    total_organiza_pagar_posicao = sum(
+        max(float(item.falta_receber or 0), 0.0)
+        for item in todos_lancamentos_organiza
+        if item.tipo == "estoque"
+        and item.data_pagamento and item.data_pagamento <= fim
     )
     total_interempresa_receber_posicao = sum(max(float(item["saldo"] or 0), 0.0) for item in repasses_receber_interempresa)
 
@@ -10033,7 +10048,10 @@ def financeiro(
         total_manual_receber_posicao + total_contratos_receber_posicao
         + total_organiza_receber_posicao + total_interempresa_receber_posicao
     )
-    total_pagar_posicao = total_manual_pagar_posicao + total_repasses_pagar_posicao
+    total_pagar_posicao = (
+        total_manual_pagar_posicao + total_repasses_pagar_posicao
+        + total_organiza_pagar_posicao
+    )
     saldo_projetado_posicao = saldo_todos + total_receber_posicao - total_pagar_posicao
 
     return templates.TemplateResponse("admin/financeiro.html", {
@@ -10094,6 +10112,7 @@ def financeiro(
         "candidatos_repasse_por_banco": candidatos_repasse_por_banco,
         "saldo_repasse_por_banco": saldo_repasse_por_banco,
         "lancamentos_organiza_financeiro": lancamentos_organiza_financeiro,
+        "lancamentos_organiza_pagar": lancamentos_organiza_pagar,
         "valor_baixado_por_titulo": valor_baixado_por_titulo,
         "vinculos_titulo_por_banco": vinculos_titulo_por_banco,
         "vinculos_titulo_por_manual": vinculos_titulo_por_manual,
@@ -10160,6 +10179,13 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
 
     receber_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
         LancamentoOrganiza.empresa_id == empresa_id,
+        LancamentoOrganiza.tipo != "estoque",
+        LancamentoOrganiza.falta_receber > 0,
+        LancamentoOrganiza.data_pagamento <= ate_data,
+    ).scalar() or 0)
+    pagar_organiza = float(db.query(func.coalesce(func.sum(LancamentoOrganiza.falta_receber), 0)).filter(
+        LancamentoOrganiza.empresa_id == empresa_id,
+        LancamentoOrganiza.tipo == "estoque",
         LancamentoOrganiza.falta_receber > 0,
         LancamentoOrganiza.data_pagamento <= ate_data,
     ).scalar() or 0)
@@ -10196,7 +10222,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         )
 
     total_receber = receber_manual + receber_contratos + receber_organiza + receber_interempresa
-    total_pagar = pagar_manual + pagar_repasses
+    total_pagar = pagar_manual + pagar_repasses + pagar_organiza
     return {
         "banco": saldo_banco,
         "receber": total_receber,
@@ -10207,6 +10233,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
         "receber_contratos": receber_contratos,
         "receber_organiza": receber_organiza,
         "receber_interempresa": receber_interempresa,
+        "pagar_organiza": pagar_organiza,
         "pagar_repasses": pagar_repasses,
     }
 

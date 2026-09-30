@@ -740,7 +740,10 @@
                   </td>
                   <td>
                     <span class="tipo-chip {{ item.tipo }}">
-                      {{ 'Venda' if item.tipo == 'venda' else 'Manutenção' }}
+                      {% if item.tipo == 'venda' %}Venda
+                      {% elif item.tipo == 'manutencao' %}Manutenção
+                      {% elif item.tipo == 'atualizacao' %}Atualização
+                      {% else %}{{ item.tipo|capitalize }}{% endif %}
                     </span>
                   </td>
                   <td class="positivo">R$ {{ item.falta_receber|moeda_br }}</td>
@@ -804,6 +807,20 @@
               {% endif %}
             {% endfor %}
 
+            {% for item in lancamentos_organiza_pagar %}
+              <tr>
+                <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
+                <td class="cliente-cell">
+                  <strong>{{ item.cliente or 'Estoque / Compras' }}</strong>
+                  {% if item.data_pagamento and item.data_pagamento < mes_cards_inicio %}<small><b>Pendência anterior · {{ item.data_pagamento.strftime('%m/%Y') }}</b></small>{% endif %}
+                  {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
+                </td>
+                <td><span class="tipo-chip">Estoque / Compras</span></td>
+                <td class="negativo">R$ {{ item.falta_receber|moeda_br }}</td>
+                <td><span class="badge-pendente">A pagar · Organiza</span></td>
+              </tr>
+            {% endfor %}
+
             {% for r in repasses_sistema %}
               {% set valor_pago_repasse = valor_vinculado_por_repasse.get(r.id, 0) %}
               {% set falta_repasse = (r.valor_repasse or 0) - valor_pago_repasse %}
@@ -827,7 +844,7 @@
               </tr>
               {% endif %}
             {% else %}
-              {% if not pagar %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
+              {% if not pagar and not lancamentos_organiza_pagar %}<tr><td colspan="5" class="tabela-vazia">Nenhum valor a pagar neste filtro.</td></tr>{% endif %}
             {% endfor %}
             </tbody>
           </table>
