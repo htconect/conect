@@ -6661,6 +6661,8 @@ def gerar_nfse_no_organiza(
     if not bool(getattr(empresa, "nfse_ativa", False)):
         return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=NFS-e não está habilitada para esta empresa.", status_code=303)
 
+    cliente = item.cliente
+
     # O CNPJ usado como tomador da NFS-e é informado no momento do envio.
     # Ele não altera o CPF/CNPJ nem qualquer outro dado do cliente/contrato no Connect.
     cnpj = limpar_identificador(cliente_cnpj or "")
@@ -6672,13 +6674,15 @@ def gerar_nfse_no_organiza(
     if not item.data_evento:
         return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Informe a data do evento antes de enviar a NFS-e.", status_code=303)
 
-    # O Connect envia somente o que o Organiza não consegue obter sozinho:
-    # CNPJ escolhido, identificação do contrato, valor e todos os dados do evento.
+    # O Connect envia os dados operacionais da NFS-e e o contato do cliente do contrato.
+    # O nome/WhatsApp servem apenas como contato; os dados fiscais do CNPJ continuam no Organiza.
     params = {
         "origem": "connect",
         "connect_empresa_id": str(empresa.id),
         "connect_contrato_id": str(item.id),
         "cliente_cnpj": cnpj,
+        "cliente_nome": (cliente.nome if cliente else "") or "",
+        "cliente_telefone": ((cliente.telefone or cliente.identificador) if cliente else "") or "",
         "valor_total": f"{float(item.valor or 0):.2f}",
         "evento_data_inicio": item.data_evento.isoformat(),
         "evento_data_fim": (item.retirada_data or item.data_evento).isoformat(),
