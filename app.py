@@ -2758,9 +2758,14 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         "venda": "venda",
         "manutencao": "manutencao",
         "manutenção": "manutencao",
+        "atualizacao": "atualizacao",
+        "atualização": "atualizacao",
+        "estoque": "estoque",
+        "compra": "estoque",
+        "compras": "estoque",
     }
     if tipo not in aliases:
-        raise HTTPException(status_code=422, detail="tipo deve ser 'venda' ou 'manutencao'.")
+        raise HTTPException(status_code=422, detail="tipo deve ser venda, manutencao, atualizacao ou estoque.")
     tipo = aliases[tipo]
 
     try:
@@ -2774,8 +2779,10 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     except (InvalidOperation, ValueError):
         raise HTTPException(status_code=422, detail="valor ou falta_receber inválido.")
 
-    if valor <= 0:
-        raise HTTPException(status_code=422, detail="valor deve ser maior que zero.")
+    # Saldos globais do Organiza podem chegar a zero quando uma origem é totalmente quitada.
+    # Zero é válido para atualizar o espelho no Connect; apenas valores negativos são rejeitados.
+    if valor < 0:
+        raise HTTPException(status_code=422, detail="valor não pode ser negativo.")
     if falta_receber < 0:
         falta_receber = Decimal("0")
 
