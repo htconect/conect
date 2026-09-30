@@ -2763,6 +2763,7 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         "estoque": "estoque",
         "compra": "estoque",
         "compras": "estoque",
+        "compras de materiais": "estoque",
     }
     if tipo not in aliases:
         raise HTTPException(status_code=422, detail="tipo deve ser venda, manutencao, atualizacao ou estoque.")
@@ -2821,7 +2822,11 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     registro.empresa_id = empresa_destino.id
     registro.tipo = tipo
     registro.cliente = (str(dados.get("cliente") or "").strip() or None)
-    registro.descricao = (str(dados.get("descricao") or "").strip() or None)
+    descricao_recebida = (str(dados.get("descricao") or "").strip() or None)
+    # "estoque" continua apenas como origem técnica da integração.
+    # Financeiramente o Connect apresenta este saldo como categoria Empresa,
+    # com a descrição padronizada Compras de materiais.
+    registro.descricao = descricao_recebida or ("Compras de materiais" if tipo == "estoque" else None)
     registro.valor = valor
     registro.falta_receber = falta_receber
     registro.data_pagamento = data_pagamento
@@ -2836,6 +2841,7 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
         "id": registro.id,
         "id_externo": registro.id_externo,
         "tipo": registro.tipo,
+        "categoria": "empresa" if registro.tipo == "estoque" else registro.tipo,
     }
 
 
@@ -2863,6 +2869,7 @@ def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db))
         "empresa_id": r.empresa_id,
         "id_externo": r.id_externo,
         "tipo": r.tipo,
+        "categoria": "empresa" if r.tipo == "estoque" else r.tipo,
         "cliente": r.cliente,
         "descricao": r.descricao,
         "valor": float(r.valor or 0),

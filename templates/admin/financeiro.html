@@ -811,11 +811,11 @@
               <tr>
                 <td>{{ item.data_pagamento.strftime('%d/%m') if item.data_pagamento else '-' }}</td>
                 <td class="cliente-cell">
-                  <strong>{{ item.cliente or 'Estoque / Compras' }}</strong>
+                  <strong>Compras de materiais</strong>
                   {% if item.data_pagamento and item.data_pagamento < mes_cards_inicio %}<small><b>Pendência anterior · {{ item.data_pagamento.strftime('%m/%Y') }}</b></small>{% endif %}
-                  {% if item.descricao %}<small>{{ item.descricao }}</small>{% endif %}
+                  <small>Origem: Organiza{% if item.descricao and item.descricao != 'Compras de materiais' %} · {{ item.descricao }}{% endif %}</small>
                 </td>
-                <td><span class="tipo-chip">Estoque / Compras</span></td>
+                <td><span class="tipo-chip">Empresa</span></td>
                 <td class="negativo">R$ {{ item.falta_receber|moeda_br }}</td>
                 <td><span class="badge-pendente">A pagar · Organiza</span></td>
               </tr>
