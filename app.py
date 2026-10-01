@@ -13,6 +13,7 @@ import hmac
 import re
 import math
 import json
+import base64
 import zipfile
 import unicodedata
 from xml.sax.saxutils import escape as xml_escape
@@ -140,6 +141,10 @@ HUMIAT_USER_VALIDATE_URL = os.getenv(
     "https://www.humiat.com.br/api/humiat/integracoes/usuario/validar",
 ).strip()
 
+HUMIAT_SSO_LOCAL_MAX_AGE = int(os.getenv("HUMIAT_SSO_LOCAL_MAX_AGE", "120") or "120")
+_HUMIAT_SSO_USADOS: dict[str, float] = {}
+_HUMIAT_SSO_USADOS_LOCK = threading.Lock()
+
 # Lista de Clientes de Aluguel do Organiza. A mesma chave já usada na integração
 # financeira pode ser reutilizada nos dois sentidos.
 ORGANIZA_CLIENTES_ALUGUEL_URL = os.getenv(
@@ -245,7 +250,61 @@ def _retorno_logout_humiat_seguro(retorno: str | None) -> str:
         return padrao
 
 
+def _b64url_decode(texto: str) -> bytes:
+    faltam = (-len(texto)) % 4
+    return base64.urlsafe_b64decode((texto + ("=" * faltam)).encode("ascii"))
+
+
+def _humiat_validar_ticket_local(ticket: str) -> dict | None:
+    """Valida ticket Humiat v2 localmente, sem chamada HTTP ao Humiat.
+
+    O Humiat e o Connect já compartilham HUMIAT_SSO_SECRET. O ticket v2 leva um
+    payload curto assinado por HMAC e expira rapidamente. Tickets antigos
+    continuam usando a validação servidor-servidor abaixo como fallback.
+    """
+    if not ticket.startswith("v2."):
+        return None
+    if not HUMIAT_SSO_SECRET:
+        raise HTTPException(status_code=503, detail="HUMIAT_SSO_SECRET não configurado no Connect")
+    try:
+        _versao, payload_b64, assinatura_b64 = ticket.split(".", 2)
+        assinatura_recebida = _b64url_decode(assinatura_b64)
+        assinatura_esperada = hmac.new(
+            HUMIAT_SSO_SECRET.encode("utf-8"),
+            f"v2.{payload_b64}".encode("ascii"),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(assinatura_recebida, assinatura_esperada):
+            raise HTTPException(status_code=401, detail="Assinatura Humiat inválida")
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+        agora = int(time_module.time())
+        exp = int(payload.get("exp") or 0)
+        iat = int(payload.get("iat") or 0)
+        if exp <= agora or iat > agora + 30 or (exp - iat) > max(30, HUMIAT_SSO_LOCAL_MAX_AGE):
+            raise HTTPException(status_code=401, detail="Ticket Humiat expirado")
+        jti = str(payload.get("jti") or "")
+        if not jti:
+            raise HTTPException(status_code=401, detail="Ticket Humiat inválido")
+        # Evita replay no mesmo processo. Limpa entradas antigas sem criar tarefa em background.
+        with _HUMIAT_SSO_USADOS_LOCK:
+            limite = agora - 300
+            for chave, usado_em in list(_HUMIAT_SSO_USADOS.items()):
+                if usado_em < limite:
+                    _HUMIAT_SSO_USADOS.pop(chave, None)
+            if jti in _HUMIAT_SSO_USADOS:
+                raise HTTPException(status_code=401, detail="Ticket Humiat já utilizado")
+            _HUMIAT_SSO_USADOS[jti] = float(agora)
+        return payload
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Ticket Humiat inválido: {exc}")
+
+
 def _humiat_validar_ticket(ticket: str) -> dict:
+    local = _humiat_validar_ticket_local(ticket)
+    if local is not None:
+        return local
     if not HUMIAT_SSO_SECRET:
         raise HTTPException(status_code=503, detail="HUMIAT_SSO_SECRET não configurado no Connect")
     dados = urlencode({"ticket": ticket}).encode("utf-8")
@@ -257,7 +316,7 @@ def _humiat_validar_ticket(ticket: str) -> dict:
     }
     req = UrlRequest(HUMIAT_SSO_VALIDATE_URL, data=dados, method="POST", headers=cabecalhos)
     try:
-        with urlopen(req, timeout=12) as resp:
+        with urlopen(req, timeout=5) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except HTTPError as exc:
         if exc.code in (301, 302, 303, 307, 308):
@@ -266,7 +325,7 @@ def _humiat_validar_ticket(ticket: str) -> dict:
                 destino = urljoin(HUMIAT_SSO_VALIDATE_URL, location)
                 req2 = UrlRequest(destino, data=dados, method="POST", headers=cabecalhos)
                 try:
-                    with urlopen(req2, timeout=12) as resp:
+                    with urlopen(req2, timeout=5) as resp:
                         return json.loads(resp.read().decode("utf-8"))
                 except Exception as exc2:
                     raise HTTPException(status_code=502, detail=f"Falha ao validar Humiat ID após redirecionamento: {exc2}")
@@ -321,6 +380,8 @@ def _sessao_usuario_empresa(request: Request, db: Session, usuario_empresa: Usua
     request.session["usuario_nome"] = usuario_empresa.nome
     request.session["usuario_empresa_id"] = int(usuario_empresa.id)
     request.session["humiat_user_id"] = int(usuario_empresa.humiat_user_id or 0) or None
+    empresa_local = db.get(Empresa, usuario_empresa.empresa_id)
+    request.session["humiat_destino_slug"] = (empresa_local.slug or "").strip().lower() if empresa_local else ""
     request.session["acesso_total"] = False
     request.session["acessos"] = {
         "agenda": bool(usuario_empresa.acesso_agenda),
@@ -4146,7 +4207,8 @@ def api_humiat_painel_connect(request: Request, slug: str, db: Session = Depends
 
 @app.get("/_connect/sso/humiat", include_in_schema=False)
 def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", db: Session = Depends(get_db)):
-    dados = _humiat_validar_ticket(humiat_ticket)
+    with perf_stage("sso.humiat_validar"):
+        dados = _humiat_validar_ticket(humiat_ticket)
     if not dados.get("ok") or (dados.get("produto") or "").strip().upper() != "CONNECT":
         raise HTTPException(status_code=401, detail="Acesso Humiat inválido para o Connect")
 
@@ -4162,6 +4224,19 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", 
     # O alias precisa ter prioridade sobre o slug global da empresa.
     slug = (dados.get("destino_slug") or empresa_h.get("slug") or "").strip().lower()
 
+    # Se o usuário já está com uma sessão Connect compatível, não consulta o
+    # banco novamente. Isso torna voltar ao Connect por outra aba praticamente
+    # instantâneo após a validação local do ticket.
+    sess_uid = int(request.session.get("humiat_user_id") or 0)
+    sess_slug = (request.session.get("humiat_destino_slug") or "").strip().lower()
+    if sess_uid and sess_uid == uid and sess_slug == slug:
+        if modo == "adm" and (request.session.get("admin_geral") or request.session.get("acesso_total")):
+            alvo = "/admin" if request.session.get("admin_geral") else "/painel"
+            return RedirectResponse(alvo, status_code=303)
+        if modo == "sistema" and request.session.get("empresa_id"):
+            alvo = destino if destino.startswith("/") and not destino.startswith("//") else "/painel"
+            return RedirectResponse(alvo, status_code=303)
+
     empresa = None
     if slug:
         empresa = db.query(Empresa).filter(func.lower(Empresa.slug) == slug, Empresa.ativa == True).first()
@@ -4176,6 +4251,7 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", 
         request.session["humiat_user_id"] = uid
         request.session["usuario_nome"] = nome
         request.session["usuario_sistema"] = email
+        request.session["humiat_destino_slug"] = slug
         if empresa:
             # ADM com empresa = administrador daquela empresa, sem expor o ADM global.
             request.session["empresa_id"] = int(empresa.id)
@@ -4190,7 +4266,8 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", 
     if modo != "sistema":
         raise HTTPException(status_code=400, detail="Perfil Humiat não suportado pelo Connect")
 
-    candidatos = _candidatos_usuario_humiat(db, uid, email, telefone, empresa.id if empresa else None)
+    with perf_stage("sso.localizar_usuario"):
+        candidatos = _candidatos_usuario_humiat(db, uid, email, telefone, empresa.id if empresa else None)
     if len(candidatos) == 1:
         local = candidatos[0]
         _vincular_usuario_humiat(local, uid, email)
