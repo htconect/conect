@@ -9,6 +9,7 @@ import shutil
 import csv
 import uuid
 import hashlib
+import hmac
 import re
 import math
 import json
@@ -4092,8 +4093,59 @@ def admin_excluir_usuario_empresa(
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 
 
+@app.get("/_connect/api/humiat/painel", include_in_schema=False)
+def api_humiat_painel_connect(request: Request, slug: str, db: Session = Depends(get_db)):
+    """Resumo enxuto do Connect para o painel central do Humiat ID.
+
+    A permissão de abrir o produto continua sendo decidida pelo Humiat ID.
+    Esta rota só devolve indicadores da empresa e exige o segredo servidor-servidor.
+    """
+    recebido = (request.headers.get("X-Humiat-SSO-Secret") or "").strip()
+    if not HUMIAT_SSO_SECRET or not recebido or not hmac.compare_digest(recebido, HUMIAT_SSO_SECRET):
+        raise HTTPException(status_code=403, detail="Integração Humiat não autorizada")
+
+    slug_limpo = (slug or "").strip().lower()
+    empresa = db.query(Empresa).filter(func.lower(Empresa.slug) == slug_limpo, Empresa.ativa == True).first()
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada no Connect")
+
+    competencia = agora_utc().strftime("%Y-%m")
+    gratis_limite = max(0, int(empresa.humiat_gratis_mes or 4))
+    aceitos_mes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.humiat_processado == True,
+        Solicitacao.humiat_competencia == competencia,
+    ).count()
+    gratis_usados = min(int(aceitos_mes or 0), gratis_limite)
+    gratis_restantes = max(0, gratis_limite - gratis_usados)
+
+    # Valor comercial dos contratos efetivamente aceitos no Connect.
+    faturado = db.query(func.coalesce(func.sum(Solicitacao.valor), 0)).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.status.in_(list(STATUS_CONTRATO_ACEITO)),
+    ).scalar() or 0
+    recebido_total = db.query(func.coalesce(func.sum(Solicitacao.valor_pago), 0)).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.status.in_(list(STATUS_CONTRATO_ACEITO)),
+    ).scalar() or 0
+
+    return JSONResponse({
+        "ok": True,
+        "empresa": {"id": empresa.id, "nome": empresa.nome, "slug": empresa.slug},
+        "contratos_gratis": {
+            "limite": gratis_limite,
+            "usados": gratis_usados,
+            "restantes": gratis_restantes,
+            "competencia": competencia,
+        },
+        "faturado_contratos": round(float(faturado or 0), 2),
+        "recebido_contratos": round(float(recebido_total or 0), 2),
+        "humiats_comprados_disponiveis": max(0, int(empresa.humiat_saldo or 0)),
+    })
+
+
 @app.get("/_connect/sso/humiat", include_in_schema=False)
-def connect_sso_humiat(request: Request, humiat_ticket: str, db: Session = Depends(get_db)):
+def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", db: Session = Depends(get_db)):
     dados = _humiat_validar_ticket(humiat_ticket)
     if not dados.get("ok") or (dados.get("produto") or "").strip().upper() != "CONNECT":
         raise HTTPException(status_code=401, detail="Acesso Humiat inválido para o Connect")
@@ -4143,7 +4195,10 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, db: Session = Depen
         local = candidatos[0]
         _vincular_usuario_humiat(local, uid, email)
         db.commit()
-        return _sessao_usuario_empresa(request, db, local)
+        resposta = _sessao_usuario_empresa(request, db, local)
+        if destino.startswith("/") and not destino.startswith("//"):
+            return RedirectResponse(destino, status_code=303)
+        return resposta
 
     if len(candidatos) > 1:
         # Não adivinha empresa/usuário. Isso evita vincular o Humiat ID à pessoa errada.
