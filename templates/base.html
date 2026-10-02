@@ -10,11 +10,11 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png?v=4">
   <link rel="shortcut icon" href="/static/favicon.ico?v=4">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=4">
-  <link rel="stylesheet" href="/static/css/style.css?v=20260725-intel2">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261002-adminator86">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   {% block head_extra %}{% endblock %}
 </head>
-<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% if not request.session.get('empresa_id') and not request.session.get('admin_geral') %}publico-cliente{% endif %} {% block body_class %}{% endblock %}">
+<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% if request.session.get('empresa_id') %}painel-interno{% endif %} {% if not request.session.get('empresa_id') and not request.session.get('admin_geral') %}publico-cliente{% endif %} {% block body_class %}{% endblock %}">
 <header class="topo-app">
   <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
     {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
@@ -52,6 +52,50 @@
     <a class="sair-app" href="/empresa/login">Entrar</a>
   {% endif %}
 </header>
+
+{% if request.session.get('empresa_id') %}
+<aside class="sidebar-adminator" aria-label="Menu principal do Conect">
+  <a class="sidebar-adminator-brand" href="/painel">
+    <span class="sidebar-adminator-logo">
+      {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}
+      <img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">
+      {% else %}
+      <img src="/static/connect-icon-master.png" alt="Conect">
+      {% endif %}
+    </span>
+    <span>
+      <b>Conect</b>
+      <small>{{ empresa.nome if empresa is defined and empresa else 'HUMIAT' }} · {{ APP_VERSION }}</small>
+    </span>
+  </a>
+
+  <nav class="sidebar-adminator-nav">
+    <span class="sidebar-adminator-titulo">Operação</span>
+    <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
+    <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
+    <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-file-earmark-text"></i><span>Contratos</span></a>
+    <a class="{% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas"><i class="bi bi-truck"></i><span>Operação</span></a>
+    <a class="{% if request.url.path.startswith('/painel/financeiro') or request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
+    <a class="{% if request.url.path.startswith('/painel/inteligencia-logistica') %}ativo{% endif %}" href="/painel/inteligencia-logistica"><i class="bi bi-stars"></i><span>Inteligência</span></a>
+
+    <span class="sidebar-adminator-titulo">Cadastros</span>
+    <a class="{% if request.url.path.startswith('/painel/contratos') %}ativo{% endif %}" href="/painel/contratos"><i class="bi bi-file-earmark-richtext"></i><span>Política / modelos</span></a>
+    <a class="{% if request.url.path.startswith('/painel/produtos') %}ativo{% endif %}" href="/painel/produtos"><i class="bi bi-box-seam"></i><span>Itens de locação</span></a>
+    <a class="{% if request.url.path.startswith('/painel/cupons') %}ativo{% endif %}" href="/painel/cupons"><i class="bi bi-ticket-perforated"></i><span>Cupons</span></a>
+    <a class="{% if request.url.path.startswith('/painel/configuracoes') %}ativo{% endif %}" href="/painel/configuracoes"><i class="bi bi-sliders"></i><span>Empresa e campos</span></a>
+
+    <span class="sidebar-adminator-titulo">Consultas</span>
+    <a class="{% if request.url.path.startswith('/painel/relatorios') %}ativo{% endif %}" href="/painel/relatorios"><i class="bi bi-bar-chart-line"></i><span>Relatórios</span></a>
+    <a class="{% if request.url.path.startswith('/painel/marketing') %}ativo{% endif %}" href="/painel/marketing"><i class="bi bi-megaphone"></i><span>Origem e campanhas</span></a>
+    <a class="{% if request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/evolucao-financeira"><i class="bi bi-graph-up-arrow"></i><span>Evolução financeira</span></a>
+  </nav>
+
+  <div class="sidebar-adminator-rodape">
+    <a href="/painel/perfil"><i class="bi bi-person-circle"></i><span>Meu perfil</span></a>
+    <a href="/empresa/sair"><i class="bi bi-box-arrow-right"></i><span>Sair</span></a>
+  </div>
+</aside>
+{% endif %}
 
 <main class="container-app">
   {% block conteudo %}{% endblock %}

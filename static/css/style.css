@@ -1765,3 +1765,193 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
 .pagamento-edicao-observacao,.pagamento-vinculo-aviso,.form-editar-pagamento>button{grid-column:1/-1}
 .pagamento-vinculo-aviso{margin:0;padding:9px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0}
 @media(max-width:700px){.pagamento-acoes-inline{justify-content:flex-start;width:100%}.form-editar-pagamento{position:fixed;left:12px;right:12px;top:80px;width:auto;max-height:calc(100vh - 100px);overflow:auto;grid-template-columns:1fr}.pagamento-edicao-observacao,.pagamento-vinculo-aviso,.form-editar-pagamento>button{grid-column:auto}}
+
+/* Conect 1.0.86 — layout Adminator no desktop, mantendo experiência app no celular */
+:root{
+  --admin-bg:#f0f4f8;
+  --admin-sidebar:#0f172a;
+  --admin-sidebar-soft:#172033;
+  --admin-card:#ffffff;
+  --admin-border:#e2e8f0;
+  --admin-text:#172033;
+  --admin-muted:#64748b;
+  --admin-primary:#2563eb;
+}
+.sidebar-adminator{display:none}
+
+@media (min-width:701px){
+  body.painel-interno{
+    background:var(--admin-bg)!important;
+    color:var(--admin-text);
+    padding-bottom:0!important;
+    min-height:100vh;
+  }
+  body.painel-interno .sidebar-adminator{
+    position:fixed;
+    inset:0 auto 0 0;
+    z-index:60;
+    width:258px;
+    display:flex;
+    flex-direction:column;
+    background:var(--admin-sidebar);
+    color:#fff;
+    border-right:1px solid rgba(255,255,255,.06);
+    box-shadow:8px 0 28px rgba(15,23,42,.08);
+    overflow-y:auto;
+    overscroll-behavior:contain;
+  }
+  .sidebar-adminator-brand{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-height:78px;
+    padding:14px 18px;
+    color:#fff;
+    text-decoration:none;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .sidebar-adminator-logo{
+    width:42px;
+    height:42px;
+    flex:0 0 42px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:12px;
+    background:#fff;
+    overflow:hidden;
+  }
+  .sidebar-adminator-logo img{width:100%;height:100%;object-fit:contain;padding:4px}
+  .sidebar-adminator-brand>span:last-child{display:flex;flex-direction:column;min-width:0}
+  .sidebar-adminator-brand b{font-size:17px;line-height:1.15}
+  .sidebar-adminator-brand small{margin-top:4px;color:#94a3b8;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
+  .sidebar-adminator-nav{padding:14px 12px 18px;display:grid;gap:3px}
+  .sidebar-adminator-titulo{
+    display:block;
+    padding:16px 10px 7px;
+    color:#718096;
+    font-size:10px;
+    line-height:1;
+    font-weight:900;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+  }
+  .sidebar-adminator-nav a,
+  .sidebar-adminator-rodape a{
+    display:flex;
+    align-items:center;
+    gap:11px;
+    min-height:42px;
+    padding:10px 12px;
+    border-radius:10px;
+    color:#cbd5e1;
+    text-decoration:none;
+    font-size:13px;
+    font-weight:750;
+    transition:background .15s ease,color .15s ease,transform .15s ease;
+  }
+  .sidebar-adminator-nav a i,
+  .sidebar-adminator-rodape a i{width:20px;text-align:center;font-size:16px;color:#94a3b8}
+  .sidebar-adminator-nav a:hover,
+  .sidebar-adminator-rodape a:hover{background:rgba(255,255,255,.06);color:#fff}
+  .sidebar-adminator-nav a.ativo{background:#1e293b;color:#fff;box-shadow:inset 3px 0 0 var(--admin-primary)}
+  .sidebar-adminator-nav a.ativo i{color:#60a5fa}
+  .sidebar-adminator-rodape{margin-top:auto;padding:12px;border-top:1px solid rgba(255,255,255,.08);display:grid;gap:3px}
+
+  body.painel-interno .topo-app{
+    position:sticky;
+    top:0;
+    z-index:50;
+    height:64px;
+    margin-left:258px;
+    padding:0 24px;
+    background:#fff;
+    color:var(--admin-text);
+    border-bottom:1px solid var(--admin-border);
+    box-shadow:0 2px 10px rgba(15,23,42,.035);
+    justify-content:flex-end;
+  }
+  body.painel-interno .topo-app>.marca-app{display:none}
+  body.painel-interno .usuario-topo>span{color:#334155;opacity:1;font-size:13px}
+  body.painel-interno .menu-topo summary{color:#334155;background:#f8fafc;border:1px solid #e2e8f0}
+  body.painel-interno .menu-topo summary:hover{background:#eef2f7}
+
+  body.painel-interno .container-app{
+    max-width:none;
+    width:auto;
+    margin:0 0 0 258px;
+    padding:24px 28px 36px;
+  }
+  body.painel-interno .nav-inferior{display:none!important}
+
+  body.painel-interno .card,
+  body.painel-interno .box,
+  body.painel-interno .accordion,
+  body.painel-interno .cartao-acao,
+  body.painel-interno .card-lista,
+  body.painel-interno .card-reserva,
+  body.painel-interno .usuario-online-card{
+    background:var(--admin-card);
+    border:1px solid var(--admin-border);
+    border-radius:12px;
+    box-shadow:0 2px 8px rgba(15,23,42,.045);
+  }
+  body.painel-interno .card,
+  body.painel-interno .box{padding:20px}
+  body.painel-interno .hero-admin{
+    background:#fff;
+    border:1px solid var(--admin-border);
+    border-radius:12px;
+    box-shadow:0 2px 8px rgba(15,23,42,.045);
+  }
+  body.painel-interno .metrica{
+    border:1px solid var(--admin-border);
+    border-radius:12px;
+    box-shadow:none;
+  }
+  body.painel-interno table{
+    border:1px solid var(--admin-border);
+    border-radius:10px;
+    box-shadow:none;
+    background:#fff;
+  }
+  body.painel-interno th{background:#f8fafc;color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.035em}
+  body.painel-interno th,
+  body.painel-interno td{border-bottom:1px solid #edf1f5}
+  body.painel-interno input,
+  body.painel-interno select,
+  body.painel-interno textarea{
+    border-color:#d8e0ea;
+    border-radius:9px;
+    background:#fff;
+    box-shadow:none;
+  }
+  body.painel-interno input:focus,
+  body.painel-interno select:focus,
+  body.painel-interno textarea:focus{outline:0;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+  body.painel-interno .cabecalho-mobile{margin:0 0 18px}
+  body.painel-interno .cabecalho-mobile h1{font-size:25px;color:#172033}
+  body.painel-interno .titulo-secao{color:#172033}
+  body.painel-interno .mini{color:#8291a7}
+  body.painel-interno .acoes{gap:8px}
+  body.painel-interno .reserva-titulo-card{
+    background:#fff;
+    color:#172033;
+    border:1px solid var(--admin-border);
+    border-radius:12px;
+    box-shadow:0 2px 8px rgba(15,23,42,.045);
+  }
+  body.painel-interno .reserva-titulo-card p{color:#64748b}
+  body.painel-interno .financeiro-corpo{max-width:100%}
+}
+
+/* O celular continua sendo tratado como app: topo escuro + menu inferior fixo. */
+@media (max-width:700px){
+  body.painel-interno .sidebar-adminator{display:none!important}
+  body.painel-interno .topo-app{margin-left:0;background:#0f172a;color:#fff}
+  body.painel-interno .topo-app>.marca-app{display:flex}
+  body.painel-interno .usuario-topo>span{color:#fff}
+  body.painel-interno .menu-topo summary{color:#fff;background:rgba(255,255,255,.12);border:0}
+  body.painel-interno .container-app{margin:0 auto;max-width:720px;padding:16px 12px 24px}
+  body.painel-interno .nav-inferior{display:grid!important}
+}
