@@ -1,0 +1,111 @@
+/* =========================================================
+   HUMIAT DESIGN SYSTEM v2 — Adminator base
+   Estrutura universal: tamanhos, tipografia, espaçamento e estados.
+   Identidade da empresa: somente --h-primary/secondary/accent.
+   Sem SolVoz => tema HUMIAT.
+   ========================================================= */
+
+
+:root,
+.theme-humiat{
+  /* Adminator: paleta-base oficial do HUMIAT. A personalização de marca vem depois. */
+  --h-primary:#2563EB;
+  --h-secondary:#0EA5E9;
+  --h-accent:#8B5CF6;
+
+  /* superfícies do componente original (tema claro) */
+  --h-page:#F0F4F8;
+  --h-surface:#FFFFFF;
+  --h-surface-soft:#F1F5F9;
+  --h-hover:#F8FAFC;
+  --h-text:#1E293B;
+  --h-text-2:#334155;
+  --h-muted:#64748B;
+  --h-light:#94A3B8;
+  --h-border:#E4E8EF;
+  --h-border-soft:#EEF1F5;
+
+  /* sidebar HUMIAT: única adaptação visual forte nesta etapa */
+  --h-sidebar:#141B2D;
+  --h-sidebar-hover:#1C2438;
+  --h-sidebar-text:#F1F5F9;
+  --h-sidebar-muted:#94A3B8;
+  --h-sidebar-light:#64748B;
+  --h-sidebar-border:#222C42;
+  --h-sidebar-active:#0F2847;
+  --h-sidebar-primary:#60A5FA;
+
+  /* estados universais do Adminator */
+  --h-success:#10B981;
+  --h-warning:#F59E0B;
+  --h-danger:#EF4444;
+  --h-info:#0EA5E9;
+
+  /* medidas do componente original */
+  --h-font:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  --h-font-xs:12px;
+  --h-font-sm:13px;
+  --h-font-md:14px;
+  --h-font-lg:20px;
+  --h-font-xl:28px;
+  --h-control-height:38px;
+  --h-control-height-sm:32px;
+  --h-radius-sm:8px;
+  --h-radius-md:14px;
+  --h-radius-lg:18px;
+  --h-space-1:4px;
+  --h-space-2:8px;
+  --h-space-3:12px;
+  --h-space-4:16px;
+  --h-space-5:22px;
+  --h-space-6:32px;
+  --h-shadow:0 1px 3px rgba(15,23,42,.06),0 1px 2px -1px rgba(15,23,42,.04);
+
+  --h-primary-hover:#1D4ED8;
+  --h-primary-light:#3B82F6;
+  --h-primary-soft:#EFF6FF;
+  --h-primary-border:#BFDBFE;
+  --h-primary-ring:rgba(37,99,235,.18);
+}
+
+
+/* A classe existe para todos os sistemas. A cor vem por variáveis, não por CSS específico. */
+.theme-solvoz{
+  --h-primary-hover:color-mix(in srgb,var(--h-primary) 84%,#000 16%);
+  --h-primary-soft:color-mix(in srgb,var(--h-primary) 18%,var(--h-surface) 82%);
+  --h-primary-border:color-mix(in srgb,var(--h-primary) 38%,var(--h-border) 62%);
+}
+
+.humiat-ui{
+  font-family:var(--h-font);
+  color:var(--h-text);
+}
+
+/* Classes-base reutilizáveis nos próximos produtos. */
+.h-ui-button{
+  min-height:var(--h-control-height);
+  padding:8px 14px;
+  border:1px solid var(--h-primary);
+  border-radius:var(--h-radius-sm);
+  background:var(--h-primary);
+  color:#fff;
+  font:inherit;
+  font-size:13px;
+  font-weight:600;
+}
+.h-ui-button:hover{background:var(--h-primary-hover);border-color:var(--h-primary-hover)}
+.h-ui-control{
+  min-height:var(--h-control-height);
+  border:1px solid var(--h-border);
+  border-radius:var(--h-radius-sm);
+  background:#fff;
+  color:var(--h-text);
+  font:inherit;
+  font-size:var(--h-font-sm);
+}
+.h-ui-card{
+  border:1px solid var(--h-border);
+  border-radius:var(--h-radius-md);
+  background:var(--h-surface);
+  box-shadow:var(--h-shadow);
+}

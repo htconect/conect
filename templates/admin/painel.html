@@ -33,57 +33,51 @@ document.addEventListener('DOMContentLoaded', function(){
   });
 });
 </script>
-<section class="humiat-wallet-card" aria-label="Carteira Humiat">
-    <div class="humiat-wallet-top">
-        <div class="humiat-brand-block">
-            <div class="humiat-coin" aria-hidden="true"><span>H</span></div>
-            <div class="humiat-brand-name">HUMIAT</div>
-        </div>
-        <div class="humiat-balance-block">
-            <h2>Carteira Humiat</h2>
-            <p>Seus créditos disponíveis</p>
-            <div class="humiat-balance-lines">
-                <div><span>Grátis restantes no mês</span><strong>{{ humiats_gratis_restantes }} H</strong></div>
-                <div><span>Comprados</span><strong>{{ empresa.humiat_saldo or 0 }} H</strong></div>
-            </div>
-            <div class="humiat-wallet-actions">
-                <a href="/painel/humiats/comprar" class="humiat-btn-buy">＋ Comprar Humiats</a>
-                <a href="/painel/humiats/extrato" class="humiat-btn-statement">▣ Extrato</a>
+<section class="humiat-wallet-card humiat-wallet-compact" aria-label="Carteira Humiat">
+    <header class="humiat-wallet-header">
+        <div class="humiat-wallet-title">
+            <span class="humiat-wallet-icon" aria-hidden="true"><i class="bi bi-wallet2"></i></span>
+            <div>
+                <span class="humiat-wallet-kicker">HUMIAT</span>
+                <h2>Carteira Humiat</h2>
+                <p>Créditos disponíveis para contratos aceitos.</p>
             </div>
         </div>
-        <div class="humiat-wallet-symbol" aria-hidden="true">
-            <div class="wallet-shape"><i>H</i><i>H</i></div>
+        <div class="humiat-wallet-actions">
+            <a href="/painel/humiats/comprar" class="humiat-btn-buy"><i class="bi bi-plus-lg" aria-hidden="true"></i> Comprar Humiats</a>
+            <a href="/painel/humiats/extrato" class="humiat-btn-statement"><i class="bi bi-receipt" aria-hidden="true"></i> Extrato</a>
+        </div>
+    </header>
+
+    <div class="humiat-wallet-metrics">
+        <div class="humiat-wallet-metric">
+            <span>Grátis restantes</span>
+            <strong>{{ humiats_gratis_restantes }} H</strong>
+            <small>{{ humiat_gratis_usados }} de {{ humiat_gratis_limite }} utilizados no mês</small>
+            <div class="humiat-wallet-progress" aria-hidden="true"><i style="width: {{ ((humiat_gratis_usados / humiat_gratis_limite * 100) if humiat_gratis_limite else 100)|round(0) }}%"></i></div>
+        </div>
+        <div class="humiat-wallet-metric">
+            <span>Humiats comprados</span>
+            <strong>{{ empresa.humiat_saldo or 0 }} H</strong>
+            <small>Saldo disponível na carteira</small>
+        </div>
+        <div class="humiat-wallet-metric">
+            <span>Contratos cobrados</span>
+            <strong>{{ humiat_contratos_cobrados_mes }}</strong>
+            <small>No mês atual</small>
+        </div>
+        <div class="humiat-wallet-metric">
+            <span>Total consumido</span>
+            <strong>{{ humiats_consumidos_mes }} H</strong>
+            <small>No mês atual</small>
         </div>
     </div>
 
-    <div class="humiat-wallet-stats">
-        <div class="humiat-stat humiat-stat-free">
-            <div class="humiat-stat-icon"><i class="bi bi-gift"></i></div>
-            <div class="humiat-stat-content">
-                <b>Humiats gratuitos</b>
-                <small>(mês atual)</small>
-                <strong>{{ humiat_gratis_usados }} / {{ humiat_gratis_limite }} H</strong>
-                <span>Humiats gratuitos utilizados</span>
-                <div class="humiat-progress"><i style="width: {{ ((humiat_gratis_usados / humiat_gratis_limite * 100) if humiat_gratis_limite else 100)|round(0) }}%"></i></div>
-                <em>Restam {{ humiat_gratis_restantes }} H grátis</em>
-            </div>
-        </div>
-        <div class="humiat-stat humiat-stat-paid">
-            <div class="humiat-stat-icon"><i class="bi bi-coin"></i></div>
-            <div class="humiat-stat-content">
-                <b>Contratos cobrados</b>
-                <small>(mês atual)</small>
-                <strong>{{ humiat_contratos_cobrados_mes }}</strong>
-                <span>contratos cobrados</span>
-                <em>Total consumido: {{ humiats_consumidos_mes }} H</em>
-            </div>
-        </div>
-    </div>
+    <p class="humiat-wallet-foot">
+        <i class="bi bi-info-circle" aria-hidden="true"></i>
+        <span><b>{{ humiat_gratis_limite }} Humiats grátis por mês.</b> Cada contrato aceito consome 1 Humiat; depois dos gratuitos, o consumo passa para os Humiats comprados.</span>
+    </p>
 </section>
-<div class="humiat-rule-note">
-    <span>ⓘ</span>
-    <p><b>{{ humiat_gratis_limite }} Humiats grátis por mês.</b><br>Cada contrato aceito consome 1 Humiat; depois dos gratuitos, o consumo passa para os Humiats comprados.</p>
-</div>
 <div class="atalhos-home">
     <a class="cartao-acao" href="/painel/agenda">
         <span><i class="bi bi-file-earmark-text"></i></span>
