@@ -2041,3 +2041,77 @@ body.tela-financeiro-desktop{overflow:hidden!important}
     grid-template-columns:repeat(6,minmax(0,1fr))!important;
   }
 }
+
+
+/* ===== 1.0.90 · Exportações e categorias em lote ===== */
+.financeiro-topo-acoes .relatorio-topo .btn-exportar-topo,
+.financeiro-topo-acoes .btn-importar-topo{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:6px!important;
+  min-height:36px!important;
+  height:36px!important;
+  box-sizing:border-box!important;
+  padding:0 11px!important;
+  border-radius:9px!important;
+  font-size:12px!important;
+  font-weight:750!important;
+  line-height:1!important;
+}
+.financeiro-topo-acoes .relatorio-topo .btn-exportar-topo i,
+.financeiro-topo-acoes .btn-importar-topo i{font-size:14px!important}
+.titulo-tabela-banco{gap:12px!important}
+.banco-categorias-acoes{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:9px;
+  min-width:0;
+}
+.banco-categorias-acoes form{margin:0}
+.categorias-pendentes{
+  display:inline-flex!important;
+  align-items:center;
+  gap:5px;
+  padding:5px 8px;
+  border:1px solid #f6c968;
+  border-radius:999px;
+  background:#fff8e7;
+  color:#92400e!important;
+  font-size:10px!important;
+  font-weight:700!important;
+  white-space:nowrap;
+}
+.categorias-pendentes[hidden]{display:none!important}
+.categorias-pendentes i{font-size:7px;color:#f59e0b}
+.salvar-categorias-banco{
+  min-height:34px!important;
+  height:34px!important;
+  padding:0 10px!important;
+  white-space:nowrap!important;
+}
+.salvar-categorias-banco:disabled{
+  opacity:.45!important;
+  cursor:not-allowed!important;
+}
+.select-tipo-banco.categoria-nao-salva{
+  border-color:#f59e0b!important;
+  background:#fffaf0!important;
+  box-shadow:0 0 0 2px rgba(245,158,11,.10)!important;
+}
+.tabela-banco tr.linha-categoria-pendente td:first-child{
+  box-shadow:inset 3px 0 0 #f59e0b!important;
+}
+.tabela-banco tr.linha-categoria-pendente{background:#fffdf7!important}
+.categorias-salvas-alerta{display:flex;align-items:center;gap:7px}
+@media(max-width:1100px){
+  .banco-contagem{display:none}
+  .categorias-pendentes{max-width:170px;overflow:hidden;text-overflow:ellipsis}
+}
+@media(max-width:700px){
+  .titulo-tabela-banco{height:auto!important;min-height:58px!important;padding:8px 10px!important;align-items:flex-start!important}
+  .banco-categorias-acoes{flex-wrap:wrap;gap:6px}
+  .categorias-pendentes{order:2;max-width:none}
+  .salvar-categorias-banco{height:32px!important;min-height:32px!important;font-size:11px!important}
+}

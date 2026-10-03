@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-financeiro-desktop{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20261003-1089">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/financeiro.css?v=20261003-1090">{% endblock %}
 {% block conteudo %}
 <section class="financeiro-novo">
   <div class="financeiro-cabecalho">
@@ -15,15 +15,15 @@
       <a href="/painel/evolucao-financeira" class="btn-evolucao-financeira"><i class="bi bi-graph-up-arrow"></i> Evolução</a>
       <div class="relatorio-topo">
         <span>Relatório {{ mes_cards_inicio.strftime('%m/%Y') }}</span>
-        <a href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}">Excel</a>
-        <a href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}">PDF</a>
+        <a class="btn-exportar-topo" href="/painel/financeiro/relatorio-mensal.xlsx?mes={{ mes_cards }}"><i class="bi bi-file-earmark-excel" aria-hidden="true"></i> Excel</a>
+        <a class="btn-exportar-topo" href="/painel/financeiro/relatorio-mensal.pdf?mes={{ mes_cards }}"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i> PDF</a>
       </div>
       {% if conta %}
       <form method="post" action="/painel/financeiro/importar" enctype="multipart/form-data" class="importar-topo-form preserve-scroll" data-loading-title="CONECT" data-loading-text="Importando extrato...">
         <input type="hidden" name="conta_id" value="{{ conta.id }}">
         <label class="btn-importar-topo{% if not importacao_habilitada %} desabilitado{% endif %}" for="arquivo-extrato-topo"
                title="{% if importacao_habilitada %}Importar extrato do Banco Principal{% else %}A importação só é permitida no Banco Principal{% endif %}">
-          ⇧ Importar
+          <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i> Importar
         </label>
         <input id="arquivo-extrato-topo" type="file" name="arquivo" accept=".csv,.xlsx,.xls" required {% if not importacao_habilitada %}disabled{% endif %}>
       </form>
@@ -96,6 +96,9 @@
 
   {% if request.query_params.get('importados') is not none %}
   <div class="financeiro-alerta">Importação: <b>{{ request.query_params.get('importados', '0') }}</b> novos · <b>{{ request.query_params.get('duplicados', '0') }}</b> duplicados · <b>{{ request.query_params.get('conciliados', '0') }}</b> já conciliados</div>
+  {% endif %}
+  {% if request.query_params.get('categorias_salvas') is not none %}
+  <div class="financeiro-alerta categorias-salvas-alerta"><i class="bi bi-check-circle" aria-hidden="true"></i> Categorias salvas: <b>{{ request.query_params.get('categorias_salvas', '0') }}</b>{% if request.query_params.get('categorias_bloqueadas') %} · <b>{{ request.query_params.get('categorias_bloqueadas') }}</b> não alterada(s) por possuírem vínculo{% endif %}.</div>
   {% endif %}
 
   <div class="financeiro-acoes-faixa">
@@ -307,7 +310,17 @@
 
 <div class="financeiro-duas-colunas">
     <section class="box tabela-financeiro banco-box">
-      <div class="titulo-tabela"><h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2><span>{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span></div>
+      <div class="titulo-tabela titulo-tabela-banco">
+        <h2><i class="bi bi-bank titulo-icone" aria-hidden="true"></i> Banco</h2>
+        <div class="banco-categorias-acoes">
+          <span class="banco-contagem">{{ banco|length }} lançamentos &nbsp; <i class="bi bi-arrow-clockwise" aria-hidden="true"></i></span>
+          <span id="categorias-pendentes" class="categorias-pendentes" hidden><i class="bi bi-circle-fill" aria-hidden="true"></i> <b>0</b> alteração(ões) não salva(s)</span>
+          <form id="form-categorias-banco" method="post" action="/painel/financeiro/banco/categorias" class="preserve-scroll">
+            <input type="hidden" name="alteracoes" id="categorias-banco-payload" value="[]">
+            <button type="submit" id="salvar-categorias-banco" class="botao-pequeno salvar-categorias-banco" disabled><i class="bi bi-check2-circle" aria-hidden="true"></i> Salvar categorias</button>
+          </form>
+        </div>
+      </div>
       <div class="tabela-scroll" data-scroll-key="financeiro-banco-scroll">
       <table class="tabela-banco">
         <colgroup>
@@ -326,11 +339,9 @@
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
             <td>
-              <form id="categoria-banco-{{ l.id }}" method="post" action="/painel/financeiro/banco/{{ l.id }}/categoria" class="tipo-form preserve-scroll"></form>
-              <select form="categoria-banco-{{ l.id }}" name="categoria" class="select-tipo-banco">
+              <select name="categoria" class="select-tipo-banco categoria-banco-global" data-lancamento-id="{{ l.id }}" data-original="{{ l.categoria }}" aria-label="Categoria do lançamento {{ l.id }}">
                 {% for valor, rotulo in categorias %}<option value="{{ valor }}" {% if l.categoria == valor %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
               </select>
-              <input form="categoria-banco-{{ l.id }}" type="hidden" name="confirmado" value="1">
             </td>
             <td class="vinculo-compacto">
               {% set vinculos_conta = vinculos_titulo_por_banco.get(l.id, []) %}
@@ -461,8 +472,6 @@
             </td>
 
 <td class="acoes-linha">
-              <button form="categoria-banco-{{ l.id }}" class="botao-icone btn-ok {{ 'confirmado' if l.categoria_confirmada else '' }}" title="Salvar tipo"><i class="bi bi-check2"></i></button>
-              
               {% if not l.pagamento and not l.organiza_lancamento_id and not vinculos_por_banco.get(l.id) and not vinculos_titulo_por_banco.get(l.id) %}
               <form method="post" action="/painel/financeiro/banco/{{ l.id }}/excluir" class="preserve-scroll" onsubmit="return confirm('Excluir este lançamento do banco?');"><button class="botao-perigo btn-perigo" title="Excluir"><i class="bi bi-trash3" aria-hidden="true"></i></button></form>
               {% else %}<span class="texto-discreto" title="Desvincule antes de excluir"><i class="bi bi-lock"></i></span>{% endif %}
@@ -1016,6 +1025,36 @@
       if(this.files && this.files.length){ salvarScrolls(); this.form.submit(); }
     });
   });
+
+  /* Categorias do extrato: edição em lote, sem salvar linha por linha. */
+  var selectsCategoriaBanco = Array.from(document.querySelectorAll('.categoria-banco-global'));
+  var formCategoriasBanco = document.getElementById('form-categorias-banco');
+  var payloadCategoriasBanco = document.getElementById('categorias-banco-payload');
+  var btnSalvarCategoriasBanco = document.getElementById('salvar-categorias-banco');
+  var avisoCategoriasPendentes = document.getElementById('categorias-pendentes');
+  function atualizarCategoriasPendentes(){
+    var alteracoes = selectsCategoriaBanco.filter(function(select){ return select.value !== select.dataset.original; });
+    selectsCategoriaBanco.forEach(function(select){
+      var mudou = select.value !== select.dataset.original;
+      select.classList.toggle('categoria-nao-salva', mudou);
+      var linha = select.closest('tr');
+      if(linha) linha.classList.toggle('linha-categoria-pendente', mudou);
+    });
+    if(payloadCategoriasBanco){
+      payloadCategoriasBanco.value = JSON.stringify(alteracoes.map(function(select){
+        return {id: Number(select.dataset.lancamentoId), categoria: select.value};
+      }));
+    }
+    if(btnSalvarCategoriasBanco) btnSalvarCategoriasBanco.disabled = alteracoes.length === 0;
+    if(avisoCategoriasPendentes){
+      avisoCategoriasPendentes.hidden = alteracoes.length === 0;
+      var contador = avisoCategoriasPendentes.querySelector('b');
+      if(contador) contador.textContent = String(alteracoes.length);
+    }
+  }
+  selectsCategoriaBanco.forEach(function(select){ select.addEventListener('change', atualizarCategoriasPendentes); });
+  if(formCategoriasBanco){ formCategoriasBanco.addEventListener('submit', function(){ atualizarCategoriasPendentes(); salvarScrolls(); }); }
+  atualizarCategoriasPendentes();
 })();
 </script>
 

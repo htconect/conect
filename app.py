@@ -9347,6 +9347,18 @@ def evolucao_financeira(
         ],
     }
 
+    dados_final = dados[ano_final]
+    meses_ativos = [mes for mes in range(1, 13) if dados_final[mes]["valor"] or dados_final[mes]["quantidade"]]
+    melhor_mes_num = max(range(1, 13), key=lambda mes: dados_final[mes]["valor"]) if meses_ativos else 1
+    destaques = {
+        "melhor_mes": meses[melhor_mes_num - 1] if meses_ativos else "—",
+        "melhor_mes_valor": dados_final[melhor_mes_num]["valor"] if meses_ativos else 0,
+        "media_mensal": (totais[ano_final]["valor"] / len(meses_ativos)) if meses_ativos else 0,
+        "media_contratos_mes": (totais[ano_final]["quantidade"] / len(meses_ativos)) if meses_ativos else 0,
+        "meses_ativos": len(meses_ativos),
+        "ticket_atual": totais[ano_final]["ticket"],
+    }
+
     return templates.TemplateResponse("admin/evolucao_financeira.html", {
         "request": request,
         "empresa": empresa,
@@ -9356,6 +9368,7 @@ def evolucao_financeira(
         "linhas": linhas,
         "totais": totais,
         "grafico": grafico,
+        "destaques": destaques,
         "corte_sistema": EVOLUCAO_FINANCEIRA_CORTE_SISTEMA,
         "e_karaoke_rj": _empresa_e_karaoke_rj(empresa),
     })
@@ -11095,6 +11108,66 @@ def financeiro_categoria_banco(
     lanc.categoria_confirmada = confirmado == "1"
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/financeiro", status_code=303)
+
+
+@app.post("/painel/financeiro/banco/categorias")
+def financeiro_categorias_banco_lote(
+        request: Request,
+        alteracoes: str = Form("[]"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    """Salva em lote somente as categorias alteradas na grade do banco."""
+    categorias_validas = {"casa", "empresa", "aluguel", "venda", "manutencao", "repasse"}
+    try:
+        itens = json.loads(alteracoes or "[]")
+    except Exception:
+        raise HTTPException(400, "Lista de categorias inválida.")
+    if not isinstance(itens, list):
+        raise HTTPException(400, "Lista de categorias inválida.")
+
+    salvos = 0
+    bloqueados = 0
+    for item in itens:
+        if not isinstance(item, dict):
+            bloqueados += 1
+            continue
+        try:
+            lancamento_id = int(item.get("id"))
+        except Exception:
+            bloqueados += 1
+            continue
+        categoria = str(item.get("categoria") or "").strip()
+        if categoria not in categorias_validas:
+            bloqueados += 1
+            continue
+        lanc = db.get(LancamentoBanco, lancamento_id)
+        if not lanc or lanc.empresa_id != empresa.id:
+            bloqueados += 1
+            continue
+        if categoria != lanc.categoria and db.query(VinculoOrganizaFinanceiro).filter(
+            VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
+        ).first():
+            bloqueados += 1
+            continue
+        if categoria != "repasse" and db.query(VinculoRepasseBanco).filter(
+            VinculoRepasseBanco.lancamento_banco_id == lanc.id
+        ).first():
+            bloqueados += 1
+            continue
+        lanc.categoria = categoria
+        lanc.categoria_confirmada = True
+        salvos += 1
+
+    db.commit()
+    referer = request.headers.get("referer") or "/painel/financeiro"
+    parsed = urlparse(referer)
+    destino = parsed.path if parsed.path.startswith("/painel/financeiro") else "/painel/financeiro"
+    qs = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    qs["categorias_salvas"] = str(salvos)
+    if bloqueados:
+        qs["categorias_bloqueadas"] = str(bloqueados)
+    return RedirectResponse(destino + ("?" + urlencode(qs) if qs else ""), status_code=303)
 
 
 @app.post("/painel/financeiro/banco/{lancamento_id}/vincular-repasse")

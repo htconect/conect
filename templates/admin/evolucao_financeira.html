@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body_class %}tela-evolucao-financeira{% endblock %}
-{% block head_extra %}<link rel="stylesheet" href="/static/css/evolucao_financeira.css?v=20260923-v153">{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/evolucao_financeira.css?v=20261003-1090">{% endblock %}
 {% block conteudo %}
 <section class="evolucao-financeira">
   <header class="evolucao-cabecalho">
@@ -26,6 +26,14 @@
     <span><i class="bi bi-lightning-charge"></i> <b>Sistema:</b> contratos válidos automaticamente a partir de 07/2026</span>
   </div>
 
+  <div class="dashboard-kpis" aria-label="Indicadores do ano {{ ano_final }}">
+    <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-cash-stack"></i></span><div><small>Faturamento {{ ano_final }}</small><strong>R$ {{ totais[ano_final].valor|moeda_br }}</strong><em>{{ totais[ano_final].quantidade }} contratos no ano</em></div></article>
+    <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-trophy"></i></span><div><small>Melhor mês de {{ ano_final }}</small><strong>{{ destaques.melhor_mes }}</strong><em>R$ {{ destaques.melhor_mes_valor|moeda_br }}</em></div></article>
+    <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-calendar3"></i></span><div><small>Média mensal</small><strong>R$ {{ destaques.media_mensal|moeda_br }}</strong><em>{{ destaques.meses_ativos }} mês(es) com movimento</em></div></article>
+    <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-receipt"></i></span><div><small>Ticket médio</small><strong>R$ {{ destaques.ticket_atual|moeda_br }}</strong><em>{{ '%.1f'|format(destaques.media_contratos_mes)|replace('.', ',') }} contratos/mês</em></div></article>
+  </div>
+
+  <div class="dashboard-secao-cabecalho"><div><h2>Visão anual</h2><p>Comparação consolidada dos três anos exibidos</p></div></div>
   <div class="cards-anos">
     {% for ano in anos %}
     <article class="card-ano">
@@ -58,7 +66,7 @@
         <button type="button" data-grafico-tipo="quantidade">Quantidade</button>
       </div>
     </div>
-    <div id="grafico-evolucao" class="grafico-evolucao" aria-label="Gráfico comparativo mensal"></div>
+    <div class="grafico-area"><div id="grafico-evolucao" class="grafico-evolucao" aria-label="Gráfico comparativo mensal"></div></div>
     <div class="legenda-grafico">
       {% for ano in anos %}<span><i class="cor-serie cor-serie-{{ loop.index }}"></i>{{ ano }}</span>{% endfor %}
     </div>
@@ -133,6 +141,12 @@
   const botoes = document.querySelectorAll('[data-grafico-tipo]');
   const formatarMoeda = valor => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0}).format(valor || 0);
   const formatarNumero = valor => new Intl.NumberFormat('pt-BR').format(valor || 0);
+  const formatarCompacto = valor => {
+    valor = Number(valor || 0);
+    if(valor >= 1000000) return (valor/1000000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mi';
+    if(valor >= 1000) return (valor/1000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mil';
+    return formatarNumero(valor);
+  };
 
   function desenhar(tipo) {
     alvo.innerHTML = '';
@@ -153,7 +167,7 @@
         barra.setAttribute('aria-label', barra.title);
         if (valor > 0) {
           const rotulo = document.createElement('span');
-          rotulo.textContent = tipo === 'quantidade' ? formatarNumero(valor) : formatarMoeda(valor);
+          rotulo.textContent = tipo === 'quantidade' ? formatarNumero(valor) : formatarCompacto(valor);
           barra.appendChild(rotulo);
         }
         barras.appendChild(barra);
