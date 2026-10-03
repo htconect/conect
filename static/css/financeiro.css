@@ -1885,3 +1885,159 @@ body.tela-financeiro-desktop{overflow:hidden!important}
 .btn-pagar-titulo:hover{background:#dcfce7}
 .modal-pagar-titulo .manual-modal-form{padding:14px}
 .modal-pagar-titulo #pagar-titulo-saldo{display:block;margin-top:5px;color:#64748b;font-weight:700}
+
+
+/* Conect 1.0.87 — Financeiro integrado ao shell Adminator.
+   O financeiro continua denso, mas não pode ignorar a área reservada ao menu lateral. */
+@media (min-width:701px){
+  body.painel-interno.tela-financeiro-desktop{
+    --fundo:var(--admin-bg,#f0f4f8);
+    --borda:var(--admin-border,#e2e8f0);
+    --texto:var(--admin-text,#172033);
+    --muted:var(--admin-muted,#64748b);
+    --azul:var(--admin-primary,#2563eb);
+    --azul-hover:#1d4ed8;
+    --sombra:0 2px 8px rgba(15,23,42,.045);
+    background:var(--admin-bg,#f0f4f8)!important;
+    overflow:hidden!important;
+  }
+
+  /* O topo e o menu pertencem ao layout global; o Financeiro não os esconde. */
+  body.painel-interno.tela-financeiro-desktop .topo-app{
+    display:flex!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .nav-inferior{
+    display:none!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .container-app{
+    max-width:none!important;
+    width:auto!important;
+    height:calc(100vh - 64px)!important;
+    min-height:0!important;
+    margin:0 0 0 258px!important;
+    padding:14px 18px 14px!important;
+    overflow:hidden!important;
+    box-sizing:border-box!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-novo{
+    width:100%!important;
+    height:100%!important;
+    min-height:0!important;
+    padding:0!important;
+    overflow:hidden!important;
+    gap:10px!important;
+  }
+
+  /* Componentes do Financeiro usam a mesma linguagem visual do painel. */
+  body.painel-interno.tela-financeiro-desktop .indicador-card,
+  body.painel-interno.tela-financeiro-desktop .financeiro-filtros-card,
+  body.painel-interno.tela-financeiro-desktop .box,
+  body.painel-interno.tela-financeiro-desktop .financeiro-add,
+  body.painel-interno.tela-financeiro-desktop .periodo-contratos-label,
+  body.painel-interno.tela-financeiro-desktop .seletor-periodo-livre,
+  body.painel-interno.tela-financeiro-desktop .seletor-semana-numerico,
+  body.painel-interno.tela-financeiro-desktop .contrato-card,
+  body.painel-interno.tela-financeiro-desktop .financeiro-abas-principais,
+  body.painel-interno.tela-financeiro-desktop .financeiro-acoes-faixa{
+    background:#fff!important;
+    border-color:var(--admin-border,#e2e8f0)!important;
+    border-radius:12px!important;
+    box-shadow:0 2px 8px rgba(15,23,42,.045)!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .box{
+    padding:0!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-filtros input,
+  body.painel-interno.tela-financeiro-desktop .financeiro-filtros select,
+  body.painel-interno.tela-financeiro-desktop .inline-form input,
+  body.painel-interno.tela-financeiro-desktop .inline-form select,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form input,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form select,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form textarea{
+    border-color:#d8e0ea!important;
+    border-radius:9px!important;
+    background:#fff!important;
+    box-shadow:none!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-filtros input:focus,
+  body.painel-interno.tela-financeiro-desktop .financeiro-filtros select:focus,
+  body.painel-interno.tela-financeiro-desktop .inline-form input:focus,
+  body.painel-interno.tela-financeiro-desktop .inline-form select:focus,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form input:focus,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form select:focus,
+  body.painel-interno.tela-financeiro-desktop .manual-modal-form textarea:focus{
+    outline:0!important;
+    border-color:#93c5fd!important;
+    box-shadow:0 0 0 3px rgba(37,99,235,.08)!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .titulo-tabela,
+  body.painel-interno.tela-financeiro-desktop .modal-vinculo-cabecalho{
+    border-color:#edf1f5!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-novo th{
+    background:#f8fafc!important;
+    color:#475569!important;
+  }
+
+  /* Ações principais seguem os mesmos raios/tamanhos do componente global. */
+  body.painel-interno.tela-financeiro-desktop .btn-evolucao-financeira,
+  body.painel-interno.tela-financeiro-desktop .relatorio-topo a,
+  body.painel-interno.tela-financeiro-desktop .btn-importar-topo,
+  body.painel-interno.tela-financeiro-desktop .btn-filtrar,
+  body.painel-interno.tela-financeiro-desktop .btn-limpar-filtros,
+  body.painel-interno.tela-financeiro-desktop .btn-vincular,
+  body.painel-interno.tela-financeiro-desktop .botao-pequeno,
+  body.painel-interno.tela-financeiro-desktop .botao-secundario,
+  body.painel-interno.tela-financeiro-desktop .botao-perigo{
+    border-radius:10px!important;
+  }
+}
+
+/* Em larguras intermediárias ainda pode haver rolagem vertical, mas nunca por baixo do menu. */
+@media (min-width:701px) and (max-width:1450px), (min-width:701px) and (max-height:760px){
+  body.painel-interno.tela-financeiro-desktop{
+    overflow:auto!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .container-app{
+    height:auto!important;
+    min-height:calc(100vh - 64px)!important;
+    overflow:visible!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-novo{
+    height:auto!important;
+    min-height:calc(100vh - 92px)!important;
+    overflow:visible!important;
+  }
+}
+
+/* Mobile permanece app: topo escuro + menu inferior de seis áreas. */
+@media (max-width:700px){
+  body.painel-interno.tela-financeiro-desktop{
+    overflow:auto!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .topo-app{
+    display:flex!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .sidebar-adminator{
+    display:none!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .container-app{
+    width:auto!important;
+    height:auto!important;
+    min-height:0!important;
+    margin:0 auto!important;
+    padding:16px 12px 96px!important;
+    overflow:visible!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .financeiro-novo{
+    width:100%!important;
+    height:auto!important;
+    min-height:0!important;
+    padding:0!important;
+    overflow:visible!important;
+  }
+  body.painel-interno.tela-financeiro-desktop .nav-inferior.nav-fluxo{
+    display:grid!important;
+    grid-template-columns:repeat(6,minmax(0,1fr))!important;
+  }
+}
