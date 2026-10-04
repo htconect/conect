@@ -53,7 +53,28 @@ class Empresa(Base):
     frete_valor_fixo = Column(Float, default=0)
     frete_valor_km = Column(Float, default=0)
     frete_cep_origem = Column(String(20), nullable=True)
-    frete_multiplicador_km = Column(Float, default=1)
+    # Mantido para compatibilidade histórica; a regra atual cobra ida + volta (2x).
+    frete_multiplicador_km = Column(Float, default=2)
+
+    # Funcionalidades por empresa. Empresas novas começam enxutas e o ADM habilita
+    # somente o que realmente fizer sentido para a operação.
+    modulo_equipes_ativo = Column(Boolean, default=False)
+    modulo_recursos_ativo = Column(Boolean, default=False)
+    modulo_cupons_ativo = Column(Boolean, default=False)
+    inteligencia_ativa = Column(Boolean, default=False)
+
+    # Fluxo da vitrine: direto = contrato público; aprovacao = pedido em rascunho
+    # aguardando o responsável; lokafest = encaminha ao LokaFest configurado.
+    vitrine_fluxo = Column(String(20), default="direto")
+    lokafest_ativo = Column(Boolean, default=False)
+    lokafest_url = Column(String(300), nullable=True)
+
+    # Metadados compartilhados pelo ecossistema Humiat. O slug local do Connect
+    # continua em ``slug``; ``humiat_slug`` preserva o identificador global quando
+    # Humiat ID enviar um alias diferente.
+    humiat_slug = Column(String(80), nullable=True, index=True)
+    humiat_sistemas_json = Column(Text, nullable=True)
+    origem_cadastro = Column(String(30), default="manual")
     mensagem_reserva = Column(Text, nullable=True)
     mensagem_aceite = Column(Text, nullable=True)
     mensagem_pagamento = Column(Text, nullable=True)
@@ -126,6 +147,7 @@ class Equipe(Base):
     id = Column(Integer, primary_key=True)
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
     nome = Column(String(80), nullable=False)
+    ordem = Column(Integer, nullable=False, default=0)
     ativa = Column(Boolean, default=True)
     criado_em = Column(DateTime, server_default=func.now())
 
@@ -266,6 +288,21 @@ class Cupom(Base):
     percentual = Column(Float, nullable=False, default=0)
     valido_ate = Column(Date, nullable=True)
     ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+
+
+
+class VitrineCategoria(Base):
+    __tablename__ = "vitrine_categorias"
+    __table_args__ = (UniqueConstraint("empresa_id", "nome", name="uq_vitrine_categoria_empresa_nome"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    nome = Column(String(80), nullable=False)
+    ordem = Column(Integer, nullable=False, default=0)
+    ativa = Column(Boolean, nullable=False, default=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     empresa = relationship("Empresa")

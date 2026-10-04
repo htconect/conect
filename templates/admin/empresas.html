@@ -1,171 +1,57 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<style>
+.adm-empresa{max-width:1180px;margin:0 auto}.adm-passos{display:flex;gap:8px;overflow:auto;margin:0 0 16px;padding-bottom:3px}.adm-passos a{white-space:nowrap;text-decoration:none;padding:9px 12px;border:1px solid #dbe3ee;border-radius:999px;background:#fff;color:#334155;font-weight:800;font-size:12px}.adm-bloco{background:#fff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden;margin-bottom:16px}.adm-bloco>header{padding:17px 19px;border-bottom:1px solid #edf1f5;display:flex;gap:12px;align-items:center}.adm-bloco>header i{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:#eef4ff;color:#155bb5;font-size:20px}.adm-bloco>header h2{margin:0;font-size:18px}.adm-bloco>header p{margin:3px 0 0;color:#64748b;font-size:13px}.adm-corpo{padding:18px}.adm-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.adm-grade.tres{grid-template-columns:repeat(3,minmax(0,1fr))}.modulos-grade{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.modulo-card{border:1px solid #dbe3ee;border-radius:15px;padding:13px;background:#f8fafc}.modulo-card label{display:flex;gap:8px;align-items:flex-start;margin:0;font-weight:800}.modulo-card input{width:auto;margin-top:3px}.modulo-card small{display:block;color:#64748b;margin-top:5px;line-height:1.35}.status-integracao{padding:13px;border:1px solid #dbe3ee;border-radius:15px;background:#f8fafc}.logo-click{width:94px;height:94px;border-radius:50%;border:4px solid #fff;box-shadow:0 5px 18px rgba(15,23,42,.15);object-fit:cover;cursor:pointer;background:#eef2f7}.adm-acoes{position:sticky;bottom:12px;z-index:9;display:flex;justify-content:flex-end;background:rgba(255,255,255,.95);border:1px solid #dbe3ee;border-radius:16px;padding:10px;box-shadow:0 10px 30px rgba(15,23,42,.12)}.ajuda-linha{color:#64748b;font-size:12px;margin:5px 0 0}.adm-frete-opcoes{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.adm-frete-opcoes label{border:1px solid #dbe3ee;border-radius:14px;padding:12px;cursor:pointer}.adm-frete-opcoes label:has(input:checked){border:2px solid #2563eb;background:#eff6ff}.adm-frete-opcoes input{width:auto}.campo-condicional[hidden]{display:none!important}
+@media(max-width:850px){.adm-grade,.adm-grade.tres,.modulos-grade,.adm-frete-opcoes{grid-template-columns:1fr}.adm-corpo{padding:14px}}
+</style>
+{% endblock %}
 {% block conteudo %}
-<div class="hero-admin">
-  <div>
-    <p class="mini">Administrador geral</p>
-    <h1>Empresas</h1>
-    <p>Você cria e edita apenas as empresas. Cada empresa acessa seus próprios clientes, contratos, produtos e agenda.</p>
-  </div>
-  <div class="acoes">
-    <a class="botao" href="/admin/performance">Diagnóstico</a>
-    <a class="botao" href="/admin/sair">Sair</a>
-  </div>
-</div>
+<div class="adm-empresa">
+<div class="hero-admin"><div><p class="mini">Administrador geral</p><h1>{% if empresa %}{{ empresa.nome }}{% else %}Nova empresa{% endif %}</h1><p>Mesmo padrão do cadastro guiado, com as integrações técnicas liberadas somente para o ADM.</p></div><div class="acoes"><a class="botao" href="/admin">Empresas</a><a class="botao" href="/admin/performance">Diagnóstico</a><a class="botao" href="/admin/sair">Sair</a></div></div>
+<nav class="adm-passos"><a href="#identidade">Empresa</a><a href="#sistemas">Sistemas</a><a href="#modulos">Funcionalidades</a><a href="#pagamento">Pagamento</a><a href="#deslocamento">Deslocamento</a><a href="#vitrine">Vitrine</a><a href="#integracoes">Integrações</a></nav>
+<form method="post" enctype="multipart/form-data" action="{% if empresa %}/admin/empresa/{{ empresa.id }}{% else %}/admin/empresas{% endif %}" id="formAdmEmpresa">
+<section class="adm-bloco" id="identidade"><header><i class="bi bi-building"></i><div><h2>Empresa</h2><p>Identidade única no ecossistema Humiat.</p></div></header><div class="adm-corpo">
+  <div class="adm-grade"><div><label>Nome</label><input name="nome" value="{{ empresa.nome if empresa else '' }}" required></div><div><label>Slug do link público</label><input name="slug" value="{{ empresa.slug if empresa else '' }}" required placeholder="minha-empresa"></div><div><label>Cidade / região principal</label><input name="cidade_atendimento" value="{{ empresa.cidade_atendimento if empresa else '' }}"></div><div><label>WhatsApp principal</label><input name="whatsapp_retorno" inputmode="tel" value="{{ empresa.whatsapp_retorno if empresa else '' }}"></div><div><label>Buscar cliente por</label><select name="identificador_principal"><option value="telefone" {% if not empresa or empresa.identificador_principal == 'telefone' %}selected{% endif %}>Telefone</option><option value="cpf" {% if empresa and empresa.identificador_principal == 'cpf' %}selected{% endif %}>CPF</option><option value="cnpj" {% if empresa and empresa.identificador_principal == 'cnpj' %}selected{% endif %}>CNPJ</option></select></div><div><label>Usuário principal</label><input name="usuario_admin" value="{{ empresa.usuario_admin if empresa else '' }}" required></div></div>
+  {% if LOCAL_LOGIN_ENABLED %}<label>Senha local</label><input name="senha_admin" type="password" {% if not empresa %}required{% endif %} autocomplete="new-password">{% else %}<input name="senha_admin" type="hidden" value=""><p class="ajuda-linha">Acesso normal pelo Humiat ID; senha local não é solicitada.</p>{% endif %}
+  <div style="display:flex;align-items:center;gap:14px;margin-top:14px"><input id="logoAdmArquivo" name="logo_arquivo" type="file" accept="image/*,.jfif,.jpe" hidden>{% if empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img class="logo-click" id="logoAdmPreview" src="{{ empresa.logo_url or empresa.logo_idb_url }}" onclick="document.getElementById('logoAdmArquivo').click()" title="Clique para trocar a logo">{% else %}<div class="logo-click" onclick="document.getElementById('logoAdmArquivo').click()" style="display:grid;place-items:center"><i class="bi bi-camera" style="font-size:25px;color:#64748b"></i></div>{% endif %}<div><b>Logo da empresa</b><p class="ajuda-linha">Clique na imagem para carregar. JPG, JPEG, JFIF, PNG ou WebP.</p></div></div>
+  <input type="hidden" name="logo_url" value=""><input type="hidden" name="logo_idb_url" value=""><input type="hidden" name="tema" value="{{ empresa.tema if empresa else 'azul' }}">
+  {% if empresa %}<label class="check" style="margin-top:14px"><input type="checkbox" name="ativa" value="1" {% if empresa.ativa %}checked{% endif %}> Empresa ativa</label>{% endif %}
+</div></section>
 
-<div class="box">
-  <h2>{% if empresa %}Editar empresa{% else %}Nova empresa{% endif %}</h2>
-  <form method="post" enctype="multipart/form-data" action="{% if empresa %}/admin/empresa/{{ empresa.id }}{% else %}/admin/empresas{% endif %}">
-    <label>Nome da empresa</label>
-    <input name="nome" value="{{ empresa.nome if empresa else '' }}" placeholder="Karaoke RJ" required>
+<section class="adm-bloco" id="sistemas"><header><i class="bi bi-grid-1x2"></i><div><h2>Sistemas Humiat</h2><p>Use o que já existe no Humiat ID e complete só o que faltar.</p></div></header><div class="adm-corpo">
+  <div class="adm-grade"><div><label>Slug no Humiat ID</label><input name="humiat_slug" value="{{ empresa.humiat_slug if empresa and empresa.humiat_slug else (empresa.slug if empresa else '') }}" placeholder="mesmo slug do ecossistema"></div><div><label>Origem do cadastro</label><div class="status-integracao"><b>{{ empresa.origem_cadastro if empresa and empresa.origem_cadastro else 'manual' }}</b><div class="ajuda-linha">Empresas que chegam pelo Humiat ID podem nascer automaticamente no Connect.</div></div></div></div>
+  <div class="modulos-grade" style="margin-top:12px"><div class="modulo-card"><label><input type="checkbox" name="sistema_humiat" value="HUMIAT ID" checked disabled> Humiat ID</label><small>Identidade central.</small><input type="hidden" name="sistema_humiat" value="HUMIAT ID"></div><div class="modulo-card"><label><input type="checkbox" name="sistema_humiat" value="CONNECT" checked disabled> Connect</label><small>Sistema atual.</small><input type="hidden" name="sistema_humiat" value="CONNECT"></div>{% for sis in ['ORGANIZA','LOKAFEST','SOLVOZ'] %}<div class="modulo-card"><label><input type="checkbox" name="sistema_humiat" value="{{ sis }}" {% if sis in (sistemas_humiat or []) %}checked{% endif %}> {{ sis|title if sis != 'SOLVOZ' else 'SolVoz' }}</label><small>Vínculo compartilhado da empresa.</small></div>{% endfor %}</div>
+  <div class="adm-grade" style="margin-top:12px"><label class="check"><input type="checkbox" name="lokafest_ativo" id="lokaAtivo" value="1" {% if empresa and empresa.lokafest_ativo %}checked{% endif %}> LokaFest ativo para esta empresa</label><div id="lokaUrlBox"><label>Link público do LokaFest</label><input name="lokafest_url" value="{{ empresa.lokafest_url if empresa and empresa.lokafest_url else '' }}" placeholder="https://..."></div></div>
+</div></section>
 
-    <label>Slug do link público</label>
-    <input name="slug" value="{{ empresa.slug if empresa else '' }}" placeholder="sua-infinite-tag" required>
+<section class="adm-bloco" id="modulos"><header><i class="bi bi-toggles"></i><div><h2>Funcionalidades do Connect</h2><p>Desative o que a empresa não usa; o módulo some das telas sem apagar histórico.</p></div></header><div class="adm-corpo"><div class="modulos-grade"><div class="modulo-card"><label><input type="checkbox" name="modulo_equipes_ativo" value="1" {% if empresa and empresa.modulo_equipes_ativo %}checked{% endif %}> Equipes</label><small>Entrega, retirada e filtros por equipe.</small></div><div class="modulo-card"><label><input type="checkbox" name="modulo_recursos_ativo" value="1" {% if empresa and empresa.modulo_recursos_ativo %}checked{% endif %}> Recursos</label><small>Estoque compartilhado consumido pelos produtos.</small></div><div class="modulo-card"><label><input type="checkbox" name="modulo_cupons_ativo" value="1" {% if empresa and empresa.modulo_cupons_ativo %}checked{% endif %}> Cupons</label><small>Desconto na vitrine e no contrato.</small></div><div class="modulo-card"><label><input type="checkbox" name="inteligencia_ativa" value="1" {% if empresa and empresa.inteligencia_ativa %}checked{% endif %}> Inteligência</label><small>Roteirização e logística avançada.</small></div></div></div></section>
 
-    <label>Buscar cliente por</label>
-    <select name="identificador_principal">
-      <option value="telefone" {% if empresa and empresa.identificador_principal == 'telefone' %}selected{% endif %}>Telefone</option>
-      <option value="cpf" {% if empresa and empresa.identificador_principal == 'cpf' %}selected{% endif %}>CPF</option>
-      <option value="cnpj" {% if empresa and empresa.identificador_principal == 'cnpj' %}selected{% endif %}>CNPJ</option>
-    </select>
+<section class="adm-bloco" id="pagamento"><header><i class="bi bi-credit-card"></i><div><h2>Pagamento</h2><p>InfinitePay é configurada somente aqui no ADM.</p></div></header><div class="adm-corpo">
+  <div class="adm-grade"><div><label>PIX copia e cola</label><textarea name="pix_copia_cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea></div><div><label>Nome do recebedor</label><input name="pix_nome_recebedor" value="{{ empresa.pix_nome_recebedor if empresa else '' }}"><label>Banco / instituição</label><input name="pix_banco" value="{{ empresa.pix_banco if empresa else '' }}"></div></div>
+  <div class="status-integracao" style="margin-top:12px"><label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa and empresa.infinitepay_ativa %}checked{% endif %}> <b>Pagamento online — InfinitePay</b></label><div class="adm-grade" style="margin-top:8px"><div><label>InfiniteTag / handle</label><input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else '' }}"></div><div><label>Valor do sinal</label><input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '0,00' }}"></div></div><p class="ajuda-linha">Credenciais e parâmetros técnicos nunca aparecem para o cliente da empresa.</p></div>
+  <label class="check" style="margin-top:12px"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Trabalha com sinal para confirmar a reserva</label>
+</div></section>
 
-    <label>Usuário da empresa</label>
-    <input name="usuario_admin" value="{{ empresa.usuario_admin if empresa else '' }}" required>
+<section class="adm-bloco" id="deslocamento"><header><i class="bi bi-truck"></i><div><h2>Frete / deslocamento</h2><p>Somente três modalidades: sob consulta, por KM ou valor fixo.</p></div></header><div class="adm-corpo">
+  <div class="adm-frete-opcoes"><label><input type="radio" name="frete_tipo" value="consultar" {% if not empresa or not empresa.frete_tipo or empresa.frete_tipo == 'consultar' %}checked{% endif %}> <b>Sob consulta</b><div class="ajuda-linha">Registra CEP e número; o valor é confirmado depois.</div></label><label><input type="radio" name="frete_tipo" value="km" {% if empresa and empresa.frete_tipo == 'km' %}checked{% endif %}> <b>Por KM</b><div class="ajuda-linha">CEP origem → destino × 2 × valor/KM.</div></label><label><input type="radio" name="frete_tipo" value="fixo" {% if empresa and empresa.frete_tipo == 'fixo' %}checked{% endif %}> <b>Valor fixo</b><div class="ajuda-linha">Mesmo valor para qualquer endereço.</div></label></div>
+  <div id="freteKmAdm" class="adm-grade campo-condicional" style="margin-top:12px"><div><label>CEP de origem</label><input name="frete_cep_origem" value="{{ empresa.frete_cep_origem if empresa else '' }}" inputmode="numeric"></div><div><label>Valor por KM</label><input name="frete_valor_km" value="{{ empresa.frete_valor_km|moeda_br if empresa and empresa.frete_valor_km else '0,00' }}" inputmode="decimal"></div><p class="ajuda-linha" style="grid-column:1/-1"><b>Ida e volta obrigatória:</b> QTD KM = distância de ida × 2. O multiplicador não é editável.</p></div>
+  <div id="freteFixoAdm" class="campo-condicional" style="margin-top:12px;max-width:340px"><label>Valor fixo</label><input name="frete_valor_fixo" value="{{ empresa.frete_valor_fixo|moeda_br if empresa and empresa.frete_valor_fixo else '0,00' }}" inputmode="decimal"></div>
+</div></section>
 
-    {% if LOCAL_LOGIN_ENABLED %}
-    <label>Senha da empresa</label>
-    <input name="senha_admin" type="password" value="" {% if not empresa %}required{% endif %} autocomplete="new-password">
-    {% else %}
-    <input name="senha_admin" type="hidden" value="">
-    <p class="texto-discreto"><b>Acesso pelo Humiat ID.</b> O Connect não exibe nem solicita senha local.</p>
-    {% endif %}
-    <label>PIX copia e cola</label>
-    <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea>
-    <label>Nome que aparece no PIX</label>
-    <input name="pix_nome_recebedor" value="{{ empresa.pix_nome_recebedor if empresa else '' }}" placeholder="Ex.: Débora Maria dos Santos Rabello">
-    <label>Banco / instituição que aparece no PIX</label>
-    <input name="pix_banco" value="{{ empresa.pix_banco if empresa else '' }}" placeholder="Ex.: Santander">
-    <p class="texto-discreto">Esses dados serão mostrados ao cliente para conferência antes do pagamento por PIX.</p>
+<section class="adm-bloco" id="vitrine"><header><i class="bi bi-window"></i><div><h2>Vitrine</h2><p>Publicação, fluxo do pedido e identidade essencial.</p></div></header><div class="adm-corpo">
+  <label class="check"><input type="checkbox" name="vitrine_ativa" value="1" {% if empresa and empresa.vitrine_ativa %}checked{% endif %}> Vitrine pública ativa</label>
+  <div class="adm-grade" style="margin-top:10px"><div><label>Fluxo ao continuar</label><select name="vitrine_fluxo"><option value="direto" {% if not empresa or empresa.vitrine_fluxo == 'direto' %}selected{% endif %}>Reservar diretamente no Connect</option><option value="aprovacao" {% if empresa and empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Solicitar aprovação antes da reserva</option><option value="lokafest" {% if empresa and empresa.vitrine_fluxo == 'lokafest' %}selected{% endif %}>Encaminhar para o LokaFest</option></select><p class="ajuda-linha">Se o deslocamento estiver “Sob consulta”, o pedido aguarda aprovação mesmo no modo direto.</p></div><div><label>Título</label><input name="vitrine_titulo" value="{{ empresa.vitrine_titulo if empresa else '' }}"><label>Subtítulo</label><input name="vitrine_subtitulo" value="{{ empresa.vitrine_subtitulo if empresa else '' }}"></div><div><label>Cor principal</label><input name="vitrine_cor_primaria" type="color" value="{{ empresa.vitrine_cor_primaria if empresa else '#6D4AFF' }}"></div><div><label>Cor secundária</label><input name="vitrine_cor_secundaria" type="color" value="{{ empresa.vitrine_cor_secundaria if empresa else '#EEF0FF' }}"></div></div>
+</div></section>
 
-    <label>WhatsApp principal / fallback</label>
-    <input name="whatsapp_retorno" inputmode="tel" value="{{ empresa.whatsapp_retorno if empresa else '' }}" placeholder="(21) 99999-9999">
-
-    <div class="box-mini" style="margin-top:14px">
-      <h3>InfinitePay</h3>
-      <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa and empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
-      <label>InfiniteTag / handle</label>
-      <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else '' }}" placeholder="sua-infinite-tag">
-      <label>Valor do sinal por equipamento</label>
-      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '0,00' }}" placeholder="0,00">
-      <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Valor do contrato pelo checkout. A configuração é isolada por empresa.</p>
-    </div>
-
-    <div class="box-mini" style="margin-top:14px">
-      <h3>NFS-e</h3>
-      <label class="check"><input type="checkbox" name="nfse_ativa" value="1" {% if empresa and empresa.nfse_ativa %}checked{% endif %}> Permitir gerar NFS-e no Organiza</label>
-      <p class="texto-discreto">Quando desativado, o botão de NFS-e não aparece nos contratos desta empresa. Inicialmente somente a Karaokê RJ fica habilitada.</p>
-    </div>
-
-    <div class="box-mini" style="margin-top:14px">
-      <h3>Google Agenda</h3>
-      {% if request.query_params.get('google') == 'conectado' %}<p class="alerta">Conta Google conectada com sucesso.</p>{% endif %}
-      {% if request.query_params.get('google') == 'desconectado' %}<p class="texto-discreto">Conta Google desconectada.</p>{% endif %}
-      {% if request.query_params.get('google_erro') %}<p class="alerta erro">{{ request.query_params.get('google_erro') }}</p>{% endif %}
-      <label class="check"><input type="checkbox" name="google_calendar_ativo" value="1" {% if empresa and empresa.google_calendar_ativo %}checked{% endif %}> Usar Google Agenda nesta empresa</label>
-      <div class="grade-permissoes" style="margin-top:8px">
-        <label class="check"><input type="checkbox" name="google_calendar_contratos" value="1" {% if not empresa or empresa.google_calendar_contratos %}checked{% endif %}> Contratos</label>
-        <label class="check"><input type="checkbox" name="google_calendar_operacao" value="1" {% if not empresa or empresa.google_calendar_operacao %}checked{% endif %}> Operação</label>
-      </div>
-      <label>Calendário</label>
-      <input name="google_calendar_id" value="{{ empresa.google_calendar_id if empresa and empresa.google_calendar_id else 'primary' }}" placeholder="primary">
-      <div class="linha">
-        <div><label>Lembrete 1 (minutos antes)</label><input type="number" min="0" max="40320" name="google_calendar_reminder_1" value="{{ empresa.google_calendar_reminder_1 if empresa and empresa.google_calendar_reminder_1 is not none else 1440 }}"></div>
-        <div><label>Lembrete 2 (minutos antes)</label><input type="number" min="0" max="40320" name="google_calendar_reminder_2" value="{{ empresa.google_calendar_reminder_2 if empresa and empresa.google_calendar_reminder_2 is not none else 120 }}"></div>
-      </div>
-      <label>Duração do compromisso de Entrega/Retirada (minutos)</label>
-      <input type="number" min="5" max="240" name="google_calendar_duracao_operacao_min" value="{{ empresa.google_calendar_duracao_operacao_min if empresa and empresa.google_calendar_duracao_operacao_min else 30 }}">
-      {% if empresa %}
-        {% if empresa.google_calendar_refresh_token or empresa.google_calendar_access_token %}
-          <p class="texto-discreto"><b>Conta conectada:</b> {{ empresa.google_calendar_email or 'Google conectado' }}</p>
-          <button type="submit" form="googleDisconnectForm" class="botao-secundario">Desconectar Google</button>
-        {% elif google_calendar_oauth_disponivel %}
-          <a class="botao" href="/admin/empresa/{{ empresa.id }}/google-calendar/conectar">Conectar conta Google</a>
-        {% else %}
-          <p class="texto-discreto">Configure GOOGLE_CALENDAR_CLIENT_ID e GOOGLE_CALENDAR_CLIENT_SECRET no Render para liberar a conexão.</p>
-        {% endif %}
-      {% else %}
-        <p class="texto-discreto">Crie a empresa primeiro. Depois abra Editar empresa para conectar a conta Google.</p>
-      {% endif %}
-    </div>
-
-    <label class="check"><input type="checkbox" name="exige_sinal" value="1" {% if empresa and empresa.exige_sinal %}checked{% endif %}> Exigir pagamento de sinal para confirmar a reserva</label>
-
-    <div class="linha">
-      <div>
-        <label>Suporte início</label>
-        <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '09:00' }}">
-      </div>
-      <div>
-        <label>Suporte fim</label>
-        <input name="suporte_fim" type="time" step="1800" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '20:00' }}">
-      </div>
-    </div>
-
-    <input type="hidden" name="mostrar_suporte_contrato" value="1">
-    <p class="texto-discreto">O contrato mostra automaticamente somente o período de suporte que coincide com a duração da locação, limitado até 22:00.</p>
-
-    <h2>Logo da empresa</h2>
-    {% if empresa and (empresa.logo_url or empresa.logo_idb_url) %}
-      <div class="logo-preview">
-        <img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="Logo atual">
-        <small>Logo atual</small>
-      </div>
-    {% endif %}
-
-    <label>Enviar logo do PC ou celular</label>
-    <input name="logo_arquivo" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml">
-    <p class="texto-discreto">Essa é a opção recomendada. A logo será salva no sistema e aparecerá nas telas públicas e no painel.</p>
-
-    <details class="box-mini">
-      <summary>Usar link da logo em vez de arquivo</summary>
-      <label>URL direta da imagem</label>
-      <input name="logo_url" value="{{ empresa.logo_url if empresa and empresa.logo_url and empresa.logo_url.startswith('http') else '' }}" placeholder="https://.../logo.png">
-      <label>Link alternativo IDB.co / imagem hospedada</label>
-      <input name="logo_idb_url" value="{{ empresa.logo_idb_url if empresa else '' }}" placeholder="Cole o link direto da imagem">
-    </details>
-
-    <label>Tema padrão</label>
-    <select name="tema">
-      <option value="azul" {% if empresa and empresa.tema == 'azul' %}selected{% endif %}>Azul</option>
-      <option value="escuro" {% if empresa and empresa.tema == 'escuro' %}selected{% endif %}>Escuro</option>
-      <option value="claro" {% if empresa and empresa.tema == 'claro' %}selected{% endif %}>Claro</option>
-    </select>
-
-    {% if empresa %}
-    <label class="check"><input type="checkbox" name="ativa" value="1" {% if empresa.ativa %}checked{% endif %}> Empresa ativa</label>
-
-    <div class="box-mini" style="margin-top:18px">
-      <h3>Regras Humiat</h3>
-      <p class="texto-discreto">A cobrança ocorre somente quando o contrato é aceito. O saldo comprado não vence; apenas a franquia gratuita reinicia a cada mês.</p>
-      <div class="linha">
-        <div>
-          <label>Humiats grátis por mês</label>
-          <input type="number" min="0" name="humiat_gratis_mes" value="{{ empresa.humiat_gratis_mes if empresa.humiat_gratis_mes is not none else 4 }}">
-        </div>
-        <div>
-          <label>Humiats por contrato aceito</label>
-          <input type="number" min="0" name="humiat_custo_contrato" value="1" readonly>
-        </div>
-      </div>
-    </div>
-    {% endif %}
-
-    <button>{% if empresa %}Salvar empresa{% else %}Criar empresa{% endif %}</button>
-  </form>
-</div>
-
-
+<section class="adm-bloco" id="integracoes"><header><i class="bi bi-plug"></i><div><h2>Integrações e atendimento</h2><p>Recursos técnicos opcionais.</p></div></header><div class="adm-corpo">
+  <div class="modulos-grade"><div class="modulo-card"><label><input type="checkbox" name="nfse_ativa" value="1" {% if empresa and empresa.nfse_ativa %}checked{% endif %}> NFS-e</label><small>Libera emissão quando a integração correspondente existir.</small></div><div class="modulo-card"><label><input type="checkbox" name="google_calendar_ativo" value="1" {% if empresa and empresa.google_calendar_ativo %}checked{% endif %}> Google Agenda</label><small>Sincronização de contratos/operação.</small></div></div>
+  <div class="adm-grade" style="margin-top:12px"><div><label>Suporte início</label><input name="suporte_inicio" type="time" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '09:00' }}"></div><div><label>Suporte fim</label><input name="suporte_fim" type="time" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '20:00' }}"></div></div><input type="hidden" name="mostrar_suporte_contrato" value="1">
+  <details style="margin-top:12px"><summary>Configuração avançada do Google Agenda</summary><div class="adm-corpo"><label class="check"><input type="checkbox" name="google_calendar_contratos" value="1" {% if not empresa or empresa.google_calendar_contratos %}checked{% endif %}> Contratos</label><label class="check"><input type="checkbox" name="google_calendar_operacao" value="1" {% if not empresa or empresa.google_calendar_operacao %}checked{% endif %}> Operação</label><label>Calendário</label><input name="google_calendar_id" value="{{ empresa.google_calendar_id if empresa and empresa.google_calendar_id else 'primary' }}"><div class="adm-grade tres"><div><label>Lembrete 1 (min)</label><input type="number" name="google_calendar_reminder_1" value="{{ empresa.google_calendar_reminder_1 if empresa else 1440 }}"></div><div><label>Lembrete 2 (min)</label><input type="number" name="google_calendar_reminder_2" value="{{ empresa.google_calendar_reminder_2 if empresa else 120 }}"></div><div><label>Duração operação (min)</label><input type="number" name="google_calendar_duracao_operacao_min" value="{{ empresa.google_calendar_duracao_operacao_min if empresa else 30 }}"></div></div>{% if empresa %}{% if empresa.google_calendar_refresh_token or empresa.google_calendar_access_token %}<p class="ajuda-linha"><b>Conta conectada:</b> {{ empresa.google_calendar_email or 'Google conectado' }}</p><button type="submit" form="googleDisconnectForm" class="botao-secundario">Desconectar Google</button>{% elif google_calendar_oauth_disponivel %}<a class="botao" href="/admin/empresa/{{ empresa.id }}/google-calendar/conectar">Conectar conta Google</a>{% endif %}{% endif %}</div></details>
+</div></section>
+{% if empresa %}<input type="hidden" name="humiat_gratis_mes" value="{{ empresa.humiat_gratis_mes or 4 }}"><input type="hidden" name="humiat_custo_contrato" value="1">{% endif %}
+<div class="adm-acoes"><button type="submit">{% if empresa %}Salvar empresa{% else %}Criar empresa{% endif %}</button></div>
+</form>
 {% if empresa %}<form id="googleDisconnectForm" method="post" action="/admin/empresa/{{ empresa.id }}/google-calendar/desconectar" style="display:none"></form>{% endif %}
-
 
 {% if empresa %}
 <div class="box usuarios-empresa-box">
@@ -208,21 +94,20 @@
 </div>
 {% endif %}
 
-{% if empresa %}
+{% if empresa and empresa.modulo_equipes_ativo %}
 <div class="box usuarios-empresa-box">
   <div class="cabecalho-secao-usuarios"><div><p class="mini">Operação</p><h2>Equipes</h2></div></div>
   <p class="texto-discreto">Cadastre as equipes disponíveis para entrega e retirada. A equipe será escolhida somente ao salvar a roteirização.</p>
   <form method="post" action="/admin/empresa/{{ empresa.id }}/equipes" class="form-usuario-organizado">
     <input type="hidden" name="equipe_id" id="equipe_id">
-    <label>Nome da equipe</label>
-    <input name="nome" id="equipe_nome" placeholder="Equipe 1" required>
+    <div class="linha"><div><label>Nome da equipe</label><input name="nome" id="equipe_nome" placeholder="Equipe 1" required></div><div><label>Ordem</label><input name="ordem" id="equipe_ordem" type="number" value="0"></div></div>
     <label class="check"><input type="checkbox" name="ativo" id="equipe_ativa" value="1" checked> Equipe ativa</label>
     <div class="acoes-formulario"><button id="botao_salvar_equipe">Criar equipe</button><button type="button" class="botao-secundario" onclick="limparEquipe()">Limpar</button></div>
   </form>
   <div class="lista-mobile lista-usuarios-organizada">
   {% for e in equipes or [] %}
-    <div class="card-lista"><div><b>{{ e.nome }}</b><small>{{ 'Ativa' if e.ativa else 'Inativa' }}</small></div>
-      <div class="acoes-usuario"><button type="button" class="acao-icone" onclick='editarEquipe({{ {"id":e.id,"nome":e.nome,"ativa":e.ativa}|tojson }})'><i class="bi bi-pencil-square"></i></button><a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/equipe/{{ e.id }}/excluir" onclick="return confirm('Excluir ou desativar esta equipe?')"><i class="bi bi-trash3"></i></a></div>
+    <div class="card-lista"><div><b>{{ e.nome }}</b><small>{{ 'Ativa' if e.ativa else 'Inativa' }} · Ordem {{ e.ordem or 0 }}</small></div>
+      <div class="acoes-usuario"><button type="button" class="acao-icone" onclick='editarEquipe({{ {"id":e.id,"nome":e.nome,"ordem":e.ordem,"ativa":e.ativa}|tojson }})'><i class="bi bi-pencil-square"></i></button><a class="acao-icone" href="/admin/empresa/{{ empresa.id }}/equipe/{{ e.id }}/excluir" onclick="return confirm('Excluir ou desativar esta equipe?')"><i class="bi bi-trash3"></i></a></div>
     </div>
   {% else %}<p class="texto-discreto">Nenhuma equipe cadastrada.</p>{% endfor %}
   </div>
@@ -281,11 +166,9 @@
         <label class="check"><input type="checkbox" name="acesso_cadastros" value="1"> Cadastros</label>
         <label class="check"><input type="checkbox" name="acesso_relatorios" value="1"> Relatórios</label>
       </div>
-      <h3>Equipes permitidas</h3>
+      {% if empresa.modulo_equipes_ativo %}<h3>Equipes permitidas</h3>
       <p class="texto-discreto">No filtro da Agenda e da Operação aparecerão somente as equipes marcadas.</p>
-      <div class="grade-permissoes">
-        {% for e in equipes or [] %}<label class="check"><input type="checkbox" name="equipes_permitidas" value="{{ e.id }}" data-equipe-permissao="{{ e.id }}"> {{ e.nome }}</label>{% endfor %}
-      </div>
+      <div class="grade-permissoes">{% for e in equipes or [] %}<label class="check"><input type="checkbox" name="equipes_permitidas" value="{{ e.id }}" data-equipe-permissao="{{ e.id }}"> {{ e.nome }}</label>{% endfor %}</div>{% endif %}
     </div>
     <div class="acoes-formulario acoes-usuario-form">
       <button id="botao_salvar_usuario">Criar usuário</button>
@@ -410,15 +293,21 @@ function limparEdicaoUsuario() {
 function editarEquipe(equipe){
   document.getElementById('equipe_id').value=equipe.id;
   document.getElementById('equipe_nome').value=equipe.nome||'';
+  document.getElementById('equipe_ordem').value=equipe.ordem||0;
   document.getElementById('equipe_ativa').checked=Boolean(equipe.ativa);
   document.getElementById('botao_salvar_equipe').textContent='Salvar equipe';
 }
 function limparEquipe(){
   document.getElementById('equipe_id').value='';
   document.getElementById('equipe_nome').value='';
+  document.getElementById('equipe_ordem').value='0';
   document.getElementById('equipe_ativa').checked=true;
   document.getElementById('botao_salvar_equipe').textContent='Criar equipe';
 }
+
+function atualizarFreteAdm(){const v=document.querySelector('input[name="frete_tipo"]:checked')?.value;const km=document.getElementById('freteKmAdm'),fx=document.getElementById('freteFixoAdm');if(km)km.hidden=v!=='km';if(fx)fx.hidden=v!=='fixo';}
+document.querySelectorAll('input[name="frete_tipo"]').forEach(x=>x.addEventListener('change',atualizarFreteAdm));atualizarFreteAdm();
+const logoAdm=document.getElementById('logoAdmArquivo');logoAdm?.addEventListener('change',()=>{const f=logoAdm.files?.[0],img=document.getElementById('logoAdmPreview');if(f&&img){img.src=URL.createObjectURL(f)}});
 </script>
 
 {% endblock %}

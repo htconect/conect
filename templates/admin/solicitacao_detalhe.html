@@ -27,10 +27,10 @@
   {% for conflito in analise_estoque.conflitos_produtos %}
     <p><b>PRODUTO EXCEDIDO:</b> {{ conflito.nome }} · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>falta {{ conflito.falta }}</strong></p>
   {% endfor %}
-  {% for conflito in analise_estoque.conflitos_recursos %}
+  {% if empresa.modulo_recursos_ativo %}{% for conflito in analise_estoque.conflitos_recursos %}
     <p><b>RECURSO EXCEDIDO:</b> {{ conflito.nome }} · necessário {{ conflito.necessario }} · disponível {{ conflito.disponivel_antes }} · <strong>falta {{ conflito.falta }}</strong></p>
-  {% endfor %}
-  <p class="texto-discreto">Se este contrato não utilizar algum recurso padrão, ajuste ou desmarque o recurso no bloco de equipamentos e recursos.</p>
+  {% endfor %}{% endif %}
+  {% if empresa.modulo_recursos_ativo %}<p class="texto-discreto">Se este contrato não utilizar algum recurso padrão, ajuste ou desmarque o recurso no bloco de equipamentos e recursos.</p>{% endif %}
 </div>
 {% endif %}
 
@@ -235,7 +235,7 @@
     <p class="texto-discreto">Nenhum equipamento adicionado.</p>
   {% endif %}
 
-  {% if recursos_contrato %}
+  {% if empresa.modulo_recursos_ativo and recursos_contrato %}
   <div class="box" id="estoque-recursos-contrato" style="margin-top:14px">
     <h3>Recursos do contrato</h3>
     <p class="texto-discreto">Os valores padrão vêm dos equipamentos registrados. Você pode desmarcar ou alterar a quantidade somente neste contrato.</p>
@@ -325,11 +325,11 @@
       </div>
     </div>
 
-    <div class="box" id="previewRecursosEquipamentos" style="margin-top:12px">
+    {% if empresa.modulo_recursos_ativo %}<div class="box" id="previewRecursosEquipamentos" style="margin-top:12px">
       <h3 style="margin-top:0">Recursos desta locação</h3>
       <p class="texto-discreto">Selecione o equipamento e ajuste os recursos agora, antes de salvar. As quantidades abaixo serão gravadas junto com os equipamentos.</p>
       <div id="listaPreviewRecursos"><small class="texto-discreto">Selecione os equipamentos para calcular os recursos.</small></div>
-    </div>
+    </div>{% endif %}
 
     <div class="contrato-automatico-campo">
       <label for="contratoAutomaticoVisual">Modelo de contrato</label>

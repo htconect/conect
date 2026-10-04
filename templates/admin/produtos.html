@@ -2,8 +2,9 @@
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Produtos e serviços</h1>
-<p class="texto-discreto">Cadastre os produtos/serviços e os recursos físicos que cada um consome. O estoque dos recursos também entra no cálculo de disponibilidade.</p>
+<p class="texto-discreto">Cadastre produtos e serviços, organize por categoria e escolha a ordem em que cada item aparece na vitrine.</p>
 
+{% if usa_recursos %}
 <div class="box" id="estoque-recursos">
   <h2>Itens do Produto/Serviço</h2>
   <p class="texto-discreto">Estoque compartilhado entre os produtos. Os itens padrão foram criados com quantidade 0 para você informar o estoque real de cada empresa.</p>
@@ -32,6 +33,7 @@
     </form>
   </details>
 </div>
+{% endif %}
 
 <div class="box">
 <form method="post" enctype="multipart/form-data">
@@ -88,16 +90,18 @@
     <p class="texto-discreto">A parte visual deste item. O cliente escolhe por foto e poucos cliques.</p>
     <label class="check"><input type="checkbox" name="vitrine_ativo" value="1" {% if not produto or produto.vitrine_ativo is not sameas false %}checked{% endif %}> Mostrar na vitrine pública</label>
     <div class="linha">
-      <div><label>Categoria</label><input name="vitrine_categoria" value="{{ produto.vitrine_categoria if produto else '' }}" placeholder="Ex.: Karaokê, Brinquedos, Som"></div>
+      <div><label>Categoria</label><select name="vitrine_categoria"><option value="">Sem categoria</option>{% for c in categorias_vitrine %}<option value="{{ c.nome }}" {% if produto and produto.vitrine_categoria == c.nome %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}</select><small class="texto-discreto"><a href="/painel/vitrine">Gerenciar categorias da vitrine</a></small></div>
       <div><label>Ordem</label><input name="vitrine_ordem" type="number" value="{{ produto.vitrine_ordem if produto else 0 }}"></div>
     </div>
     <label>Resumo curto</label>
     <input name="vitrine_resumo" maxlength="240" value="{{ produto.vitrine_resumo if produto else '' }}" placeholder="Ex.: Completo para festas e eventos">
     <label>Fotos</label>
-    <input name="foto_arquivos" type="file" accept="image/*" multiple>
-    <small class="texto-discreto">No celular, toque em Fotos, escolha direto da galeria e selecione quantas quiser.</small>
+    <input id="fotoArquivos" name="foto_arquivos" type="file" accept="image/*,.jfif,.jpe" multiple hidden>
+    <button type="button" class="botao-secundario largura-total" onclick="document.getElementById('fotoArquivos').click()"><i class="bi bi-images"></i> Toque aqui para escolher fotos</button>
+    <small id="fotoArquivosStatus" class="texto-discreto">JPG, JPEG, JFIF, PNG e WebP. No celular, abre a galeria.</small>
   </div>
 
+  {% if usa_recursos %}
   <div class="box" style="margin-top:16px">
     <h3>Recursos que este produto utiliza</h3>
     <p class="texto-discreto">Marque somente o que normalmente acompanha 1 unidade deste produto e informe quantas unidades são consumidas.</p>
@@ -120,6 +124,7 @@
       </div>
     {% endfor %}
   </div>
+  {% endif %}
 
   <input type="hidden" name="volume_logistico" value="1">
   <input type="hidden" name="carga_pontos" value="1">
@@ -134,7 +139,7 @@
   <div class="grid">
     {% for foto in produto.fotos %}
     <div class="card" style="padding:10px">
-      <img src="{{ foto.arquivo_url }}" alt="{{ produto.nome }}" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:12px">
+      <img src="{{ foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para adicionar/substituir fotos" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:12px;cursor:pointer">
       <p style="margin:8px 0"><b>{% if foto.capa %}Foto principal{% else %}Foto {{ loop.index }}{% endif %}</b></p>
       <div style="display:flex;gap:7px;flex-wrap:wrap">
         {% if not foto.capa %}<form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/capa"><button type="submit" class="secundario">Usar como principal</button></form>{% endif %}
@@ -158,17 +163,14 @@
   <p>Quantidade do produto: {{ p.quantidade_disponivel or 0 }}</p>
   <p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p>
   <p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
-  {% if p.recursos_estoque_resumo %}
-    <p><b>Recursos:</b> {{ p.recursos_estoque_resumo|join(' · ') }}</p>
-  {% else %}
-    <p class="texto-discreto">Sem recursos de estoque vinculados.</p>
-  {% endif %}
+  {% if usa_recursos %}{% if p.recursos_estoque_resumo %}<p><b>Recursos:</b> {{ p.recursos_estoque_resumo|join(' · ') }}</p>{% else %}<p class="texto-discreto">Sem recursos de estoque vinculados.</p>{% endif %}{% endif %}
   <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
 </div>
 {% endfor %}
 </div>
 
 <script>
+document.getElementById('fotoArquivos')?.addEventListener('change',function(){const n=this.files?.length||0;const status=document.getElementById('fotoArquivosStatus');if(status&&n)status.textContent=n+(n===1?' foto selecionada. Salve o item para enviar.':' fotos selecionadas. Salve o item para enviar.');});
 function alternarRecursoProduto(check){
   const linha = check.closest('.linha');
   const hidden = linha.querySelector('.recurso-utiliza');

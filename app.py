@@ -30,6 +30,7 @@ logger = logging.getLogger("conect")
 geo_logger = logging.getLogger("conect.geocodificacao")
 
 from fastapi import FastAPI, Depends, Form, Request, HTTPException, File, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
@@ -42,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, \
     ProdutoServico, ProdutoFoto, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -253,6 +254,58 @@ templates.env.globals["LOCAL_LOGIN_ENABLED"] = LOCAL_LOGIN_ENABLED
 templates.env.globals["HUMIAT_SSO_ATIVO"] = not LOCAL_LOGIN_ENABLED
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 Path("static/uploads/vitrine").mkdir(parents=True, exist_ok=True)
+
+
+def _resposta_json_esperada(request: Request) -> bool:
+    path = str(request.url.path or "")
+    accept = str(request.headers.get("accept") or "").lower()
+    return path.startswith("/api/") or "application/json" in accept or request.headers.get("x-requested-with") == "XMLHttpRequest"
+
+
+def _codigo_erro_publico() -> str:
+    return "CN-" + uuid.uuid4().hex[:8].upper()
+
+
+@app.exception_handler(HTTPException)
+async def erro_http_padrao(request: Request, exc: HTTPException):
+    if exc.status_code in {301, 302, 303, 307, 308} and exc.headers and exc.headers.get("Location"):
+        return RedirectResponse(exc.headers["Location"], status_code=exc.status_code)
+    if _resposta_json_esperada(request):
+        return JSONResponse({"ok": False, "erro": str(exc.detail or "Não foi possível concluir.")}, status_code=exc.status_code)
+    codigo = _codigo_erro_publico()
+    return templates.TemplateResponse("erro.html", {
+        "request": request,
+        "status_code": exc.status_code,
+        "mensagem": str(exc.detail or "Não foi possível concluir esta ação."),
+        "codigo_erro": codigo,
+    }, status_code=exc.status_code)
+
+
+@app.exception_handler(RequestValidationError)
+async def erro_validacao_padrao(request: Request, exc: RequestValidationError):
+    if _resposta_json_esperada(request):
+        return JSONResponse({"ok": False, "erro": "Confira os campos informados.", "detalhes": exc.errors()}, status_code=422)
+    return templates.TemplateResponse("erro.html", {
+        "request": request,
+        "status_code": 422,
+        "mensagem": "Confira os campos informados e tente novamente.",
+        "codigo_erro": _codigo_erro_publico(),
+    }, status_code=422)
+
+
+@app.exception_handler(Exception)
+async def erro_inesperado_padrao(request: Request, exc: Exception):
+    codigo = _codigo_erro_publico()
+    logger.exception("Erro não tratado %s em %s", codigo, request.url.path)
+    if _resposta_json_esperada(request):
+        return JSONResponse({"ok": False, "erro": "Ocorreu um problema inesperado.", "codigo": codigo}, status_code=500)
+    return templates.TemplateResponse("erro.html", {
+        "request": request,
+        "status_code": 500,
+        "mensagem": "Não foi possível concluir esta ação agora.",
+        "codigo_erro": codigo,
+    }, status_code=500)
+
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
 
@@ -1997,8 +2050,37 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_valor_km FLOAT DEFAULT 0")
     if "frete_cep_origem" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_cep_origem VARCHAR(20)")
+    nova_col_modulo_equipes = False
+    nova_col_modulo_recursos = False
+    nova_col_modulo_cupons = False
+    nova_col_inteligencia = False
     if "frete_multiplicador_km" not in cols_emp:
-        comandos.append("ALTER TABLE empresas ADD COLUMN frete_multiplicador_km FLOAT DEFAULT 1")
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_multiplicador_km FLOAT DEFAULT 2")
+    if "modulo_equipes_ativo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN modulo_equipes_ativo BOOLEAN DEFAULT false")
+        nova_col_modulo_equipes = True
+    if "modulo_recursos_ativo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN modulo_recursos_ativo BOOLEAN DEFAULT false")
+        nova_col_modulo_recursos = True
+    if "modulo_cupons_ativo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN modulo_cupons_ativo BOOLEAN DEFAULT false")
+        nova_col_modulo_cupons = True
+    if "inteligencia_ativa" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN inteligencia_ativa BOOLEAN DEFAULT false")
+        nova_col_inteligencia = True
+    if "vitrine_fluxo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fluxo VARCHAR(20) DEFAULT 'direto'")
+    if "lokafest_ativo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_ativo BOOLEAN DEFAULT false")
+    if "lokafest_url" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_url VARCHAR(300)")
+    if "humiat_slug" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_slug VARCHAR(80)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_empresas_humiat_slug ON empresas (humiat_slug)")
+    if "humiat_sistemas_json" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN humiat_sistemas_json TEXT")
+    if "origem_cadastro" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN origem_cadastro VARCHAR(30) DEFAULT 'manual'")
     if "mensagem_reserva" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_reserva TEXT")
     if "mensagem_preparacao" not in cols_emp:
@@ -2302,12 +2384,18 @@ def garantir_colunas_novas():
             id INTEGER PRIMARY KEY,
             empresa_id INTEGER NOT NULL,
             nome VARCHAR(80) NOT NULL,
+            ordem INTEGER DEFAULT 0 NOT NULL,
             ativa BOOLEAN DEFAULT true,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(empresa_id) REFERENCES empresas (id),
             UNIQUE(empresa_id, nome)
         )
         """)
+    if "equipes" in tabelas:
+        cols_equipes = colunas("equipes")
+        if "ordem" not in cols_equipes:
+            comandos.append("ALTER TABLE equipes ADD COLUMN ordem INTEGER DEFAULT 0")
+
     if "usuarios_equipes" not in tabelas:
         comandos.append("""
         CREATE TABLE usuarios_equipes (
@@ -2583,6 +2671,21 @@ def garantir_colunas_novas():
         if "carga_apos_parada" not in cols_rip:
             comandos.append("ALTER TABLE rotas_inteligentes_paradas ADD COLUMN carga_apos_parada INTEGER DEFAULT 0 NOT NULL")
 
+    if "vitrine_categorias" not in tabelas:
+        comandos.append("""
+        CREATE TABLE vitrine_categorias (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            nome VARCHAR(80) NOT NULL,
+            ordem INTEGER DEFAULT 0 NOT NULL,
+            ativa BOOLEAN DEFAULT true NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            UNIQUE(empresa_id, nome)
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_vitrine_categorias_empresa_id ON vitrine_categorias (empresa_id)")
+
     # Índices de performance para as telas de Painel/Agenda/Operação.
     # São idempotentes e ajudam principalmente quando o PostgreSQL está remoto.
     if "solicitacoes" in tabelas:
@@ -2643,6 +2746,21 @@ def garantir_colunas_novas():
         with engine.begin() as conn:
             for comando in comandos:
                 conn.execute(text(comando))
+
+    # Ao introduzir os módulos por empresa, preserva o comportamento das empresas
+    # que já utilizavam cada recurso. Depois desta migração o ADM passa a controlar
+    # os switches e nenhuma desativação é revertida automaticamente.
+    with engine.begin() as conn:
+        if nova_col_modulo_equipes and "equipes" in tabelas:
+            conn.execute(text("UPDATE empresas SET modulo_equipes_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM equipes)"))
+        if nova_col_modulo_recursos and "produtos_servicos_recursos" in tabelas:
+            conn.execute(text("UPDATE empresas SET modulo_recursos_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM produtos_servicos_recursos)"))
+        if nova_col_modulo_cupons and "cupons" in tabelas:
+            conn.execute(text("UPDATE empresas SET modulo_cupons_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM cupons)"))
+        if nova_col_inteligencia and "rotas_inteligentes" in tabelas:
+            conn.execute(text("UPDATE empresas SET inteligencia_ativa = true WHERE id IN (SELECT DISTINCT empresa_id FROM rotas_inteligentes)"))
+        # A regra atual de deslocamento por KM é sempre ida + volta.
+        conn.execute(text("UPDATE empresas SET frete_multiplicador_km = 2 WHERE frete_tipo = 'km'"))
 
     # Preserva a auditoria das versões anteriores sem presumir recebimento.
     if nova_col_whatsapp_contrato_acionado and "solicitacoes" in tabelas:
@@ -3292,11 +3410,6 @@ def startup():
             if str(getattr(emp, "mensagem_aceite", "") or "").strip() == MENSAGEM_ACEITE_LEGADA.strip():
                 emp.mensagem_aceite = MENSAGEM_ACEITE_PADRAO
                 db.commit()
-            # Primeira migração: a Karaoke RJ já usa a mesma conta InfinitePay do SolVoz.
-            # O handle preenchido funciona como marcador para não reativar caso a empresa desabilite depois.
-            if (emp.slug or "").strip().lower() == "karaokerj" and not (emp.infinitepay_handle or "").strip():
-                emp.infinitepay_handle = INFINITEPAY_HANDLE_PADRAO or "karaokerj"
-                emp.infinitepay_ativa = True
             if (emp.slug or "").strip().lower() in {"karaokerj", "karaoke-rj"} or (emp.nome or "").strip().lower() in {"karaokê rj", "karaoke rj"}:
                 cupom_k10 = db.query(Cupom).filter(
                     Cupom.empresa_id == emp.id, func.upper(Cupom.codigo) == "KARAOKE10"
@@ -3313,9 +3426,6 @@ def startup():
                 _conta_infinitepay(db, emp.id)
             configurar_campos_empresa(db, emp.id)
             criar_modelos_iniciais_empresa(db, emp)
-            if db.query(Equipe).filter_by(empresa_id=emp.id).count() == 0:
-                db.add_all([Equipe(empresa_id=emp.id, nome="Equipe 1", ativa=True), Equipe(empresa_id=emp.id, nome="Equipe 2", ativa=True)])
-                db.commit()
             corrigir_valores_teste(db)
             recalcular_valores_reservas(db)
             corrigir_reservas_aprovadas_sem_itens(db)
@@ -3975,7 +4085,9 @@ def _quitar_humiats_pendentes(db: Session, empresa: Empresa):
 def admin_geral(request: Request, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
     return templates.TemplateResponse("admin/empresas.html",
-                                      {"request": request, "empresas": empresas, "empresa": None, "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
+                                      {"request": request, "empresas": empresas, "empresa": None,
+                                       "sistemas_humiat": ["HUMIAT ID", "CONNECT"],
+                                       "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
 
 
 @app.post("/admin/empresas")
@@ -3985,11 +4097,15 @@ def admin_criar_empresa(
         usuario_admin: str = Form(...),
         senha_admin: str = Form(""),
         identificador_principal: str = Form("telefone"),
+        cidade_atendimento: str = Form(""),
         pix_copia_cola: str = Form(""),
         pix_nome_recebedor: str = Form(""),
         pix_banco: str = Form(""),
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
+        infinitepay_handle: str = Form(""),
+        infinitepay_valor_sinal: str = Form("0"),
+        exige_sinal: Optional[str] = Form(None),
         nfse_ativa: Optional[str] = Form(None),
         google_calendar_ativo: Optional[str] = Form(None),
         google_calendar_contratos: Optional[str] = Form(None),
@@ -3998,9 +4114,24 @@ def admin_criar_empresa(
         google_calendar_reminder_1: int = Form(1440),
         google_calendar_reminder_2: int = Form(120),
         google_calendar_duracao_operacao_min: int = Form(30),
-        infinitepay_handle: str = Form(""),
-        infinitepay_valor_sinal: str = Form("0"),
-        exige_sinal: Optional[str] = Form(None),
+        modulo_equipes_ativo: Optional[str] = Form(None),
+        modulo_recursos_ativo: Optional[str] = Form(None),
+        modulo_cupons_ativo: Optional[str] = Form(None),
+        inteligencia_ativa: Optional[str] = Form(None),
+        lokafest_ativo: Optional[str] = Form(None),
+        lokafest_url: str = Form(""),
+        humiat_slug: str = Form(""),
+        sistema_humiat: list[str] = Form(default=[]),
+        frete_tipo: str = Form("consultar"),
+        frete_valor_fixo: str = Form("0"),
+        frete_valor_km: str = Form("0"),
+        frete_cep_origem: str = Form(""),
+        vitrine_ativa: Optional[str] = Form(None),
+        vitrine_fluxo: str = Form("direto"),
+        vitrine_titulo: str = Form(""),
+        vitrine_subtitulo: str = Form(""),
+        vitrine_cor_primaria: str = Form("#6D4AFF"),
+        vitrine_cor_secundaria: str = Form("#EEF0FF"),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
         mostrar_suporte_contrato: Optional[str] = Form(None),
@@ -4020,17 +4151,38 @@ def admin_criar_empresa(
         db: Session = Depends(get_db),
         ok: bool = Depends(admin_geral_logado)
 ):
+    slug_limpo = re.sub(r"[^a-z0-9-]+", "-", unicodedata.normalize("NFKD", slug or "").encode("ascii", "ignore").decode("ascii").lower()).strip("-")
+    if not slug_limpo:
+        raise HTTPException(400, "Informe um slug válido.")
+    if db.query(Empresa).filter(func.lower(Empresa.slug) == slug_limpo).first():
+        raise HTTPException(400, "Já existe uma empresa com este slug.")
+
+    sistemas = _normalizar_sistemas_humiat(sistema_humiat)
+    fluxo = (vitrine_fluxo or "direto").strip().lower()
+    if fluxo not in {"direto", "aprovacao", "lokafest"}:
+        fluxo = "direto"
+    tipo_frete = (frete_tipo or "consultar").strip().lower()
+    if tipo_frete not in {"consultar", "fixo", "km"}:
+        tipo_frete = "consultar"
+
     empresa = Empresa(
         nome=nome.strip(),
-        slug=slug.strip().lower().replace(" ", "-"),
+        slug=slug_limpo,
+        humiat_slug=(humiat_slug.strip().lower()[:80] or slug_limpo),
+        humiat_sistemas_json=json.dumps(sistemas, ensure_ascii=False),
+        origem_cadastro="manual",
         identificador_principal=identificador_principal,
         usuario_admin=usuario_admin.strip(),
         senha_admin=(senha_admin.strip() if LOCAL_LOGIN_ENABLED and senha_admin.strip() else secrets.token_urlsafe(32)),
+        cidade_atendimento=cidade_atendimento.strip()[:120] or None,
         pix_copia_cola=pix_copia_cola.strip(),
         pix_nome_recebedor=pix_nome_recebedor.strip(),
         pix_banco=pix_banco.strip(),
         whatsapp_retorno=_limpar_tel_whatsapp(whatsapp_retorno),
         infinitepay_ativa=bool(infinitepay_ativa),
+        infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or None),
+        infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
+        exige_sinal=bool(exige_sinal),
         nfse_ativa=bool(nfse_ativa),
         google_calendar_ativo=bool(google_calendar_ativo),
         google_calendar_contratos=bool(google_calendar_contratos),
@@ -4039,11 +4191,25 @@ def admin_criar_empresa(
         google_calendar_reminder_1=max(int(google_calendar_reminder_1 or 0), 0),
         google_calendar_reminder_2=max(int(google_calendar_reminder_2 or 0), 0),
         google_calendar_duracao_operacao_min=max(int(google_calendar_duracao_operacao_min or 30), 5),
-        infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or None),
-        infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
-        exige_sinal=bool(exige_sinal),
-        suporte_inicio=suporte_inicio.strip() or "09:00",
-        suporte_fim=suporte_fim.strip() or "20:00",
+        modulo_equipes_ativo=bool(modulo_equipes_ativo),
+        modulo_recursos_ativo=bool(modulo_recursos_ativo),
+        modulo_cupons_ativo=bool(modulo_cupons_ativo),
+        inteligencia_ativa=bool(inteligencia_ativa),
+        lokafest_ativo=bool(lokafest_ativo) or "LOKAFEST" in sistemas,
+        lokafest_url=lokafest_url.strip()[:300] or None,
+        frete_tipo=tipo_frete,
+        frete_valor_fixo=max(texto_para_float(frete_valor_fixo), 0),
+        frete_valor_km=max(texto_para_float(frete_valor_km), 0),
+        frete_cep_origem=_cep_limpo(frete_cep_origem) or None,
+        frete_multiplicador_km=2,
+        vitrine_ativa=bool(vitrine_ativa),
+        vitrine_fluxo=fluxo,
+        vitrine_titulo=vitrine_titulo.strip()[:160] or None,
+        vitrine_subtitulo=vitrine_subtitulo.strip()[:240] or None,
+        vitrine_cor_primaria=_cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF"),
+        vitrine_cor_secundaria=_cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF"),
+        suporte_inicio=suporte_inicio.strip() or None,
+        suporte_fim=suporte_fim.strip() or None,
         mostrar_suporte_contrato=bool(mostrar_suporte_contrato),
         logo_url="",
         logo_idb_url="",
@@ -4055,30 +4221,29 @@ def admin_criar_empresa(
         mensagem_preparacao=mensagem_preparacao.strip(),
         mensagem_a_caminho=mensagem_a_caminho.strip(),
         mensagem_localizacao=mensagem_localizacao.strip(),
+        mensagem_hora_fim=mensagem_hora_fim.strip(),
+        mostrar_mensagem_hora_fim=bool(mostrar_mensagem_hora_fim),
         ativa=True
     )
     db.add(empresa)
     db.commit()
     db.refresh(empresa)
-    garantir_itens_estoque_padrao(db, empresa.id)
 
-    # Logo no cadastro inicial da empresa.
     if logo_arquivo and logo_arquivo.filename:
         empresa.logo_url = _salvar_imagem_upload_segura(
             logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
         )
-        empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
-        empresa.logo_idb_url = ""
     elif logo_idb_url.strip():
         empresa.logo_idb_url = logo_idb_url.strip()
-        empresa.logo_url = ""
+    if empresa.infinitepay_ativa:
+        _infinitepay_seed_taxas(db, empresa.id)
     db.commit()
-    db.refresh(empresa)
     configurar_campos_empresa(db, empresa.id)
     criar_modelos_iniciais_empresa(db, empresa)
-    return RedirectResponse("/admin", status_code=303)
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    return RedirectResponse(f"/admin/empresa/{empresa.id}", status_code=303)
 
 
 @app.get("/admin/empresa/{empresa_id}", response_class=HTMLResponse)
@@ -4089,7 +4254,7 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
         raise HTTPException(404)
     empresas = db.query(Empresa).order_by(Empresa.nome).all()
     usuarios_empresa = db.query(UsuarioEmpresa).filter_by(empresa_id=empresa.id).order_by(UsuarioEmpresa.nome).all()
-    equipes = db.query(Equipe).filter_by(empresa_id=empresa.id).order_by(Equipe.nome).all()
+    equipes = db.query(Equipe).filter_by(empresa_id=empresa.id).order_by(Equipe.ordem.asc(), Equipe.nome.asc()).all()
     equipes_usuario = {u.id: [e.id for e in u.equipes] for u in usuarios_empresa}
     competencia_atual = agora_utc().strftime("%Y-%m")
     aceitos_mes = db.query(Solicitacao).filter(
@@ -4103,6 +4268,7 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
                                        "usuarios_empresa": usuarios_empresa, "equipes": equipes,
                                        "equipes_usuario": equipes_usuario, "aceitos_mes": aceitos_mes,
                                        "pendentes_humiat": pendentes_humiat, "movimentos_humiat": movimentos_humiat,
+                                       "sistemas_humiat": _sistemas_humiat_lista(empresa),
                                        "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
 
 
@@ -4114,11 +4280,15 @@ def admin_salvar_empresa(
         usuario_admin: str = Form(...),
         senha_admin: str = Form(""),
         identificador_principal: str = Form("telefone"),
+        cidade_atendimento: str = Form(""),
         pix_copia_cola: str = Form(""),
         pix_nome_recebedor: str = Form(""),
         pix_banco: str = Form(""),
         whatsapp_retorno: str = Form(""),
         infinitepay_ativa: Optional[str] = Form(None),
+        infinitepay_handle: str = Form(""),
+        infinitepay_valor_sinal: str = Form("0"),
+        exige_sinal: Optional[str] = Form(None),
         nfse_ativa: Optional[str] = Form(None),
         google_calendar_ativo: Optional[str] = Form(None),
         google_calendar_contratos: Optional[str] = Form(None),
@@ -4127,9 +4297,24 @@ def admin_salvar_empresa(
         google_calendar_reminder_1: int = Form(1440),
         google_calendar_reminder_2: int = Form(120),
         google_calendar_duracao_operacao_min: int = Form(30),
-        infinitepay_handle: str = Form(""),
-        infinitepay_valor_sinal: str = Form("0"),
-        exige_sinal: Optional[str] = Form(None),
+        modulo_equipes_ativo: Optional[str] = Form(None),
+        modulo_recursos_ativo: Optional[str] = Form(None),
+        modulo_cupons_ativo: Optional[str] = Form(None),
+        inteligencia_ativa: Optional[str] = Form(None),
+        lokafest_ativo: Optional[str] = Form(None),
+        lokafest_url: str = Form(""),
+        humiat_slug: str = Form(""),
+        sistema_humiat: list[str] = Form(default=[]),
+        frete_tipo: str = Form("consultar"),
+        frete_valor_fixo: str = Form("0"),
+        frete_valor_km: str = Form("0"),
+        frete_cep_origem: str = Form(""),
+        vitrine_ativa: Optional[str] = Form(None),
+        vitrine_fluxo: str = Form("direto"),
+        vitrine_titulo: str = Form(""),
+        vitrine_subtitulo: str = Form(""),
+        vitrine_cor_primaria: str = Form("#6D4AFF"),
+        vitrine_cor_secundaria: str = Form("#EEF0FF"),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
         mostrar_suporte_contrato: Optional[str] = Form(None),
@@ -4146,16 +4331,42 @@ def admin_salvar_empresa(
     empresa = db.get(Empresa, empresa_id)
     if not empresa:
         raise HTTPException(404)
+    slug_limpo = re.sub(r"[^a-z0-9-]+", "-", unicodedata.normalize("NFKD", slug or "").encode("ascii", "ignore").decode("ascii").lower()).strip("-")
+    if not slug_limpo:
+        raise HTTPException(400, "Informe um slug válido.")
+    conflito_slug = db.query(Empresa).filter(func.lower(Empresa.slug) == slug_limpo, Empresa.id != empresa.id).first()
+    if conflito_slug:
+        raise HTTPException(400, "Já existe outra empresa com este slug.")
+
+    sistemas = _normalizar_sistemas_humiat(sistema_humiat)
+    fluxo = (vitrine_fluxo or "direto").strip().lower()
+    if fluxo not in {"direto", "aprovacao", "lokafest"}:
+        fluxo = "direto"
+    tipo_frete = (frete_tipo or "consultar").strip().lower()
+    if tipo_frete not in {"consultar", "fixo", "km"}:
+        tipo_frete = "consultar"
+
     empresa.nome = nome.strip()
-    empresa.slug = slug.strip().lower().replace(" ", "-")
+    empresa.slug = slug_limpo
+    empresa.humiat_slug = (humiat_slug.strip().lower()[:80] or empresa.humiat_slug or slug_limpo)
+    empresa.humiat_sistemas_json = json.dumps(sistemas, ensure_ascii=False)
     empresa.identificador_principal = identificador_principal
     empresa.usuario_admin = usuario_admin.strip()
     empresa.senha_admin = senha_admin.strip() if LOCAL_LOGIN_ENABLED and senha_admin.strip() else empresa.senha_admin
+    empresa.cidade_atendimento = cidade_atendimento.strip()[:120] or None
     empresa.pix_copia_cola = pix_copia_cola.strip()
     empresa.pix_nome_recebedor = pix_nome_recebedor.strip()
     empresa.pix_banco = pix_banco.strip()
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
+
+    # InfinitePay é exclusivamente técnica/administrativa e permanece somente no ADM.
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
+    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or None
+    empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
+    empresa.exige_sinal = bool(exige_sinal)
+    if empresa.infinitepay_ativa:
+        _infinitepay_seed_taxas(db, empresa.id)
+
     empresa.nfse_ativa = bool(nfse_ativa)
     empresa.google_calendar_ativo = bool(google_calendar_ativo)
     empresa.google_calendar_contratos = bool(google_calendar_contratos)
@@ -4164,14 +4375,30 @@ def admin_salvar_empresa(
     empresa.google_calendar_reminder_1 = max(int(google_calendar_reminder_1 or 0), 0)
     empresa.google_calendar_reminder_2 = max(int(google_calendar_reminder_2 or 0), 0)
     empresa.google_calendar_duracao_operacao_min = max(int(google_calendar_duracao_operacao_min or 30), 5)
-    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or None
-    empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
-    empresa.exige_sinal = bool(exige_sinal)
-    empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
-    empresa.suporte_fim = suporte_fim.strip() or empresa.suporte_fim or "20:00"
+
+    empresa.modulo_equipes_ativo = bool(modulo_equipes_ativo)
+    empresa.modulo_recursos_ativo = bool(modulo_recursos_ativo)
+    empresa.modulo_cupons_ativo = bool(modulo_cupons_ativo)
+    empresa.inteligencia_ativa = bool(inteligencia_ativa)
+    empresa.lokafest_ativo = bool(lokafest_ativo) or "LOKAFEST" in sistemas
+    empresa.lokafest_url = lokafest_url.strip()[:300] or None
+
+    empresa.frete_tipo = tipo_frete
+    empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
+    empresa.frete_valor_km = max(texto_para_float(frete_valor_km), 0)
+    empresa.frete_cep_origem = _cep_limpo(frete_cep_origem) or None
+    empresa.frete_multiplicador_km = 2
+
+    empresa.vitrine_ativa = bool(vitrine_ativa)
+    empresa.vitrine_fluxo = fluxo
+    empresa.vitrine_titulo = vitrine_titulo.strip()[:160] or None
+    empresa.vitrine_subtitulo = vitrine_subtitulo.strip()[:240] or None
+    empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
+    empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
+
+    empresa.suporte_inicio = suporte_inicio.strip() or None
+    empresa.suporte_fim = suporte_fim.strip() or None
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
-    # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
-    # Mantemos URL apenas como alternativa técnica.
     if logo_arquivo and logo_arquivo.filename:
         empresa.logo_url = _salvar_imagem_upload_segura(
             logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
@@ -4189,7 +4416,8 @@ def admin_salvar_empresa(
     empresa.humiat_custo_contrato = max(0, int(humiat_custo_contrato or 0))
     db.commit()
     empresa_cache_invalidar(empresa.id)
-    return RedirectResponse("/admin", status_code=303)
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    return RedirectResponse(f"/admin/empresa/{empresa.id}?salvo=1", status_code=303)
 
 
 @app.get("/admin/empresa/{empresa_id}/google-calendar/conectar")
@@ -4399,15 +4627,17 @@ def admin_criar_usuario_empresa(
 
 
 @app.post("/admin/empresa/{empresa_id}/equipes")
-def admin_salvar_equipe(empresa_id: int, nome: str = Form(...), equipe_id: Optional[int] = Form(None), ativo: Optional[str] = Form("1"), db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+def admin_salvar_equipe(empresa_id: int, nome: str = Form(...), equipe_id: Optional[int] = Form(None), ordem: int = Form(0), ativo: Optional[str] = Form("1"), db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
     empresa = db.get(Empresa, empresa_id)
-    if not empresa: raise HTTPException(404)
+    if not empresa or not _empresa_modulo_ativo(empresa, "equipes"):
+        raise HTTPException(404)
     equipe = db.get(Equipe, equipe_id) if equipe_id else None
     if equipe and equipe.empresa_id != empresa.id: raise HTTPException(404)
     if not equipe:
         equipe = Equipe(empresa_id=empresa.id)
         db.add(equipe)
     equipe.nome = nome.strip()
+    equipe.ordem = int(ordem or 0)
     equipe.ativa = bool(ativo)
     db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
@@ -4415,11 +4645,11 @@ def admin_salvar_equipe(empresa_id: int, nome: str = Form(...), equipe_id: Optio
 
 @app.get("/admin/empresa/{empresa_id}/equipe/{equipe_id}/excluir")
 def admin_excluir_equipe(empresa_id: int, equipe_id: int, db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+    empresa = db.get(Empresa, empresa_id)
     equipe = db.get(Equipe, equipe_id)
-    if equipe and equipe.empresa_id == empresa_id:
-        em_uso = db.query(Agenda).filter(Agenda.equipe_id == equipe.id).first()
-        if em_uso: equipe.ativa = False
-        else: db.delete(equipe)
+    if empresa and _empresa_modulo_ativo(empresa, "equipes") and equipe and equipe.empresa_id == empresa_id:
+        # O cadastro padrão preserva histórico: excluir na interface significa inativar.
+        equipe.ativa = False
         db.commit()
     return RedirectResponse(f"/admin/empresa/{empresa_id}", status_code=303)
 
@@ -4524,11 +4754,46 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", 
     empresa = None
     if slug:
         empresa = db.query(Empresa).filter(func.lower(Empresa.slug) == slug, Empresa.ativa == True).first()
-        if not empresa:
+        if not empresa and modo == "adm":
+            # Uma empresa já autorizada pelo Humiat ID pode nascer no Connect como
+            # rascunho. O ADM conclui apenas as configurações específicas do Connect.
+            nome_empresa_h = str(empresa_h.get("nome") or empresa_h.get("razao_social") or slug).strip()[:120]
+            usuario_base = (email or f"adm-{slug}").strip().lower()[:80]
+            usuario_final = usuario_base
+            if db.query(Empresa).filter(func.lower(Empresa.usuario_admin) == usuario_final.lower()).first():
+                usuario_final = f"adm-{slug}-{uuid.uuid4().hex[:6]}"[:80]
+            empresa = Empresa(
+                nome=nome_empresa_h or slug,
+                slug=slug[:80],
+                humiat_slug=str(empresa_h.get("slug") or slug).strip().lower()[:80],
+                origem_cadastro="humiat_id",
+                identificador_principal="telefone",
+                usuario_admin=usuario_final,
+                senha_admin=secrets.token_urlsafe(32),
+                ativa=True,
+                vitrine_ativa=False,
+                modulo_equipes_ativo=False,
+                modulo_recursos_ativo=False,
+                modulo_cupons_ativo=False,
+                inteligencia_ativa=False,
+            )
+            _atualizar_metadados_humiat_empresa(empresa, empresa_h, dados)
+            lokafest_url_ticket = str(empresa_h.get("lokafest_url") or dados.get("lokafest_url") or "").strip()
+            if lokafest_url_ticket:
+                empresa.lokafest_url = lokafest_url_ticket[:300]
+            db.add(empresa)
+            db.commit()
+            db.refresh(empresa)
+            configurar_campos_empresa(db, empresa.id)
+            criar_modelos_iniciais_empresa(db, empresa)
+        elif not empresa:
             raise HTTPException(
                 status_code=403,
-                detail=f"A empresa '{slug}' está liberada no Organiza, mas ainda não existe no Connect com o mesmo slug.",
+                detail=f"A empresa '{slug}' está liberada no Humiat ID, mas ainda não existe no Connect. Peça ao administrador para concluir o cadastro.",
             )
+        elif empresa:
+            _atualizar_metadados_humiat_empresa(empresa, empresa_h, dados)
+            db.commit()
 
     if modo == "adm":
         request.session.clear()
@@ -4828,6 +5093,8 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
         por_empresa.setdefault(int(item.empresa_id), []).append(item)
 
     for empresa_id, alvos_empresa in por_empresa.items():
+        empresa_cfg = db.get(Empresa, empresa_id)
+        usa_recursos_empresa = bool(empresa_cfg and _empresa_modulo_ativo(empresa_cfg, "recursos"))
         datas = {item.data_evento for item in alvos_empresa if item.data_evento}
         if not datas:
             continue
@@ -5056,6 +5323,8 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
                         "conflito": falta > 0,
                     })
 
+            if not usa_recursos_empresa:
+                linhas_recursos = []
             conflitos_produtos = [linha for linha in linhas_produtos if linha["conflito"]]
             conflitos_recursos = [linha for linha in linhas_recursos if linha["conflito"]]
             resultado[sid] = {
@@ -5177,6 +5446,148 @@ def _recursos_produto_edicao(db: Session, empresa_id: int, produto_id: int | Non
     }
 
 
+
+def _empresa_modulo_ativo(empresa: Empresa, modulo: str) -> bool:
+    mapa = {
+        "equipes": "modulo_equipes_ativo",
+        "recursos": "modulo_recursos_ativo",
+        "cupons": "modulo_cupons_ativo",
+        "inteligencia": "inteligencia_ativa",
+    }
+    campo = mapa.get((modulo or "").strip().lower())
+    return bool(campo and getattr(empresa, campo, False))
+
+
+def _sistemas_humiat_lista(empresa: Empresa) -> list[str]:
+    bruto = str(getattr(empresa, "humiat_sistemas_json", "") or "").strip()
+    if not bruto:
+        sistemas = ["HUMIAT ID", "CONNECT"]
+        if getattr(empresa, "lokafest_ativo", False):
+            sistemas.append("LOKAFEST")
+        return sistemas
+    try:
+        obj = json.loads(bruto)
+        if isinstance(obj, dict):
+            return sorted({str(k).strip().upper() for k, v in obj.items() if v and str(k).strip()})
+        if isinstance(obj, list):
+            return sorted({str(v).strip().upper() for v in obj if str(v).strip()})
+    except Exception:
+        pass
+    return ["HUMIAT ID", "CONNECT"]
+
+
+def _normalizar_sistemas_humiat(dados: dict | list | str | None) -> list[str]:
+    if isinstance(dados, dict):
+        valores = [k for k, v in dados.items() if v]
+    elif isinstance(dados, list):
+        valores = dados
+    elif isinstance(dados, str):
+        valores = re.split(r"[,;|]", dados)
+    else:
+        valores = []
+    saida = []
+    aliases = {
+        "HUMIAT": "HUMIAT ID", "HUMIAT_ID": "HUMIAT ID", "HUMIAT ID": "HUMIAT ID",
+        "CONNECT": "CONNECT", "CONECT": "CONNECT",
+        "ORGANIZA": "ORGANIZA", "LOKAFEST": "LOKAFEST", "LOKA FEST": "LOKAFEST",
+        "SOLVOZ": "SOLVOZ",
+    }
+    for valor in valores:
+        chave = str(valor or "").strip().upper().replace("-", " ").replace("_", " ")
+        chave = re.sub(r"\s+", " ", chave)
+        norm = aliases.get(chave, chave)
+        if norm and norm not in saida:
+            saida.append(norm)
+    if "HUMIAT ID" not in saida:
+        saida.insert(0, "HUMIAT ID")
+    if "CONNECT" not in saida:
+        saida.append("CONNECT")
+    return saida
+
+
+def _atualizar_metadados_humiat_empresa(empresa: Empresa, empresa_h: dict | None = None, dados_ticket: dict | None = None) -> None:
+    """Aproveita dados que o Humiat ID já enviou sem depender de um endpoint extra.
+
+    A estrutura aceita ``sistemas``, ``produtos`` ou ``apps`` em lista/dict para
+    continuar compatível com evoluções do Humiat ID.
+    """
+    empresa_h = empresa_h or {}
+    dados_ticket = dados_ticket or {}
+    slug_global = str(empresa_h.get("slug") or dados_ticket.get("empresa_slug") or "").strip().lower()
+    if slug_global:
+        empresa.humiat_slug = slug_global[:80]
+    sistemas_brutos = (
+        empresa_h.get("sistemas")
+        or empresa_h.get("produtos")
+        or empresa_h.get("apps")
+        or dados_ticket.get("sistemas")
+        or dados_ticket.get("produtos")
+        or dados_ticket.get("apps")
+    )
+    sistemas = _normalizar_sistemas_humiat(sistemas_brutos)
+    empresa.humiat_sistemas_json = json.dumps(sistemas, ensure_ascii=False)
+    empresa.lokafest_ativo = bool(getattr(empresa, "lokafest_ativo", False) or "LOKAFEST" in sistemas)
+
+
+def _categorias_vitrine_empresa(db: Session, empresa_id: int, somente_ativas: bool = True) -> list[VitrineCategoria]:
+    consulta = db.query(VitrineCategoria).filter(VitrineCategoria.empresa_id == empresa_id)
+    if somente_ativas:
+        consulta = consulta.filter(VitrineCategoria.ativa == True)
+    return consulta.order_by(VitrineCategoria.ordem.asc(), VitrineCategoria.nome.asc()).all()
+
+
+def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> None:
+    """Importa categorias já escritas nos produtos e cria a base inicial da KRJ uma vez.
+
+    Empresas novas continuam vazias: nenhuma categoria de karaokê é padrão global.
+    """
+    existentes = {
+        str(nome or "").strip().casefold()
+        for (nome,) in db.query(VitrineCategoria.nome).filter(VitrineCategoria.empresa_id == empresa.id).all()
+        if str(nome or "").strip()
+    }
+    nomes_produtos = [
+        str(nome or "").strip()
+        for (nome,) in db.query(ProdutoServico.vitrine_categoria).filter(
+            ProdutoServico.empresa_id == empresa.id,
+            ProdutoServico.vitrine_categoria.isnot(None),
+        ).distinct().all()
+        if str(nome or "").strip()
+    ]
+    ordem = db.query(func.max(VitrineCategoria.ordem)).filter(VitrineCategoria.empresa_id == empresa.id).scalar() or 0
+    mudou = False
+    for nome in nomes_produtos:
+        if nome.casefold() not in existentes:
+            ordem += 10
+            db.add(VitrineCategoria(empresa_id=empresa.id, nome=nome[:80], ordem=ordem, ativa=True))
+            existentes.add(nome.casefold())
+            mudou = True
+    if not existentes and (empresa.slug or "").strip().lower() in {"karaokerj", "karaoke-rj"}:
+        for idx, nome in enumerate(("Karaokê", "Jogos", "Combos"), start=1):
+            db.add(VitrineCategoria(empresa_id=empresa.id, nome=nome, ordem=idx * 10, ativa=True))
+        mudou = True
+    if mudou:
+        db.commit()
+
+
+def _url_lokafest_segura(empresa: Empresa, data_evento: date | None = None) -> str | None:
+    alvo = str(getattr(empresa, "lokafest_url", "") or "").strip()
+    if not alvo:
+        return None
+    try:
+        parsed = urlparse(alvo)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        pares = list(parse_qsl(parsed.query, keep_blank_values=True))
+        pares.append(("origem", "connect"))
+        pares.append(("empresa", str(empresa.slug or "")))
+        if data_evento:
+            pares.append(("data_evento", data_evento.isoformat()))
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(pares), parsed.fragment))
+    except Exception:
+        return None
+
+
 def _cor_hex_vitrine(valor: str, padrao: str) -> str:
     valor = str(valor or "").strip()
     return valor.upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", valor) else padrao
@@ -5198,20 +5609,19 @@ def _tipo_imagem_real(dados: bytes) -> str | None:
 
 
 def _salvar_imagem_upload_segura(upload: UploadFile | None, destino_dir: Path, prefixo: str = "") -> str:
-    """Valida tamanho + assinatura real antes de publicar qualquer imagem enviada."""
+    """Valida a assinatura real da imagem e normaliza a extensão automaticamente.
+
+    JFIF/JPE/JPEG são todos JPEG. O usuário não deve receber erro apenas porque o
+    celular/WhatsApp salvou a mesma imagem com outra extensão.
+    """
     if not upload or not getattr(upload, "filename", ""):
         return ""
-    declarada = Path(upload.filename).suffix.lower()
-    if declarada == ".jpeg":
-        declarada = ".jpg"
-    if declarada not in {".png", ".jpg", ".webp", ".gif"}:
-        raise HTTPException(400, "Formato de imagem inválido. Use PNG, JPG, WEBP ou GIF.")
     dados = upload.file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
     if len(dados) > MAX_IMAGE_UPLOAD_BYTES:
         raise HTTPException(413, f"Imagem muito grande. Limite: {MAX_IMAGE_UPLOAD_BYTES // (1024 * 1024)} MB.")
     real = _tipo_imagem_real(dados)
-    if not real or real != declarada:
-        raise HTTPException(400, "O arquivo enviado não é uma imagem válida do formato informado.")
+    if not real:
+        raise HTTPException(400, "Não conseguimos usar esta imagem. Escolha uma foto JPG, JPEG, JFIF, PNG, WEBP ou GIF.")
     destino_dir.mkdir(parents=True, exist_ok=True)
     nome = f"{prefixo}{uuid.uuid4().hex}{real}"
     destino = destino_dir / nome
@@ -5284,34 +5694,80 @@ def _coordenadas_cep(cep: str, identificador: str = "cep"):
     return lat, lon, detalhe
 
 
-def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str) -> dict:
+def _coordenadas_cep_numero(cep: str, numero: str = "", identificador: str = "cep"):
+    cep_limpo = _cep_limpo(cep)
+    numero_limpo = re.sub(r"[^0-9A-Za-z/-]", "", str(numero or "").strip())[:20]
+    if len(cep_limpo) != 8:
+        return None, None, "CEP inválido"
+    chave = f"{cep_limpo}:{numero_limpo}"
+    if chave in _CEP_COORD_CACHE:
+        lat, lon = _CEP_COORD_CACHE[chave]
+        return lat, lon, "cache"
+    cep_fmt = f"{cep_limpo[:5]}-{cep_limpo[5:]}"
+    consultas = []
+    if numero_limpo:
+        consultas.extend([f"{cep_fmt}, {numero_limpo}, Brasil", f"CEP {cep_limpo}, número {numero_limpo}, Brasil"])
+    consultas.extend([f"{cep_fmt}, Brasil", f"CEP {cep_limpo}, Brasil"])
+    lat, lon, detalhe = _geocodificar_consultas(consultas, identificador=identificador)
+    if lat is not None and lon is not None:
+        _CEP_COORD_CACHE[chave] = (float(lat), float(lon))
+    return lat, lon, detalhe
+
+
+def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: str = "") -> dict:
     cep = _cep_limpo(cep_destino)
+    numero = str(numero_destino or "").strip()[:30]
     if len(cep) != 8:
         return {"ok": False, "erro": "Informe um CEP válido."}
+    if not numero:
+        return {"ok": False, "erro": "Informe o número do endereço."}
     tipo = str(getattr(empresa, "frete_tipo", "consultar") or "consultar").lower()
     if tipo == "fixo":
         valor = max(float(getattr(empresa, "frete_valor_fixo", 0) or 0), 0.0)
-        return {"ok": True, "tipo": "fixo", "cep": cep, "valor": round(valor, 2), "distancia_km": None}
+        return {
+            "ok": True, "tipo": "fixo", "cep": cep, "numero": numero,
+            "valor": round(valor, 2), "distancia_ida_km": None, "quantidade_km": None,
+            "valor_km": None,
+        }
     if tipo == "km":
         origem = _cep_limpo(getattr(empresa, "frete_cep_origem", "") or "")
         valor_km = max(float(getattr(empresa, "frete_valor_km", 0) or 0), 0.0)
-        multiplicador = max(float(getattr(empresa, "frete_multiplicador_km", 1) or 1), 0.1)
         if len(origem) != 8 or valor_km <= 0:
             return {"ok": False, "erro": "O cálculo por KM ainda não foi configurado pela empresa."}
         lat1, lon1, _ = _coordenadas_cep(origem, f"frete-origem-{empresa.id}")
-        lat2, lon2, _ = _coordenadas_cep(cep, f"frete-destino-{empresa.id}")
+        lat2, lon2, _ = _coordenadas_cep_numero(cep, numero, f"frete-destino-{empresa.id}")
         if None in (lat1, lon1, lat2, lon2):
-            return {"ok": False, "erro": "Não foi possível localizar este CEP agora. Tente novamente."}
-        distancia, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
-        if distancia is None:
+            return {"ok": False, "erro": "Não foi possível localizar este endereço agora. Confira CEP e número."}
+        distancia_ida, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
+        if distancia_ida is None:
             return {"ok": False, "erro": "Não foi possível calcular o deslocamento agora."}
-        valor = round(max(float(distancia), 0.0) * valor_km * multiplicador, 2)
-        return {"ok": True, "tipo": "km", "cep": cep, "valor": valor, "distancia_km": round(float(distancia), 1), "fonte": fonte}
-    return {"ok": True, "tipo": "consultar", "cep": cep, "valor": 0.0, "distancia_km": None, "consultar": True}
+        distancia_ida = max(float(distancia_ida), 0.0)
+        quantidade_km = distancia_ida * 2.0
+        valor = round(quantidade_km * valor_km, 2)
+        return {
+            "ok": True, "tipo": "km", "cep": cep, "numero": numero, "valor": valor,
+            "distancia_ida_km": round(distancia_ida, 1),
+            "quantidade_km": round(quantidade_km, 1),
+            "valor_km": round(valor_km, 2),
+            # Compatibilidade com a tela antiga: distancia_km passa a representar a ida.
+            "distancia_km": round(distancia_ida, 1),
+            "fonte": fonte,
+        }
+    return {
+        "ok": True, "tipo": "consultar", "cep": cep, "numero": numero, "valor": 0.0,
+        "distancia_ida_km": None, "quantidade_km": None, "valor_km": None, "consultar": True,
+    }
 
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -> list[dict]:
-    """Calcula a mesma disponibilidade operacional do painel, mas em formato enxuto para a vitrine."""
-    garantir_itens_estoque_padrao(db, empresa.id)
+    """Disponibilidade pública ordenada por categoria e, depois, pela ordem do item."""
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
+    ordem_categoria = {c.nome.casefold(): (int(c.ordem or 0), c.nome) for c in categorias}
+    categorias_cadastradas = {c.nome.casefold() for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)}
+    categorias_inativas = {
+        c.nome.casefold() for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False) if not c.ativa
+    }
+
     produtos = (
         db.query(ProdutoServico)
         .options(selectinload(ProdutoServico.fotos))
@@ -5320,9 +5776,16 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
             ProdutoServico.ativo == True,
             ProdutoServico.vitrine_ativo == True,
         )
-        .order_by(ProdutoServico.vitrine_ordem.asc(), ProdutoServico.nome.asc())
         .all()
     )
+    # Categoria inativa tira seus itens da vitrine, sem alterar o histórico/cadastro.
+    produtos = [p for p in produtos if (str(p.vitrine_categoria or '').strip().casefold() not in categorias_inativas)]
+    produtos.sort(key=lambda p: (
+        ordem_categoria.get(str(p.vitrine_categoria or '').strip().casefold(), (999999, str(p.vitrine_categoria or 'Outros')))[0],
+        int(p.vitrine_ordem or 0),
+        str(p.nome or '').casefold(),
+    ))
+
     reservas_do_dia = _reservas_ativas_na_data(db, empresa.id, data_consulta)
     alugado_por_produto: dict[int, int] = {}
     for reserva in reservas_do_dia:
@@ -5331,28 +5794,30 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
                 continue
             alugado_por_produto[int(ri.produto_id)] = alugado_por_produto.get(int(ri.produto_id), 0) + max(1, int(ri.quantidade or 1))
 
-    mapa_recursos = _mapa_recursos_produtos(db, empresa.id)
-    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta)
-    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+    usa_recursos = _empresa_modulo_ativo(empresa, 'recursos')
+    mapa_recursos = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
+    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta) if usa_recursos else {}
+    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)} if usa_recursos else {}
 
     saida = []
     for produto in produtos:
         total = max(0, int(produto.quantidade_disponivel or 0))
         alugados = max(0, int(alugado_por_produto.get(produto.id, 0)))
         disponivel_fisico = max(total - alugados, 0)
-        disponiveis, _detalhes = _limite_recursos_produto(
-            produto,
-            mapa_recursos.get(produto.id, {}),
-            itens_estoque,
-            comprometido_recursos,
-            disponivel_fisico,
-        )
+        if usa_recursos:
+            disponiveis, _detalhes = _limite_recursos_produto(
+                produto, mapa_recursos.get(produto.id, {}), itens_estoque, comprometido_recursos, disponivel_fisico,
+            )
+        else:
+            disponiveis = disponivel_fisico
+        categoria = str(produto.vitrine_categoria or '').strip()
         saida.append({
-            "produto": produto,
-            "disponiveis": max(0, int(disponiveis)),
-            "foto": _foto_capa_produto(produto),
-            "resumo": (produto.vitrine_resumo or produto.descricao or "").strip(),
-            "categoria": (produto.vitrine_categoria or "").strip(),
+            'produto': produto,
+            'disponiveis': max(0, int(disponiveis)),
+            'foto': _foto_capa_produto(produto),
+            'resumo': (produto.vitrine_resumo or produto.descricao or '').strip(),
+            'categoria': categoria or 'Outros',
+            'categoria_cadastrada': (categoria.casefold() in categorias_cadastradas) if categoria else False,
         })
     return saida
 
@@ -5381,30 +5846,36 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         valor_total = round(valor_unitario * quantidade, 2)
         total += valor_total
         itens.append({
-            "produto": produto,
-            "produto_id": produto.id,
-            "nome": produto.nome,
-            "quantidade": quantidade,
-            "valor_unitario": valor_unitario,
-            "valor_total": valor_total,
+            "produto": produto, "produto_id": produto.id, "nome": produto.nome,
+            "quantidade": quantidade, "valor_unitario": valor_unitario, "valor_total": valor_total,
             "foto": _foto_capa_produto(produto),
         })
     if not itens:
         return None
     frete_bruto = bruto.get("frete") if isinstance(bruto.get("frete"), dict) else {}
     frete_valor = max(float(frete_bruto.get("valor") or 0), 0.0)
+    cupom_codigo = _normalizar_codigo_cupom(str(bruto.get("cupom_codigo") or ""))
+    cupom = _cupom_valido(db, empresa.id, cupom_codigo) if (_empresa_modulo_ativo(empresa, 'cupons') and cupom_codigo) else None
+    desconto = round(total * (float(cupom.percentual or 0) / 100.0), 2) if cupom else 0.0
     return {
         "data_evento": data_obj,
         "itens": itens,
         "subtotal": round(total, 2),
+        "cupom": cupom,
+        "cupom_codigo": cupom.codigo if cupom else "",
+        "cupom_percentual": float(cupom.percentual or 0) if cupom else 0.0,
+        "desconto": desconto,
         "frete": {
             "cep": _cep_limpo(frete_bruto.get("cep") or ""),
+            "numero": str(frete_bruto.get("numero") or "").strip()[:30],
             "tipo": str(frete_bruto.get("tipo") or "consultar"),
             "valor": round(frete_valor, 2),
-            "distancia_km": frete_bruto.get("distancia_km"),
+            "distancia_ida_km": frete_bruto.get("distancia_ida_km") or frete_bruto.get("distancia_km"),
+            "quantidade_km": frete_bruto.get("quantidade_km"),
+            "valor_km": frete_bruto.get("valor_km"),
             "consultar": bool(frete_bruto.get("consultar")),
         },
-        "total": round(total + frete_valor, 2),
+        "total": round(max(total - desconto, 0) + frete_valor, 2),
     }
 
 
@@ -6218,7 +6689,7 @@ async def salvar_cadastro_empresa_guiado(
         frete_valor_fixo: str = Form("0"),
         frete_valor_km: str = Form("0"),
         frete_cep_origem: str = Form(""),
-        frete_multiplicador_km: str = Form("1"),
+        frete_multiplicador_km: str = Form("2"),
         vitrine_ativa: Optional[str] = Form(None),
         vitrine_titulo: str = Form(""),
         vitrine_subtitulo: str = Form(""),
@@ -6251,10 +6722,8 @@ async def salvar_cadastro_empresa_guiado(
     empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
     empresa.frete_valor_km = max(texto_para_float(frete_valor_km), 0)
     empresa.frete_cep_origem = _cep_limpo(frete_cep_origem) or None
-    try:
-        empresa.frete_multiplicador_km = max(0.1, min(float(str(frete_multiplicador_km or "1").replace(",", ".")), 20.0))
-    except Exception:
-        empresa.frete_multiplicador_km = 1.0
+    # Regra padrão do Connect: o deslocamento por KM sempre cobra ida + volta.
+    empresa.frete_multiplicador_km = 2.0
 
     empresa.vitrine_ativa = bool(vitrine_ativa)
     empresa.vitrine_titulo = (vitrine_titulo or "").strip()[:160] or None
@@ -6331,21 +6800,9 @@ async def salvar_configuracoes_empresa(
     empresa.pix_nome_recebedor = pix_nome_recebedor.strip()
     empresa.pix_banco = pix_banco.strip()
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
-    empresa.infinitepay_ativa = bool(infinitepay_ativa)
-    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or None
-    empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
+    # InfinitePay é uma integração técnica exclusiva do ADM geral.
+    # O painel da empresa exibe apenas o status e nunca altera handle, taxas ou ativação.
     empresa.exige_sinal = bool(exige_sinal)
-    _infinitepay_seed_taxas(db, empresa.id)
-    form_data = await request.form()
-    for parcelas in range(1, 13):
-        chave = f"infinitepay_taxa_{parcelas}"
-        if chave not in form_data:
-            continue
-        taxa = texto_para_float(str(form_data.get(chave) or "0"))
-        linha = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa.id, parcelas=parcelas).first()
-        if linha and 0 < taxa < 100:
-            linha.taxa_percentual = taxa
-            linha.ativa = True
     empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
     empresa.suporte_fim = suporte_fim.strip() or empresa.suporte_fim or "20:00"
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
@@ -6382,6 +6839,8 @@ async def salvar_configuracoes_empresa(
 
 @app.get("/painel/cupons", response_class=HTMLResponse)
 def cupons(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "cupons"):
+        raise HTTPException(404)
     itens = db.query(Cupom).filter_by(empresa_id=empresa.id).order_by(Cupom.ativo.desc(), Cupom.codigo).all()
     return templates.TemplateResponse("admin/cupons.html", {
         "request": request, "empresa": empresa, "cupons": itens, "cupom": None
@@ -6390,6 +6849,8 @@ def cupons(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
 
 @app.get("/painel/cupom/{cupom_id}", response_class=HTMLResponse)
 def cupom_editar(cupom_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "cupons"):
+        raise HTTPException(404)
     cupom = db.get(Cupom, cupom_id)
     if not cupom or cupom.empresa_id != empresa.id:
         raise HTTPException(404)
@@ -6408,6 +6869,8 @@ def salvar_cupom(
         valido_ate: str = Form(""), ativo: Optional[str] = Form(None),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
+    if not _empresa_modulo_ativo(empresa, "cupons"):
+        raise HTTPException(404)
     codigo_limpo = _normalizar_codigo_cupom(codigo)
     if not codigo_limpo:
         raise HTTPException(400, "Informe um código de cupom válido.")
@@ -6437,19 +6900,58 @@ def salvar_cupom(
 
 @app.get("/painel/vitrine", response_class=HTMLResponse)
 def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    produtos = (
-        db.query(ProdutoServico)
-        .options(selectinload(ProdutoServico.fotos))
-        .filter_by(empresa_id=empresa.id)
-        .order_by(ProdutoServico.vitrine_ordem.asc(), ProdutoServico.nome.asc())
-        .all()
-    )
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
+    ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias}
+    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
+    produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
     return templates.TemplateResponse("admin/vitrine.html", {
-        "request": request,
-        "empresa": empresa,
-        "produtos": produtos,
+        "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
+        "salvo": request.query_params.get("salvo", ""),
     })
+
+
+@app.post("/painel/vitrine/categorias")
+def salvar_categoria_vitrine(
+        categoria_id: str = Form(""), nome: str = Form(...), ordem: int = Form(0),
+        ativa: Optional[str] = Form(None), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    nome_limpo = " ".join((nome or "").strip().split())[:80]
+    if not nome_limpo:
+        raise HTTPException(400, "Informe o nome da categoria.")
+    cid = int(categoria_id) if str(categoria_id or "").isdigit() else None
+    categoria = db.get(VitrineCategoria, cid) if cid else None
+    if categoria and categoria.empresa_id != empresa.id:
+        raise HTTPException(404)
+    conflito = db.query(VitrineCategoria).filter(
+        VitrineCategoria.empresa_id == empresa.id, func.lower(VitrineCategoria.nome) == nome_limpo.lower()
+    ).first()
+    if conflito and (not categoria or conflito.id != categoria.id):
+        raise HTTPException(400, "Já existe uma categoria com este nome.")
+    nome_anterior = categoria.nome if categoria else ""
+    if not categoria:
+        categoria = VitrineCategoria(empresa_id=empresa.id)
+        db.add(categoria)
+    categoria.nome = nome_limpo
+    categoria.ordem = int(ordem or 0)
+    categoria.ativa = bool(ativa)
+    if nome_anterior and nome_anterior.casefold() != nome_limpo.casefold():
+        db.query(ProdutoServico).filter(
+            ProdutoServico.empresa_id == empresa.id, func.lower(ProdutoServico.vitrine_categoria) == nome_anterior.lower()
+        ).update({ProdutoServico.vitrine_categoria: nome_limpo}, synchronize_session=False)
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=categoria", status_code=303)
+
+
+@app.post("/painel/vitrine/categoria/{categoria_id}/status")
+def status_categoria_vitrine(
+        categoria_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    categoria = db.get(VitrineCategoria, categoria_id)
+    if not categoria or categoria.empresa_id != empresa.id:
+        raise HTTPException(404)
+    categoria.ativa = not bool(categoria.ativa)
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=categoria", status_code=303)
 
 
 @app.post("/painel/vitrine")
@@ -6520,10 +7022,13 @@ def excluir_foto_produto(produto_id: int, foto_id: int, db: Session = Depends(ge
 
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
+    usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    mapa = _mapa_recursos_produtos(db, empresa.id)
+    mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
     itens_por_id = {item.id: item for item in itens_estoque}
     for p in produtos:
         resumo = []
@@ -6538,8 +7043,8 @@ def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa =
         "produtos": produtos,
         "produto": None,
         "contratos": contratos,
-        "itens_estoque": itens_estoque,
-        "recursos_produto": {},
+        "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
+        "categorias_vitrine": categorias_vitrine, "recursos_produto": {},
     })
 
 
@@ -6549,10 +7054,13 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     produto = db.get(ProdutoServico, produto_id)
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
-    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
+    usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    mapa = _mapa_recursos_produtos(db, empresa.id)
+    mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
     itens_por_id = {item.id: item for item in itens_estoque}
     for p in produtos:
         resumo = []
@@ -6567,8 +7075,9 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
         "produtos": produtos,
         "produto": produto,
         "contratos": contratos,
-        "itens_estoque": itens_estoque,
-        "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id),
+        "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
+        "categorias_vitrine": categorias_vitrine,
+        "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if usa_recursos else {},
     })
 
 
@@ -6579,6 +7088,8 @@ def salvar_itens_estoque(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
     for idx, bruto_id in enumerate(item_id or []):
         try:
             recurso_id = int(bruto_id)
@@ -6603,6 +7114,8 @@ def novo_item_estoque(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
     nome_limpo = " ".join((nome or "").strip().split())
     if not nome_limpo:
         return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
@@ -6698,7 +7211,12 @@ def salvar_produto(
     produto.tipo_locacao = "horas_fixas"
     produto.vitrine_ativo = bool(vitrine_ativo)
     produto.vitrine_resumo = (vitrine_resumo or "").strip()[:240] or None
-    produto.vitrine_categoria = (vitrine_categoria or "").strip()[:80] or None
+    categoria_nome = (vitrine_categoria or "").strip()[:80]
+    categoria_valida = db.query(VitrineCategoria).filter(
+        VitrineCategoria.empresa_id == empresa.id, VitrineCategoria.ativa == True,
+        func.lower(VitrineCategoria.nome) == categoria_nome.lower(),
+    ).first() if categoria_nome else None
+    produto.vitrine_categoria = categoria_valida.nome if categoria_valida else None
     produto.vitrine_ordem = int(vitrine_ordem or 0)
     db.flush()
 
@@ -6719,9 +7237,10 @@ def salvar_produto(
         if primeira_nova is None:
             primeira_nova = foto
         proxima_ordem += 1
-    _salvar_vinculos_recursos_produto(
-        db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
-    )
+    if _empresa_modulo_ativo(empresa, "recursos"):
+        _salvar_vinculos_recursos_produto(
+            db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
+        )
     db.commit()
     return RedirectResponse("/painel/produtos", status_code=303)
 
@@ -6829,6 +7348,9 @@ def usuario_pode_ver_nao_roteirizados(request: Request, db: Session) -> bool:
 
 
 def equipes_visiveis_usuario(request: Request, db: Session, empresa_id: int):
+    empresa_cfg = db.get(Empresa, empresa_id)
+    if not empresa_cfg or not _empresa_modulo_ativo(empresa_cfg, "equipes"):
+        return []
     q = db.query(Equipe).filter(Equipe.empresa_id == empresa_id, Equipe.ativa == True)
     if request.session.get("acesso_total"):
         return q.order_by(Equipe.nome).all()
@@ -7532,6 +8054,8 @@ def salvar_recursos_solicitacao(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
@@ -7573,6 +8097,8 @@ def restaurar_recursos_solicitacao(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
@@ -13335,30 +13861,49 @@ def vitrine_publica(slug: str, request: Request, data_evento: str = "", db: Sess
         return RedirectResponse(f"/e/{slug}", status_code=303)
     if data_obj < date.today():
         return RedirectResponse(f"/e/{slug}?erro=data", status_code=303)
+    _garantir_categorias_vitrine_existentes(db, empresa)
     itens = _itens_vitrine_publica(db, empresa, data_obj)
-    categorias = []
-    for reg in itens:
-        categoria = reg.get("categoria") or ""
-        if categoria and categoria not in categorias:
-            categorias.append(categoria)
+    nomes_presentes = {str(reg.get("categoria") or "Outros").casefold() for reg in itens}
+    categorias = [c.nome for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True) if c.nome.casefold() in nomes_presentes]
+    if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
+        categorias.append("Outros")
     return templates.TemplateResponse("publico/vitrine.html", {
-        "request": request,
-        "empresa": empresa,
-        "data_evento": data_obj,
-        "itens": itens,
-        "categorias": categorias,
-        "erro": request.query_params.get("erro", ""),
+        "request": request, "empresa": empresa, "data_evento": data_obj, "itens": itens,
+        "categorias": categorias, "erro": request.query_params.get("erro", ""),
+        "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
+        "fluxo_vitrine": str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
     })
 
 
 @app.post("/e/{slug}/vitrine/calcular-deslocamento")
 def vitrine_calcular_deslocamento(
-        slug: str, cep: str = Form(...), db: Session = Depends(get_db)):
+        slug: str, cep: str = Form(...), numero: str = Form(...), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
-    resultado = _calcular_frete_vitrine(empresa, cep)
+    resultado = _calcular_frete_vitrine(empresa, cep, numero)
     return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 400)
+
+
+@app.post("/e/{slug}/vitrine/validar-cupom")
+def vitrine_validar_cupom(
+        slug: str, codigo: str = Form(""), data_evento: str = Form(""), db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
+        raise HTTPException(404)
+    if not _empresa_modulo_ativo(empresa, "cupons"):
+        return JSONResponse({"ok": False, "erro": "Cupons não estão disponíveis nesta vitrine."}, status_code=404)
+    try:
+        referencia = datetime.strptime(data_evento, "%Y-%m-%d").date() if data_evento else None
+    except Exception:
+        referencia = None
+    cupom = _cupom_valido(db, empresa.id, codigo, referencia=referencia)
+    if not cupom:
+        return JSONResponse({"ok": False, "erro": "Cupom inválido ou vencido."}, status_code=400)
+    return {
+        "ok": True, "codigo": cupom.codigo, "percentual": round(float(cupom.percentual or 0), 2),
+        "descricao": cupom.descricao or "",
+    }
 
 
 @app.post("/e/{slug}/vitrine/reservar")
@@ -13367,11 +13912,11 @@ def vitrine_publica_reservar(
         data_evento: str = Form(...),
         produto_id: list[str] = Form(default=[]),
         quantidade: list[str] = Form(default=[]),
-        cep_frete: str = Form(""),
+        cep_frete: str = Form(""), numero_frete: str = Form(""), cupom_codigo: str = Form(""),
         db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa:
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     try:
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -13394,20 +13939,35 @@ def vitrine_publica_reservar(
         pedido.append({"produto_id": pid, "quantidade": qtd})
     if not pedido:
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=selecione", status_code=303)
-    frete = _calcular_frete_vitrine(empresa, cep_frete)
+
+    frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
     if not frete.get("ok"):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=frete", status_code=303)
+
+    codigo = _normalizar_codigo_cupom(cupom_codigo)
+    cupom = None
+    if codigo:
+        if not _empresa_modulo_ativo(empresa, "cupons"):
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=cupom", status_code=303)
+        cupom = _cupom_valido(db, empresa.id, codigo, referencia=data_obj)
+        if not cupom:
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=cupom", status_code=303)
+
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
-        "data_evento": data_obj.isoformat(),
-        "itens": pedido,
+        "data_evento": data_obj.isoformat(), "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
         "frete": {
-            "cep": frete.get("cep"),
-            "tipo": frete.get("tipo"),
-            "valor": float(frete.get("valor") or 0),
-            "distancia_km": frete.get("distancia_km"),
+            "cep": frete.get("cep"), "numero": frete.get("numero"), "tipo": frete.get("tipo"),
+            "valor": float(frete.get("valor") or 0), "distancia_ida_km": frete.get("distancia_ida_km"),
+            "quantidade_km": frete.get("quantidade_km"), "valor_km": frete.get("valor_km"),
             "consultar": bool(frete.get("consultar")),
         },
     }
+
+    fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+    if fluxo == "lokafest" and getattr(empresa, "lokafest_ativo", False):
+        alvo = _url_lokafest_segura(empresa, data_obj)
+        if alvo:
+            return RedirectResponse(alvo, status_code=303)
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
 
@@ -14050,7 +14610,12 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
     if pedido_vitrine:
         contexto["vitrine_pedido"] = pedido_vitrine
         if form is None:
-            form = {"data_evento": pedido_vitrine["data_evento"].isoformat()}
+            frete = pedido_vitrine.get("frete") or {}
+            form = {
+                "data_evento": pedido_vitrine["data_evento"].isoformat(),
+                "cep": frete.get("cep") or "",
+                "numero": frete.get("numero") or "",
+            }
     if form is not None:
         contexto["form"] = form
     return contexto
@@ -14113,6 +14678,11 @@ def salvar_pre_cadastro(
     if not empresa:
         raise HTTPException(404)
     pedido_vitrine = _pedido_vitrine_sessao(request, db, empresa)
+    if pedido_vitrine:
+        # O mesmo endereço usado no cálculo do deslocamento segue para o rascunho do contrato.
+        frete_pedido = pedido_vitrine.get("frete") or {}
+        cep = str(frete_pedido.get("cep") or cep or "").strip()
+        numero = str(frete_pedido.get("numero") or numero or "").strip()
     cpf_limpo = limpar_identificador(cpf)
     cnpj_limpo = limpar_identificador(cnpj)
     telefone_limpo = limpar_identificador(telefone)
@@ -14297,15 +14867,25 @@ def salvar_pre_cadastro(
         solicitacao.produto_id = produto_principal.id if produto_principal else None
         solicitacao.contrato_id = contrato_padrao_id
         solicitacao.hora_fim = somar_minutos(inicio_obj, duracao_maxima)
-        frete_vitrine = max(float((pedido_vitrine.get("frete") or {}).get("valor") or 0), 0.0)
-        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), frete_vitrine, None)
-        solicitacao.status = "contrato_enviado" if contrato_padrao_id else "pre_reserva"
+        frete_info = pedido_vitrine.get("frete") or {}
+        frete_vitrine = max(float(frete_info.get("valor") or 0), 0.0)
+        cupom_vitrine = None
+        if _empresa_modulo_ativo(empresa, "cupons") and pedido_vitrine.get("cupom_codigo"):
+            cupom_vitrine = _cupom_valido(db, empresa.id, pedido_vitrine.get("cupom_codigo"), referencia=data_obj)
+        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), frete_vitrine, cupom_vitrine)
+        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar"))
+        solicitacao.status = "pre_reserva" if precisa_aprovacao else ("contrato_enviado" if contrato_padrao_id else "pre_reserva")
 
     db.commit()
     db.refresh(solicitacao)
 
     if pedido_vitrine:
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
+        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar"))
+        if precisa_aprovacao or solicitacao.status == "pre_reserva":
+            return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
         return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
 
     # Fluxo legado sem vitrine: preserva o pré-contrato por WhatsApp.
@@ -14313,6 +14893,19 @@ def salvar_pre_cadastro(
         f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato",
         status_code=303,
     )
+
+
+@app.get("/e/{slug}/pedido/{solicitacao_id}", response_class=HTMLResponse)
+def pedido_vitrine_recebido(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id) if empresa else None
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    composicao = composicao_valores_contrato(item)
+    return templates.TemplateResponse("publico/pedido_recebido.html", {
+        "request": request, "empresa": empresa, "item": item, "composicao": composicao,
+        "frete_sob_consulta": str(getattr(empresa, "frete_tipo", "") or "").lower() == "consultar",
+    })
 
 
 def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", tamanho=10):
@@ -16975,6 +17568,8 @@ def limpar_localizacao_inteligencia(
 
 @app.get("/painel/inteligencia-logistica", response_class=HTMLResponse)
 def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     cfg = _config_rota(db, empresa.id)
     rotas = db.query(RotaInteligente).filter_by(empresa_id=empresa.id).order_by(
         RotaInteligente.data_operacao.desc(), RotaInteligente.id.desc()
@@ -17002,6 +17597,8 @@ def inteligencia_logistica(request: Request, db: Session = Depends(get_db), empr
 
 @app.get("/painel/inteligencia-logistica/nova", response_class=HTMLResponse)
 def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     garantir_agenda_reservas(db, empresa.id)
     try:
         data_filtro = datetime.strptime(data, "%Y-%m-%d").date() if data else date.today()
@@ -17028,6 +17625,8 @@ def nova_inteligencia(request: Request, data: str = "", equipe_id: int = 0, db: 
 
 @app.get("/painel/inteligencia-logistica/configuracoes", response_class=HTMLResponse)
 def configuracoes_inteligencia(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     cfg = _config_rota(db, empresa.id)
     veiculos = db.query(VeiculoLogistico).filter_by(empresa_id=empresa.id, ativo=True).order_by(VeiculoLogistico.nome).all()
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
@@ -17039,6 +17638,8 @@ def configuracoes_inteligencia(request: Request, db: Session = Depends(get_db), 
 
 @app.get("/painel/inteligencia-logistica/historico", response_class=HTMLResponse)
 def historico_inteligencia(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     rotas = db.query(RotaInteligente).filter_by(empresa_id=empresa.id).order_by(
         RotaInteligente.data_operacao.desc(), RotaInteligente.id.desc()
     ).all()
@@ -17049,6 +17650,8 @@ def historico_inteligencia(request: Request, db: Session = Depends(get_db), empr
 
 @app.post("/painel/inteligencia-logistica/configuracao")
 def salvar_config_inteligencia(request: Request, endereco_loja: str = Form(""), latitude_loja: str = Form(""), longitude_loja: str = Form(""), minutos_montagem: int = Form(30), minutos_desmontagem: int = Form(20), antecedencia_entrega: int = Form(60), horario_minimo_cliente: str = Form("08:00"), raio_retirada_estrategica_km: str = Form("10"), desvio_max_retirada_estrategica_min: int = Form(60), minutos_parada_loja: int = Form(20), velocidade_media_kmh: str = Form("30"), custo_km: str = Form("0"), custo_hora_equipe: str = Form("0"), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     cfg = _config_rota(db, empresa.id)
     endereco_anterior = (cfg.endereco_loja or "").strip()
     novo_endereco = endereco_loja.strip()
@@ -17201,6 +17804,8 @@ def salvar_perfil_carga_veiculo(veiculo_id: int, produto_id: int = Form(...), vo
 
 @app.post("/painel/inteligencia-logistica/gerar")
 def gerar_rota_inteligente(request: Request, data_operacao: str = Form(...), equipe_id: int = Form(0), veiculo_id: int = Form(0), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "inteligencia"):
+        raise HTTPException(404)
     garantir_agenda_reservas(db, empresa.id)
     try:
         data_op = datetime.strptime(data_operacao, "%Y-%m-%d").date()

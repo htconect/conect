@@ -14,8 +14,9 @@
   <h2>Seu pedido · {{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</h2>
   {% for reg in vitrine_pedido.itens %}<div class="pedido-vitrine-item">{% if reg.foto %}<img src="{{ reg.foto }}" alt="">{% endif %}<div><strong>{{ reg.quantidade }}x {{ reg.nome }}</strong><small class="texto-discreto">R$ {{ reg.valor_total|moeda_br }}</small></div></div>{% endfor %}
   <div class="pedido-vitrine-total"><span>Itens</span><span>R$ {{ (vitrine_pedido.subtotal if vitrine_pedido.subtotal is defined else vitrine_pedido.total)|moeda_br }}</span></div>
-  {% if vitrine_pedido.frete is defined and vitrine_pedido.frete %}<div class="pedido-vitrine-total"><span>Deslocamento{% if vitrine_pedido.frete.cep %} · CEP {{ vitrine_pedido.frete.cep[:5] }}-{{ vitrine_pedido.frete.cep[5:] }}{% endif %}</span><span>{% if vitrine_pedido.frete.consultar %}Sob consulta{% else %}R$ {{ vitrine_pedido.frete.valor|moeda_br }}{% endif %}</span></div>{% endif %}
-  <div class="pedido-vitrine-total"><strong>Total</strong><strong>R$ {{ vitrine_pedido.total|moeda_br }}</strong></div>
+  {% if vitrine_pedido.desconto %}<div class="pedido-vitrine-total" style="color:#067647"><span>Desconto{% if vitrine_pedido.cupom_codigo %} · {{ vitrine_pedido.cupom_codigo }}{% endif %}</span><span>− R$ {{ vitrine_pedido.desconto|moeda_br }}</span></div>{% endif %}
+  {% if vitrine_pedido.frete is defined and vitrine_pedido.frete %}<div class="pedido-vitrine-total"><span>Deslocamento{% if vitrine_pedido.frete.cep %} · CEP {{ vitrine_pedido.frete.cep[:5] }}-{{ vitrine_pedido.frete.cep[5:] }}{% if vitrine_pedido.frete.numero %}, nº {{ vitrine_pedido.frete.numero }}{% endif %}{% endif %}</span><span>{% if vitrine_pedido.frete.consultar %}Sob consulta{% else %}R$ {{ vitrine_pedido.frete.valor|moeda_br }}{% endif %}</span></div>{% endif %}
+  <div class="pedido-vitrine-total"><strong>{% if vitrine_pedido.frete.consultar %}Total parcial{% else %}Total{% endif %}</strong><strong>R$ {{ vitrine_pedido.total|moeda_br }}</strong></div>
 </div>
 {% endif %}
 

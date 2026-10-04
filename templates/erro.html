@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+.erro-padrao{max-width:720px;margin:8vh auto;padding:28px;background:#fff;border:1px solid #dbe3ee;border-radius:24px;text-align:center;box-shadow:0 18px 50px rgba(15,23,42,.08)}
+.erro-padrao .icone{width:72px;height:72px;border-radius:22px;margin:0 auto 16px;display:grid;place-items:center;background:#eff6ff;color:#155bb5;font-size:32px}.erro-padrao h1{margin:0 0 8px}.erro-padrao p{color:#64748b}.erro-acoes{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:18px}.erro-codigo{display:inline-block;margin-top:18px;padding:8px 10px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:12px}
+</style>
+{% endblock %}
+{% block conteudo %}
+<section class="erro-padrao">
+  <div class="icone"><i class="bi bi-exclamation-triangle"></i></div>
+  <small>ERRO {{ status_code }}</small>
+  <h1>Algo não saiu como esperado</h1>
+  <p>{{ mensagem }}</p>
+  <div class="erro-acoes">
+    <button type="button" class="botao" onclick="location.reload()">Tentar novamente</button>
+    <button type="button" class="botao-secundario" onclick="history.back()">Voltar</button>
+  </div>
+  <span class="erro-codigo">Código: {{ codigo_erro }}</span>
+</section>
+{% endblock %}
