@@ -27,7 +27,7 @@
     <p>Seu contrato está aceito e o pagamento está totalmente quitado.</p>
     <p><b>Obrigado! Sua reserva está confirmada.</b></p>
     <div class="acoes-duplas">
-      <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}.pdf" target="_blank">Ver contrato</a>
+      <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}.pdf" target="_blank">Ver contrato</a>
       <button type="button" onclick="fecharPaginaReserva()">Fechar</button>
     </div>
     <p id="avisoFechar" class="texto-discreto" hidden>Você já pode fechar esta página.</p>
@@ -111,12 +111,12 @@
 
   {% if contrato_pronto %}
     <div class="box">
-      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar">Editar meus dados</a>
-      <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.id }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento.">
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar">Editar meus dados</a>
+      <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.public_token }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento.">
         <label class="check-aceite"><input id="aceiteContrato" type="checkbox" name="aceite" value="sim" required><span>Li, conferi os dados e aceito o contrato.</span></label>
         <button id="botaoAceitarContrato" class="largura-total" type="submit" disabled style="margin-top:10px">Aceitar contrato</button>
       </form>
-      <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.id }}" onsubmit="return confirm('Cancelar este contrato?');" style="margin-top:12px"><button class="perigo largura-total" type="submit">Cancelar</button></form>
+      <form method="post" action="/e/{{ empresa.slug }}/cancelar/{{ item.public_token }}" onsubmit="return confirm('Cancelar este contrato?');" style="margin-top:12px"><button class="perigo largura-total" type="submit">Cancelar</button></form>
     </div>
   {% endif %}
 
@@ -128,7 +128,7 @@
       <p><b>Deseja passar para a etapa de pagamento?</b></p>
       <div class="acoes-duplas">
         <button type="button" onclick="mostrarEtapaPagamento()">Sim, prosseguir</button>
-        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}">Agora não</a>
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}">Agora não</a>
       </div>
       <p class="texto-discreto">Você poderá usar este mesmo link para pagar depois.</p>
     </div>
@@ -192,7 +192,7 @@
           {% endif %}
           <a class="botao largura-total" href="{{ cobranca_pendente.checkout_url }}">Ir para pagamento</a>
         {% else %}
-          <form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.id }}/infinitepay" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
+          <form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.public_token }}/infinitepay" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
             {% for opcao in opcoes_pagamento %}
               <label class="opcao-pagamento">
                 <div class="opcao-pagamento-linha">
@@ -257,8 +257,8 @@
     <details class="secao-recolhivel" id="consultaContratoAceito">
       <summary>Consultar contrato aceito</summary>
       <div class="secao-corpo consultar-links">
-        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}.pdf" target="_blank">Ver contrato</a>
-        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.id }}/clausulas" target="_blank">Ver cláusulas</a>
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}.pdf" target="_blank">Ver contrato</a>
+        <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/clausulas" target="_blank">Ver cláusulas</a>
       </div>
     </details>
   </section>

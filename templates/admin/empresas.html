@@ -31,8 +31,13 @@
     <label>Usuário da empresa</label>
     <input name="usuario_admin" value="{{ empresa.usuario_admin if empresa else '' }}" required>
 
+    {% if LOCAL_LOGIN_ENABLED %}
     <label>Senha da empresa</label>
-    <input name="senha_admin" value="{{ empresa.senha_admin if empresa else '' }}" required>
+    <input name="senha_admin" type="password" value="" {% if not empresa %}required{% endif %} autocomplete="new-password">
+    {% else %}
+    <input name="senha_admin" type="hidden" value="">
+    <p class="texto-discreto"><b>Acesso pelo Humiat ID.</b> O Connect não exibe nem solicita senha local.</p>
+    {% endif %}
     <label>PIX copia e cola</label>
     <textarea name="pix_copia_cola" placeholder="Chave PIX ou código copia e cola">{{ empresa.pix_copia_cola if empresa else '' }}</textarea>
     <label>Nome que aparece no PIX</label>
@@ -252,9 +257,16 @@
     <label>E-mail do Humiat ID</label>
     <input type="email" name="email" id="usuario_email" placeholder="usuario@empresa.com.br">
     <small class="texto-discreto">Informe o mesmo e-mail usado no Humiat ID. No primeiro acesso SSO, o Connect valida e grava o vínculo sem criar outro usuário.</small>
+    {% if LOCAL_LOGIN_ENABLED %}
     <label id="label_senha">Senha</label>
-    <input name="senha" id="usuario_senha" required>
+    <input name="senha" id="usuario_senha" type="password" required autocomplete="new-password">
     <small class="texto-discreto" id="aviso_senha" style="display:none">Deixe em branco para manter a senha atual.</small>
+    {% else %}
+    <span id="label_senha" style="display:none"></span>
+    <input name="senha" id="usuario_senha" type="hidden" value="">
+    <small class="texto-discreto">Acesso feito pelo Humiat ID usando o e-mail informado acima.</small>
+    <small id="aviso_senha" style="display:none"></small>
+    {% endif %}
     <label class="check"><input type="checkbox" name="ativo" id="usuario_ativo" value="1" checked> Usuário ativo</label>
 
     <div class="box-mini bloco-permissoes">
@@ -389,7 +401,7 @@ function limparEdicaoUsuario() {
   const formulario = document.getElementById("form-usuario");
   formulario.reset();
   document.getElementById("usuario_id").value = "";
-  document.getElementById("usuario_senha").required = true;
+  document.getElementById("usuario_senha").required = {{ 'true' if LOCAL_LOGIN_ENABLED else 'false' }};
   document.getElementById("label_senha").textContent = "Senha";
   document.getElementById("aviso_senha").style.display = "none";
   document.getElementById("botao_salvar_usuario").textContent = "Criar usuário";

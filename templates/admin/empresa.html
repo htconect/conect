@@ -12,7 +12,12 @@
     <option value="cnpj" {% if empresa.identificador_principal == 'cnpj' %}selected{% endif %}>CNPJ</option>
   </select>
   <label>Usuário do painel</label><input name="usuario_admin" value="{{ empresa.usuario_admin or '' }}" required>
-  <label>Senha do painel</label><input name="senha_admin" value="{{ empresa.senha_admin or '' }}" required>
+  {% if LOCAL_LOGIN_ENABLED %}
+  <label>Senha do painel</label><input name="senha_admin" type="password" value="" autocomplete="new-password">
+  {% else %}
+  <input name="senha_admin" type="hidden" value="">
+  <p class="texto-discreto">Acesso pelo Humiat ID.</p>
+  {% endif %}
   <button>Salvar empresa</button>
 </form>
 </div>

@@ -7,7 +7,7 @@
   <p class="texto-discreto">Na InfinitePay você escolhe PIX ou cartão.</p>
 </div>
 
-<form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.id }}/infinitepay" class="box" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
+<form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.public_token }}/infinitepay" class="box" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
   {% for opcao in opcoes %}
     <label class="card" style="display:block;margin-bottom:16px;cursor:pointer;padding:20px;overflow:visible">
       <div style="display:flex;gap:14px;align-items:center;min-width:0">

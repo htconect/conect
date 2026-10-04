@@ -1,7 +1,7 @@
 import os
 
 APP_NOME = "HUMIAT Conect"
-APP_VERSION = "1.0.91"
+APP_VERSION = "1.0.92"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./conect.db")
 
@@ -11,8 +11,18 @@ if DATABASE_URL.startswith("postgres://"):
 
 SECRET_KEY = os.getenv("SECRET_KEY", "troque-esta-chave-em-producao")
 
-ADMIN_NOME = os.getenv("CONECT_ADMIN_NOME", "Admin")
-ADMIN_SENHA = os.getenv("CONECT_ADMIN_SENHA", "humiat123")
+# Segurança/autenticação. Em produção o Connect usa exclusivamente o Humiat ID.
+# O login local existe apenas como escape explícito para desenvolvimento/recuperação.
+LOCAL_LOGIN_ENABLED = os.getenv("CONECT_LOCAL_LOGIN_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+SESSION_COOKIE_SECURE = os.getenv("CONECT_SECURE_COOKIES", "true").strip().lower() in {"1", "true", "yes", "on"}
+SECURITY_HEADERS_ENABLED = os.getenv("CONECT_SECURITY_HEADERS", "true").strip().lower() in {"1", "true", "yes", "on"}
+LEGACY_PUBLIC_CONTRACT_IDS = os.getenv("CONECT_LEGACY_PUBLIC_CONTRACT_IDS", "false").strip().lower() in {"1", "true", "yes", "on"}
+API_DOCS_ENABLED = os.getenv("CONECT_API_DOCS", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+# Sem credencial padrão. Se o login local for excepcionalmente habilitado,
+# usuário e senha precisam ser definidos explicitamente no ambiente.
+ADMIN_NOME = os.getenv("CONECT_ADMIN_NOME", "").strip()
+ADMIN_SENHA = os.getenv("CONECT_ADMIN_SENHA", "").strip()
 
 # Diagnóstico temporário de performance. Desative no Render após a otimização.
 PERFORMANCE_MONITORING = os.getenv("PERFORMANCE_MONITORING", "true")

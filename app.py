@@ -8,6 +8,7 @@ from io import BytesIO, StringIO
 import shutil
 import csv
 import uuid
+import secrets
 import hashlib
 import hmac
 import re
@@ -35,7 +36,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
 
-from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL
+from config import (
+    APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL,
+    LOCAL_LOGIN_ENABLED, SESSION_COOKIE_SECURE, SECURITY_HEADERS_ENABLED, LEGACY_PUBLIC_CONTRACT_IDS, API_DOCS_ENABLED,
+)
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
@@ -89,14 +93,164 @@ class ControleAcessoMiddleware:
         return None
 
 
-app = FastAPI(title=APP_NOME, version=APP_VERSION)
+_SCANNER_PATH_RE = re.compile(
+    r"(?:^|/)(?:phpinfo(?:\.php)?|wp-admin|administrator|service-account\.json|sa\.json|"
+    r"gcp-(?:key|credentials|sa)\.json|credentials\.json|google-(?:credentials|key)\.json|"
+    r"application_default_credentials\.json|key(?:file)?\.json|firebase-(?:adminsdk|key)\.json|\.env|docs|redoc|openapi\.json)(?:$|/)",
+    re.IGNORECASE,
+)
+
+
+def _client_ip_scope(scope) -> str:
+    headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+    forwarded = (headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
+    if forwarded:
+        return forwarded[:80]
+    client = scope.get("client")
+    return str(client[0])[:80] if client else "desconhecido"
+
+
+class ScannerNoiseMiddleware:
+    """Responde scanners comuns antes de atingir banco, sessão e monitor de performance."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http":
+            path = str(scope.get("path") or "")
+            if _SCANNER_PATH_RE.search(path):
+                response = Response(status_code=404, content="Not Found", media_type="text/plain")
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+_RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
+
+class BasicRateLimitMiddleware:
+    """Limite leve para gravações públicas e login; complementa proteção de borda."""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        method = str(scope.get("method") or "GET").upper()
+        path = str(scope.get("path") or "")
+        limite = None
+        janela = 600.0
+        if method == "POST" and path in {"/admin/login", "/empresa/login"}:
+            limite = 10
+        elif method == "GET" and path.startswith("/e/") and path.endswith("/api/clientes/por-telefone"):
+            limite = 30
+        elif method == "POST" and path.startswith("/e/"):
+            limite = 40
+        if limite:
+            agora = time_module.monotonic()
+            chave = f"{_client_ip_scope(scope)}:{path.rsplit('/', 1)[0]}"
+            with _RATE_LIMIT_LOCK:
+                historico = [t for t in _RATE_LIMIT_BUCKETS.get(chave, []) if agora - t < janela]
+                if len(historico) >= limite:
+                    response = Response(
+                        status_code=429,
+                        content="Muitas tentativas. Aguarde alguns minutos e tente novamente.",
+                        media_type="text/plain; charset=utf-8",
+                        headers={"Retry-After": str(int(janela))},
+                    )
+                    await response(scope, receive, send)
+                    return
+                historico.append(agora)
+                _RATE_LIMIT_BUCKETS[chave] = historico
+        await self.app(scope, receive, send)
+
+
+class SameOriginWriteMiddleware:
+    """Bloqueia POSTs de páginas externas sem exigir mudanças em todos os formulários."""
+    SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        method = str(scope.get("method") or "GET").upper()
+        path = str(scope.get("path") or "")
+        if method not in self.SAFE_METHODS and not path.startswith("/api/"):
+            headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope.get("headers", [])}
+            host = (headers.get("host") or "").lower()
+            origin = (headers.get("origin") or "").strip()
+            referer = (headers.get("referer") or "").strip()
+            origem_host = urlparse(origin).netloc.lower() if origin and origin != "null" else ""
+            referer_host = urlparse(referer).netloc.lower() if referer else ""
+            if (origem_host and origem_host != host) or (not origem_host and referer_host and referer_host != host):
+                response = Response(status_code=403, content="Origem da requisição não permitida.", media_type="text/plain")
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+class SecurityHeadersMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not SECURITY_HEADERS_ENABLED:
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.extend([
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"SAMEORIGIN"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    (b"permissions-policy", b"camera=(), microphone=()"),
+                    (b"content-security-policy", (
+                        b"default-src 'self' https: data: blob:; "
+                        b"script-src 'self' 'unsafe-inline' https:; "
+                        b"style-src 'self' 'unsafe-inline' https:; "
+                        b"img-src 'self' https: data: blob:; "
+                        b"font-src 'self' https: data:; connect-src 'self' https:; "
+                        b"frame-src https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'"
+                    )),
+                ])
+                path = str(scope.get("path") or "")
+                if path.startswith("/e/") and any(seg in path for seg in ("/contrato/", "/pagamento/", "/obrigado/", "/confirmar-whatsapp/")):
+                    headers.append((b"cache-control", b"no-store, private, max-age=0"))
+                    headers.append((b"pragma", b"no-cache"))
+                if SESSION_COOKIE_SECURE:
+                    headers.append((b"strict-transport-security", b"max-age=15552000; includeSubDomains"))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app = FastAPI(
+    title=APP_NOME, version=APP_VERSION,
+    docs_url="/docs" if API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if API_DOCS_ENABLED else None,
+)
 install_sql_monitor(engine)
 app.add_middleware(PerformanceMiddleware)
 app.add_middleware(ControleAcessoMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 24)
+app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 24, same_site="lax", https_only=SESSION_COOKIE_SECURE)
+app.add_middleware(SameOriginWriteMiddleware)
+app.add_middleware(BasicRateLimitMiddleware)
+app.add_middleware(ScannerNoiseMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["APP_VERSION"] = APP_VERSION
+templates.env.globals["LOCAL_LOGIN_ENABLED"] = LOCAL_LOGIN_ENABLED
+templates.env.globals["HUMIAT_SSO_ATIVO"] = not LOCAL_LOGIN_ENABLED
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 Path("static/uploads/vitrine").mkdir(parents=True, exist_ok=True)
 
@@ -1663,7 +1817,7 @@ def _valor_pagamento_manual_sugerido(empresa: Empresa, item: Solicitacao) -> flo
 
 def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
     """Mensagem única do link permanente de aceite/pagamento da reserva."""
-    link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+    link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
     cliente_nome = item.cliente.nome if item.cliente else "cliente"
     texto = aplicar_variaveis_mensagem(
         mensagens_empresa(empresa).get("aceite", ""),
@@ -1685,8 +1839,8 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     link permanente da reserva, que também acompanha aceite, pagamentos e quitação.
     """
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
-    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
+    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
+    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
 
     linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
     mensagem_final = mensagens_empresa(empresa).get("confirmacao", "").strip()
@@ -1712,7 +1866,7 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
 def montar_mensagem_whatsapp_saldo_operacao(request: Request, empresa: Empresa, item: Solicitacao) -> str:
     """Mensagem da Operação para solicitar somente o saldo pendente da reserva."""
     saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0.0)
-    link = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
+    link = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
     link = f"{link}?pagamento=1#etapa-pagamento"
     cliente = (item.cliente.nome if item.cliente else "cliente") or "cliente"
     return (
@@ -1933,6 +2087,9 @@ def garantir_colunas_novas():
 
     if "solicitacoes" in tabelas:
         cols_sol = colunas("solicitacoes")
+        if "public_token" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN public_token VARCHAR(64)")
+        comandos.append("CREATE UNIQUE INDEX IF NOT EXISTS ix_solicitacoes_public_token ON solicitacoes (public_token)")
         if "valor_pago" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_pago FLOAT DEFAULT 0")
         if "valor_equipamentos" not in cols_sol:
@@ -2698,6 +2855,100 @@ def migrar_enderecos_contratos_legados():
     finally:
         db.close()
 
+
+def garantir_tokens_publicos_solicitacoes():
+    """Garante um token imprevisível para cada contrato existente e futuro."""
+    db = SessionLocal()
+    try:
+        pendentes = db.query(Solicitacao).filter(
+            or_(Solicitacao.public_token.is_(None), Solicitacao.public_token == "")
+        ).all()
+        alterou = False
+        for item in pendentes:
+            while True:
+                token = secrets.token_urlsafe(32)
+                existe = db.query(Solicitacao.id).filter(Solicitacao.public_token == token).first()
+                if not existe:
+                    break
+            item.public_token = token
+            alterou = True
+        if alterou:
+            db.commit()
+            logger.info("Tokens públicos de contratos gerados: %s", len(pendentes))
+    except Exception:
+        db.rollback()
+        logger.exception("Falha ao gerar tokens públicos dos contratos")
+        raise
+    finally:
+        db.close()
+
+
+
+def invalidar_credenciais_locais_legadas():
+    """Remove senhas humanas legadas quando o Humiat ID é o único login ativo.
+
+    Os campos permanecem preenchidos apenas porque o schema histórico exige valor,
+    mas recebem segredos aleatórios sem utilidade de autenticação.
+    """
+    if LOCAL_LOGIN_ENABLED:
+        return
+    chave_migracao = "20261004_invalidar_senhas_locais_humiat_v1"
+    db = SessionLocal()
+    try:
+        ja = db.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave_migracao}).first()
+        if ja:
+            return
+        empresas = db.query(Empresa).all()
+        usuarios = db.query(UsuarioEmpresa).all()
+        for empresa in empresas:
+            empresa.senha_admin = secrets.token_urlsafe(48)
+        for usuario in usuarios:
+            usuario.senha = secrets.token_urlsafe(48)
+        db.flush()
+        db.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave_migracao})
+        db.commit()
+        logger.info("Credenciais locais legadas invalidadas; autenticação central pelo Humiat ID.")
+    except Exception:
+        db.rollback()
+        logger.exception("Falha ao invalidar credenciais locais legadas")
+        raise
+    finally:
+        db.close()
+
+def _token_publico_item(db: Session, item: Solicitacao) -> str:
+    token = str(getattr(item, "public_token", "") or "").strip()
+    if token:
+        return token
+    token = secrets.token_urlsafe(32)
+    item.public_token = token
+    db.commit()
+    db.refresh(item)
+    return token
+
+
+def _solicitacao_publica_por_ref(db: Session, empresa: Empresa | None, referencia: str) -> Solicitacao | None:
+    ref = str(referencia or "").strip()
+    if not empresa or not ref:
+        return None
+    item = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.public_token == ref,
+    ).first()
+    if item:
+        return item
+    # Compatibilidade desligada por padrão. Só deve ser usada de forma temporária
+    # se for indispensável reabrir links numéricos antigos já enviados.
+    if LEGACY_PUBLIC_CONTRACT_IDS and ref.isdigit():
+        legado = db.get(Solicitacao, int(ref))
+        if legado and legado.empresa_id == empresa.id:
+            _token_publico_item(db, legado)
+            return legado
+    return None
+
+
+def _ref_publica(db: Session, item: Solicitacao) -> str:
+    return _token_publico_item(db, item)
+
 def migrar_aceite_em_rascunhos():
     """Corrige o legado em que ``aceite_em`` recebia CURRENT_TIMESTAMP no INSERT.
 
@@ -3009,6 +3260,8 @@ def normalizar_pagamentos_infinitepay_historicos(db: Session) -> int:
 def startup():
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
+    garantir_tokens_publicos_solicitacoes()
+    invalidar_credenciais_locais_legadas()
     migrar_aceite_em_rascunhos()
     migrar_enderecos_contratos_legados()
     migrar_vinculos_repasse_legados()
@@ -3464,7 +3717,7 @@ def admin_performance_limpar(ok: bool = Depends(admin_geral_logado)):
 def admin_login_form(request: Request):
     if request.session.get("admin_geral"):
         return RedirectResponse("/admin", status_code=303)
-    if HUMIAT_SSO_SECRET and request.query_params.get("local") != "1":
+    if not LOCAL_LOGIN_ENABLED or HUMIAT_SSO_SECRET:
         return RedirectResponse(_humiat_login_connect_url("adm"), status_code=303)
     return templates.TemplateResponse("admin/login.html", {
         "request": request,
@@ -3478,9 +3731,9 @@ def admin_login_form(request: Request):
 
 @app.post("/admin/login")
 def admin_login(request: Request, usuario: str = Form(...), senha: str = Form(...)):
-    if HUMIAT_SSO_SECRET:
+    if not LOCAL_LOGIN_ENABLED or HUMIAT_SSO_SECRET:
         return RedirectResponse(_humiat_login_connect_url("adm"), status_code=303)
-    if usuario.strip() == ADMIN_NOME and senha.strip() == ADMIN_SENHA:
+    if ADMIN_NOME and ADMIN_SENHA and usuario.strip() == ADMIN_NOME and hmac.compare_digest(senha.strip(), ADMIN_SENHA):
         request.session.clear()
         request.session["admin_geral"] = True
         return RedirectResponse("/admin", status_code=303)
@@ -3713,7 +3966,7 @@ def admin_criar_empresa(
         nome: str = Form(...),
         slug: str = Form(...),
         usuario_admin: str = Form(...),
-        senha_admin: str = Form(...),
+        senha_admin: str = Form(""),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
         pix_nome_recebedor: str = Form(""),
@@ -3755,7 +4008,7 @@ def admin_criar_empresa(
         slug=slug.strip().lower().replace(" ", "-"),
         identificador_principal=identificador_principal,
         usuario_admin=usuario_admin.strip(),
-        senha_admin=senha_admin.strip(),
+        senha_admin=(senha_admin.strip() if LOCAL_LOGIN_ENABLED and senha_admin.strip() else secrets.token_urlsafe(32)),
         pix_copia_cola=pix_copia_cola.strip(),
         pix_nome_recebedor=pix_nome_recebedor.strip(),
         pix_banco=pix_banco.strip(),
@@ -3794,14 +4047,9 @@ def admin_criar_empresa(
 
     # Logo no cadastro inicial da empresa.
     if logo_arquivo and logo_arquivo.filename:
-        extensao = Path(logo_arquivo.filename).suffix.lower()
-        if extensao not in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]:
-            raise HTTPException(400, "Formato de logo inválido. Use PNG, JPG, WEBP, GIF ou SVG.")
-        nome_arquivo = f"empresa_{empresa.id}_{uuid.uuid4().hex}{extensao}"
-        destino = Path("static/uploads/logos") / nome_arquivo
-        with destino.open("wb") as buffer:
-            shutil.copyfileobj(logo_arquivo.file, buffer)
-        empresa.logo_url = f"/static/uploads/logos/{nome_arquivo}"
+        empresa.logo_url = _salvar_imagem_upload_segura(
+            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        )
         empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
@@ -3847,7 +4095,7 @@ def admin_salvar_empresa(
         nome: str = Form(...),
         slug: str = Form(...),
         usuario_admin: str = Form(...),
-        senha_admin: str = Form(...),
+        senha_admin: str = Form(""),
         identificador_principal: str = Form("telefone"),
         pix_copia_cola: str = Form(""),
         pix_nome_recebedor: str = Form(""),
@@ -3885,7 +4133,7 @@ def admin_salvar_empresa(
     empresa.slug = slug.strip().lower().replace(" ", "-")
     empresa.identificador_principal = identificador_principal
     empresa.usuario_admin = usuario_admin.strip()
-    empresa.senha_admin = senha_admin.strip()
+    empresa.senha_admin = senha_admin.strip() if LOCAL_LOGIN_ENABLED and senha_admin.strip() else empresa.senha_admin
     empresa.pix_copia_cola = pix_copia_cola.strip()
     empresa.pix_nome_recebedor = pix_nome_recebedor.strip()
     empresa.pix_banco = pix_banco.strip()
@@ -3908,14 +4156,9 @@ def admin_salvar_empresa(
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
     if logo_arquivo and logo_arquivo.filename:
-        extensao = Path(logo_arquivo.filename).suffix.lower()
-        if extensao not in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]:
-            raise HTTPException(400, "Formato de logo inválido. Use PNG, JPG, WEBP, GIF ou SVG.")
-        nome_arquivo = f"empresa_{empresa.id}_{uuid.uuid4().hex}{extensao}"
-        destino = Path("static/uploads/logos") / nome_arquivo
-        with destino.open("wb") as buffer:
-            shutil.copyfileobj(logo_arquivo.file, buffer)
-        empresa.logo_url = f"/static/uploads/logos/{nome_arquivo}"
+        empresa.logo_url = _salvar_imagem_upload_segura(
+            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        )
         empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
@@ -4113,17 +4356,20 @@ def admin_criar_usuario_empresa(
         "acesso_nao_roteirizados": bool(acesso_nao_roteirizados),
     }
 
+    if not LOCAL_LOGIN_ENABLED and not email_humiat:
+        raise HTTPException(400, "Informe o e-mail do Humiat ID para vincular este usuário.")
+
     if existente:
         for campo, valor in dados.items():
             setattr(existente, campo, valor)
-        if senha and senha.strip():
+        if LOCAL_LOGIN_ENABLED and senha and senha.strip():
             existente.senha = senha.strip()
     else:
-        if not senha or not senha.strip():
-            raise HTTPException(400, "Informe a senha para criar o usuário.")
+        if LOCAL_LOGIN_ENABLED and (not senha or not senha.strip()):
+            raise HTTPException(400, "Informe a senha para criar o usuário local.")
         db.add(UsuarioEmpresa(
             empresa_id=empresa.id,
-            senha=senha.strip(),
+            senha=(senha.strip() if LOCAL_LOGIN_ENABLED and senha and senha.strip() else secrets.token_urlsafe(32)),
             **dados
         ))
 
@@ -4317,7 +4563,7 @@ def connect_sso_humiat(request: Request, humiat_ticket: str, destino: str = "", 
 def empresa_login_form(request: Request, db: Session = Depends(get_db)):
     if request.session.get("empresa_id"):
         return RedirectResponse("/painel", status_code=303)
-    if HUMIAT_SSO_SECRET and request.query_params.get("local") != "1":
+    if not LOCAL_LOGIN_ENABLED or HUMIAT_SSO_SECRET:
         return RedirectResponse(_humiat_login_connect_url("sistema"), status_code=303)
     return templates.TemplateResponse("admin/login.html", {
         "request": request,
@@ -4331,7 +4577,7 @@ def empresa_login_form(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/empresa/login")
 def empresa_login(request: Request, usuario: str = Form(...), senha: str = Form(...), db: Session = Depends(get_db)):
-    if HUMIAT_SSO_SECRET:
+    if not LOCAL_LOGIN_ENABLED or HUMIAT_SSO_SECRET:
         return RedirectResponse(_humiat_login_connect_url("sistema"), status_code=303)
     if request.session.get("empresa_id"):
         return RedirectResponse("/painel", status_code=303)
@@ -4948,20 +5194,46 @@ def _cor_hex_vitrine(valor: str, padrao: str) -> str:
     return valor.upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", valor) else padrao
 
 
-def _salvar_arquivo_vitrine(upload: UploadFile | None, empresa_id: int, pasta: str = "empresa") -> str:
-    """Salva imagem enviada pelo próprio locador e devolve a URL pública local."""
+MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("CONECT_MAX_IMAGE_MB", "12") or 12)) * 1024 * 1024
+
+
+def _tipo_imagem_real(dados: bytes) -> str | None:
+    if dados.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if dados.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if dados.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if len(dados) >= 12 and dados[:4] == b"RIFF" and dados[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def _salvar_imagem_upload_segura(upload: UploadFile | None, destino_dir: Path, prefixo: str = "") -> str:
+    """Valida tamanho + assinatura real antes de publicar qualquer imagem enviada."""
     if not upload or not getattr(upload, "filename", ""):
         return ""
-    extensao = Path(upload.filename).suffix.lower()
-    if extensao not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+    declarada = Path(upload.filename).suffix.lower()
+    if declarada == ".jpeg":
+        declarada = ".jpg"
+    if declarada not in {".png", ".jpg", ".webp", ".gif"}:
         raise HTTPException(400, "Formato de imagem inválido. Use PNG, JPG, WEBP ou GIF.")
-    destino_dir = Path("static/uploads/vitrine") / str(empresa_id) / pasta
+    dados = upload.file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+    if len(dados) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(413, f"Imagem muito grande. Limite: {MAX_IMAGE_UPLOAD_BYTES // (1024 * 1024)} MB.")
+    real = _tipo_imagem_real(dados)
+    if not real or real != declarada:
+        raise HTTPException(400, "O arquivo enviado não é uma imagem válida do formato informado.")
     destino_dir.mkdir(parents=True, exist_ok=True)
-    nome = f"{uuid.uuid4().hex}{extensao}"
+    nome = f"{prefixo}{uuid.uuid4().hex}{real}"
     destino = destino_dir / nome
-    with destino.open("wb") as buffer:
-        shutil.copyfileobj(upload.file, buffer)
+    destino.write_bytes(dados)
     return "/" + destino.as_posix()
+
+
+def _salvar_arquivo_vitrine(upload: UploadFile | None, empresa_id: int, pasta: str = "empresa") -> str:
+    destino_dir = Path("static/uploads/vitrine") / str(empresa_id) / pasta
+    return _salvar_imagem_upload_segura(upload, destino_dir)
 
 
 def _foto_capa_produto(produto: ProdutoServico) -> str:
@@ -5814,7 +6086,7 @@ def salvar_perfil_usuario(
 
 @app.get("/painel/alterar-senha", response_class=HTMLResponse)
 def alterar_senha_form(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    if request.session.get("humiat_user_id"):
+    if not LOCAL_LOGIN_ENABLED or request.session.get("humiat_user_id"):
         return RedirectResponse(HUMIAT_FORGOT_URL, status_code=303)
     return templates.TemplateResponse("admin/alterar_senha.html", {
         "request": request,
@@ -5832,7 +6104,7 @@ def alterar_senha_salvar(
         confirmar_senha: str = Form(...),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)):
-    if request.session.get("humiat_user_id"):
+    if not LOCAL_LOGIN_ENABLED or request.session.get("humiat_user_id"):
         return RedirectResponse(HUMIAT_FORGOT_URL, status_code=303)
     senha_atual = senha_atual.strip()
     nova_senha = nova_senha.strip()
@@ -5921,14 +6193,9 @@ async def salvar_configuracoes_empresa(
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
     if logo_arquivo and logo_arquivo.filename:
-        extensao = Path(logo_arquivo.filename).suffix.lower()
-        if extensao not in [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]:
-            raise HTTPException(400, "Formato de logo inválido. Use PNG, JPG, WEBP, GIF ou SVG.")
-        nome_arquivo = f"empresa_{empresa.id}_{uuid.uuid4().hex}{extensao}"
-        destino = Path("static/uploads/logos") / nome_arquivo
-        with destino.open("wb") as buffer:
-            shutil.copyfileobj(logo_arquivo.file, buffer)
-        empresa.logo_url = f"/static/uploads/logos/{nome_arquivo}"
+        empresa.logo_url = _salvar_imagem_upload_segura(
+            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        )
         empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
@@ -8305,28 +8572,64 @@ def salvar_endereco_cliente(db: Session, empresa_id: int, cliente_id: int, ender
 
 
 @app.get("/e/{slug}/api/clientes/por-telefone")
-def api_publico_cliente_por_telefone(slug: str, telefone: str, db: Session = Depends(get_db)):
-    empresa = db.query(Empresa).filter_by(slug=slug).first()
+def api_publico_cliente_por_telefone(slug: str, telefone: str, documento: str = "", db: Session = Depends(get_db)):
+    """Consulta pública protegida: telefone sozinho nunca devolve dados pessoais.
+
+    Para carregar cadastro/endereço já existente, o próprio cliente precisa informar
+    também o CPF/CNPJ correspondente. Isso mantém a facilidade do preenchimento
+    automático sem transformar o telefone em uma chave pública para consultar PII.
+    """
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404)
     tel = limpar_identificador(telefone)
     if tel.startswith("55") and len(tel) == 13:
         tel = tel[2:]
+    headers = {"Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache"}
     if len(tel) != 11 or tel[2] != "9":
-        return JSONResponse({"encontrado": False, "enderecos": []})
-    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, or_(Cliente.telefone == tel, Cliente.identificador == tel)).all()
+        return JSONResponse({"encontrado": False, "confirmado": False}, headers=headers)
+    clientes = db.query(Cliente).filter(
+        Cliente.empresa_id == empresa.id,
+        or_(Cliente.telefone == tel, Cliente.identificador == tel),
+    ).all()
     if not clientes:
-        return JSONResponse({"encontrado": False, "enderecos": []})
-    cliente = clientes[0]
-    ids = [c.id for c in clientes]
-    enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
-    if not enderecos:
-        for c in clientes:
-            if c.endereco:
-                salvar_endereco_cliente(db, empresa.id, c.id, c.endereco, c.numero, c.complemento, c.bairro, c.cidade, c.estado, c.cep)
+        return JSONResponse({"encontrado": False, "confirmado": False}, headers=headers)
+
+    doc = limpar_identificador(documento)
+    if len(doc) not in {11, 14}:
+        return JSONResponse({"encontrado": True, "confirmado": False, "requer_documento": True}, headers=headers)
+
+    cliente = next((c for c in clientes if doc in {limpar_identificador(c.cpf), limpar_identificador(c.cnpj)}), None)
+    if not cliente:
+        return JSONResponse({"encontrado": True, "confirmado": False, "requer_documento": True}, headers=headers)
+
+    enderecos = db.query(EnderecoCliente).filter(
+        EnderecoCliente.empresa_id == empresa.id,
+        EnderecoCliente.cliente_id == cliente.id,
+        EnderecoCliente.ativo == True,
+    ).order_by(EnderecoCliente.atualizado_em.desc()).all()
+    if not enderecos and cliente.endereco:
+        salvar_endereco_cliente(
+            db, empresa.id, cliente.id, cliente.endereco, cliente.numero, cliente.complemento,
+            cliente.bairro, cliente.cidade, cliente.estado, cliente.cep,
+        )
         db.commit()
-        enderecos = db.query(EnderecoCliente).filter(EnderecoCliente.empresa_id == empresa.id, EnderecoCliente.cliente_id.in_(ids), EnderecoCliente.ativo == True).order_by(EnderecoCliente.atualizado_em.desc()).all()
-    return JSONResponse({"encontrado": True, "quantidade": len(clientes), "cliente": {"id": cliente.id, "nome": cliente.nome or '', "cpf": cliente.cpf or '', "cnpj": cliente.cnpj or '', "email": cliente.email or '', "telefone": cliente.telefone or tel, "como_conheceu": cliente.como_conheceu or ''}, "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]]})
+        enderecos = db.query(EnderecoCliente).filter(
+            EnderecoCliente.empresa_id == empresa.id,
+            EnderecoCliente.cliente_id == cliente.id,
+            EnderecoCliente.ativo == True,
+        ).order_by(EnderecoCliente.atualizado_em.desc()).all()
+
+    return JSONResponse({
+        "encontrado": True,
+        "confirmado": True,
+        "cliente": {
+            "nome": cliente.nome or "", "cpf": cliente.cpf or "", "cnpj": cliente.cnpj or "",
+            "email": cliente.email or "", "telefone": cliente.telefone or tel,
+            "como_conheceu": cliente.como_conheceu or "",
+        },
+        "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]],
+    }, headers=headers)
 
 
 @app.get("/api/clientes/por-telefone")
@@ -13367,8 +13670,8 @@ def _url_whatsapp_registro_contrato(request: Request, db: Session, empresa: Empr
     itens_reserva = db.query(ReservaItem).filter_by(
         empresa_id=empresa.id, solicitacao_id=item.id
     ).all()
-    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=item.id)
-    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=item.id)
+    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
+    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
 
     linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
     linhas.extend([
@@ -13687,7 +13990,34 @@ def salvar_pre_cadastro(
         return render_erro("email_obrigatorio")
     if email_limpo and not _email_basico_valido(email_limpo):
         return render_erro("email_invalido")
+    # Não permite que apenas o conhecimento do telefone altere um cadastro existente.
+    # Se já houver CPF/CNPJ salvo, o mesmo documento precisa acompanhar a reserva.
     cliente = db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=ident).first()
+    candidatos_telefone = []
+    if telefone_limpo:
+        candidatos_telefone = db.query(Cliente).filter(
+            Cliente.empresa_id == empresa.id,
+            or_(Cliente.telefone == telefone_limpo, Cliente.identificador == telefone_limpo),
+        ).all()
+    documento_informado = cpf_limpo or cnpj_limpo
+    candidato_documento = next((
+        c for c in candidatos_telefone
+        if documento_informado and documento_informado in {limpar_identificador(c.cpf), limpar_identificador(c.cnpj)}
+    ), None)
+    if candidato_documento:
+        cliente = candidato_documento
+    elif cliente:
+        documento_salvo = limpar_identificador(cliente.cpf) or limpar_identificador(cliente.cnpj)
+        if documento_salvo and documento_salvo != documento_informado:
+            return render_erro("cadastro_confirmacao")
+    elif candidatos_telefone:
+        # Cadastro encontrado pelo WhatsApp: só reutiliza automaticamente se não houver
+        # documento antigo; havendo documento, exige a confirmação correspondente.
+        protegido = next((c for c in candidatos_telefone if limpar_identificador(c.cpf) or limpar_identificador(c.cnpj)), None)
+        if protegido:
+            return render_erro("cadastro_confirmacao")
+        cliente = candidatos_telefone[0]
+
     if not cliente:
         cliente = Cliente(empresa_id=empresa.id, identificador=ident)
         db.add(cliente)
@@ -13795,11 +14125,11 @@ def salvar_pre_cadastro(
 
     if pedido_vitrine:
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
-        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao.id}", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
 
     # Fluxo legado sem vitrine: preserva o pré-contrato por WhatsApp.
     return RedirectResponse(
-        f"/e/{slug}/confirmar-whatsapp/{solicitacao.id}?tipo=pre_contrato",
+        f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato",
         status_code=303,
     )
 
@@ -13841,7 +14171,7 @@ def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", taman
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}.pdf")
-def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+def contrato_cliente_pdf(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
@@ -13850,7 +14180,7 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
         raise HTTPException(500, "Para gerar PDF, instale a dependência: reportlab")
 
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
@@ -13929,9 +14259,9 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: int, request: Request, db: S
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}/clausulas", response_class=HTMLResponse)
-def contrato_cliente_clausulas(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+def contrato_cliente_clausulas(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     contrato_ids = set()
@@ -13959,9 +14289,9 @@ def contrato_cliente_clausulas(slug: str, solicitacao_id: int, request: Request,
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}", response_class=HTMLResponse)
-def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+def contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
 
@@ -14079,13 +14409,13 @@ def contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Sessi
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}/editar", response_class=HTMLResponse)
-def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+def editar_dados_contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
     if status_reserva_confirmada(item.status) or item.status in {"aceite_pagamento_pendente", "cancelado_cliente"}:
-        return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
 
     endereco_evento = dados_endereco_solicitacao(item)
     return templates.TemplateResponse("publico/cadastro.html", {
@@ -14129,7 +14459,7 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: int, request: Reque
 
 @app.post("/e/{slug}/contrato/{solicitacao_id}/editar")
 def salvar_dados_contrato_cliente(
-        slug: str, solicitacao_id: int,
+        slug: str, solicitacao_id: str,
         identificador: str = Form(""), tipo_pessoa: str = Form("fisica"),
         nome: str = Form(""), data_nascimento: str = Form(""), telefone: str = Form(""), cpf: str = Form(""),
         cnpj: str = Form(""), email: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
@@ -14140,11 +14470,11 @@ def salvar_dados_contrato_cliente(
         como_conheceu: str = Form(""), db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
     if status_reserva_confirmada(item.status) or item.status in {"aceite_pagamento_pendente", "cancelado_cliente"}:
-        return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
 
     cliente = item.cliente
     cliente.nome = nome.strip()
@@ -14186,13 +14516,13 @@ def salvar_dados_contrato_cliente(
 
     db.commit()
     _tentar_geocodificar_solicitacao(db, item)
-    return RedirectResponse(f"/e/{slug}/contrato/{item.id}", status_code=303)
+    return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
 
 
 @app.post("/e/{slug}/cancelar/{solicitacao_id}")
-def cancelar_contrato(slug: str, solicitacao_id: int, db: Session = Depends(get_db)):
+def cancelar_contrato(slug: str, solicitacao_id: str, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if item.status != "cancelado_cliente":
@@ -14200,17 +14530,17 @@ def cancelar_contrato(slug: str, solicitacao_id: int, db: Session = Depends(get_
         item.cancelado_em = agora_utc()
         db.commit()
         _google_calendar_auto_excluir(db, empresa, item)
-    return RedirectResponse(f"/e/{slug}/obrigado/{solicitacao_id}", status_code=303)
+    return RedirectResponse(f"/e/{slug}/obrigado/{_ref_publica(db, item)}", status_code=303)
 
 
 @app.post("/e/{slug}/aceitar/{solicitacao_id}")
-def aceitar_contrato(slug: str, solicitacao_id: int, request: Request, aceite: Optional[str] = Form(None), db: Session = Depends(get_db)):
+def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: Optional[str] = Form(None), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if aceite != "sim":
-        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}?erro=aceite", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=aceite", status_code=303)
 
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count()
     if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
@@ -14258,24 +14588,24 @@ def aceitar_contrato(slug: str, solicitacao_id: int, request: Request, aceite: O
             if sinal_checkout > 0.009:
                 return infinitepay_criar_checkout(
                     slug=slug,
-                    solicitacao_id=solicitacao_id,
+                    solicitacao_id=_ref_publica(db, item),
                     request=request,
                     tipo_pagamento="sinal",
                     db=db,
                 )
             return RedirectResponse(
-                f"/e/{slug}/contrato/{solicitacao_id}#etapa-pagamento",
+                f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento",
                 status_code=303,
             )
 
         # Mantém o comportamento anterior das empresas sem InfinitePay.
         return RedirectResponse(
-            f"/e/{slug}/confirmar-whatsapp/{solicitacao_id}?tipo=aceite",
+            f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, item)}?tipo=aceite",
             status_code=303,
         )
 
     # Link permanente: se o contrato já foi aceito, apenas volta ao estado atual.
-    return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}", status_code=303)
+    return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
 
 
 
@@ -14294,7 +14624,7 @@ def cancelar_cobranca_infinitepay_local(
     local. Se o checkout antigo for pago depois, o webhook continua sendo
     processado para não perder um pagamento real.
     """
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     cobranca = db.get(InfinitePayCobranca, cobranca_id)
     if not item or item.empresa_id != empresa.id or not cobranca:
         raise HTTPException(404)
@@ -14435,7 +14765,7 @@ def _processar_retorno_infinitepay(
             "cobranca": cobranca,
             "primeiro_pagamento": primeiro_pagamento,
             "saldo_restante": _saldo_contrato(item),
-            "link_reserva": f"/e/{empresa.slug}/contrato/{item.id}",
+            "link_reserva": f"/e/{empresa.slug}/contrato/{_ref_publica(db, item)}",
             "whatsapp_acionado": bool(item.whatsapp_contrato_acionado_em),
         }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     return templates.TemplateResponse("publico/pagamento_pendente.html", {
@@ -14465,26 +14795,26 @@ def infinitepay_retorno(
 
 
 @app.get("/e/{slug}/pagamento/{solicitacao_id}", response_class=HTMLResponse, name="infinitepay_escolha_pagamento")
-def infinitepay_escolha_pagamento(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
+def infinitepay_escolha_pagamento(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     # Compatibilidade com links antigos: a etapa de pagamento agora vive no mesmo
     # link permanente usado para leitura e aceite do contrato.
-    return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}#etapa-pagamento", status_code=303)
+    return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento", status_code=303)
 
 
 @app.post("/e/{slug}/pagamento/{solicitacao_id}/infinitepay", name="infinitepay_criar_checkout")
 def infinitepay_criar_checkout(
     slug: str,
-    solicitacao_id: int,
+    solicitacao_id: str,
     request: Request,
     tipo_pagamento: str = Form(...),
     db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
     if not _infinitepay_habilitada(empresa):
@@ -14492,9 +14822,9 @@ def infinitepay_criar_checkout(
 
     saldo = _saldo_contrato(item)
     if saldo <= 0.009:
-        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}#etapa-pagamento", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento", status_code=303)
     if item.status not in {"aceite_pagamento_pendente", "aguardando_pagamento", "reserva_confirmada"}:
-        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao_id}#etapa-pagamento", status_code=303)
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento", status_code=303)
 
     # Regra de idempotência do checkout: enquanto existir uma cobrança ativa,
     # abrir o link novamente sempre retorna à mesma InfinitePay.
@@ -14675,7 +15005,7 @@ async def infinitepay_webhook(request: Request, db: Session = Depends(get_db)):
 @app.post("/e/{slug}/whatsapp-evento/{solicitacao_id}", status_code=204)
 def registrar_evento_whatsapp_publico(
     slug: str,
-    solicitacao_id: int,
+    solicitacao_id: str,
     tipo: str = Form(...),
     acao: str = Form(...),
     db: Session = Depends(get_db),
@@ -14687,7 +15017,7 @@ def registrar_evento_whatsapp_publico(
     ``delegado`` significa que o cliente escolheu deixar a comunicação para o responsável.
     """
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    item = db.get(Solicitacao, solicitacao_id)
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
 
@@ -14724,9 +15054,9 @@ def registrar_evento_whatsapp_publico(
 
 
 @app.get("/e/{slug}/confirmar-whatsapp/{solicitacao_id}", response_class=HTMLResponse)
-def confirmar_whatsapp(slug: str, solicitacao_id: int, request: Request, tipo: str = "pre_contrato", db: Session = Depends(get_db)):
+def confirmar_whatsapp(slug: str, solicitacao_id: str, request: Request, tipo: str = "pre_contrato", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    solicitacao = db.get(Solicitacao, solicitacao_id)
+    solicitacao = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not solicitacao or solicitacao.empresa_id != empresa.id:
         raise HTTPException(404)
     tipo_confirmacao = "aceite" if tipo == "aceite" else "pre_contrato"
@@ -14741,11 +15071,14 @@ def confirmar_whatsapp(slug: str, solicitacao_id: int, request: Request, tipo: s
 
 
 @app.get("/e/{slug}/obrigado/{solicitacao_id}", response_class=HTMLResponse)
-def obrigado(slug: str, solicitacao_id: int, request: Request, db: Session = Depends(get_db)):
-    empresa = db.query(Empresa).filter_by(slug=slug).first()
-    solicitacao = db.get(Solicitacao, solicitacao_id)
+def obrigado(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    solicitacao = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
+    if not empresa or not solicitacao or solicitacao.empresa_id != empresa.id:
+        raise HTTPException(404)
     return templates.TemplateResponse("publico/obrigado.html",
-                                      {"request": request, "empresa": empresa, "solicitacao": solicitacao})
+                                      {"request": request, "empresa": empresa, "solicitacao": solicitacao},
+                                      headers={"Cache-Control": "no-store"})
 
 # ============================================================
 # CENTRAL DE INTELIGÊNCIA LOGÍSTICA (módulo premium independente)

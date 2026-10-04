@@ -7,13 +7,9 @@ Sistema separado do Organiza para pré-cadastro, contratos, aceite e agenda.
 ### Administrador Geral
 Cria e edita empresas. Não entra no painel operacional das empresas.
 
-Credenciais padrão:
-- Usuário: `Admin`
-- Senha: `humiat123`
+Acesso administrativo em produção: **Humiat ID**.
 
-Variáveis opcionais:
-- `CONECT_ADMIN_NOME`
-- `CONECT_ADMIN_SENHA`
+O login local fica desligado por padrão (`CONECT_LOCAL_LOGIN_ENABLED=false`) e não possui credenciais padrão.
 
 ### Empresa
 Cada empresa acessa somente seus próprios dados:
@@ -22,7 +18,7 @@ Cada empresa acessa somente seus próprios dados:
 - contratos
 - agenda
 
-O usuário e senha da empresa são criados pelo Administrador Geral.
+Usuários da empresa são vinculados ao Humiat ID. O Connect não depende de senha local em produção.
 
 ## Rotas principais
 
@@ -44,7 +40,7 @@ uvicorn app:app --reload
 Start Command:
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port $PORT
+uvicorn app:app --host 0.0.0.0 --port $PORT --no-server-header
 ```
 
 

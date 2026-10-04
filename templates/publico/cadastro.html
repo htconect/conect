@@ -29,6 +29,7 @@
   {% if erro == 'email_obrigatorio' %}Informe seu e-mail para continuar.{% endif %}
   {% if erro == 'email_invalido' %}Informe um e-mail válido.{% endif %}
   {% if erro == 'vitrine_indisponivel' %}Uma das opções escolhidas não está mais disponível nesta data. Volte à vitrine e escolha novamente.{% endif %}
+  {% if erro == 'cadastro_confirmacao' %}Já existe um cadastro com este WhatsApp. Informe o mesmo CPF ou CNPJ cadastrado para proteger seus dados.{% endif %}
 </div>
 {% endif %}
 
@@ -46,7 +47,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="{% if vitrine_pedido is defined and vitrine_pedido %}Preparando contrato{% else %}Salvando pré-contrato{% endif %}" data-loading-text="{% if vitrine_pedido is defined and vitrine_pedido %}Estamos montando o contrato com os itens escolhidos.{% else %}Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp.{% endif %}"{% endif %}>
+<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="{% if vitrine_pedido is defined and vitrine_pedido %}Preparando contrato{% else %}Salvando pré-contrato{% endif %}" data-loading-text="{% if vitrine_pedido is defined and vitrine_pedido %}Estamos montando o contrato com os itens escolhidos.{% else %}Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp.{% endif %}"{% endif %}>
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
   {% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %}<input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">{% endif %}
 
@@ -150,8 +151,47 @@ let timerBuscaPublico=null;
 function preencherEnderecoPublico(e){const m={cep:'cep',endereco:'endereco',numero:'numeroEventoPublico',complemento:'complementoEventoPublico',bairro:'bairro',cidade:'cidade',estado:'estado'};Object.entries(m).forEach(([k,id])=>{const el=document.getElementById(id);if(el)el.value=e[k]||'';});const local=document.querySelector('input[name="local"]');if(local)local.value=e.endereco||'';const nomeLocal=document.querySelector('input[name="local_nome"]');if(nomeLocal)nomeLocal.value=e.apelido||'';}
 function alternarCamposEnderecoPublico(mostrar){const area=document.getElementById('camposNovoEnderecoPublico');if(area)area.hidden=!mostrar;}
 function mostrarEnderecosPublico(lista){const box=document.getElementById('enderecosEncontradosPublico');if(!box)return;box.innerHTML='';alternarCamposEnderecoPublico(true);if(!lista||!lista.length){box.hidden=true;return;}box.hidden=false;const label=document.createElement('label');label.textContent='Endereços já utilizados';box.appendChild(label);const select=document.createElement('select');select.className='endereco-select';const atual=(document.getElementById('endereco')?.value||'').trim();const p=document.createElement('option');p.value='';p.selected=true;p.textContent=atual?'Manter o endereço atual desta reserva':'Escolha um endereço';select.appendChild(p);lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);const nome=(e.apelido||'').trim()||`Endereço ${i+1}`;o.textContent=`${nome} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});select.onchange=()=>{if(select.value==='')return;preencherEnderecoPublico(lista[Number(select.value)]);};box.appendChild(select);const n=document.createElement('button');n.type='button';n.className='botao-novo-endereco';n.textContent='+ Digitar novo endereço';n.onclick=()=>{select.value='';preencherEnderecoPublico({});document.getElementById('cep')?.focus();};box.appendChild(n);}
-async function consultarClientePublico(){let tel=(document.getElementById('telefoneClientePublico').value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length!==11||tel[2]!=='9')return;const st=document.getElementById('statusBuscaClientePublico');st.textContent='Consultando cadastro...';if(window.mostrarCarregando)mostrarCarregando('Consultando cadastro','Localizando seus dados e endereços já utilizados.');try{const r=await fetch(`/e/{{ empresa.slug }}/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}`);const d=await r.json();if(d.encontrado){const c=d.cliente;[['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj]].forEach(([id,v])=>{const el=document.getElementById(id);if(el){el.value=v||'';el.readOnly=true;el.classList.add('campo-travado');}});const emailEl=document.getElementById('emailClientePublico');if(emailEl){emailEl.value=c.email||'';if(c.email){emailEl.readOnly=true;emailEl.classList.add('campo-travado');}else{emailEl.readOnly=false;emailEl.classList.remove('campo-travado');}}const origem=document.getElementById('comoConheceuPublico');if(origem&&c.como_conheceu)origem.value=c.como_conheceu;mostrarEnderecosPublico(d.enderecos);st.textContent=c.email?'Cadastro encontrado. Mantenha o endereço atual, escolha um já utilizado ou digite um novo.':'Cadastro antigo encontrado. Informe seu e-mail para continuar e escolha o endereço do evento.';}else{st.textContent='Novo cadastro. Complete seus dados.';}}catch(e){st.textContent='Não foi possível consultar agora. Continue preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}}
-document.addEventListener('DOMContentLoaded',()=>{const t=document.getElementById('telefoneClientePublico');if(t){t.addEventListener('input',()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);});let tel=(t.value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length===11&&tel[2]==='9')setTimeout(consultarClientePublico,100);}const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}});
+function documentoClientePublico(){
+  const cpf=(document.getElementById('cpfClientePublico')?.value||'').replace(/\D/g,'');
+  const cnpj=(document.getElementById('cnpjClientePublico')?.value||'').replace(/\D/g,'');
+  if(cpf.length===11)return cpf;
+  if(cnpj.length===14)return cnpj;
+  return '';
+}
+async function consultarClientePublico(){
+  let tel=(document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'');
+  if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);
+  const st=document.getElementById('statusBuscaClientePublico');
+  if(tel.length!==11||tel[2]!=='9'){if(st)st.textContent='Digite um WhatsApp válido.';return;}
+  const documento=documentoClientePublico();
+  if(st)st.textContent='Consultando cadastro...';
+  try{
+    const url=`/e/{{ empresa.slug }}/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}${documento?`&documento=${encodeURIComponent(documento)}`:''}`;
+    const r=await fetch(url,{headers:{'Accept':'application/json'},cache:'no-store'});
+    const d=await r.json();
+    if(!d.encontrado){if(st)st.textContent='Novo cadastro. Complete seus dados.';return;}
+    if(!d.confirmado){if(st)st.textContent='Cadastro encontrado. Informe seu CPF ou CNPJ para carregar seus dados com segurança.';return;}
+    const c=d.cliente||{};
+    [['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj]].forEach(([id,v])=>{
+      const el=document.getElementById(id);if(el&&v){el.value=v;el.readOnly=true;el.classList.add('campo-travado');}
+    });
+    const nomeEmpresa=document.querySelector('input[name="nome_empresa"]');
+    if(nomeEmpresa&&c.cnpj&&c.nome){nomeEmpresa.value=c.nome;}
+    const emailEl=document.getElementById('emailClientePublico');
+    if(emailEl){emailEl.value=c.email||'';emailEl.readOnly=!!c.email;emailEl.classList.toggle('campo-travado',!!c.email);}
+    const origem=document.getElementById('comoConheceuPublico');if(origem&&c.como_conheceu)origem.value=c.como_conheceu;
+    mostrarEnderecosPublico(d.enderecos||[]);
+    if(st)st.textContent=c.email?'Cadastro confirmado. Escolha um endereço já utilizado ou informe um novo.':'Cadastro confirmado. Informe seu e-mail e o endereço do evento.';
+  }catch(e){if(st)st.textContent='Não foi possível consultar agora. Continue preenchendo.';}
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  const agendarConsulta=()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);};
+  const t=document.getElementById('telefoneClientePublico');
+  if(t){t.addEventListener('input',agendarConsulta);let tel=(t.value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length===11&&tel[2]==='9')setTimeout(consultarClientePublico,100);}
+  document.getElementById('cpfClientePublico')?.addEventListener('input',agendarConsulta);
+  document.getElementById('cnpjClientePublico')?.addEventListener('input',agendarConsulta);
+  const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}
+});
 function atualizarHoraFimPreContrato(){
   const inicio=document.getElementById('horaInicioPreContrato');
   const aviso=document.getElementById('avisoHorarioContrato');

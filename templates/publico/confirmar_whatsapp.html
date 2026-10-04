@@ -23,7 +23,7 @@
       {% else %}
         <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
       {% endif %}
-      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.id }}" onclick="registrarWhatsApp('pre_contrato','delegado')">Deixar para o responsável</a>
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/obrigado/{{ solicitacao.public_token }}" onclick="registrarWhatsApp('pre_contrato','delegado')">Deixar para o responsável</a>
     </div>
     <p class="texto-discreto" style="margin:12px 0 0">Se você deixar para o responsável, seus dados continuam salvos normalmente.</p>
   {% else %}
@@ -39,10 +39,10 @@
       {% else %}
         <button type="button" class="largura-total" disabled>WhatsApp indisponível</button>
       {% endif %}
-      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}?aceite=ok" onclick="registrarWhatsApp('aceite','delegado')">Deixar para o responsável</a>
+      <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.public_token }}?aceite=ok" onclick="registrarWhatsApp('aceite','delegado')">Deixar para o responsável</a>
     </div>
     <div class="continuar-fluxo">
-      <a class="botao largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.id }}?aceite=ok">Continuar para pagamento</a>
+      <a class="botao largura-total" href="/e/{{ empresa.slug }}/contrato/{{ solicitacao.public_token }}?aceite=ok">Continuar para pagamento</a>
     </div>
     <p class="texto-discreto" style="margin:12px 0 0">Se abrir o WhatsApp, depois volte a esta tela para continuar o pagamento.</p>
   {% endif %}
@@ -54,7 +54,7 @@ function registrarWhatsApp(tipo, acao){
     const dados=new FormData();
     dados.append('tipo',tipo);
     dados.append('acao',acao);
-    navigator.sendBeacon('/e/{{ empresa.slug }}/whatsapp-evento/{{ solicitacao.id }}',dados);
+    navigator.sendBeacon('/e/{{ empresa.slug }}/whatsapp-evento/{{ solicitacao.public_token }}',dados);
   }catch(e){}
 }
 </script>

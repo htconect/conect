@@ -8,8 +8,8 @@
 {% set excedente = (pago - total) if total and pago > total else 0 %}
 {% set tel = item.cliente.telefone or item.cliente.identificador %}
 {% set tel_limpo = tel|replace(' ','')|replace('-','')|replace('(','')|replace(')','') %}
-{% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=item.id) %}
-{% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=item.id) %}
+{% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=item.public_token) %}
+{% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=item.public_token) %}
 {% set link_aceite_whatsapp = request.url_for('compartilhar_aceite_whatsapp', solicitacao_id=item.id) %}
 {% set link_contrato_whatsapp = request.url_for('compartilhar_contrato_whatsapp', solicitacao_id=item.id) %}
 {% set tem_itens = item.itens and item.itens|length > 0 %}

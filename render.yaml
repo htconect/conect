@@ -3,16 +3,22 @@ services:
     name: humiat-conect
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --no-server-header
     envVars:
       - key: DATABASE_URL
         sync: false
       - key: SECRET_KEY
         generateValue: true
-      - key: CONECT_ADMIN_NOME
-        value: Admin
-      - key: CONECT_ADMIN_SENHA
-        value: humiat123
+      - key: CONECT_LOCAL_LOGIN_ENABLED
+        value: "false"
+      - key: CONECT_SECURE_COOKIES
+        value: "true"
+      - key: CONECT_SECURITY_HEADERS
+        value: "true"
+      - key: CONECT_LEGACY_PUBLIC_CONTRACT_IDS
+        value: "false"
+      - key: CONECT_API_DOCS
+        value: "false"
 
       # Mesmo segredo do Humiat/Organiza. Configure o valor no Render.
       - key: HUMIAT_SSO_SECRET

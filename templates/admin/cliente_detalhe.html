@@ -9,8 +9,8 @@
 <h2 class="titulo-secao">Reservas do cliente</h2>
 <div class="lista-mobile">
 {% for i in solicitacoes %}
-  {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=i.id) %}
-  {% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=i.id) %}
+  {% set link_contrato_visual = request.url_for('contrato_cliente', slug=empresa.slug, solicitacao_id=i.public_token) %}
+  {% set link_contrato_pdf = request.url_for('contrato_cliente_pdf', slug=empresa.slug, solicitacao_id=i.public_token) %}
   {% set contrato_aceito = status_reserva_confirmada(i.status) %}
   <article class="card reserva-cliente">
     <a class="card-link-limpo" href="/painel/solicitacao/{{ i.id }}">

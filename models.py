@@ -1,3 +1,4 @@
+import secrets
 from datetime import time
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Time,
@@ -346,6 +347,8 @@ class Solicitacao(Base):
     __tablename__ = "solicitacoes"
 
     id = Column(Integer, primary_key=True)
+    # Token público imprevisível. IDs numéricos continuam apenas para uso interno.
+    public_token = Column(String(64), nullable=True, unique=True, index=True, default=lambda: secrets.token_urlsafe(32))
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False)
     cliente_id = Column(Integer, ForeignKey("clientes.id"), nullable=False)
     produto_id = Column(Integer, ForeignKey("produtos_servicos.id"), nullable=True)
