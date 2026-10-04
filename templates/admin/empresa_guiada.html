@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+.empresa-wrap{max-width:1160px;margin:0 auto}.empresa-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:24px;border-radius:24px;background:linear-gradient(135deg,#0f3d91,#1f6fc1);color:#fff;margin-bottom:18px}.empresa-hero h1{margin:0 0 6px;color:#fff}.empresa-hero p{margin:0;color:#dbeafe}.empresa-logo-medalhao{width:86px;height:86px;border-radius:50%;padding:5px;background:#fff;border:5px solid rgba(255,255,255,.35);box-shadow:0 12px 28px rgba(15,23,42,.2);overflow:hidden;flex:0 0 auto}.empresa-logo-medalhao img{width:100%;height:100%;object-fit:cover;border-radius:50%}.empresa-logo-medalhao .sem-logo{width:100%;height:100%;display:grid;place-items:center;border-radius:50%;background:#eaf2ff;color:#0f3d91;font-size:30px}.empresa-passos{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:0 0 18px}.empresa-passos a{padding:11px 10px;border:1px solid #dbe3ee;background:#fff;border-radius:14px;text-decoration:none;color:#334155;font-weight:800;text-align:center;font-size:12px}.empresa-bloco{background:#fff;border:1px solid #dbe3ee;border-radius:22px;margin:0 0 18px;overflow:hidden}.empresa-bloco-cab{display:flex;gap:12px;align-items:center;padding:18px 20px;border-bottom:1px solid #edf1f5}.empresa-bloco-cab i{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;background:#eef4ff;color:#155bb5;font-size:21px}.empresa-bloco-cab h2{margin:0;font-size:18px}.empresa-bloco-cab p{margin:3px 0 0;color:#64748b;font-size:13px}.empresa-bloco-corpo{padding:20px}.empresa-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.empresa-grade.tres{grid-template-columns:repeat(3,minmax(0,1fr))}.opcoes-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.opcao-card{position:relative;border:1px solid #dbe3ee;border-radius:16px;padding:14px;background:#fff;cursor:pointer}.opcao-card input{position:absolute;opacity:0}.opcao-card:has(input:checked){border:2px solid #2563eb;background:#eff6ff}.opcao-card b{display:block;margin-bottom:4px}.opcao-card small{color:#64748b}.preview-vitrine{border:1px solid #dbe3ee;border-radius:20px;background:linear-gradient(145deg,var(--pv-suave,#eef0ff),#fff);padding:18px;min-height:240px}.preview-capa{height:120px;border-radius:16px;background:linear-gradient(135deg,var(--pv-cor,#6d4aff),var(--pv-suave,#eef0ff));background-size:cover;background-position:center;position:relative;margin-bottom:38px}.preview-logo{position:absolute;width:78px;height:78px;border-radius:50%;border:5px solid #fff;background:#fff;left:50%;bottom:-39px;transform:translateX(-50%);overflow:hidden;box-shadow:0 8px 18px rgba(15,23,42,.16)}.preview-logo img{width:100%;height:100%;object-fit:cover}.preview-logo span{display:grid;place-items:center;width:100%;height:100%;background:#f8fafc;color:#64748b}.preview-vitrine h3{text-align:center;margin:6px 0}.preview-vitrine p{text-align:center;color:#64748b;margin:4px auto 0;max-width:420px}.imagem-box{border:1px dashed #b8c5d6;border-radius:18px;padding:16px;background:#f8fafc}.imagem-atual{display:flex;gap:14px;align-items:center}.imagem-atual img{width:94px;height:94px;border-radius:18px;object-fit:cover;background:#fff}.imagem-atual.logo img{border-radius:50%}.imagem-acoes{display:flex;gap:8px;flex-wrap:wrap}.botao-arquivo{position:relative;overflow:hidden}.botao-arquivo input{position:absolute;inset:0;opacity:0;cursor:pointer}.status-online{display:flex;align-items:center;gap:10px;padding:14px;border:1px solid #dbe3ee;border-radius:16px;background:#f8fafc}.status-online .bolinha{width:12px;height:12px;border-radius:50%;background:#94a3b8}.status-online.ativo .bolinha{background:#16a34a}.status-online b{display:block}.status-online small{color:#64748b}.frete-campos{margin-top:14px}.acoes-fixas{position:sticky;bottom:12px;z-index:12;display:flex;justify-content:space-between;align-items:center;gap:12px;background:rgba(255,255,255,.95);backdrop-filter:blur(8px);border:1px solid #dbe3ee;border-radius:18px;padding:12px 14px;box-shadow:0 12px 30px rgba(15,23,42,.12)}.salvo-ok{padding:12px 14px;border-radius:14px;background:#ecfdf3;border:1px solid #a7f3d0;color:#067647;margin-bottom:14px;font-weight:800}.ajuste-modal{position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:99999;display:none;align-items:center;justify-content:center;padding:18px}.ajuste-modal.ativo{display:flex}.ajuste-card{width:min(94vw,720px);max-height:92vh;overflow:auto;background:#fff;border-radius:22px;padding:18px}.ajuste-canvas-wrap{background:#eef2f7;border-radius:16px;padding:10px;display:grid;place-items:center}.ajuste-canvas-wrap canvas{max-width:100%;max-height:52vh;border-radius:12px;background:#fff}.ajuste-controles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.ajuste-controles label{font-size:12px}.ajuste-controles input[type=range]{width:100%}.ajuste-acoes{display:flex;justify-content:space-between;gap:8px;margin-top:14px}.texto-ajuda{font-size:12px;color:#64748b}.campo-inativo{display:none}.slug-box{display:flex;align-items:center;gap:8px;padding:12px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;overflow:hidden}.slug-box code{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:800px){.empresa-passos{grid-template-columns:repeat(2,minmax(0,1fr))}.empresa-grade,.empresa-grade.tres,.opcoes-cards{grid-template-columns:1fr}.empresa-hero{padding:18px}.empresa-logo-medalhao{width:70px;height:70px}.empresa-bloco-corpo{padding:16px}.acoes-fixas{bottom:76px}.imagem-atual{align-items:flex-start}.ajuste-controles{grid-template-columns:1fr}}
+</style>
+{% endblock %}
+{% block conteudo %}
+<div class="empresa-wrap">
+  <section class="empresa-hero">
+    <div>
+      <small>CONFIGURAÇÃO DA EMPRESA</small>
+      <h1>{{ empresa.nome }}</h1>
+      <p>Preencha por blocos. Você pode salvar e continuar depois.</p>
+    </div>
+    <div class="empresa-logo-medalhao">
+      {% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% else %}<div class="sem-logo"><i class="bi bi-building"></i></div>{% endif %}
+    </div>
+  </section>
+  {% if salvo %}<div class="salvo-ok"><i class="bi bi-check-circle"></i> Rascunho salvo. Você ou o administrador podem continuar daqui.</div>{% endif %}
+  <nav class="empresa-passos">
+    <a href="#dados">1. Empresa</a><a href="#pagamento">2. Pagamento</a><a href="#atendimento">3. Atendimento</a><a href="#frete">4. Deslocamento</a><a href="#vitrine">5. Vitrine</a>
+  </nav>
+
+  <form method="post" action="/painel/empresa" enctype="multipart/form-data" id="formEmpresa">
+    <input type="hidden" name="logo_ajustada" id="logo_ajustada">
+    <input type="hidden" name="capa_ajustada" id="capa_ajustada">
+
+    <section class="empresa-bloco" id="dados">
+      <div class="empresa-bloco-cab"><i class="bi bi-shop"></i><div><h2>Sua empresa</h2><p>Somente o que o cliente precisa reconhecer.</p></div></div>
+      <div class="empresa-bloco-corpo">
+        <div class="empresa-grade">
+          <div><label>Nome da empresa</label><input name="nome" value="{{ empresa.nome or '' }}" required></div>
+          <div><label>Cidade / região principal</label><input name="cidade_atendimento" value="{{ empresa.cidade_atendimento or '' }}" placeholder="Ex.: Rio de Janeiro"></div>
+          <div><label>WhatsApp comercial</label><input name="whatsapp_retorno" inputmode="tel" value="{{ empresa.whatsapp_retorno or '' }}" placeholder="(21) 99999-9999"></div>
+          <div><label>Link público</label><div class="slug-box"><code>{{ link_publico }}</code></div></div>
+        </div>
+        <div style="margin-top:16px">
+          <label>Logo</label>
+          <div class="imagem-box">
+            <div class="imagem-atual logo">
+              {% if empresa.logo_url or empresa.logo_idb_url %}<img id="previewLogo" src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="Logo">{% else %}<img id="previewLogo" src="/static/connect-icon-master.png" alt="Logo">{% endif %}
+              <div><div class="imagem-acoes"><label class="botao botao-arquivo"><i class="bi bi-upload"></i> Enviar logo<input id="arquivoLogo" type="file" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="botao-secundario" data-ajustar-atual="logo"><i class="bi bi-crop"></i> Ajustar</button><button type="button" class="botao-secundario" data-prompt-ia="logo"><i class="bi bi-stars"></i> Prompt para IA</button></div><p class="texto-ajuda">A logo aparece redonda no painel e na vitrine. O original não é alterado.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="empresa-bloco" id="pagamento">
+      <div class="empresa-bloco-cab"><i class="bi bi-wallet2"></i><div><h2>Pagamento</h2><p>Configuração simples para o dia a dia.</p></div></div>
+      <div class="empresa-bloco-corpo">
+        <div class="empresa-grade">
+          <div><label>PIX / copia e cola</label><textarea name="pix_copia_cola" rows="3" placeholder="Chave PIX ou código">{{ empresa.pix_copia_cola or '' }}</textarea></div>
+          <div>
+            <label>Nome do recebedor</label><input name="pix_nome_recebedor" value="{{ empresa.pix_nome_recebedor or '' }}">
+            <label>Banco / instituição</label><input name="pix_banco" value="{{ empresa.pix_banco or '' }}">
+          </div>
+        </div>
+        <label class="check" style="margin-top:12px"><input type="checkbox" name="exige_sinal" value="1" {% if empresa.exige_sinal %}checked{% endif %}> Trabalha com sinal para confirmar a reserva</label>
+        <div class="status-online {% if empresa.infinitepay_ativa %}ativo{% endif %}" style="margin-top:16px"><span class="bolinha"></span><div><b>Pagamento online: {{ 'Ativo — InfinitePay' if empresa.infinitepay_ativa else 'Não ativado' }}</b><small>{% if empresa.infinitepay_ativa %}A configuração técnica é administrada pela plataforma.{% else %}Para ativar o pagamento online, consulte o administrador.{% endif %}</small></div></div>
+      </div>
+    </section>
+
+    <section class="empresa-bloco" id="atendimento">
+      <div class="empresa-bloco-cab"><i class="bi bi-clock"></i><div><h2>Atendimento</h2><p>Informe a janela geral de suporte da empresa.</p></div></div>
+      <div class="empresa-bloco-corpo"><div class="empresa-grade"><div><label>Início</label><input type="time" name="suporte_inicio" value="{{ empresa.suporte_inicio or '09:00' }}"></div><div><label>Fim</label><input type="time" name="suporte_fim" value="{{ empresa.suporte_fim or '20:00' }}"></div></div></div>
+    </section>
+
+    <section class="empresa-bloco" id="frete">
+      <div class="empresa-bloco-cab"><i class="bi bi-truck"></i><div><h2>Frete / deslocamento</h2><p>O cliente informa o CEP antes de reservar.</p></div></div>
+      <div class="empresa-bloco-corpo">
+        <label>Como você calcula o deslocamento?</label>
+        <div class="opcoes-cards">
+          <label class="opcao-card"><input type="radio" name="frete_tipo" value="fixo" {% if empresa.frete_tipo == 'fixo' %}checked{% endif %}><b>Valor fixo</b><small>Mesmo valor para qualquer CEP.</small></label>
+          <label class="opcao-card"><input type="radio" name="frete_tipo" value="km" {% if empresa.frete_tipo == 'km' %}checked{% endif %}><b>Por KM</b><small>Calcula a rota a partir do CEP de saída.</small></label>
+          <label class="opcao-card"><input type="radio" name="frete_tipo" value="consultar" {% if not empresa.frete_tipo or empresa.frete_tipo == 'consultar' %}checked{% endif %}><b>Sob consulta</b><small>Coleta o CEP e deixa o valor para confirmar.</small></label>
+        </div>
+        <div id="freteFixo" class="frete-campos campo-inativo"><label>Valor fixo</label><input name="frete_valor_fixo" data-mascara="moeda" inputmode="decimal" value="{{ empresa.frete_valor_fixo|moeda_br if empresa.frete_valor_fixo else '0,00' }}"></div>
+        <div id="freteKm" class="frete-campos campo-inativo"><div class="empresa-grade tres"><div><label>CEP de saída</label><input name="frete_cep_origem" inputmode="numeric" value="{{ empresa.frete_cep_origem or '' }}" placeholder="00000-000"></div><div><label>Valor por KM</label><input name="frete_valor_km" data-mascara="moeda" inputmode="decimal" value="{{ empresa.frete_valor_km|moeda_br if empresa.frete_valor_km else '0,00' }}"></div><div><label>Multiplicador do trajeto</label><input name="frete_multiplicador_km" inputmode="decimal" value="{{ empresa.frete_multiplicador_km or 1 }}"><small class="texto-ajuda">1 = um trajeto; 2 = ida e volta; use outro valor somente se sua operação precisar.</small></div></div></div>
+      </div>
+    </section>
+
+    <section class="empresa-bloco" id="vitrine">
+      <div class="empresa-bloco-cab"><i class="bi bi-stars"></i><div><h2>Vitrine</h2><p>Logo, cores, capa e uma mensagem curta. Sem editor complicado.</p></div></div>
+      <div class="empresa-bloco-corpo">
+        <label class="check"><input type="checkbox" name="vitrine_ativa" value="1" {% if empresa.vitrine_ativa %}checked{% endif %}> Vitrine pública ativa</label>
+        <div class="empresa-grade" style="margin-top:12px">
+          <div>
+            <label>Título principal</label><input name="vitrine_titulo" id="vitrineTitulo" maxlength="160" value="{{ empresa.vitrine_titulo or '' }}" placeholder="Vamos encontrar as opções certas para seu evento.">
+            <label>Frase curta</label><input name="vitrine_subtitulo" id="vitrineSubtitulo" maxlength="240" value="{{ empresa.vitrine_subtitulo or '' }}" placeholder="Primeiro a data. Depois, as opções disponíveis.">
+            <label>Apresentação da empresa</label><textarea name="vitrine_descricao" id="vitrineDescricao" maxlength="500" rows="4" placeholder="Conte em poucas palavras o que você aluga e onde atende.">{{ empresa.vitrine_descricao or '' }}</textarea>
+            <label>Texto do botão</label><input name="vitrine_botao_texto" id="vitrineBotao" maxlength="60" value="{{ empresa.vitrine_botao_texto or 'Adicionar ao pedido' }}">
+            <div class="empresa-grade"><div><label>Cor principal</label><input name="vitrine_cor_primaria" id="corPrincipal" type="color" value="{{ empresa.vitrine_cor_primaria or '#6D4AFF' }}" style="height:48px"></div><div><label>Cor suave</label><input name="vitrine_cor_secundaria" id="corSecundaria" type="color" value="{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }}" style="height:48px"></div></div>
+          </div>
+          <div class="preview-vitrine" id="previewVitrine">
+            <div class="preview-capa" id="previewCapa" {% if empresa.vitrine_fundo_url %}style="background-image:url('{{ empresa.vitrine_fundo_url }}')"{% endif %}><div class="preview-logo">{% if empresa.logo_url or empresa.logo_idb_url %}<img id="previewLogoMini" src="{{ empresa.logo_url or empresa.logo_idb_url }}">{% else %}<span><i class="bi bi-image"></i></span>{% endif %}</div></div>
+            <h3 id="previewNome">{{ empresa.nome }}</h3><p id="previewTexto">{{ empresa.vitrine_descricao or empresa.vitrine_subtitulo or 'Sua apresentação aparecerá aqui.' }}</p>
+          </div>
+        </div>
+        <div style="margin-top:16px"><label>Modelo visual</label><div class="opcoes-cards"><label class="opcao-card"><input type="radio" name="vitrine_modelo" value="classico" {% if empresa.vitrine_modelo == 'classico' %}checked{% endif %}><b>Clássico</b><small>Limpo e direto.</small></label><label class="opcao-card"><input type="radio" name="vitrine_modelo" value="moderno" {% if not empresa.vitrine_modelo or empresa.vitrine_modelo == 'moderno' %}checked{% endif %}><b>Moderno</b><small>Leve, com profundidade suave.</small></label><label class="opcao-card"><input type="radio" name="vitrine_modelo" value="divertido" {% if empresa.vitrine_modelo == 'divertido' %}checked{% endif %}><b>Divertido</b><small>Mais cor, sem excesso de parametrização.</small></label></div></div>
+        <div style="margin-top:16px"><label>Capa da vitrine</label><div class="imagem-box"><div class="imagem-atual">{% if empresa.vitrine_fundo_url %}<img id="previewCapaMini" src="{{ empresa.vitrine_fundo_url }}" alt="Capa" style="width:170px;height:92px">{% else %}<img id="previewCapaMini" src="/static/connect-icon-master.png" alt="Capa" style="width:170px;height:92px">{% endif %}<div><div class="imagem-acoes"><label class="botao botao-arquivo"><i class="bi bi-upload"></i> Enviar capa<input id="arquivoCapa" type="file" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="botao-secundario" data-ajustar-atual="capa"><i class="bi bi-crop"></i> Ajustar</button><button type="button" class="botao-secundario" data-prompt-ia="capa"><i class="bi bi-stars"></i> Prompt para IA</button></div><p class="texto-ajuda">Ajuste em formato horizontal. O sistema usa a capa na tela inicial da vitrine.</p></div></div></div></div>
+      </div>
+    </section>
+
+    <div class="acoes-fixas"><span class="texto-ajuda">Você pode salvar mesmo sem terminar.</span><div style="display:flex;gap:8px"><a class="botao-secundario" href="/e/{{ empresa.slug }}" target="_blank"><i class="bi bi-eye"></i> Ver vitrine</a><button type="submit"><i class="bi bi-save"></i> Salvar rascunho</button></div></div>
+  </form>
+</div>
+
+<div class="ajuste-modal" id="ajusteModal" aria-hidden="true"><div class="ajuste-card"><h2 id="ajusteTitulo">Ajustar imagem</h2><p class="texto-ajuda">Centralize, aproxime e gire. O arquivo original permanece intacto.</p><div class="ajuste-canvas-wrap"><canvas id="ajusteCanvas" width="800" height="800"></canvas></div><div class="ajuste-controles"><label>Zoom<input id="ajusteZoom" type="range" min="1" max="3" step="0.01" value="1"></label><label>Horizontal<input id="ajusteX" type="range" min="-100" max="100" step="1" value="0"></label><label>Vertical<input id="ajusteY" type="range" min="-100" max="100" step="1" value="0"></label><label>Rotação <span id="rotacaoValor">0°</span><div><button type="button" class="botao-secundario" id="girarEsq">↶</button> <button type="button" class="botao-secundario" id="girarDir">↷</button></div></label></div><div class="ajuste-acoes"><button type="button" class="botao-secundario" id="cancelarAjuste">Cancelar</button><button type="button" id="usarImagem">Usar esta imagem</button></div></div></div>
+{% endblock %}
+{% block scripts_extra %}
+<script>
+(function(){
+ const radios=[...document.querySelectorAll('input[name="frete_tipo"]')],fixo=document.getElementById('freteFixo'),km=document.getElementById('freteKm');
+ function freteUI(){const v=document.querySelector('input[name="frete_tipo"]:checked')?.value;fixo?.classList.toggle('campo-inativo',v!=='fixo');km?.classList.toggle('campo-inativo',v!=='km')}radios.forEach(r=>r.addEventListener('change',freteUI));freteUI();
+ const cp=document.getElementById('corPrincipal'),cs=document.getElementById('corSecundaria'),pv=document.getElementById('previewVitrine'),pc=document.getElementById('previewCapa'),desc=document.getElementById('vitrineDescricao'),sub=document.getElementById('vitrineSubtitulo'),nome=document.querySelector('input[name="nome"]'),pn=document.getElementById('previewNome'),pt=document.getElementById('previewTexto');
+ function atualizaPreview(){pv?.style.setProperty('--pv-cor',cp?.value||'#6D4AFF');pv?.style.setProperty('--pv-suave',cs?.value||'#EEF0FF');if(pn&&nome)pn.textContent=nome.value||'Sua empresa';if(pt)pt.textContent=desc?.value||sub?.value||'Sua apresentação aparecerá aqui.'} [cp,cs,desc,sub,nome].forEach(el=>el?.addEventListener('input',atualizaPreview));atualizaPreview();
+ const modal=document.getElementById('ajusteModal'),canvas=document.getElementById('ajusteCanvas'),ctx=canvas.getContext('2d'),zoom=document.getElementById('ajusteZoom'),px=document.getElementById('ajusteX'),py=document.getElementById('ajusteY'),rv=document.getElementById('rotacaoValor');let imagem=null,tipo='logo',rot=0;
+ function dimensoes(){return tipo==='logo'?[800,800]:[1400,617]}
+ function render(){if(!imagem)return;const [w,h]=dimensoes();canvas.width=w;canvas.height=h;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);const ang=(rot%360)*Math.PI/180;const troca=Math.abs(rot%180)===90;const iw=troca?imagem.height:imagem.width,ih=troca?imagem.width:imagem.height;const escalaBase=Math.max(w/iw,h/ih);const z=Number(zoom.value)||1;const escala=escalaBase*z;const dx=(Number(px.value)||0)/100*w*.45,dy=(Number(py.value)||0)/100*h*.45;ctx.save();ctx.translate(w/2+dx,h/2+dy);ctx.rotate(ang);ctx.drawImage(imagem,-imagem.width*escala/2,-imagem.height*escala/2,imagem.width*escala,imagem.height*escala);ctx.restore()}
+ function abrir(src,t){tipo=t;rot=0;zoom.value='1';px.value='0';py.value='0';rv.textContent='0°';imagem=new Image();imagem.onload=()=>{render();modal.classList.add('ativo');modal.setAttribute('aria-hidden','false')};imagem.src=src}
+ function deArquivo(file,t){if(!file)return;const r=new FileReader();r.onload=()=>abrir(r.result,t);r.readAsDataURL(file)}
+ document.getElementById('arquivoLogo')?.addEventListener('change',e=>deArquivo(e.target.files[0],'logo'));document.getElementById('arquivoCapa')?.addEventListener('change',e=>deArquivo(e.target.files[0],'capa'));
+ document.querySelectorAll('[data-ajustar-atual]').forEach(b=>b.addEventListener('click',()=>{const t=b.dataset.ajustarAtual;const img=document.getElementById(t==='logo'?'previewLogo':'previewCapaMini');if(img?.src)abrir(img.src,t)}));
+ [zoom,px,py].forEach(el=>el.addEventListener('input',render));document.getElementById('girarEsq').onclick=()=>{rot-=90;rv.textContent=rot+'°';render()};document.getElementById('girarDir').onclick=()=>{rot+=90;rv.textContent=rot+'°';render()};document.getElementById('cancelarAjuste').onclick=()=>modal.classList.remove('ativo');
+ document.getElementById('usarImagem').onclick=()=>{let data='';try{data=canvas.toDataURL(tipo==='logo'?'image/png':'image/jpeg',.9)}catch(e){alert('Para ajustar esta imagem, envie o arquivo novamente pelo botão Enviar.');return}document.getElementById(tipo==='logo'?'logo_ajustada':'capa_ajustada').value=data;if(tipo==='logo'){document.getElementById('previewLogo').src=data;const mini=document.getElementById('previewLogoMini');if(mini)mini.src=data}else{document.getElementById('previewCapaMini').src=data;pc.style.backgroundImage=`url(${data})`}modal.classList.remove('ativo')};
+ document.querySelectorAll('[data-prompt-ia]').forEach(b=>b.addEventListener('click',async()=>{const t=b.dataset.promptIa;const empresa=(nome?.value||'Sua empresa').trim();const cidade=(document.querySelector('input[name="cidade_atendimento"]')?.value||'').trim();const descricao=(desc?.value||sub?.value||'').trim();const cor1=cp?.value||'#6D4AFF',cor2=cs?.value||'#EEF0FF';let prompt='';if(t==='logo'){prompt=`Crie uma logo profissional para a empresa "${empresa}"${cidade?` que atende ${cidade}`:''}. Formato quadrado 1:1, 1200 x 1200 px, pensada para também funcionar em recorte circular. Visual moderno, legível em tamanho pequeno, com identidade própria, sem excesso de elementos e sem texto minúsculo. Paleta de referência: ${cor1} e ${cor2}. ${descricao?`Contexto da empresa: ${descricao}.`:''} Não invente telefone, preço ou informações comerciais. Entregue somente a arte da logo, centralizada e com margem segura.`}else{prompt=`Crie uma capa horizontal profissional para a vitrine da empresa "${empresa}"${cidade?` em ${cidade}`:''}. Tamanho 1400 x 617 px. ${descricao?`Contexto: ${descricao}.`:''} Use a identidade visual da empresa e, se eu anexar a logo, preserve-a sem alterar. Paleta de referência: ${cor1} e ${cor2}. A imagem deve ser comercial, moderna, limpa e legível no celular, com os elementos importantes concentrados no centro para evitar cortes. Não invente preços, telefone ou serviços. Não coloque botões nem redes sociais dentro da imagem.`}try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Cole no ChatGPT, Gemini ou Canva e anexe a logo/foto quando necessário.')}catch(e){window.prompt('Copie este prompt:',prompt)}}));
+})();
+</script>
+{% endblock %}

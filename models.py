@@ -44,6 +44,16 @@ class Empresa(Base):
     vitrine_cor_primaria = Column(String(20), default="#6D4AFF")
     vitrine_cor_secundaria = Column(String(20), default="#EEF0FF")
     vitrine_fundo_url = Column(String(300), nullable=True)
+    # Cadastro guiado da empresa e vitrine simplificada.
+    cidade_atendimento = Column(String(120), nullable=True)
+    vitrine_descricao = Column(String(500), nullable=True)
+    vitrine_modelo = Column(String(30), default="moderno")
+    vitrine_botao_texto = Column(String(60), default="Adicionar ao pedido")
+    frete_tipo = Column(String(20), default="consultar")  # consultar, fixo, km
+    frete_valor_fixo = Column(Float, default=0)
+    frete_valor_km = Column(Float, default=0)
+    frete_cep_origem = Column(String(20), nullable=True)
+    frete_multiplicador_km = Column(Float, default=1)
     mensagem_reserva = Column(Text, nullable=True)
     mensagem_aceite = Column(Text, nullable=True)
     mensagem_pagamento = Column(Text, nullable=True)

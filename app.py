@@ -85,7 +85,7 @@ class ControleAcessoMiddleware:
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/") or path == "/painel/marketing" or path.startswith("/painel/marketing/"):
             return "relatorios"
         prefixos_cadastro = (
-            "/painel/configuracoes", "/painel/vitrine", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
+            "/painel/empresa", "/painel/configuracoes", "/painel/vitrine", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -1965,7 +1965,6 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN mostrar_suporte_contrato BOOLEAN DEFAULT false")
     # Regra global: janela geral de suporte encerra às 22:00 em todas as empresas.
     # O contrato usa apenas a parcela dessa janela que coincide com a duração da locação.
-    comandos.append("UPDATE empresas SET suporte_fim = '22:00' WHERE COALESCE(suporte_fim, '') <> '22:00'")
     if "logo_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN logo_url VARCHAR(300)")
     if "tema" not in cols_emp:
@@ -1982,6 +1981,24 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_cor_secundaria VARCHAR(20) DEFAULT '#EEF0FF'")
     if "vitrine_fundo_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fundo_url VARCHAR(300)")
+    if "cidade_atendimento" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN cidade_atendimento VARCHAR(120)")
+    if "vitrine_descricao" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_descricao VARCHAR(500)")
+    if "vitrine_modelo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_modelo VARCHAR(30) DEFAULT 'moderno'")
+    if "vitrine_botao_texto" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_botao_texto VARCHAR(60) DEFAULT 'Adicionar ao pedido'")
+    if "frete_tipo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_tipo VARCHAR(20) DEFAULT 'consultar'")
+    if "frete_valor_fixo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_valor_fixo FLOAT DEFAULT 0")
+    if "frete_valor_km" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_valor_km FLOAT DEFAULT 0")
+    if "frete_cep_origem" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_cep_origem VARCHAR(20)")
+    if "frete_multiplicador_km" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_multiplicador_km FLOAT DEFAULT 1")
     if "mensagem_reserva" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_reserva TEXT")
     if "mensagem_preparacao" not in cols_emp:
@@ -4022,11 +4039,11 @@ def admin_criar_empresa(
         google_calendar_reminder_1=max(int(google_calendar_reminder_1 or 0), 0),
         google_calendar_reminder_2=max(int(google_calendar_reminder_2 or 0), 0),
         google_calendar_duracao_operacao_min=max(int(google_calendar_duracao_operacao_min or 30), 5),
-        infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO),
+        infinitepay_handle=(infinitepay_handle.strip().lstrip("$") or None),
         infinitepay_valor_sinal=max(texto_para_float(infinitepay_valor_sinal), 0),
         exige_sinal=bool(exige_sinal),
         suporte_inicio=suporte_inicio.strip() or "09:00",
-        suporte_fim="22:00",
+        suporte_fim=suporte_fim.strip() or "20:00",
         mostrar_suporte_contrato=bool(mostrar_suporte_contrato),
         logo_url="",
         logo_idb_url="",
@@ -4147,11 +4164,11 @@ def admin_salvar_empresa(
     empresa.google_calendar_reminder_1 = max(int(google_calendar_reminder_1 or 0), 0)
     empresa.google_calendar_reminder_2 = max(int(google_calendar_reminder_2 or 0), 0)
     empresa.google_calendar_duracao_operacao_min = max(int(google_calendar_duracao_operacao_min or 30), 5)
-    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
+    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or None
     empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
-    empresa.suporte_fim = "22:00"
+    empresa.suporte_fim = suporte_fim.strip() or empresa.suporte_fim or "20:00"
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
@@ -4662,43 +4679,14 @@ def configurar_campos_empresa(db: Session, empresa_id: int):
     db.commit()
 
 
-ITENS_ESTOQUE_PADRAO = (
-    "TV",
-    "Som JBL",
-    "BOMBOX JBL",
-    "Microfone sem fio",
-    "Pedestal",
-    "Mesa de apoio",
-    "Spot de LED",
-    "Mesa de som",
-)
+ITENS_ESTOQUE_PADRAO = ()  # Novas empresas começam sem recursos pré-cadastrados.
+
 
 STATUS_ESTOQUE_IGNORADOS = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"}
 
 
 def garantir_itens_estoque_padrao(db: Session, empresa_id: int):
-    """Cria os recursos padrão da empresa sem alterar quantidades já cadastradas.
-
-    A primeira carga nasce com estoque zero para que cada empresa informe o estoque
-    real antes de o recurso limitar uma locação.
-    """
-    existentes = {
-        str(item.nome or "").strip().casefold(): item
-        for item in db.query(ItemProdutoServicoEstoque).filter_by(empresa_id=empresa_id).all()
-    }
-    criou = False
-    for nome in ITENS_ESTOQUE_PADRAO:
-        chave = nome.casefold()
-        if chave not in existentes:
-            db.add(ItemProdutoServicoEstoque(
-                empresa_id=empresa_id,
-                nome=nome,
-                quantidade_estoque=0,
-                ativo=True,
-            ))
-            criou = True
-    if criou:
-        db.commit()
+    """Compatibilidade: novas empresas começam vazias; recursos existentes são preservados."""
     return _itens_estoque_empresa(db, empresa_id)
 
 
@@ -5244,6 +5232,83 @@ def _foto_capa_produto(produto: ProdutoServico) -> str:
     return str(capa.arquivo_url or "")
 
 
+
+
+_CEP_COORD_CACHE: dict[str, tuple[float, float]] = {}
+
+def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str) -> str:
+    """Salva apenas PNG/JPEG/WebP gerado pelo ajustador do navegador."""
+    bruto = str(data_url or "").strip()
+    m = re.match(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=\s]+)$", bruto, re.IGNORECASE)
+    if not m:
+        return ""
+    tipo = m.group(1).lower()
+    try:
+        dados = base64.b64decode(re.sub(r"\s+", "", m.group(2)), validate=True)
+    except Exception:
+        raise HTTPException(400, "Imagem ajustada inválida.")
+    if not dados or len(dados) > 12 * 1024 * 1024:
+        raise HTTPException(400, "A imagem ajustada deve ter até 12 MB.")
+    assinatura_ok = (
+        (tipo == "png" and dados.startswith(b"\x89PNG\r\n\x1a\n")) or
+        (tipo == "jpeg" and dados.startswith(b"\xff\xd8\xff")) or
+        (tipo == "webp" and len(dados) > 12 and dados[:4] == b"RIFF" and dados[8:12] == b"WEBP")
+    )
+    if not assinatura_ok:
+        raise HTTPException(400, "O arquivo ajustado não é uma imagem válida.")
+    extensao = {"jpeg": "jpg", "png": "png", "webp": "webp"}[tipo]
+    pasta = Path("static/uploads/vitrine") / str(empresa_id) / "empresa"
+    pasta.mkdir(parents=True, exist_ok=True)
+    nome = f"{prefixo}_{uuid.uuid4().hex[:14]}.{extensao}"
+    destino = pasta / nome
+    destino.write_bytes(dados)
+    return "/" + destino.as_posix()
+
+
+def _cep_limpo(valor: str) -> str:
+    return re.sub(r"\D", "", str(valor or ""))[:8]
+
+
+def _coordenadas_cep(cep: str, identificador: str = "cep"):
+    cep = _cep_limpo(cep)
+    if len(cep) != 8:
+        return None, None, "CEP inválido"
+    if cep in _CEP_COORD_CACHE:
+        lat, lon = _CEP_COORD_CACHE[cep]
+        return lat, lon, "cache"
+    lat, lon, detalhe = _geocodificar_consultas(
+        [f"{cep[:5]}-{cep[5:]}, Brasil", f"CEP {cep}, Brasil"], identificador=identificador
+    )
+    if lat is not None and lon is not None:
+        _CEP_COORD_CACHE[cep] = (float(lat), float(lon))
+    return lat, lon, detalhe
+
+
+def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str) -> dict:
+    cep = _cep_limpo(cep_destino)
+    if len(cep) != 8:
+        return {"ok": False, "erro": "Informe um CEP válido."}
+    tipo = str(getattr(empresa, "frete_tipo", "consultar") or "consultar").lower()
+    if tipo == "fixo":
+        valor = max(float(getattr(empresa, "frete_valor_fixo", 0) or 0), 0.0)
+        return {"ok": True, "tipo": "fixo", "cep": cep, "valor": round(valor, 2), "distancia_km": None}
+    if tipo == "km":
+        origem = _cep_limpo(getattr(empresa, "frete_cep_origem", "") or "")
+        valor_km = max(float(getattr(empresa, "frete_valor_km", 0) or 0), 0.0)
+        multiplicador = max(float(getattr(empresa, "frete_multiplicador_km", 1) or 1), 0.1)
+        if len(origem) != 8 or valor_km <= 0:
+            return {"ok": False, "erro": "O cálculo por KM ainda não foi configurado pela empresa."}
+        lat1, lon1, _ = _coordenadas_cep(origem, f"frete-origem-{empresa.id}")
+        lat2, lon2, _ = _coordenadas_cep(cep, f"frete-destino-{empresa.id}")
+        if None in (lat1, lon1, lat2, lon2):
+            return {"ok": False, "erro": "Não foi possível localizar este CEP agora. Tente novamente."}
+        distancia, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
+        if distancia is None:
+            return {"ok": False, "erro": "Não foi possível calcular o deslocamento agora."}
+        valor = round(max(float(distancia), 0.0) * valor_km * multiplicador, 2)
+        return {"ok": True, "tipo": "km", "cep": cep, "valor": valor, "distancia_km": round(float(distancia), 1), "fonte": fonte}
+    return {"ok": True, "tipo": "consultar", "cep": cep, "valor": 0.0, "distancia_km": None, "consultar": True}
+
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -> list[dict]:
     """Calcula a mesma disponibilidade operacional do painel, mas em formato enxuto para a vitrine."""
     garantir_itens_estoque_padrao(db, empresa.id)
@@ -5326,11 +5391,25 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         })
     if not itens:
         return None
-    return {"data_evento": data_obj, "itens": itens, "total": round(total, 2)}
+    frete_bruto = bruto.get("frete") if isinstance(bruto.get("frete"), dict) else {}
+    frete_valor = max(float(frete_bruto.get("valor") or 0), 0.0)
+    return {
+        "data_evento": data_obj,
+        "itens": itens,
+        "subtotal": round(total, 2),
+        "frete": {
+            "cep": _cep_limpo(frete_bruto.get("cep") or ""),
+            "tipo": str(frete_bruto.get("tipo") or "consultar"),
+            "valor": round(frete_valor, 2),
+            "distancia_km": frete_bruto.get("distancia_km"),
+            "consultar": bool(frete_bruto.get("consultar")),
+        },
+        "total": round(total + frete_valor, 2),
+    }
 
 
 def criar_modelos_iniciais_empresa(db: Session, empresa: Empresa):
-    """Cria produto, contrato, recursos de estoque e mensagens padrão para a empresa não começar vazia."""
+    """Cria somente a estrutura genérica mínima; produtos e recursos começam vazios."""
     garantir_itens_estoque_padrao(db, empresa.id)
     contrato = db.query(Contrato).filter_by(empresa_id=empresa.id).first()
     if not contrato:
@@ -5355,20 +5434,6 @@ Este é um contrato fictício inicial. Edite este texto conforme a política da 
         db.add(contrato)
         db.commit()
         db.refresh(contrato)
-
-    produto = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).first()
-    if not produto:
-        db.add(ProdutoServico(
-            empresa_id=empresa.id,
-            contrato_id=None,
-            nome="Jukebox Básico - exemplo",
-            descricao="1 jukebox, 2 caixas, 2 microfones e cabos. Edite ou exclua este exemplo.",
-            quantidade_disponivel=1,
-            valor_base=0,
-            duracao_minutos=240,
-            ativo=True
-        ))
-        db.commit()
 
     mensagens = mensagens_empresa(empresa)
     empresa.mensagem_reserva = empresa.mensagem_reserva or mensagens["reserva"]
@@ -6127,8 +6192,100 @@ def alterar_senha_salvar(
     return RedirectResponse("/painel/alterar-senha?sucesso=Senha alterada com sucesso.", status_code=303)
 
 
+@app.get("/painel/empresa", response_class=HTMLResponse)
+def cadastro_empresa_guiado(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/empresa_guiada.html", {
+        "request": request,
+        "empresa": empresa,
+        "link_publico": url_publica(request, f"/e/{empresa.slug}"),
+        "salvo": request.query_params.get("salvo", ""),
+    })
+
+
+@app.post("/painel/empresa")
+async def salvar_cadastro_empresa_guiado(
+        request: Request,
+        nome: str = Form(""),
+        cidade_atendimento: str = Form(""),
+        whatsapp_retorno: str = Form(""),
+        pix_copia_cola: str = Form(""),
+        pix_nome_recebedor: str = Form(""),
+        pix_banco: str = Form(""),
+        exige_sinal: Optional[str] = Form(None),
+        suporte_inicio: str = Form(""),
+        suporte_fim: str = Form(""),
+        frete_tipo: str = Form("consultar"),
+        frete_valor_fixo: str = Form("0"),
+        frete_valor_km: str = Form("0"),
+        frete_cep_origem: str = Form(""),
+        frete_multiplicador_km: str = Form("1"),
+        vitrine_ativa: Optional[str] = Form(None),
+        vitrine_titulo: str = Form(""),
+        vitrine_subtitulo: str = Form(""),
+        vitrine_descricao: str = Form(""),
+        vitrine_modelo: str = Form("moderno"),
+        vitrine_botao_texto: str = Form("Adicionar ao pedido"),
+        vitrine_cor_primaria: str = Form("#6D4AFF"),
+        vitrine_cor_secundaria: str = Form("#EEF0FF"),
+        logo_arquivo: UploadFile | None = File(None),
+        capa_arquivo: UploadFile | None = File(None),
+        logo_ajustada: str = Form(""),
+        capa_ajustada: str = Form(""),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    nome_limpo = (nome or "").strip()
+    if nome_limpo:
+        empresa.nome = nome_limpo[:120]
+    empresa.cidade_atendimento = (cidade_atendimento or "").strip()[:120] or None
+    empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
+    empresa.pix_copia_cola = (pix_copia_cola or "").strip()
+    empresa.pix_nome_recebedor = (pix_nome_recebedor or "").strip()[:160]
+    empresa.pix_banco = (pix_banco or "").strip()[:120]
+    empresa.exige_sinal = bool(exige_sinal)
+    empresa.suporte_inicio = (suporte_inicio or "").strip() or empresa.suporte_inicio or "09:00"
+    empresa.suporte_fim = (suporte_fim or "").strip() or empresa.suporte_fim or "20:00"
+
+    tipo_frete = (frete_tipo or "consultar").strip().lower()
+    if tipo_frete not in {"consultar", "fixo", "km"}:
+        tipo_frete = "consultar"
+    empresa.frete_tipo = tipo_frete
+    empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
+    empresa.frete_valor_km = max(texto_para_float(frete_valor_km), 0)
+    empresa.frete_cep_origem = _cep_limpo(frete_cep_origem) or None
+    try:
+        empresa.frete_multiplicador_km = max(0.1, min(float(str(frete_multiplicador_km or "1").replace(",", ".")), 20.0))
+    except Exception:
+        empresa.frete_multiplicador_km = 1.0
+
+    empresa.vitrine_ativa = bool(vitrine_ativa)
+    empresa.vitrine_titulo = (vitrine_titulo or "").strip()[:160] or None
+    empresa.vitrine_subtitulo = (vitrine_subtitulo or "").strip()[:240] or None
+    empresa.vitrine_descricao = (vitrine_descricao or "").strip()[:500] or None
+    modelo = (vitrine_modelo or "moderno").strip().lower()
+    empresa.vitrine_modelo = modelo if modelo in {"classico", "moderno", "divertido"} else "moderno"
+    empresa.vitrine_botao_texto = (vitrine_botao_texto or "Adicionar ao pedido").strip()[:60] or "Adicionar ao pedido"
+    empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
+    empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
+
+    if logo_ajustada.strip():
+        empresa.logo_url = _salvar_data_url_imagem(logo_ajustada, empresa.id, "logo")
+        empresa.logo_idb_url = ""
+    elif logo_arquivo and logo_arquivo.filename:
+        empresa.logo_url = _salvar_imagem_upload_segura(logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_")
+        empresa.logo_idb_url = ""
+    if capa_ajustada.strip():
+        empresa.vitrine_fundo_url = _salvar_data_url_imagem(capa_ajustada, empresa.id, "capa")
+    elif capa_arquivo and capa_arquivo.filename:
+        empresa.vitrine_fundo_url = _salvar_arquivo_vitrine(capa_arquivo, empresa.id, "empresa")
+
+    db.commit()
+    empresa_cache_invalidar(empresa.id)
+    return RedirectResponse("/painel/empresa?salvo=1", status_code=303)
+
+
 @app.get("/painel/configuracoes", response_class=HTMLResponse)
 def configuracoes_empresa(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not request.session.get("acesso_total"):
+        return RedirectResponse("/painel/empresa", status_code=303)
     mensagens_padrao = mensagens_empresa(empresa)
     campos = db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).order_by(
         CampoEmpresa.ordem).all()
@@ -6168,12 +6325,14 @@ async def salvar_configuracoes_empresa(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
+    if not request.session.get("acesso_total"):
+        return RedirectResponse("/painel/empresa", status_code=303)
     empresa.pix_copia_cola = pix_copia_cola.strip()
     empresa.pix_nome_recebedor = pix_nome_recebedor.strip()
     empresa.pix_banco = pix_banco.strip()
     empresa.whatsapp_retorno = _limpar_tel_whatsapp(whatsapp_retorno)
     empresa.infinitepay_ativa = bool(infinitepay_ativa)
-    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or INFINITEPAY_HANDLE_PADRAO
+    empresa.infinitepay_handle = infinitepay_handle.strip().lstrip("$") or None
     empresa.infinitepay_valor_sinal = max(texto_para_float(infinitepay_valor_sinal), 0)
     empresa.exige_sinal = bool(exige_sinal)
     _infinitepay_seed_taxas(db, empresa.id)
@@ -6188,7 +6347,7 @@ async def salvar_configuracoes_empresa(
             linha.taxa_percentual = taxa
             linha.ativa = True
     empresa.suporte_inicio = suporte_inicio.strip() or "09:00"
-    empresa.suporte_fim = "22:00"
+    empresa.suporte_fim = suporte_fim.strip() or empresa.suporte_fim or "20:00"
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
@@ -13192,12 +13351,23 @@ def vitrine_publica(slug: str, request: Request, data_evento: str = "", db: Sess
     })
 
 
+@app.post("/e/{slug}/vitrine/calcular-deslocamento")
+def vitrine_calcular_deslocamento(
+        slug: str, cep: str = Form(...), db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
+        raise HTTPException(404)
+    resultado = _calcular_frete_vitrine(empresa, cep)
+    return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 400)
+
+
 @app.post("/e/{slug}/vitrine/reservar")
 def vitrine_publica_reservar(
         slug: str, request: Request,
         data_evento: str = Form(...),
         produto_id: list[str] = Form(default=[]),
         quantidade: list[str] = Form(default=[]),
+        cep_frete: str = Form(""),
         db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -13224,9 +13394,19 @@ def vitrine_publica_reservar(
         pedido.append({"produto_id": pid, "quantidade": qtd})
     if not pedido:
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=selecione", status_code=303)
+    frete = _calcular_frete_vitrine(empresa, cep_frete)
+    if not frete.get("ok"):
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=frete", status_code=303)
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
         "data_evento": data_obj.isoformat(),
         "itens": pedido,
+        "frete": {
+            "cep": frete.get("cep"),
+            "tipo": frete.get("tipo"),
+            "valor": float(frete.get("valor") or 0),
+            "distancia_km": frete.get("distancia_km"),
+            "consultar": bool(frete.get("consultar")),
+        },
     }
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
@@ -13252,7 +13432,7 @@ class InfinitePayErro(RuntimeError):
 
 
 def _infinitepay_handle(empresa: Empresa) -> str:
-    return str(getattr(empresa, "infinitepay_handle", "") or INFINITEPAY_HANDLE_PADRAO or "").strip().lstrip("$")
+    return str(getattr(empresa, "infinitepay_handle", "") or "").strip().lstrip("$")
 
 
 def _infinitepay_habilitada(empresa: Empresa) -> bool:
@@ -14117,7 +14297,8 @@ def salvar_pre_cadastro(
         solicitacao.produto_id = produto_principal.id if produto_principal else None
         solicitacao.contrato_id = contrato_padrao_id
         solicitacao.hora_fim = somar_minutos(inicio_obj, duracao_maxima)
-        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), 0, None)
+        frete_vitrine = max(float((pedido_vitrine.get("frete") or {}).get("valor") or 0), 0.0)
+        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), frete_vitrine, None)
         solicitacao.status = "contrato_enviado" if contrato_padrao_id else "pre_reserva"
 
     db.commit()

@@ -1,47 +1,48 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<style>
+.vitrine-admin{max-width:1160px;margin:0 auto}.vitrine-hero{position:relative;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:24px 26px;border-radius:24px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px;overflow:hidden}.vitrine-hero:after{content:"";position:absolute;right:-45px;top:-55px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.08)}.vitrine-hero h1{margin:0 0 5px;color:#fff}.vitrine-hero p{margin:0;color:#dbeafe}.vitrine-hero-acoes{display:flex;gap:8px;position:relative;z-index:2}.vitrine-logo{width:88px;height:88px;border-radius:50%;border:5px solid rgba(255,255,255,.55);background:#fff;padding:4px;overflow:hidden;box-shadow:0 12px 26px rgba(15,23,42,.18)}.vitrine-logo img{width:100%;height:100%;object-fit:cover;border-radius:50%}.vitrine-logo span{width:100%;height:100%;display:grid;place-items:center;color:#0f3d91;font-size:28px;font-weight:900}.vitrine-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.vitrine-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px}.vitrine-kpi small{color:#64748b}.vitrine-kpi strong{display:block;font-size:1.35rem;margin-top:4px}.vitrine-grade{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(340px,.75fr);gap:16px;align-items:start}.painel-card{background:#fff;border:1px solid #dbe3ee;border-radius:22px;overflow:hidden}.painel-card>header{padding:17px 18px;border-bottom:1px solid #edf1f5;display:flex;justify-content:space-between;gap:12px;align-items:center}.painel-card>header h2{margin:0;font-size:18px}.painel-card>header p{margin:3px 0 0;color:#64748b;font-size:13px}.painel-corpo{padding:18px}.preview-pub{border:1px solid #dbe3ee;border-radius:20px;background:linear-gradient(145deg,{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }},#fff);padding:14px}.preview-capa{height:150px;border-radius:16px;background:linear-gradient(135deg,{{ empresa.vitrine_cor_primaria or '#6D4AFF' }},{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }});{% if empresa.vitrine_fundo_url %}background-image:url('{{ empresa.vitrine_fundo_url }}');{% endif %}background-size:cover;background-position:center;position:relative;margin-bottom:44px}.preview-medalhao{position:absolute;width:88px;height:88px;left:50%;bottom:-44px;transform:translateX(-50%);border-radius:50%;background:#fff;border:5px solid #fff;overflow:hidden;box-shadow:0 8px 22px rgba(15,23,42,.18)}.preview-medalhao img{width:100%;height:100%;object-fit:cover}.preview-medalhao span{width:100%;height:100%;display:grid;place-items:center;background:#f8fafc;color:#64748b;font-size:28px}.preview-pub h3{text-align:center;margin:5px 0}.preview-pub p{text-align:center;color:#64748b;margin:4px auto;max-width:450px}.produto-lista{display:grid;gap:10px}.produto-linha-admin{display:grid;grid-template-columns:74px minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid #e5e7eb;border-radius:16px;padding:10px}.produto-linha-admin img,.produto-img-vazia{width:74px;height:62px;border-radius:12px;object-fit:cover;background:#f1f5f9;display:grid;place-items:center;color:#94a3b8}.produto-linha-admin h3{margin:0;font-size:15px}.produto-linha-admin p{margin:3px 0 0;color:#64748b;font-size:12px}.tag-status{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:800;background:#ecfdf3;color:#067647}.tag-status.inativo{background:#f1f5f9;color:#64748b}.saude-box{border:1px dashed #cbd5e1;border-radius:18px;padding:20px;text-align:center}.saude-ok{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:#d1fae5;color:#059669;margin:0 auto 10px;font-size:22px}.link-publico{padding:12px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;display:flex;gap:8px;align-items:center}.link-publico code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}.botao-copiar{min-height:36px!important;padding:7px 10px!important}
+@media(max-width:900px){.vitrine-cards{grid-template-columns:1fr}.vitrine-grade{grid-template-columns:1fr}.vitrine-hero{align-items:flex-start}.vitrine-logo{width:70px;height:70px}.vitrine-hero-acoes{flex-direction:column}.produto-linha-admin{grid-template-columns:62px minmax(0,1fr)}.produto-linha-admin img,.produto-img-vazia{width:62px;height:56px}.produto-linha-admin>a{grid-column:1/-1;width:100%}}
+</style>
+{% endblock %}
 {% block conteudo %}
-<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
-<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap">
-  <div><h1 style="margin-bottom:5px">Vitrine pública</h1><p class="texto-discreto" style="margin-top:0">A parte visual que o cliente vê antes de iniciar o contrato.</p></div>
-  <a class="botao" href="/e/{{ empresa.slug }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Abrir vitrine</a>
-</div>
-{% if request.query_params.get('salvo') %}<div class="box aviso" style="border-color:#a7f3d0;background:#ecfdf5"><b>Vitrine atualizada.</b></div>{% endif %}
-<div class="grid" style="align-items:start">
-  <div class="box">
-    <h2>Identidade visual</h2>
-    <p class="texto-discreto">Poucas escolhas. O cliente verá sua marca, suas cores e seus itens.</p>
-    <form method="post" action="/painel/vitrine" enctype="multipart/form-data">
-      <label class="check"><input type="checkbox" name="vitrine_ativa" value="1" {% if empresa.vitrine_ativa is not sameas false %}checked{% endif %}> Vitrine pública ativa</label>
-      <label>Título principal</label><input name="vitrine_titulo" maxlength="160" value="{{ empresa.vitrine_titulo or '' }}" placeholder="Vamos encontrar as opções certas para o seu evento.">
-      <label>Frase curta</label><input name="vitrine_subtitulo" maxlength="240" value="{{ empresa.vitrine_subtitulo or '' }}" placeholder="Primeiro a data. Depois, mostramos o que está disponível.">
-      <div class="linha">
-        <div><label>Cor principal</label><input name="vitrine_cor_primaria" type="color" value="{{ empresa.vitrine_cor_primaria or '#6D4AFF' }}" style="height:48px"></div>
-        <div><label>Cor suave</label><input name="vitrine_cor_secundaria" type="color" value="{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }}" style="height:48px"></div>
-      </div>
-      <label>Imagem de fundo <span class="texto-discreto">(opcional)</span></label>
-      <input type="file" name="vitrine_fundo_arquivo" accept="image/*">
-      <small class="texto-discreto">No celular, toque aqui e escolha direto da galeria.</small>
-      <button class="largura-total" type="submit" style="margin-top:16px">Salvar aparência</button>
-    </form>
-    {% if empresa.vitrine_fundo_url %}<form method="post" action="/painel/vitrine/remover-fundo" style="margin-top:8px"><button type="submit" class="secundario largura-total">Remover imagem de fundo</button></form>{% endif %}
-  </div>
-  <div class="box">
-    <h2>Prévia</h2>
-    <div style="border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;background:linear-gradient(155deg,{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }},#fff);min-height:360px;padding:24px;display:flex;flex-direction:column;justify-content:flex-end;{% if empresa.vitrine_fundo_url %}background-image:linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,.9)),url('{{ empresa.vitrine_fundo_url }}');background-size:cover;background-position:center;{% endif %}">
-      {% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="" style="width:58px;height:58px;object-fit:contain;margin-bottom:auto;border-radius:14px;background:#fff;padding:5px">{% endif %}
-      <small style="font-weight:800;color:{{ empresa.vitrine_cor_primaria or '#6D4AFF' }}">SEU EVENTO COMEÇA AQUI</small>
-      <h2 style="font-size:2rem;line-height:1.05;margin:8px 0">{{ empresa.vitrine_titulo or 'Vamos encontrar as opções certas para o seu evento.' }}</h2>
-      <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível.' }}</p>
-      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px"><span class="texto-discreto">Data do evento</span><div style="margin-top:8px;background:{{ empresa.vitrine_cor_primaria or '#6D4AFF' }};color:#fff;padding:12px;border-radius:10px;text-align:center;font-weight:800">Começar pela data</div></div>
+<div class="vitrine-admin">
+  <section class="vitrine-hero">
+    <div style="display:flex;align-items:center;gap:16px;position:relative;z-index:2">
+      <div class="vitrine-logo">{% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% else %}<span>{{ (empresa.nome or 'C')[:1]|upper }}</span>{% endif %}</div>
+      <div><small>VITRINE PÚBLICA</small><h1>{{ empresa.nome }}</h1><p>Data, produtos e serviços, CEP, deslocamento e reserva.</p></div>
     </div>
+    <div class="vitrine-hero-acoes"><a class="botao btn-krj-ghost" href="/painel/empresa#vitrine"><i class="bi bi-palette"></i> Personalizar</a><a class="botao" href="/e/{{ empresa.slug }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Ver vitrine</a></div>
+  </section>
+
+  <div class="vitrine-cards">
+    <div class="vitrine-kpi"><small>Status</small><strong>{{ 'Publicada' if empresa.vitrine_ativa else 'Desativada' }}</strong></div>
+    <div class="vitrine-kpi"><small>Produtos e serviços ativos</small><strong>{{ produtos|selectattr('vitrine_ativo')|list|length }}</strong></div>
+    <div class="vitrine-kpi"><small>Frete / deslocamento</small><strong>{% if empresa.frete_tipo == 'fixo' %}Fixo{% elif empresa.frete_tipo == 'km' %}Por KM{% else %}Sob consulta{% endif %}</strong></div>
+  </div>
+
+  <div class="vitrine-grade">
+    <section class="painel-card">
+      <header><div><h2>Produtos e serviços</h2><p>O que está ativo aparece para o cliente quando houver disponibilidade.</p></div><a class="botao" href="/painel/produtos"><i class="bi bi-plus-lg"></i> Gerenciar</a></header>
+      <div class="painel-corpo">
+        <div class="produto-lista">
+          {% for p in produtos %}
+          {% set capa = (p.fotos|selectattr('capa')|list|first) or (p.fotos|list|first) %}
+          <div class="produto-linha-admin">
+            {% if capa %}<img src="{{ capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-img-vazia"><i class="bi bi-image"></i></div>{% endif %}
+            <div><h3>{{ p.nome }}</h3><p>{{ p.vitrine_categoria or 'Sem categoria' }} · R$ {{ p.valor_base|moeda_br }}</p><span class="tag-status {% if not p.vitrine_ativo %}inativo{% endif %}">{{ 'Na vitrine' if p.vitrine_ativo else 'Fora da vitrine' }}</span></div>
+            <a class="botao-secundario" href="/painel/produto/{{ p.id }}#vitrine-produto">Editar</a>
+          </div>
+          {% else %}<div class="saude-box"><i class="bi bi-box-seam" style="font-size:30px;color:#94a3b8"></i><h3>Nenhum produto ou serviço</h3><p class="texto-discreto">Cadastre o primeiro item para montar a vitrine.</p><a class="botao" href="/painel/produtos">Cadastrar item</a></div>{% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <aside style="display:grid;gap:16px">
+      <section class="painel-card"><header><div><h2>Prévia</h2><p>A identidade é configurada na Empresa.</p></div></header><div class="painel-corpo"><div class="preview-pub"><div class="preview-capa"><div class="preview-medalhao">{% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}">{% else %}<span><i class="bi bi-image"></i></span>{% endif %}</div></div><h3>{{ empresa.nome }}</h3><p>{{ empresa.vitrine_descricao or empresa.vitrine_subtitulo or 'Sua apresentação aparecerá aqui.' }}</p></div></div></section>
+      <section class="painel-card"><header><div><h2>Saúde da vitrine</h2><p>O essencial para o cliente conseguir reservar.</p></div></header><div class="painel-corpo"><div class="saude-box"><div class="saude-ok"><i class="bi bi-check-lg"></i></div><b>{% if empresa.vitrine_ativa and (produtos|selectattr('vitrine_ativo')|list|length) %}Vitrine pronta{% else %}Ainda falta configurar{% endif %}</b><p class="texto-discreto">Logo, cores, produtos e deslocamento ficam em um fluxo simples.</p></div></div></section>
+      <section class="painel-card"><header><div><h2>Link público</h2></div></header><div class="painel-corpo"><div class="link-publico"><code id="linkVitrine">{{ link_publico }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkVitrine').textContent)"><i class="bi bi-copy"></i></button></div></div></section>
+    </aside>
   </div>
 </div>
-<div class="box">
-  <h2>Itens que aparecem</h2>
-  <p class="texto-discreto">Fotos e textos são configurados em Itens de locação.</p>
-  <div class="grid">
-  {% for p in produtos %}<div class="card" style="padding:12px"><b>{{ p.nome }}</b><p class="texto-discreto">{% if p.vitrine_ativo %}Visível na vitrine{% else %}Oculto da vitrine{% endif %}{% if p.fotos %} · {{ p.fotos|length }} foto(s){% endif %}</p><a href="/painel/produto/{{ p.id }}#vitrine-produto">Editar vitrine</a></div>{% else %}<p>Nenhum item cadastrado.</p>{% endfor %}
-  </div>
-</div>
-<div class="box"><b>Link público</b><p style="word-break:break-all">{{ link_publico }}</p><a class="botao secundario" href="{{ link_publico }}" target="_blank">Testar como cliente</a></div>
 {% endblock %}

@@ -19,7 +19,7 @@
     <input name="nome" value="{{ empresa.nome if empresa else '' }}" placeholder="Karaoke RJ" required>
 
     <label>Slug do link público</label>
-    <input name="slug" value="{{ empresa.slug if empresa else '' }}" placeholder="karaokerj" required>
+    <input name="slug" value="{{ empresa.slug if empresa else '' }}" placeholder="sua-infinite-tag" required>
 
     <label>Buscar cliente por</label>
     <select name="identificador_principal">
@@ -53,9 +53,9 @@
       <h3>InfinitePay</h3>
       <label class="check"><input type="checkbox" name="infinitepay_ativa" value="1" {% if empresa and empresa.infinitepay_ativa %}checked{% endif %}> Usar InfinitePay nesta empresa</label>
       <label>InfiniteTag / handle</label>
-      <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else 'karaokerj' }}" placeholder="karaokerj">
+      <input name="infinitepay_handle" value="{{ empresa.infinitepay_handle if empresa and empresa.infinitepay_handle else '' }}" placeholder="sua-infinite-tag">
       <label>Valor do sinal por equipamento</label>
-      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '100,00' }}" placeholder="100,00">
+      <input name="infinitepay_valor_sinal" inputmode="decimal" value="{{ empresa.infinitepay_valor_sinal|moeda_br if empresa and empresa.infinitepay_valor_sinal else '0,00' }}" placeholder="0,00">
       <p class="texto-discreto">Ative somente nas empresas que devem oferecer Sinal/Valor do contrato pelo checkout. A configuração é isolada por empresa.</p>
     </div>
 
@@ -105,8 +105,8 @@
         <input name="suporte_inicio" type="time" step="1800" value="{{ empresa.suporte_inicio if empresa and empresa.suporte_inicio else '09:00' }}">
       </div>
       <div>
-        <label>Suporte fim (máximo 22:00)</label>
-        <input name="suporte_fim" type="time" step="1800" max="22:00" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '22:00' }}">
+        <label>Suporte fim</label>
+        <input name="suporte_fim" type="time" step="1800" value="{{ empresa.suporte_fim if empresa and empresa.suporte_fim else '20:00' }}">
       </div>
     </div>
 
