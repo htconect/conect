@@ -36,6 +36,13 @@ class Empresa(Base):
     mostrar_suporte_contrato = Column(Boolean, default=False)
     logo_url = Column(String(300), nullable=True)
     tema = Column(String(30), default="azul")
+    # Identidade da experiência pública / vitrine do cliente.
+    vitrine_ativa = Column(Boolean, default=False)
+    vitrine_titulo = Column(String(160), nullable=True)
+    vitrine_subtitulo = Column(String(240), nullable=True)
+    vitrine_cor_primaria = Column(String(20), default="#6D4AFF")
+    vitrine_cor_secundaria = Column(String(20), default="#EEF0FF")
+    vitrine_fundo_url = Column(String(300), nullable=True)
     mensagem_reserva = Column(Text, nullable=True)
     mensagem_aceite = Column(Text, nullable=True)
     mensagem_pagamento = Column(Text, nullable=True)
@@ -273,9 +280,30 @@ class ProdutoServico(Base):
     permite_mala = Column(Boolean, nullable=False, default=True)
     permite_teto = Column(Boolean, nullable=False, default=False)
     ativo = Column(Boolean, default=True)
+    # Campos exclusivos da vitrine pública. Mantêm a operação interna separada da apresentação ao cliente.
+    vitrine_ativo = Column(Boolean, default=True)
+    vitrine_resumo = Column(String(240), nullable=True)
+    vitrine_categoria = Column(String(80), nullable=True)
+    vitrine_ordem = Column(Integer, default=0)
 
     empresa = relationship("Empresa", back_populates="produtos")
     contrato = relationship("Contrato")
+    fotos = relationship("ProdutoFoto", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoFoto.ordem, ProdutoFoto.id")
+
+
+class ProdutoFoto(Base):
+    __tablename__ = "produto_fotos"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    arquivo_url = Column(String(300), nullable=False)
+    ordem = Column(Integer, nullable=False, default=0)
+    capa = Column(Boolean, nullable=False, default=False)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    empresa = relationship("Empresa")
+    produto = relationship("ProdutoServico", back_populates="fotos")
 
 
 class ItemProdutoServicoEstoque(Base):

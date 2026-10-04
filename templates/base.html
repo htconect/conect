@@ -10,8 +10,8 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png?v=4">
   <link rel="shortcut icon" href="/static/favicon.ico?v=4">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=4">
-  <link rel="stylesheet" href="/static/css/style.css?v=20261003-1090">
-  <link rel="stylesheet" href="/static/css/humiat-design-system.css?v=20261003-1090">
+  <link rel="stylesheet" href="/static/css/style.css?v=20261004-1091">
+  <link rel="stylesheet" href="/static/css/humiat-design-system.css?v=20261004-1091">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   {% block head_extra %}{% endblock %}
 </head>
@@ -32,6 +32,7 @@
         <div class="menu-topo-card">
           <strong>Cadastros</strong>
           <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
+          <a href="/painel/vitrine"><i class="bi bi-shop"></i> Vitrine pública</a>
           <a href="/painel/produtos"><i class="bi bi-box-seam"></i> Itens de locação</a>
           <a href="/painel/cupons"><i class="bi bi-ticket-perforated"></i> Cupons</a>
           <a href="/painel/configuracoes"><i class="bi bi-building"></i> Empresa e campos</a>
@@ -81,6 +82,7 @@
 
     <span class="sidebar-adminator-titulo">Cadastros</span>
     <a class="{% if request.url.path.startswith('/painel/contratos') %}ativo{% endif %}" href="/painel/contratos"><i class="bi bi-file-earmark-richtext"></i><span>Política / modelos</span></a>
+    <a class="{% if request.url.path.startswith('/painel/vitrine') %}ativo{% endif %}" href="/painel/vitrine"><i class="bi bi-shop"></i><span>Vitrine pública</span></a>
     <a class="{% if request.url.path.startswith('/painel/produtos') %}ativo{% endif %}" href="/painel/produtos"><i class="bi bi-box-seam"></i><span>Itens de locação</span></a>
     <a class="{% if request.url.path.startswith('/painel/cupons') %}ativo{% endif %}" href="/painel/cupons"><i class="bi bi-ticket-perforated"></i><span>Cupons</span></a>
     <a class="{% if request.url.path.startswith('/painel/configuracoes') %}ativo{% endif %}" href="/painel/configuracoes"><i class="bi bi-sliders"></i><span>Empresa e campos</span></a>

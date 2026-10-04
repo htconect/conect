@@ -39,7 +39,7 @@ from config import APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, O
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, \
-    ProdutoServico, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
+    ProdutoServico, ProdutoFoto, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
@@ -81,7 +81,7 @@ class ControleAcessoMiddleware:
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/") or path == "/painel/marketing" or path.startswith("/painel/marketing/"):
             return "relatorios"
         prefixos_cadastro = (
-            "/painel/configuracoes", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
+            "/painel/configuracoes", "/painel/vitrine", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -98,6 +98,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["APP_VERSION"] = APP_VERSION
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
+Path("static/uploads/vitrine").mkdir(parents=True, exist_ok=True)
 
 FUSO_EMPRESA = timezone(timedelta(hours=-3))
 
@@ -1815,6 +1816,18 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN logo_url VARCHAR(300)")
     if "tema" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN tema VARCHAR(30) DEFAULT 'azul'")
+    if "vitrine_ativa" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_ativa BOOLEAN DEFAULT false")
+    if "vitrine_titulo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_titulo VARCHAR(160)")
+    if "vitrine_subtitulo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_subtitulo VARCHAR(240)")
+    if "vitrine_cor_primaria" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_cor_primaria VARCHAR(20) DEFAULT '#6D4AFF'")
+    if "vitrine_cor_secundaria" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_cor_secundaria VARCHAR(20) DEFAULT '#EEF0FF'")
+    if "vitrine_fundo_url" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fundo_url VARCHAR(300)")
     if "mensagem_reserva" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN mensagem_reserva TEXT")
     if "mensagem_preparacao" not in cols_emp:
@@ -1887,6 +1900,14 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN permite_mala BOOLEAN DEFAULT true NOT NULL")
         if "permite_teto" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN permite_teto BOOLEAN DEFAULT false NOT NULL")
+        if "vitrine_ativo" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_ativo BOOLEAN DEFAULT true")
+        if "vitrine_resumo" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_resumo VARCHAR(240)")
+        if "vitrine_categoria" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_categoria VARCHAR(80)")
+        if "vitrine_ordem" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_ordem INTEGER DEFAULT 0")
 
     if "veiculos_logisticos" in tabelas:
         cols_vei = colunas("veiculos_logisticos")
@@ -4922,6 +4943,120 @@ def _recursos_produto_edicao(db: Session, empresa_id: int, produto_id: int | Non
     }
 
 
+def _cor_hex_vitrine(valor: str, padrao: str) -> str:
+    valor = str(valor or "").strip()
+    return valor.upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", valor) else padrao
+
+
+def _salvar_arquivo_vitrine(upload: UploadFile | None, empresa_id: int, pasta: str = "empresa") -> str:
+    """Salva imagem enviada pelo próprio locador e devolve a URL pública local."""
+    if not upload or not getattr(upload, "filename", ""):
+        return ""
+    extensao = Path(upload.filename).suffix.lower()
+    if extensao not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        raise HTTPException(400, "Formato de imagem inválido. Use PNG, JPG, WEBP ou GIF.")
+    destino_dir = Path("static/uploads/vitrine") / str(empresa_id) / pasta
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    nome = f"{uuid.uuid4().hex}{extensao}"
+    destino = destino_dir / nome
+    with destino.open("wb") as buffer:
+        shutil.copyfileobj(upload.file, buffer)
+    return "/" + destino.as_posix()
+
+
+def _foto_capa_produto(produto: ProdutoServico) -> str:
+    fotos = list(getattr(produto, "fotos", []) or [])
+    if not fotos:
+        return ""
+    capa = next((f for f in fotos if f.capa), None) or fotos[0]
+    return str(capa.arquivo_url or "")
+
+
+def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -> list[dict]:
+    """Calcula a mesma disponibilidade operacional do painel, mas em formato enxuto para a vitrine."""
+    garantir_itens_estoque_padrao(db, empresa.id)
+    produtos = (
+        db.query(ProdutoServico)
+        .options(selectinload(ProdutoServico.fotos))
+        .filter(
+            ProdutoServico.empresa_id == empresa.id,
+            ProdutoServico.ativo == True,
+            ProdutoServico.vitrine_ativo == True,
+        )
+        .order_by(ProdutoServico.vitrine_ordem.asc(), ProdutoServico.nome.asc())
+        .all()
+    )
+    reservas_do_dia = _reservas_ativas_na_data(db, empresa.id, data_consulta)
+    alugado_por_produto: dict[int, int] = {}
+    for reserva in reservas_do_dia:
+        for ri in reserva.itens:
+            if not ri.produto_id:
+                continue
+            alugado_por_produto[int(ri.produto_id)] = alugado_por_produto.get(int(ri.produto_id), 0) + max(1, int(ri.quantidade or 1))
+
+    mapa_recursos = _mapa_recursos_produtos(db, empresa.id)
+    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta)
+    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+
+    saida = []
+    for produto in produtos:
+        total = max(0, int(produto.quantidade_disponivel or 0))
+        alugados = max(0, int(alugado_por_produto.get(produto.id, 0)))
+        disponivel_fisico = max(total - alugados, 0)
+        disponiveis, _detalhes = _limite_recursos_produto(
+            produto,
+            mapa_recursos.get(produto.id, {}),
+            itens_estoque,
+            comprometido_recursos,
+            disponivel_fisico,
+        )
+        saida.append({
+            "produto": produto,
+            "disponiveis": max(0, int(disponiveis)),
+            "foto": _foto_capa_produto(produto),
+            "resumo": (produto.vitrine_resumo or produto.descricao or "").strip(),
+            "categoria": (produto.vitrine_categoria or "").strip(),
+        })
+    return saida
+
+
+def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> dict | None:
+    bruto = request.session.get(f"vitrine_pedido_{empresa.slug}")
+    if not isinstance(bruto, dict):
+        return None
+    try:
+        data_obj = datetime.strptime(str(bruto.get("data_evento") or ""), "%Y-%m-%d").date()
+    except Exception:
+        return None
+    itens_brutos = bruto.get("itens") or []
+    itens = []
+    total = 0.0
+    for reg in itens_brutos:
+        try:
+            produto_id = int(reg.get("produto_id"))
+            quantidade = max(1, int(reg.get("quantidade") or 1))
+        except Exception:
+            continue
+        produto = db.get(ProdutoServico, produto_id)
+        if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
+            continue
+        valor_unitario = max(float(produto.valor_base or 0), 0.0)
+        valor_total = round(valor_unitario * quantidade, 2)
+        total += valor_total
+        itens.append({
+            "produto": produto,
+            "produto_id": produto.id,
+            "nome": produto.nome,
+            "quantidade": quantidade,
+            "valor_unitario": valor_unitario,
+            "valor_total": valor_total,
+            "foto": _foto_capa_produto(produto),
+        })
+    if not itens:
+        return None
+    return {"data_evento": data_obj, "itens": itens, "total": round(total, 2)}
+
+
 def criar_modelos_iniciais_empresa(db: Session, empresa: Empresa):
     """Cria produto, contrato, recursos de estoque e mensagens padrão para a empresa não começar vazia."""
     garantir_itens_estoque_padrao(db, empresa.id)
@@ -5874,10 +6009,93 @@ def salvar_cupom(
     return RedirectResponse("/painel/cupons", status_code=303)
 
 
+@app.get("/painel/vitrine", response_class=HTMLResponse)
+def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produtos = (
+        db.query(ProdutoServico)
+        .options(selectinload(ProdutoServico.fotos))
+        .filter_by(empresa_id=empresa.id)
+        .order_by(ProdutoServico.vitrine_ordem.asc(), ProdutoServico.nome.asc())
+        .all()
+    )
+    return templates.TemplateResponse("admin/vitrine.html", {
+        "request": request,
+        "empresa": empresa,
+        "produtos": produtos,
+        "link_publico": url_publica(request, f"/e/{empresa.slug}"),
+    })
+
+
+@app.post("/painel/vitrine")
+def salvar_painel_vitrine(
+        request: Request,
+        vitrine_ativa: Optional[str] = Form(None),
+        vitrine_titulo: str = Form(""),
+        vitrine_subtitulo: str = Form(""),
+        vitrine_cor_primaria: str = Form("#6D4AFF"),
+        vitrine_cor_secundaria: str = Form("#EEF0FF"),
+        vitrine_fundo_arquivo: UploadFile | None = File(None),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    empresa.vitrine_ativa = bool(vitrine_ativa)
+    empresa.vitrine_titulo = (vitrine_titulo or "").strip()[:160] or None
+    empresa.vitrine_subtitulo = (vitrine_subtitulo or "").strip()[:240] or None
+    empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
+    empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
+    if vitrine_fundo_arquivo and vitrine_fundo_arquivo.filename:
+        empresa.vitrine_fundo_url = _salvar_arquivo_vitrine(vitrine_fundo_arquivo, empresa.id, "empresa")
+    db.commit()
+    empresa_cache_invalidar(empresa.id)
+    return RedirectResponse("/painel/vitrine?salvo=1", status_code=303)
+
+
+@app.post("/painel/vitrine/remover-fundo")
+def remover_fundo_vitrine(db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    empresa.vitrine_fundo_url = None
+    db.commit()
+    empresa_cache_invalidar(empresa.id)
+    return RedirectResponse("/painel/vitrine", status_code=303)
+
+
+@app.post("/painel/produto/{produto_id}/foto/{foto_id}/capa")
+def definir_capa_produto(produto_id: int, foto_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    foto = db.get(ProdutoFoto, foto_id)
+    if not produto or produto.empresa_id != empresa.id or not foto or foto.empresa_id != empresa.id or foto.produto_id != produto.id:
+        raise HTTPException(404)
+    db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).update({ProdutoFoto.capa: False}, synchronize_session=False)
+    foto.capa = True
+    db.commit()
+    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+
+
+@app.post("/painel/produto/{produto_id}/foto/{foto_id}/excluir")
+def excluir_foto_produto(produto_id: int, foto_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    foto = db.get(ProdutoFoto, foto_id)
+    if not produto or produto.empresa_id != empresa.id or not foto or foto.empresa_id != empresa.id or foto.produto_id != produto.id:
+        raise HTTPException(404)
+    era_capa = bool(foto.capa)
+    caminho = Path(str(foto.arquivo_url or "").lstrip("/"))
+    db.delete(foto)
+    db.flush()
+    if era_capa:
+        proxima = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).order_by(ProdutoFoto.ordem.asc(), ProdutoFoto.id.asc()).first()
+        if proxima:
+            proxima.capa = True
+    db.commit()
+    try:
+        if caminho.exists() and caminho.is_file():
+            caminho.unlink()
+    except Exception:
+        pass
+    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+
+
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
-    produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
+    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     mapa = _mapa_recursos_produtos(db, empresa.id)
     itens_por_id = {item.id: item for item in itens_estoque}
@@ -5906,7 +6124,7 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
-    produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
+    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     mapa = _mapa_recursos_produtos(db, empresa.id)
     itens_por_id = {item.id: item for item in itens_estoque}
@@ -5989,6 +6207,9 @@ def salvar_produto_url(
         carga_pontos: int = Form(1), volume_logistico: int = Form(1),
         permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
         contrato_id: str = Form(""),
+        vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
+        vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        foto_arquivos: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
@@ -6000,8 +6221,9 @@ def salvar_produto_url(
         duracao_minutos=duracao_minutos, prazo_retirada_dias=prazo_retirada_dias,
         carga_pontos=carga_pontos, volume_logistico=volume_logistico,
         permite_interno=permite_interno, permite_mala=permite_mala, permite_teto=permite_teto,
-        contrato_id=contrato_id, recurso_item_id=recurso_item_id,
-        recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
+        contrato_id=contrato_id, vitrine_ativo=vitrine_ativo, vitrine_resumo=vitrine_resumo,
+        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, foto_arquivos=foto_arquivos,
+        recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
     )
 
@@ -6014,6 +6236,9 @@ def salvar_produto(
         prazo_retirada_dias: int = Form(1), carga_pontos: int = Form(1), volume_logistico: int = Form(1),
         permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
         contrato_id: str = Form(""),
+        vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
+        vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        foto_arquivos: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
@@ -6045,7 +6270,29 @@ def salvar_produto(
     if not (produto.permite_interno or produto.permite_mala or produto.permite_teto):
         produto.permite_interno = True
     produto.tipo_locacao = "horas_fixas"
+    produto.vitrine_ativo = bool(vitrine_ativo)
+    produto.vitrine_resumo = (vitrine_resumo or "").strip()[:240] or None
+    produto.vitrine_categoria = (vitrine_categoria or "").strip()[:80] or None
+    produto.vitrine_ordem = int(vitrine_ordem or 0)
     db.flush()
+
+    fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
+    proxima_ordem = fotos_existentes
+    primeira_nova = None
+    for upload in foto_arquivos or []:
+        if not getattr(upload, "filename", ""):
+            continue
+        url = _salvar_arquivo_vitrine(upload, empresa.id, f"produto_{produto.id}")
+        if not url:
+            continue
+        foto = ProdutoFoto(
+            empresa_id=empresa.id, produto_id=produto.id, arquivo_url=url, ordem=proxima_ordem,
+            capa=(fotos_existentes == 0 and primeira_nova is None),
+        )
+        db.add(foto)
+        if primeira_nova is None:
+            primeira_nova = foto
+        proxima_ordem += 1
     _salvar_vinculos_recursos_produto(
         db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
     )
@@ -6065,6 +6312,8 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
         volume_logistico=origem.volume_logistico or 1, permite_interno=origem.permite_interno,
         permite_mala=origem.permite_mala, permite_teto=origem.permite_teto, ativo=True,
+        vitrine_ativo=origem.vitrine_ativo, vitrine_resumo=origem.vitrine_resumo,
+        vitrine_categoria=origem.vitrine_categoria, vitrine_ordem=origem.vitrine_ordem,
     )
     db.add(novo)
     db.flush()
@@ -12594,7 +12843,89 @@ def portal_empresa(slug: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
+    if not getattr(empresa, "vitrine_ativa", True):
+        return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
+    return templates.TemplateResponse("publico/vitrine_inicio.html", {
+        "request": request,
+        "empresa": empresa,
+        "hoje": date.today().isoformat(),
+    })
+
+
+@app.get("/e/{slug}/identificar", response_class=HTMLResponse)
+def portal_empresa_identificar(slug: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404, "Empresa não encontrada")
     return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
+
+
+@app.get("/e/{slug}/vitrine", response_class=HTMLResponse)
+def vitrine_publica(slug: str, request: Request, data_evento: str = "", db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404, "Empresa não encontrada")
+    if not getattr(empresa, "vitrine_ativa", True):
+        return RedirectResponse(f"/e/{slug}/identificar", status_code=303)
+    try:
+        data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    except Exception:
+        return RedirectResponse(f"/e/{slug}", status_code=303)
+    if data_obj < date.today():
+        return RedirectResponse(f"/e/{slug}?erro=data", status_code=303)
+    itens = _itens_vitrine_publica(db, empresa, data_obj)
+    categorias = []
+    for reg in itens:
+        categoria = reg.get("categoria") or ""
+        if categoria and categoria not in categorias:
+            categorias.append(categoria)
+    return templates.TemplateResponse("publico/vitrine.html", {
+        "request": request,
+        "empresa": empresa,
+        "data_evento": data_obj,
+        "itens": itens,
+        "categorias": categorias,
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/e/{slug}/vitrine/reservar")
+def vitrine_publica_reservar(
+        slug: str, request: Request,
+        data_evento: str = Form(...),
+        produto_id: list[str] = Form(default=[]),
+        quantidade: list[str] = Form(default=[]),
+        db: Session = Depends(get_db),
+):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+    try:
+        data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    except Exception:
+        return RedirectResponse(f"/e/{slug}", status_code=303)
+    disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in _itens_vitrine_publica(db, empresa, data_obj)}
+    pedido = []
+    for idx, pid_bruto in enumerate(produto_id or []):
+        try:
+            pid = int(pid_bruto)
+            qtd = max(1, int(quantidade[idx] if idx < len(quantidade) else 1))
+        except Exception:
+            continue
+        produto = db.get(ProdutoServico, pid)
+        if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
+            continue
+        limite = max(0, int(disponiveis.get(pid, 0)))
+        if limite <= 0 or qtd > limite:
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=indisponivel", status_code=303)
+        pedido.append({"produto_id": pid, "quantidade": qtd})
+    if not pedido:
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=selecione", status_code=303)
+    request.session[f"vitrine_pedido_{empresa.slug}"] = {
+        "data_evento": data_obj.isoformat(),
+        "itens": pedido,
+    }
+    return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
 
 @app.post("/e/{slug}/buscar")
@@ -13232,6 +13563,11 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
         "campos_cfg": {ce.campo.chave: ce for ce in
                        db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     }
+    pedido_vitrine = _pedido_vitrine_sessao(request, db, empresa)
+    if pedido_vitrine:
+        contexto["vitrine_pedido"] = pedido_vitrine
+        if form is None:
+            form = {"data_evento": pedido_vitrine["data_evento"].isoformat()}
     if form is not None:
         contexto["form"] = form
     return contexto
@@ -13291,6 +13627,9 @@ def salvar_pre_cadastro(
         db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+    pedido_vitrine = _pedido_vitrine_sessao(request, db, empresa)
     cpf_limpo = limpar_identificador(cpf)
     cnpj_limpo = limpar_identificador(cnpj)
     telefone_limpo = limpar_identificador(telefone)
@@ -13378,6 +13717,16 @@ def salvar_pre_cadastro(
     if not hora_meia_em_meia_valida(hora_inicio):
         return render_erro("hora_invalida")
     data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    if pedido_vitrine:
+        # A data escolhida na vitrine é a referência da reserva. O cliente não precisa escolhê-la novamente.
+        data_obj = pedido_vitrine["data_evento"]
+        disponibilidade_atual = {
+            int(reg["produto"].id): int(reg["disponiveis"])
+            for reg in _itens_vitrine_publica(db, empresa, data_obj)
+        }
+        for reg in pedido_vitrine["itens"]:
+            if int(reg["quantidade"]) > max(0, disponibilidade_atual.get(int(reg["produto_id"]), 0)):
+                return render_erro("vitrine_indisponivel")
     rascunho_existente = (
         db.query(Solicitacao)
         .join(Cliente, Solicitacao.cliente_id == Cliente.id)
@@ -13411,11 +13760,44 @@ def salvar_pre_cadastro(
         responsavel_contrato_telefone=(responsavel_pre_telefone[:30] if responsavel_pre_telefone else None),
     )
     db.add(solicitacao)
+    db.flush()
+
+    if pedido_vitrine:
+        total_itens = 0.0
+        produto_principal = None
+        contrato_padrao_id = None
+        duracao_maxima = 240
+        for reg in pedido_vitrine["itens"]:
+            produto = reg["produto"]
+            quantidade_item = max(1, int(reg["quantidade"] or 1))
+            valor_unitario = max(float(produto.valor_base or 0), 0.0)
+            valor_total = round(valor_unitario * quantidade_item, 2)
+            total_itens += valor_total
+            duracao_maxima = max(duracao_maxima, int(produto.duracao_minutos or 240))
+            db.add(ReservaItem(
+                empresa_id=empresa.id, solicitacao_id=solicitacao.id, produto_id=produto.id,
+                nome=produto.nome, descricao=produto.descricao, quantidade=quantidade_item,
+                valor_unitario=valor_unitario, valor_total=valor_total,
+            ))
+            if produto_principal is None:
+                produto_principal = produto
+            if contrato_padrao_id is None and produto.contrato_id:
+                contrato_padrao_id = produto.contrato_id
+
+        solicitacao.produto_id = produto_principal.id if produto_principal else None
+        solicitacao.contrato_id = contrato_padrao_id
+        solicitacao.hora_fim = somar_minutos(inicio_obj, duracao_maxima)
+        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), 0, None)
+        solicitacao.status = "contrato_enviado" if contrato_padrao_id else "pre_reserva"
+
     db.commit()
     db.refresh(solicitacao)
-    # O pré-contrato é salvo antes de qualquer abertura do WhatsApp.
-    # A tela seguinte explica claramente que o Conect apenas prepara a mensagem;
-    # o envio real acontece quando o cliente toca em Enviar dentro do WhatsApp.
+
+    if pedido_vitrine:
+        request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
+        return RedirectResponse(f"/e/{slug}/contrato/{solicitacao.id}", status_code=303)
+
+    # Fluxo legado sem vitrine: preserva o pré-contrato por WhatsApp.
     return RedirectResponse(
         f"/e/{slug}/confirmar-whatsapp/{solicitacao.id}?tipo=pre_contrato",
         status_code=303,

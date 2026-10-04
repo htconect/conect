@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap">
+  <div><h1 style="margin-bottom:5px">Vitrine pública</h1><p class="texto-discreto" style="margin-top:0">A parte visual que o cliente vê antes de iniciar o contrato.</p></div>
+  <a class="botao" href="/e/{{ empresa.slug }}" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Abrir vitrine</a>
+</div>
+{% if request.query_params.get('salvo') %}<div class="box aviso" style="border-color:#a7f3d0;background:#ecfdf5"><b>Vitrine atualizada.</b></div>{% endif %}
+<div class="grid" style="align-items:start">
+  <div class="box">
+    <h2>Identidade visual</h2>
+    <p class="texto-discreto">Poucas escolhas. O cliente verá sua marca, suas cores e seus itens.</p>
+    <form method="post" action="/painel/vitrine" enctype="multipart/form-data">
+      <label class="check"><input type="checkbox" name="vitrine_ativa" value="1" {% if empresa.vitrine_ativa is not sameas false %}checked{% endif %}> Vitrine pública ativa</label>
+      <label>Título principal</label><input name="vitrine_titulo" maxlength="160" value="{{ empresa.vitrine_titulo or '' }}" placeholder="Vamos encontrar as opções certas para o seu evento.">
+      <label>Frase curta</label><input name="vitrine_subtitulo" maxlength="240" value="{{ empresa.vitrine_subtitulo or '' }}" placeholder="Primeiro a data. Depois, mostramos o que está disponível.">
+      <div class="linha">
+        <div><label>Cor principal</label><input name="vitrine_cor_primaria" type="color" value="{{ empresa.vitrine_cor_primaria or '#6D4AFF' }}" style="height:48px"></div>
+        <div><label>Cor suave</label><input name="vitrine_cor_secundaria" type="color" value="{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }}" style="height:48px"></div>
+      </div>
+      <label>Imagem de fundo <span class="texto-discreto">(opcional)</span></label>
+      <input type="file" name="vitrine_fundo_arquivo" accept="image/*">
+      <small class="texto-discreto">No celular, toque aqui e escolha direto da galeria.</small>
+      <button class="largura-total" type="submit" style="margin-top:16px">Salvar aparência</button>
+    </form>
+    {% if empresa.vitrine_fundo_url %}<form method="post" action="/painel/vitrine/remover-fundo" style="margin-top:8px"><button type="submit" class="secundario largura-total">Remover imagem de fundo</button></form>{% endif %}
+  </div>
+  <div class="box">
+    <h2>Prévia</h2>
+    <div style="border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;background:linear-gradient(155deg,{{ empresa.vitrine_cor_secundaria or '#EEF0FF' }},#fff);min-height:360px;padding:24px;display:flex;flex-direction:column;justify-content:flex-end;{% if empresa.vitrine_fundo_url %}background-image:linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,.9)),url('{{ empresa.vitrine_fundo_url }}');background-size:cover;background-position:center;{% endif %}">
+      {% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="" style="width:58px;height:58px;object-fit:contain;margin-bottom:auto;border-radius:14px;background:#fff;padding:5px">{% endif %}
+      <small style="font-weight:800;color:{{ empresa.vitrine_cor_primaria or '#6D4AFF' }}">SEU EVENTO COMEÇA AQUI</small>
+      <h2 style="font-size:2rem;line-height:1.05;margin:8px 0">{{ empresa.vitrine_titulo or 'Vamos encontrar as opções certas para o seu evento.' }}</h2>
+      <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível.' }}</p>
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px"><span class="texto-discreto">Data do evento</span><div style="margin-top:8px;background:{{ empresa.vitrine_cor_primaria or '#6D4AFF' }};color:#fff;padding:12px;border-radius:10px;text-align:center;font-weight:800">Começar pela data</div></div>
+    </div>
+  </div>
+</div>
+<div class="box">
+  <h2>Itens que aparecem</h2>
+  <p class="texto-discreto">Fotos e textos são configurados em Itens de locação.</p>
+  <div class="grid">
+  {% for p in produtos %}<div class="card" style="padding:12px"><b>{{ p.nome }}</b><p class="texto-discreto">{% if p.vitrine_ativo %}Visível na vitrine{% else %}Oculto da vitrine{% endif %}{% if p.fotos %} · {{ p.fotos|length }} foto(s){% endif %}</p><a href="/painel/produto/{{ p.id }}#vitrine-produto">Editar vitrine</a></div>{% else %}<p>Nenhum item cadastrado.</p>{% endfor %}
+  </div>
+</div>
+<div class="box"><b>Link público</b><p style="word-break:break-all">{{ link_publico }}</p><a class="botao secundario" href="{{ link_publico }}" target="_blank">Testar como cliente</a></div>
+{% endblock %}

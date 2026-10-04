@@ -1,4 +1,4 @@
-const CACHE = "conect-pwa-v3-icons";
+const CACHE = "conect-pwa-v4-vitrine";
 const ARQUIVOS = [
   "/static/icon-192.png",
   "/static/icon-512.png",

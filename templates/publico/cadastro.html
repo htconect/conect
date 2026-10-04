@@ -1,13 +1,21 @@
-{% extends "base.html" %}
+{% extends "publico/base_cliente.html" %}
 {% block conteudo %}
 <style>
 .aviso-horario-contrato{margin-top:10px;border:2px solid currentColor;padding:14px 16px;border-radius:12px}
 .aviso-horario-contrato strong{display:block;font-size:1.08rem;margin-bottom:6px}
 .aviso-horario-contrato p{margin:0;line-height:1.45}
+.pedido-vitrine-resumo{background:#fff;border:1px solid var(--cliente-borda);border-radius:18px;padding:14px;margin:12px 0 18px}.pedido-vitrine-resumo h2{margin:0 0 10px;font-size:1rem}.pedido-vitrine-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #eef2f7}.pedido-vitrine-item:last-child{border-bottom:0}.pedido-vitrine-item img{width:54px;height:46px;object-fit:cover;border-radius:9px}.pedido-vitrine-item>div{min-width:0;flex:1}.pedido-vitrine-item strong{display:block}.pedido-vitrine-total{display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-weight:900}
 </style>
 
-<h1>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Editar dados do contrato{% else %}Pré-contrato{% endif %} - {{ empresa.nome }}</h1>
-<p class="texto-discreto">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Corrija seus dados e salve. Depois confira novamente o contrato para aceitar.{% else %}Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.{% endif %}</p>
+<h1>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Editar dados do contrato{% elif vitrine_pedido is defined and vitrine_pedido %}Complete sua reserva{% else %}Pré-contrato{% endif %}</h1>
+<p class="texto-discreto">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Corrija seus dados e salve. Depois confira novamente o contrato para aceitar.{% else %}{% if vitrine_pedido is defined and vitrine_pedido %}Seu pedido já está montado. Agora complete os dados do contrato.{% else %}Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.{% endif %}{% endif %}</p>
+{% if vitrine_pedido is defined and vitrine_pedido %}
+<div class="pedido-vitrine-resumo">
+  <h2>Seu pedido · {{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</h2>
+  {% for reg in vitrine_pedido.itens %}<div class="pedido-vitrine-item">{% if reg.foto %}<img src="{{ reg.foto }}" alt="">{% endif %}<div><strong>{{ reg.quantidade }}x {{ reg.nome }}</strong><small class="texto-discreto">R$ {{ reg.valor_total|moeda_br }}</small></div></div>{% endfor %}
+  <div class="pedido-vitrine-total"><span>Total dos itens</span><span>R$ {{ vitrine_pedido.total|moeda_br }}</span></div>
+</div>
+{% endif %}
 
 {% if erro %}
 <div class="box aviso">
@@ -20,6 +28,7 @@
   {% if erro == 'rascunho_duplicado' %}Seu contrato já foi informado para este telefone nesta data. Leia o contrato quando receber. Caso precise alterar alguma informação, chame a empresa pelo WhatsApp.{% endif %}
   {% if erro == 'email_obrigatorio' %}Informe seu e-mail para continuar.{% endif %}
   {% if erro == 'email_invalido' %}Informe um e-mail válido.{% endif %}
+  {% if erro == 'vitrine_indisponivel' %}Uma das opções escolhidas não está mais disponível nesta data. Volte à vitrine e escolha novamente.{% endif %}
 </div>
 {% endif %}
 
@@ -37,7 +46,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="Salvando pré-contrato" data-loading-text="Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp."{% endif %}>
+<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.id }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="{% if vitrine_pedido is defined and vitrine_pedido %}Preparando contrato{% else %}Salvando pré-contrato{% endif %}" data-loading-text="{% if vitrine_pedido is defined and vitrine_pedido %}Estamos montando o contrato com os itens escolhidos.{% else %}Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp.{% endif %}"{% endif %}>
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
   {% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %}<input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">{% endif %}
 
@@ -101,7 +110,7 @@
   <section class="secao-form">
     <h2>3. Evento</h2>
     <div class="grid duas">
-      <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required></div>
+      <div><label>Data do evento *</label>{% if vitrine_pedido is defined and vitrine_pedido %}<div class="box" style="padding:12px;margin:0"><b>{{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</b></div><input name="data_evento" type="hidden" value="{{ vitrine_pedido.data_evento.isoformat() }}">{% else %}<input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required>{% endif %}</div>
       <div><label>Hora de início *</label><input id="horaInicioPreContrato" name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio if form is defined else '' }}" required></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
@@ -133,7 +142,7 @@
     <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
   </section>
 
-  <button>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Salvar correções{% else %}Enviar reserva{% endif %}</button>
+  <button>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Salvar correções{% elif vitrine_pedido is defined and vitrine_pedido %}Continuar para o contrato{% else %}Enviar reserva{% endif %}</button>
 </form>
 
 <script>
