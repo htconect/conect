@@ -43,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
+from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -1728,9 +1728,8 @@ def horario_suporte_contrato(empresa: Empresa, item: Solicitacao) -> tuple[str, 
         if fim_evento <= inicio_evento:
             fim_evento += timedelta(days=1)
     else:
-        duracao = 240
-        if getattr(item, "produto", None) and getattr(item.produto, "duracao_minutos", None):
-            duracao = max(1, int(item.produto.duracao_minutos or 240))
+        duracao_snapshot = int(getattr(item, "duracao_contratada_minutos", 0) or 0)
+        duracao = max(60, duracao_snapshot) if duracao_snapshot > 0 else 240
         fim_evento = inicio_evento + timedelta(minutes=duracao)
 
     inicio_geral = datetime.combine(data_base, _time_hhmm(getattr(empresa, "suporte_inicio", ""), "09:00"))
@@ -2170,6 +2169,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_ativo BOOLEAN DEFAULT false")
     if "lokafest_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_url VARCHAR(300)")
+    if "duracao_padrao_minutos" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN duracao_padrao_minutos INTEGER DEFAULT 240")
     if "retirada_cortesia_proximo_dia" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN retirada_cortesia_proximo_dia BOOLEAN DEFAULT false")
         nova_col_retirada_cortesia = True
@@ -2306,6 +2307,28 @@ def garantir_colunas_novas():
             ativo BOOLEAN DEFAULT true NOT NULL,
             CONSTRAINT uq_veiculo_produto_carga UNIQUE (veiculo_id, produto_id)
         )""")
+
+    if "tipos_evento_empresa" in tabelas:
+        cols_tipo_evento = colunas("tipos_evento_empresa")
+        if "duracao_minutos" not in cols_tipo_evento:
+            comandos.append("ALTER TABLE tipos_evento_empresa ADD COLUMN duracao_minutos INTEGER")
+
+    if "bloqueios_data" not in tabelas:
+        comandos.append("""
+        CREATE TABLE bloqueios_data (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            data_inicio DATE NOT NULL,
+            data_fim DATE NOT NULL,
+            descricao VARCHAR(160),
+            ativo BOOLEAN DEFAULT true NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id)
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_empresa_id ON bloqueios_data (empresa_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_inicio ON bloqueios_data (data_inicio)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_fim ON bloqueios_data (data_fim)")
 
     if "solicitacoes" in tabelas:
         cols_sol = colunas("solicitacoes")
@@ -2461,6 +2484,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN status_geocodificacao VARCHAR(20) DEFAULT 'pendente'")
         if "data_geocodificacao" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN data_geocodificacao TIMESTAMP")
+        if "tipo_evento_comercial" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN tipo_evento_comercial VARCHAR(30) DEFAULT 'residencial'")
         if "duracao_contratada_minutos" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN duracao_contratada_minutos INTEGER")
         if "horas_adicionais" not in cols_sol:
@@ -3735,18 +3760,21 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
 
 
 def _garantir_colunas_v113_criticas() -> None:
-    """Adiciona apenas as colunas indispensáveis da v1.0.113.
+    """Adiciona apenas as colunas indispensáveis até a v1.0.116.
 
     É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
     """
     comandos_pg = [
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS duracao_padrao_minutos INTEGER DEFAULT 240",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_cortesia_proximo_dia BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_hora_maxima VARCHAR(5) DEFAULT '22:00'",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_primeira_valor FLOAT DEFAULT 100",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
+        "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS tipo_evento_comercial VARCHAR(30) DEFAULT 'residencial'",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS duracao_contratada_minutos INTEGER",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS valor_horas_adicionais FLOAT DEFAULT 0 NOT NULL",
@@ -3757,11 +3785,25 @@ def _garantir_colunas_v113_criticas() -> None:
             with engine.begin() as conn:
                 for comando in comandos_pg:
                     conn.execute(text(comando))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bloqueios_data (
+                        id SERIAL PRIMARY KEY,
+                        empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+                        data_inicio DATE NOT NULL,
+                        data_fim DATE NOT NULL,
+                        descricao VARCHAR(160),
+                        ativo BOOLEAN NOT NULL DEFAULT true,
+                        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_empresa_id ON bloqueios_data (empresa_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_inicio ON bloqueios_data (data_inicio)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_fim ON bloqueios_data (data_fim)"))
             return
         # Desenvolvimento/SQLite: reutiliza a rotina compatível já existente.
         garantir_colunas_novas()
     except Exception:
-        logger.exception("Falha ao garantir colunas críticas da v1.0.113")
+        logger.exception("Falha ao garantir colunas críticas da v1.0.116")
         raise
 
 
@@ -3825,11 +3867,107 @@ def _migrar_horarios_karaokerj_v113_uma_vez() -> None:
 def _iniciar_migracao_horarios_v113_em_background() -> None:
     threading.Thread(target=_migrar_horarios_karaokerj_v113_uma_vez, name="connect-migracao-horarios-v113", daemon=True).start()
 
+
+def _migrar_duracoes_empresa_v116_uma_vez() -> None:
+    """Move a duração comum do item para a empresa/tipo, preservando o tempo final.
+
+    Para a Karaokê RJ, Residencial fica com 4h e Empresa com 5h, conforme a
+    regra comercial definida. Qualquer tempo acima da base permanece como
+    acréscimo do item.
+    """
+    chave = "20261005_duracoes_empresa_v116"
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                chave VARCHAR(160) PRIMARY KEY,
+                aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        db.commit()
+        if db.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave}).first():
+            return
+        for empresa in db.query(Empresa).all():
+            _garantir_tipos_evento_padrao(db, empresa)
+            produtos = db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+            tipos = {str(t.nome or "").strip().casefold(): t for t in _tipos_evento_empresa(db, empresa.id, somente_ativos=False)}
+            eh_krj = (str(empresa.slug or "").strip().lower() in {"karaokerj", "karaoke-rj"} or
+                      str(empresa.nome or "").strip().lower() in {"karaokê rj", "karaoke rj"})
+            bases = {}
+            totais_por_tipo = {}
+            for chave_tipo in ("residencial", "empresa"):
+                tipo = tipos.get(chave_tipo)
+                totais = []
+                por_produto = {}
+                for produto in produtos:
+                    legado = max(60, int(getattr(produto, "duracao_minutos", 240) or 240))
+                    extra = 0
+                    cfg = None
+                    if tipo:
+                        cfg = db.query(ProdutoPrecoEvento).filter_by(
+                            empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id
+                        ).first()
+                    if cfg and str(getattr(cfg, "horas_modo", "padrao") or "padrao").lower() == "adicionar":
+                        extra = max(0, int(getattr(cfg, "horas_adicionais", 0) or 0)) * 60
+                    total_antigo = legado + extra
+                    por_produto[produto.id] = total_antigo
+                    totais.append(total_antigo)
+                base = min(totais) if totais else max(60, int(getattr(empresa, "duracao_padrao_minutos", 240) or 240))
+                if eh_krj:
+                    base = 300 if chave_tipo == "empresa" else 240
+                bases[chave_tipo] = base
+                totais_por_tipo[chave_tipo] = por_produto
+                if tipo:
+                    tipo.duracao_minutos = base
+            empresa.duracao_padrao_minutos = bases.get("residencial", 240)
+            if eh_krj:
+                empresa.retirada_cortesia_proximo_dia = True
+                empresa.retirada_hora_maxima = "22:00"
+                empresa.hora_extra_primeira_valor = 100.0
+                empresa.hora_extra_demais_valor = 50.0
+            for produto in produtos:
+                for chave_tipo in ("residencial", "empresa"):
+                    tipo = tipos.get(chave_tipo)
+                    if not tipo:
+                        continue
+                    total_antigo = totais_por_tipo.get(chave_tipo, {}).get(produto.id, bases[chave_tipo])
+                    # Na KRJ, a nova regra Empresa=5h é intencional mesmo se o legado era 4h.
+                    if eh_krj and chave_tipo == "empresa":
+                        total_antigo = max(total_antigo, 300)
+                    extra_min = max(0, total_antigo - bases[chave_tipo])
+                    extra_horas = int(extra_min // 60)
+                    cfg = db.query(ProdutoPrecoEvento).filter_by(
+                        empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id
+                    ).first()
+                    if cfg or extra_horas > 0:
+                        if not cfg:
+                            cfg = ProdutoPrecoEvento(
+                                empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id, modo="normal"
+                            )
+                            db.add(cfg)
+                        cfg.horas_modo = "adicionar" if extra_horas > 0 else "padrao"
+                        cfg.horas_adicionais = extra_horas
+                # Legado passa a espelhar o padrão geral apenas para rotinas antigas.
+                produto.duracao_minutos = empresa.duracao_padrao_minutos
+        db.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave})
+        db.commit()
+        logger.info("Migração v1.0.116 aplicada: duração padrão movida para empresa/tipo de evento.")
+    except Exception:
+        db.rollback()
+        logger.exception("Falha na migração única de duração v1.0.116")
+    finally:
+        db.close()
+
+
+def _iniciar_migracao_duracoes_v116_em_background() -> None:
+    threading.Thread(target=_migrar_duracoes_empresa_v116_uma_vez, name="connect-migracao-duracoes-v116", daemon=True).start()
+
+
 @app.on_event("startup")
 def startup():
     # Migração estrutural mínima: somente colunas novas desta versão.
     _garantir_colunas_v113_criticas()
-    _iniciar_migracao_horarios_v113_em_background()
+    _iniciar_migracao_duracoes_v116_em_background()
 
     # Nunca bloquear o bind da porta do Render por causa de uma migração de dados.
     # A migração é idempotente e roda em background; app_migrations impede repetição.
@@ -4165,7 +4303,7 @@ def mensagens_empresa(empresa: Empresa) -> dict:
             "Obrigado pela confiança!"
         ),
         "hora_fim": empresa.mensagem_hora_fim or (
-            "A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico."
+            "O período contratado é definido pelas regras de horário da empresa e pode ser ampliado por itens específicos ou horas adicionais."
         ),
         "preparacao": empresa.mensagem_preparacao or MENSAGEM_OPERACAO_PREPARACAO_APROVADA,
         "a_caminho": empresa.mensagem_a_caminho or MENSAGEM_OPERACAO_A_CAMINHO_APROVADA,
@@ -6112,6 +6250,16 @@ def _mensagens_tipos_evento_empresa(db: Session, empresa_id: int) -> dict[str, s
     return resultado
 
 
+def _duracoes_tipos_evento_empresa(db: Session, empresa: Empresa) -> dict[str, int]:
+    base = _duracao_padrao_empresa(empresa)
+    resultado = {"residencial": base, "empresa": base}
+    for tipo in _tipos_evento_empresa(db, empresa.id, somente_ativos=False):
+        chave = str(tipo.nome or "").strip().lower()
+        if chave in resultado and getattr(tipo, "duracao_minutos", None):
+            resultado[chave] = max(60, int(tipo.duracao_minutos or base))
+    return resultado
+
+
 def _salvar_mensagens_tipos_evento_empresa(db: Session, empresa_id: int, residencial: str, empresarial: str) -> None:
     mensagens = {
         "residencial": (residencial or "").strip()[:240],
@@ -6128,6 +6276,52 @@ def _salvar_mensagens_tipos_evento_empresa(db: Session, empresa_id: int, residen
             tipo = TipoEventoEmpresa(empresa_id=empresa_id, nome=nome, ordem=idx * 10, ativo=True)
             db.add(tipo)
         tipo.descricao = mensagens[chave] or None
+        tipo.ativo = True
+        tipo.ordem = idx * 10
+
+
+def _duracao_padrao_empresa(empresa: Empresa) -> int:
+    try:
+        return max(60, int(getattr(empresa, "duracao_padrao_minutos", 240) or 240))
+    except Exception:
+        return 240
+
+
+def _tipo_evento_empresa_por_chave(db: Session, empresa_id: int, tipo_evento: str) -> TipoEventoEmpresa | None:
+    chave = _normalizar_tipo_evento_vitrine(tipo_evento)
+    nome = TIPOS_EVENTO_VITRINE[chave]
+    return db.query(TipoEventoEmpresa).filter(
+        TipoEventoEmpresa.empresa_id == empresa_id,
+        func.lower(TipoEventoEmpresa.nome) == nome.casefold(),
+    ).first()
+
+
+def _duracao_base_empresa_tipo(db: Session, empresa: Empresa, tipo_evento: str = "residencial") -> int:
+    base = _duracao_padrao_empresa(empresa)
+    tipo = _tipo_evento_empresa_por_chave(db, empresa.id, tipo_evento)
+    if tipo and getattr(tipo, "duracao_minutos", None):
+        try:
+            return max(60, int(tipo.duracao_minutos or base))
+        except Exception:
+            return base
+    return base
+
+
+def _salvar_duracoes_tipos_evento_empresa(db: Session, empresa: Empresa, residencial: int, empresarial: int) -> None:
+    valores = {
+        "residencial": max(60, int(residencial or _duracao_padrao_empresa(empresa))),
+        "empresa": max(60, int(empresarial or _duracao_padrao_empresa(empresa))),
+    }
+    existentes = {
+        str(t.nome or "").strip().lower(): t
+        for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa.id).all()
+    }
+    for idx, chave in enumerate(("residencial", "empresa"), start=1):
+        tipo = existentes.get(chave)
+        if not tipo:
+            tipo = TipoEventoEmpresa(empresa_id=empresa.id, nome=TIPOS_EVENTO_VITRINE[chave], ordem=idx * 10, ativo=True)
+            db.add(tipo)
+        tipo.duracao_minutos = valores[chave]
         tipo.ativo = True
         tipo.ordem = idx * 10
 
@@ -6182,15 +6376,11 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
 
 
 def _duracao_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServico, tipo_evento: str) -> int:
-    """Duração contratada na vitrine, respeitando a regra do tipo de evento."""
-    base = max(60, int(getattr(produto, "duracao_minutos", 240) or 240))
-    if not bool(getattr(produto, "preco_por_tipo_evento", False)):
+    """Duração contratada: regra da empresa/tipo + eventual acréscimo do item."""
+    base = _duracao_base_empresa_tipo(db, empresa, tipo_evento)
+    if not produto or not bool(getattr(produto, "preco_por_tipo_evento", False)):
         return base
-    tipo_chave = _normalizar_tipo_evento_vitrine(tipo_evento)
-    tipo = db.query(TipoEventoEmpresa).filter(
-        TipoEventoEmpresa.empresa_id == empresa.id,
-        func.lower(TipoEventoEmpresa.nome) == TIPOS_EVENTO_VITRINE[tipo_chave].casefold(),
-    ).first()
+    tipo = _tipo_evento_empresa_por_chave(db, empresa.id, tipo_evento)
     if not tipo:
         return base
     cfg = db.query(ProdutoPrecoEvento).filter_by(
@@ -6211,6 +6401,37 @@ def _duracao_pedido_vitrine(pedido: dict | None) -> int:
         except Exception:
             continue
     return max(duracoes or [240])
+
+
+def _tipo_evento_solicitacao(item: Solicitacao) -> str:
+    salvo = str(getattr(item, "tipo_evento_comercial", "") or "").strip().lower()
+    if salvo in TIPOS_EVENTO_VITRINE:
+        return salvo
+    m = re.search(r"\[VITRINE_TIPO_EVENTO=([^\]]+)\]", str(getattr(item, "observacoes", "") or ""))
+    return _normalizar_tipo_evento_vitrine(m.group(1) if m else "residencial")
+
+
+def _duracao_contrato_solicitacao(db: Session, empresa: Empresa, item: Solicitacao, itens: list[ReservaItem] | None = None) -> int:
+    tipo_evento = _tipo_evento_solicitacao(item)
+    duracao = _duracao_base_empresa_tipo(db, empresa, tipo_evento)
+    itens = itens if itens is not None else list(getattr(item, "itens", None) or [])
+    for ri in itens:
+        produto = getattr(ri, "produto", None)
+        if not produto and getattr(ri, "produto_id", None):
+            produto = db.get(ProdutoServico, ri.produto_id)
+        if produto and produto.empresa_id == empresa.id:
+            duracao = max(duracao, _duracao_vitrine_produto(db, empresa, produto, tipo_evento))
+    return max(60, int(duracao or 240))
+
+
+def _mapa_duracoes_produtos_evento(db: Session, empresa: Empresa, produtos: list[ProdutoServico]) -> dict[int, dict[str, int]]:
+    return {
+        int(p.id): {
+            "residencial": _duracao_vitrine_produto(db, empresa, p, "residencial"),
+            "empresa": _duracao_vitrine_produto(db, empresa, p, "empresa"),
+        }
+        for p in produtos if getattr(p, "id", None)
+    }
 
 
 def _valor_horas_adicionais_empresa(empresa: Empresa, quantidade: int) -> float:
@@ -6447,7 +6668,8 @@ def _opcionais_descricao_reserva(descricao: str) -> list[dict]:
 def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
     obs = str(item.observacoes or "")
     m_tipo = re.search(r"\[VITRINE_TIPO_EVENTO=([^\]]+)\]", obs)
-    tipo_evento = _normalizar_tipo_evento_vitrine(m_tipo.group(1) if m_tipo else "residencial")
+    tipo_salvo = str(getattr(item, "tipo_evento_comercial", "") or "").strip().lower()
+    tipo_evento = _normalizar_tipo_evento_vitrine(tipo_salvo if tipo_salvo in TIPOS_EVENTO_VITRINE else (m_tipo.group(1) if m_tipo else "residencial"))
     empresa = db.get(Empresa, item.empresa_id)
     itens = []
     subtotal = 0.0
@@ -6461,7 +6683,7 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         possui_sob_consulta = possui_sob_consulta or sob
         duracao_item = (
             _duracao_vitrine_produto(db, empresa, produto, tipo_evento)
-            if empresa and produto else max(60, int(getattr(produto, "duracao_minutos", 240) or 240))
+            if empresa and produto else (_duracao_base_empresa_tipo(db, empresa, tipo_evento) if empresa else 240)
         )
         duracao_maxima = max(duracao_maxima, duracao_item)
         itens.append({
@@ -6482,8 +6704,8 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE.get(tipo_evento, tipo_evento.title()),
         "itens": itens,
-        "duracao_maxima_minutos": max(60, duracao_maxima or 240),
-        "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
+        "duracao_maxima_minutos": max(60, duracao_maxima or (_duracao_base_empresa_tipo(db, empresa, tipo_evento) if empresa else 240)),
+        "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or (_duracao_base_empresa_tipo(db, empresa, tipo_evento) if empresa else 240))),
         "hora_inicio": item.hora_inicio,
         "hora_inicio_texto": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
         "retirada_mesmo_dia": bool(getattr(item, "retirada_obrigatoria", False)),
@@ -6591,7 +6813,8 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
         bairro=str(frete.get("bairro") or "")[:120], local=str(frete.get("logradouro") or "")[:200],
         local_numero=str(frete.get("numero") or "")[:30], local_cidade=str(frete.get("cidade") or "")[:120],
         local_estado=str(frete.get("estado") or "")[:40], local_cep=str(frete.get("cep") or "")[:20],
-        observacoes=obs, duracao_contratada_minutos=duracao_base,
+        observacoes=obs, tipo_evento_comercial=_normalizar_tipo_evento_vitrine(pedido.get("tipo_evento", "residencial")),
+        duracao_contratada_minutos=duracao_base,
         horas_adicionais=horas_adicionais, valor_horas_adicionais=valor_horas_adicionais,
         cortesia_retirada=cortesia_retirada,
         retirada_obrigatoria=retirada_mesmo_dia,
@@ -7231,9 +7454,21 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         "distancia_ida_km": None, "quantidade_km": None, "valor_km": None, "consultar": True, **extra_endereco,
     }
 
+def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) -> BloqueioData | None:
+    if not data_consulta:
+        return None
+    return db.query(BloqueioData).filter(
+        BloqueioData.empresa_id == empresa_id,
+        BloqueioData.ativo == True,
+        BloqueioData.data_inicio <= data_consulta,
+        BloqueioData.data_fim >= data_consulta,
+    ).order_by(BloqueioData.data_inicio.asc(), BloqueioData.id.asc()).first()
+
+
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, tipo_evento: str = "residencial") -> list[dict]:
     """Disponibilidade pública com preço já resolvido para o tipo de evento escolhido."""
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
+    bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_consulta)
     _garantir_categorias_vitrine_existentes(db, empresa)
     _garantir_tipos_evento_padrao(db, empresa)
     categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
@@ -7284,6 +7519,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             )
         else:
             disponiveis = disponivel_fisico
+        if bloqueio_data:
+            disponiveis = 0
         categoria = str(produto.vitrine_categoria or '').strip()
         fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
         preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
@@ -8225,6 +8462,7 @@ def cadastro_empresa_guiado(request: Request, db: Session = Depends(get_db), emp
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
         "salvo": request.query_params.get("salvo", ""),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
+        "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
     })
 
 
@@ -8240,6 +8478,9 @@ async def salvar_cadastro_empresa_guiado(
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
+        duracao_padrao_minutos: int = Form(240),
+        duracao_residencial_minutos: int = Form(240),
+        duracao_empresa_minutos: int = Form(240),
         retirada_cortesia_proximo_dia: Optional[str] = Form(None),
         retirada_hora_maxima: str = Form("22:00"),
         hora_extra_primeira_valor: str = Form("100"),
@@ -8276,6 +8517,13 @@ async def salvar_cadastro_empresa_guiado(
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = (suporte_inicio or "").strip() or empresa.suporte_inicio or "09:00"
     empresa.suporte_fim = (suporte_fim or "").strip() or empresa.suporte_fim or "20:00"
+    # Residencial é o padrão geral/fallback; Empresa pode ter duração própria.
+    empresa.duracao_padrao_minutos = max(60, int(duracao_residencial_minutos or duracao_padrao_minutos or 240))
+    _salvar_duracoes_tipos_evento_empresa(
+        db, empresa,
+        empresa.duracao_padrao_minutos,
+        max(60, int(duracao_empresa_minutos or empresa.duracao_padrao_minutos)),
+    )
     empresa.retirada_cortesia_proximo_dia = bool(retirada_cortesia_proximo_dia)
     try:
         hora_limite = datetime.strptime((retirada_hora_maxima or "22:00").strip(), "%H:%M").strftime("%H:%M")
@@ -9146,8 +9394,11 @@ def salvar_produto(
     produto.contrato_id = contrato.id if contrato and contrato.empresa_id == empresa.id else None
     produto.quantidade_disponivel = max(0, int(quantidade_disponivel or 0))
     produto.valor_base = texto_para_float(valor_base)
-    produto.duracao_minutos = duracao_minutos
-    produto.prazo_retirada_dias = prazo_retirada_dias
+    # Campo legado mantido para compatibilidade operacional; a duração comercial
+    # agora pertence à empresa/tipo de evento.
+    produto.duracao_minutos = _duracao_padrao_empresa(empresa)
+    if not produto_existente:
+        produto.prazo_retirada_dias = 1
     produto.carga_pontos = max(1, int(carga_pontos or 1))
     produto.volume_logistico = max(1, int(volume_logistico or 1))
     produto.permite_interno = bool(permite_interno)
@@ -11056,6 +11307,8 @@ async def preparar_contrato(
     # pode devolver a coleção antiga (ou vazia), zerando o valor total do contrato.
     # Mantemos o total a partir dos novos itens que estão sendo gravados agora.
     total_itens_novos = 0.0
+    tipo_evento_atual = _tipo_evento_solicitacao(item)
+    duracao_contrato_itens = _duracao_base_empresa_tipo(db, empresa, tipo_evento_atual)
     for idx, produto_id in enumerate(produto_ids):
         if not produto_id:
             continue
@@ -11081,6 +11334,10 @@ async def preparar_contrato(
         ))
         if primeiro_produto is None:
             primeiro_produto = produto
+        duracao_contrato_itens = max(
+            duracao_contrato_itens,
+            _duracao_vitrine_produto(db, empresa, produto, tipo_evento_atual),
+        )
 
     # Os recursos agora são editáveis antes de salvar os equipamentos. Se o navegador
     # enviou o preview, gravamos os ajustes junto com esta mesma operação.
@@ -11129,8 +11386,17 @@ async def preparar_contrato(
     _atualizar_resultado_campanha_karaoke10(item, item.cliente)
     item.sinal = texto_para_float(sinal)
     item.observacoes = observacoes
-    if primeiro_produto and item.hora_inicio:
-        item.hora_fim = somar_minutos(item.hora_inicio, primeiro_produto.duracao_minutos or 240)
+    if item.hora_inicio:
+        item.duracao_contratada_minutos = max(60, int(duracao_contrato_itens or _duracao_base_empresa_tipo(db, empresa, tipo_evento_atual)))
+        horas_pagantes = max(0, int(getattr(item, "horas_adicionais", 0) or 0))
+        if bool(getattr(item, "cortesia_retirada", False)) and not retirada_obrigatoria_ativa(item):
+            horas_pagantes = 0
+            item.horas_adicionais = 0
+            item.valor_horas_adicionais = 0.0
+        item.hora_fim = somar_minutos(item.hora_inicio, item.duracao_contratada_minutos + horas_pagantes * 60)
+        if retirada_obrigatoria_ativa(item):
+            item.retirada_data = item.data_evento
+            item.retirada_hora = item.hora_fim
 
     # Salvar não significa aceitar nem enviar.
     # Antes do aceite, o contrato continua como rascunho até o usuário liberar o envio.
@@ -11217,8 +11483,8 @@ def aceite_manual_solicitacao(
     registro = f"Aceite manual por {usuario}: {motivo}"
     item.observacoes = (item.observacoes + "\n\n" if item.observacoes else "") + registro
 
-    if item.hora_inicio and not item.hora_fim and item.produto and item.produto.duracao_minutos:
-        item.hora_fim = somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
+    if item.hora_inicio and not item.hora_fim:
+        item.hora_fim = somar_minutos(item.hora_inicio, _duracao_contrato_solicitacao(db, empresa, item))
     criar_eventos_operacionais(db, item)
     _processar_humiat_aceite(db, empresa, item)
     db.commit()
@@ -11338,6 +11604,8 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
         "request": request,
         "empresa": empresa,
         "produtos": produtos,
+        "duracoes_produtos_evento": _mapa_duracoes_produtos_evento(db, empresa, produtos),
+        "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
         "contratos": contratos,
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
@@ -11489,6 +11757,9 @@ def contrato_novo_salvar(
         contrato_id: str = Form(""),
         data_evento: str = Form(""),
         hora_inicio: str = Form(""),
+        tipo_evento_comercial: str = Form("residencial"),
+        retirada_mesmo_dia: Optional[str] = Form(None),
+        horas_adicionais_manual: int = Form(0),
         retirada_obrigatoria: str = Form(""),
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
@@ -11523,6 +11794,9 @@ def contrato_novo_salvar(
         "numero": numero, "complemento": complemento, "bairro": bairro,
         "cidade": cidade, "estado": estado, "cep": cep, "produto_id": produto_id,
         "contrato_id": contrato_id, "data_evento": data_evento, "hora_inicio": hora_inicio,
+        "tipo_evento_comercial": _normalizar_tipo_evento_vitrine(tipo_evento_comercial),
+        "retirada_mesmo_dia": "1" if retirada_mesmo_dia else "",
+        "horas_adicionais_manual": max(0, int(horas_adicionais_manual or 0)),
         "retirada_obrigatoria": retirada_obrigatoria, "retirada_data": retirada_data,
         "retirada_hora": retirada_hora, "valor": valor, "cupom_codigo": cupom_codigo, "frete": frete, "sinal": sinal,
         "local_nome": local_nome, "local": local, "acesso_local": acesso_local,
@@ -11536,6 +11810,8 @@ def contrato_novo_salvar(
             "request": request,
             "empresa": empresa,
             "produtos": produtos,
+            "duracoes_produtos_evento": _mapa_duracoes_produtos_evento(db, empresa, produtos),
+        "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
             "contratos": contratos,
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
@@ -11567,6 +11843,11 @@ def contrato_novo_salvar(
         return render_erro("A hora precisa estar em intervalo de 30 minutos. Exemplo: 18:00 ou 18:30.")
 
     data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date() if data_evento else None
+    if not cadastro_cliente and data_evento_obj:
+        bloqueio = _bloqueio_data_empresa(db, empresa.id, data_evento_obj)
+        if bloqueio:
+            detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
+            return render_erro(f"Esta data está bloqueada na Agenda{detalhe}. Escolha outra data ou remova o bloqueio.")
     duplicado_q = None
     if not cadastro_cliente:
         duplicado_q = db.query(Solicitacao).join(Cliente, Solicitacao.cliente_id == Cliente.id).filter(
@@ -11631,17 +11912,43 @@ def contrato_novo_salvar(
         return render_erro("No contrato manual, informe pelo menos um item principal.")
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
-    retirada_obrigatoria_bool = bool(retirada_obrigatoria)
-    retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
-    retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
+    tipo_evento_comercial = _normalizar_tipo_evento_vitrine(tipo_evento_comercial)
+    manual = modo_criacao == "manual"
+    duracao_base = (_duracao_vitrine_produto(db, empresa, produto, tipo_evento_comercial)
+                    if produto else _duracao_base_empresa_tipo(db, empresa, tipo_evento_comercial))
+    try:
+        horas_adicionais_manual = max(0, min(24, int(horas_adicionais_manual or 0)))
+    except Exception:
+        horas_adicionais_manual = 0
+    cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+    retirada_mesmo_dia_bool = bool(retirada_mesmo_dia) if cortesia_configurada else True
+    if not manual:
+        # Pré-contrato fora da vitrine define apenas o período padrão; a decisão de retirada/horas extras
+        # acontece no aceite, quando os itens já estarão definidos.
+        horas_adicionais_manual = 0
+        retirada_mesmo_dia_bool = False if cortesia_configurada else True
+    if cortesia_configurada and not retirada_mesmo_dia_bool:
+        horas_adicionais_manual = 0
+    duracao_total = duracao_base + horas_adicionais_manual * 60
+    fim_calculado = somar_minutos(inicio_obj, duracao_total)
+    if retirada_mesmo_dia_bool:
+        limite = _hora_maxima_retirada_empresa(empresa)
+        inicio_min = inicio_obj.hour * 60 + inicio_obj.minute
+        fim_min = inicio_min + duracao_total
+        limite_min = limite.hour * 60 + limite.minute
+        if fim_min >= 24 * 60 or fim_min > limite_min:
+            return render_erro(f"A retirada no mesmo dia ultrapassa o limite de {limite.strftime('%H:%M')}.")
+    valor_horas_manual = _valor_horas_adicionais_empresa(empresa, horas_adicionais_manual) if retirada_mesmo_dia_bool else 0.0
+    retirada_obrigatoria_bool = retirada_mesmo_dia_bool
+    retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
+    retirada_hora_obj = fim_calculado if retirada_obrigatoria_bool else None
     valor_equipamentos_float = texto_para_float(valor)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
-    cupom = _cupom_valido_ou_snapshot(db, empresa.id, codigo_cupom, item) if codigo_cupom else None
+    cupom = _cupom_valido(db, empresa.id, codigo_cupom, referencia=data_evento_obj) if codigo_cupom else None
     if codigo_cupom and not cupom:
         return render_erro("Cupom inválido, inativo ou fora da validade.")
     frete_float = texto_para_float(frete)
     sinal_float = texto_para_float(sinal)
-    manual = modo_criacao == "manual"
 
     item = Solicitacao(
         empresa_id=empresa.id,
@@ -11650,9 +11957,14 @@ def contrato_novo_salvar(
         contrato_id=int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None),
         data_evento=data_evento_obj,
         hora_inicio=inicio_obj,
-        hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
+        hora_fim=fim_calculado,
+        tipo_evento_comercial=tipo_evento_comercial,
+        duracao_contratada_minutos=duracao_base,
+        horas_adicionais=horas_adicionais_manual,
+        valor_horas_adicionais=round(valor_horas_manual, 2),
+        cortesia_retirada=bool(cortesia_configurada and not retirada_mesmo_dia_bool),
         retirada_obrigatoria=retirada_obrigatoria_bool,
-        retirada_data=retirada_data_obj if retirada_obrigatoria_bool else None,
+        retirada_data=retirada_data_obj,
         retirada_hora=retirada_hora_obj,
         bairro=bairro.strip(),
         local=endereco.strip(),
@@ -11681,7 +11993,7 @@ def contrato_novo_salvar(
     if item.retirada_obrigatoria and not item.retirada_hora:
         item.retirada_hora = item.hora_fim or item.hora_inicio
 
-    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual)
     _atualizar_resultado_campanha_karaoke10(item, cliente)
     db.add(item)
     db.flush()
@@ -11759,6 +12071,9 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
         "cep": endereco_evento["cep"],
         "data_evento": item.data_evento.isoformat() if item.data_evento else "",
         "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
+        "tipo_evento_comercial": _tipo_evento_solicitacao(item),
+        "retirada_mesmo_dia": "1" if retirada_obrigatoria_ativa(item) else "",
+        "horas_adicionais_manual": max(0, int(getattr(item, "horas_adicionais", 0) or 0)),
         "retirada_obrigatoria": "1" if retirada_obrigatoria_ativa(item) else "",
         "retirada_data": item.retirada_data.isoformat() if item.retirada_data else (item.data_evento.isoformat() if item.data_evento else ""),
         "retirada_hora": item.retirada_hora.strftime("%H:%M") if item.retirada_hora else (item.hora_fim.strftime("%H:%M") if item.hora_fim else ""),
@@ -11796,6 +12111,8 @@ def editar_solicitacao_completa(
         "request": request,
         "empresa": empresa,
         "produtos": produtos,
+        "duracoes_produtos_evento": _mapa_duracoes_produtos_evento(db, empresa, produtos),
+        "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
         "contratos": contratos,
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
@@ -11828,6 +12145,9 @@ def salvar_solicitacao_completa(
         contrato_id: str = Form(""),
         data_evento: str = Form(""),
         hora_inicio: str = Form(""),
+        tipo_evento_comercial: str = Form("residencial"),
+        retirada_mesmo_dia: Optional[str] = Form(None),
+        horas_adicionais_manual: int = Form(0),
         retirada_obrigatoria: str = Form(""),
         retirada_data: str = Form(""),
         retirada_hora: str = Form(""),
@@ -11857,7 +12177,9 @@ def salvar_solicitacao_completa(
         nome=nome, telefone=telefone, cpf=cpf, cnpj=cnpj, email=email, endereco=endereco,
         numero=numero, complemento=complemento, bairro=bairro, cidade=cidade, estado=estado,
         cep=cep, produto_id=produto_id, contrato_id=contrato_id, data_evento=data_evento,
-        hora_inicio=hora_inicio, retirada_obrigatoria=retirada_obrigatoria,
+        hora_inicio=hora_inicio, tipo_evento_comercial=_normalizar_tipo_evento_vitrine(tipo_evento_comercial),
+        retirada_mesmo_dia="1" if retirada_mesmo_dia else "",
+        horas_adicionais_manual=max(0, int(horas_adicionais_manual or 0)), retirada_obrigatoria=retirada_obrigatoria,
         retirada_data=retirada_data, retirada_hora=retirada_hora,
         valor=valor, cupom_codigo=cupom_codigo, frete=frete, sinal=sinal, local_nome=local_nome, local=local,
         acesso_local=acesso_local, local_responsavel_nome=local_responsavel_nome,
@@ -11868,6 +12190,8 @@ def salvar_solicitacao_completa(
     def render_erro(mensagem: str):
         return templates.TemplateResponse("admin/contrato_novo.html", {
             "request": request, "empresa": empresa, "produtos": produtos, "contratos": contratos,
+            "duracoes_produtos_evento": _mapa_duracoes_produtos_evento(db, empresa, produtos),
+        "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
             "recursos_atuais_view": _recursos_atuais_view(db, item),
@@ -11909,9 +12233,32 @@ def salvar_solicitacao_completa(
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
     data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
-    retirada_obrigatoria_bool = bool(retirada_obrigatoria)
-    retirada_data_obj = datetime.strptime(retirada_data, "%Y-%m-%d").date() if retirada_data else data_evento_obj
-    retirada_hora_obj = datetime.strptime(retirada_hora, "%H:%M").time() if retirada_hora else None
+    if data_evento_obj != item.data_evento:
+        bloqueio = _bloqueio_data_empresa(db, empresa.id, data_evento_obj)
+        if bloqueio:
+            detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
+            return render_erro(f"Esta data está bloqueada na Agenda{detalhe}. Escolha outra data ou remova o bloqueio.")
+    tipo_evento_comercial = _normalizar_tipo_evento_vitrine(tipo_evento_comercial)
+    duracao_base = (_duracao_vitrine_produto(db, empresa, produto, tipo_evento_comercial)
+                    if produto else _duracao_base_empresa_tipo(db, empresa, tipo_evento_comercial))
+    try:
+        horas_adicionais_manual = max(0, min(24, int(horas_adicionais_manual or 0)))
+    except Exception:
+        horas_adicionais_manual = 0
+    cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+    retirada_obrigatoria_bool = bool(retirada_mesmo_dia) if cortesia_configurada else True
+    if cortesia_configurada and not retirada_obrigatoria_bool:
+        horas_adicionais_manual = 0
+    duracao_total = duracao_base + horas_adicionais_manual * 60
+    fim_calculado = somar_minutos(inicio_obj, duracao_total)
+    if retirada_obrigatoria_bool:
+        limite = _hora_maxima_retirada_empresa(empresa)
+        fim_min = inicio_obj.hour * 60 + inicio_obj.minute + duracao_total
+        if fim_min >= 24 * 60 or fim_min > limite.hour * 60 + limite.minute:
+            return render_erro(f"A retirada no mesmo dia ultrapassa o limite de {limite.strftime('%H:%M')}.")
+    retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
+    retirada_hora_obj = fim_calculado if retirada_obrigatoria_bool else None
+    valor_horas_manual = _valor_horas_adicionais_empresa(empresa, horas_adicionais_manual) if retirada_obrigatoria_bool else 0.0
     valor_equipamentos_float = texto_para_float(valor)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
     cupom = _cupom_valido(db, empresa.id, codigo_cupom) if codigo_cupom else None
@@ -11924,10 +12271,15 @@ def salvar_solicitacao_completa(
     item.contrato_id = int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None)
     item.data_evento = data_evento_obj
     item.hora_inicio = inicio_obj
-    item.hora_fim = somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else item.hora_fim
+    item.hora_fim = fim_calculado
+    item.tipo_evento_comercial = tipo_evento_comercial
+    item.duracao_contratada_minutos = duracao_base
+    item.horas_adicionais = horas_adicionais_manual
+    item.valor_horas_adicionais = round(valor_horas_manual, 2)
+    item.cortesia_retirada = bool(cortesia_configurada and not retirada_obrigatoria_bool)
     item.retirada_obrigatoria = retirada_obrigatoria_bool
-    item.retirada_data = retirada_data_obj if retirada_obrigatoria_bool else None
-    item.retirada_hora = retirada_hora_obj or (item.hora_fim or item.hora_inicio if retirada_obrigatoria_bool else None)
+    item.retirada_data = retirada_data_obj
+    item.retirada_hora = retirada_hora_obj
     item.bairro = bairro.strip()
     item.local = endereco.strip() or local.strip()
     item.local_numero = numero.strip()
@@ -11940,7 +12292,7 @@ def salvar_solicitacao_completa(
     item.local_responsavel_telefone = limpar_identificador(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.acesso_local = acesso_local.strip()
-    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom)
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual)
     _atualizar_resultado_campanha_karaoke10(item, cliente)
     item.sinal = sinal_float
     item.observacoes = observacoes.strip()
@@ -12056,6 +12408,8 @@ def usar_solicitacao_como_base(
         data_evento=origem.data_evento,
         hora_inicio=origem.hora_inicio,
         hora_fim=origem.hora_fim,
+        tipo_evento_comercial=_tipo_evento_solicitacao(origem),
+        duracao_contratada_minutos=getattr(origem, "duracao_contratada_minutos", None),
         bairro=origem.bairro,
         local=origem.local,
         local_numero=origem.local_numero,
@@ -12179,6 +12533,14 @@ def criar_pre_reserva_rapida(
     if produto and produto.empresa_id != empresa.id:
         raise HTTPException(404)
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
+    data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    bloqueio = _bloqueio_data_empresa(db, empresa.id, data_evento_obj)
+    if bloqueio:
+        detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
+        return RedirectResponse(f"/painel/cliente/{cliente.id}?erro={quote('Data bloqueada na Agenda' + detalhe)}", status_code=303)
+    tipo_evento_rapido = "residencial"
+    duracao_rapida = (_duracao_vitrine_produto(db, empresa, produto, tipo_evento_rapido)
+                      if produto else _duracao_base_empresa_tipo(db, empresa, tipo_evento_rapido))
     endereco_texto = (local or cliente.endereco or "").strip()
     historico = None
     if endereco_texto:
@@ -12204,9 +12566,12 @@ def criar_pre_reserva_rapida(
         cliente_id=cliente.id,
         produto_id=produto.id if produto else None,
         contrato_id=int(contrato_id) if contrato_id else (produto.contrato_id if produto and produto.contrato_id else None),
-        data_evento=datetime.strptime(data_evento, "%Y-%m-%d").date(),
+        data_evento=data_evento_obj,
         hora_inicio=inicio_obj,
-        hora_fim=somar_minutos(inicio_obj, produto.duracao_minutos or 240) if produto else None,
+        hora_fim=somar_minutos(inicio_obj, duracao_rapida),
+        tipo_evento_comercial=tipo_evento_rapido,
+        duracao_contratada_minutos=duracao_rapida,
+        cortesia_retirada=bool(getattr(empresa, "retirada_cortesia_proximo_dia", False)),
         bairro=bairro_evento.strip(),
         local=endereco_texto,
         local_numero=numero_evento.strip(),
@@ -15864,11 +16229,16 @@ def agenda(
         anterior = (referencia - timedelta(days=1)).replace(day=1)
         proximo = (fim_mes + timedelta(days=1)).replace(day=1)
         resumo_mes = _agenda_resumo_mensal(db, empresa, referencia, fim_mes)
+        bloqueios_mes = db.query(BloqueioData).filter(
+            BloqueioData.empresa_id == empresa.id, BloqueioData.ativo == True,
+            BloqueioData.data_inicio <= fim_mes, BloqueioData.data_fim >= referencia,
+        ).order_by(BloqueioData.data_inicio.asc(), BloqueioData.id.asc()).all()
         primeiro_semana = referencia.weekday()  # segunda=0
         celulas = [None] * primeiro_semana
         for n in range(1, ultimo + 1):
             d = referencia.replace(day=n)
-            celulas.append({"data": d, "resumo": resumo_mes.get(d.isoformat(), {})})
+            bloqueios_dia = [b for b in bloqueios_mes if b.data_inicio <= d <= b.data_fim]
+            celulas.append({"data": d, "resumo": resumo_mes.get(d.isoformat(), {}), "bloqueios": bloqueios_dia})
         while len(celulas) % 7:
             celulas.append(None)
         nomes_meses = ("Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro")
@@ -15877,7 +16247,7 @@ def agenda(
             "referencia": referencia, "fim_mes": fim_mes, "celulas": celulas,
             "mes_titulo": f"{nomes_meses[referencia.month-1]} {referencia.year}",
             "mes_anterior": anterior.strftime("%Y-%m"), "mes_proximo": proximo.strftime("%Y-%m"),
-            "resumo_mes": resumo_mes, "pode_operacao": pode_operacao,
+            "resumo_mes": resumo_mes, "pode_operacao": pode_operacao, "bloqueios_mes": bloqueios_mes,
             "google_disponivel": bool(
                 getattr(empresa, "google_calendar_ativo", False)
                 and _google_calendar_conectado(empresa)
@@ -15986,6 +16356,15 @@ def agenda(
     for item in itens:
         item.google_calendar_status_view = _google_calendar_status_contrato(db, empresa, item)
     mensagens = mensagens_empresa(empresa)
+    try:
+        inicio_bloq = datetime.strptime(data_inicial, "%Y-%m-%d").date()
+        fim_bloq = datetime.strptime(data_final, "%Y-%m-%d").date()
+    except Exception:
+        inicio_bloq, fim_bloq = date.today(), date.today()
+    bloqueios_periodo = db.query(BloqueioData).filter(
+        BloqueioData.empresa_id == empresa.id, BloqueioData.ativo == True,
+        BloqueioData.data_inicio <= fim_bloq, BloqueioData.data_fim >= inicio_bloq,
+    ).order_by(BloqueioData.data_inicio.asc()).all()
     return templates.TemplateResponse("admin/agenda.html", {
         "request": request,
         "itens": itens,
@@ -15998,8 +16377,39 @@ def agenda(
         "filtro_cancelados": bool(cancelados),
         "equipes": equipes, "equipe_id": equipe_id, "situacao_rota": situacao_rota,
         "rotas_por_solicitacao": rotas_por_solicitacao,
-        "mensagens": mensagens,
+        "mensagens": mensagens, "bloqueios_periodo": bloqueios_periodo,
     })
+
+
+@app.post("/painel/agenda/bloqueios")
+def criar_bloqueio_data(
+        request: Request, data_inicio: str = Form(...), data_fim: str = Form(...), descricao: str = Form(""),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    try:
+        inicio = datetime.strptime(data_inicio, "%Y-%m-%d").date()
+        fim = datetime.strptime(data_fim, "%Y-%m-%d").date()
+    except Exception:
+        raise HTTPException(400, "Informe datas válidas para o bloqueio.")
+    if fim < inicio:
+        inicio, fim = fim, inicio
+    db.add(BloqueioData(
+        empresa_id=empresa.id, data_inicio=inicio, data_fim=fim,
+        descricao=(descricao or "").strip()[:160] or None, ativo=True,
+    ))
+    db.commit()
+    destino = request.headers.get("referer") or f"/painel/agenda?mes={inicio.strftime('%Y-%m')}"
+    return RedirectResponse(destino, status_code=303)
+
+
+@app.post("/painel/agenda/bloqueios/{bloqueio_id}/excluir")
+def excluir_bloqueio_data(
+        bloqueio_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    bloqueio = db.query(BloqueioData).filter_by(id=bloqueio_id, empresa_id=empresa.id).first()
+    if not bloqueio:
+        raise HTTPException(404)
+    db.delete(bloqueio)
+    db.commit()
+    return RedirectResponse(request.headers.get("referer") or "/painel/agenda", status_code=303)
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/responsavel-retirada")
@@ -16195,6 +16605,7 @@ def vitrine_publica(
         if calculado.get("ok"):
             frete_inicial = calculado
 
+    bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_obj)
     return templates.TemplateResponse("publico/vitrine.html", {
         "request": request, "empresa": empresa, "data_evento": data_obj, "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "itens": itens,
@@ -16204,6 +16615,7 @@ def vitrine_publica(
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
+        "bloqueio_data": bloqueio_data,
     })
 
 
@@ -16260,6 +16672,8 @@ def vitrine_publica_reservar(
     except Exception:
         return RedirectResponse(f"/e/{slug}", status_code=303)
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
+    if _bloqueio_data_empresa(db, empresa.id, data_obj):
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=data_bloqueada", status_code=303)
     disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)}
     opcionais_por_produto: dict[int, list[dict]] = {}
     for idx, pid_op_bruto in enumerate(opcional_produto_id or []):
@@ -16878,8 +17292,8 @@ def _aprovar_contrato_apos_pagamento(db: Session, empresa: Empresa, item: Solici
     if not item.aprovado_em:
         item.aprovado_em = agora_utc()
     fim_obj = item.hora_fim or (
-        somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
-        if item.produto and item.produto.duracao_minutos else None
+        somar_minutos(item.hora_inicio, _duracao_contrato_solicitacao(db, empresa, item))
+        if item.hora_inicio else None
     )
     item.hora_fim = fim_obj
     criar_eventos_operacionais(db, item)
@@ -17008,6 +17422,8 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
         "request": request, "empresa": empresa, "cliente": cliente, "identificador": identificador,
         "cliente_encontrado": cliente_encontrado, "cpf_confirmacao": cpf_confirmacao, "erro": erro,
         "responsavel_token": str(responsavel_token or "").strip(),
+        "duracao_padrao_publica_minutos": _duracao_base_empresa_tipo(db, empresa, "residencial"),
+        "duracao_padrao_publica_rotulo": _rotulo_duracao_minutos(_duracao_base_empresa_tipo(db, empresa, "residencial")),
         "campos_cfg": {ce.campo.chave: ce for ce in
                        db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     }
@@ -17275,8 +17691,10 @@ def salvar_pre_cadastro(
     responsavel_pre_nome = responsavel_pre[0] if responsavel_pre else ""
     responsavel_pre_telefone = responsavel_pre[1] if responsavel_pre else ""
 
-    # O contrato normal fora da vitrine continua com o comportamento legado.
-    # Na vitrine, a duração vem do item/tipo de evento e a retirada segue a empresa.
+    # A duração padrão pertence à empresa/tipo de evento. O item apenas pode acrescentar horas.
+    tipo_evento_comercial = _normalizar_tipo_evento_vitrine(
+        pedido_vitrine.get("tipo_evento", "residencial") if pedido_vitrine else "residencial"
+    )
     duracao_base_vitrine = 0
     horas_extra_vitrine = 0
     valor_horas_extra_vitrine = 0.0
@@ -17304,7 +17722,8 @@ def salvar_pre_cadastro(
                 return render_erro("retirada_limite")
         fim_obj = somar_minutos(inicio_obj, duracao_total_vitrine)
     else:
-        fim_obj = somar_minutos(inicio_obj, 240)
+        duracao_base_vitrine = _duracao_base_empresa_tipo(db, empresa, tipo_evento_comercial)
+        fim_obj = somar_minutos(inicio_obj, duracao_base_vitrine)
     if pre_reserva_existente:
         solicitacao = pre_reserva_existente
         solicitacao.cliente_id = cliente.id
@@ -17334,6 +17753,13 @@ def salvar_pre_cadastro(
         )
         db.add(solicitacao)
         db.flush()
+
+    solicitacao.tipo_evento_comercial = tipo_evento_comercial
+    if not pedido_vitrine:
+        solicitacao.duracao_contratada_minutos = max(60, int(duracao_base_vitrine or _duracao_base_empresa_tipo(db, empresa, tipo_evento_comercial)))
+        solicitacao.horas_adicionais = 0
+        solicitacao.valor_horas_adicionais = 0.0
+        solicitacao.cortesia_retirada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
 
     if pedido_vitrine:
         solicitacao.duracao_contratada_minutos = max(60, int(duracao_base_vitrine or 240))
@@ -17686,6 +18112,14 @@ def contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Sessi
                     "simulacoes": _infinitepay_simulacoes(saldo_restante, taxas) if infinitepay_habilitada else [],
                 })
 
+    duracao_base_aceite = _duracao_contrato_solicitacao(db, empresa, item, itens_reserva)
+    hora_fim_base_aceite = (
+        somar_minutos(item.hora_inicio, duracao_base_aceite) if item.hora_inicio else None
+    )
+    horas_adicionais_aceite = max(0, int(getattr(item, "horas_adicionais", 0) or 0))
+    valor_horas_adicionais_aceite = _valor_horas_adicionais_empresa(empresa, horas_adicionais_aceite)
+    limite_retirada_aceite = _hora_maxima_retirada_empresa(empresa)
+
     return templates.TemplateResponse("publico/contrato.html", {
         "request": request, "empresa": empresa, "item": item, "contrato": contrato,
         "produto": produto, "itens_reserva": itens_reserva,
@@ -17704,6 +18138,13 @@ def contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Sessi
         "sinal_primeiro_pagamento": sinal_primeiro_pagamento,
         "opcoes_pagamento": opcoes_pagamento,
         "erro_aceite": request.query_params.get("erro") == "aceite",
+        "erro_retirada": request.query_params.get("erro") == "retirada",
+        "duracao_base_aceite": duracao_base_aceite,
+        "duracao_base_aceite_rotulo": _rotulo_duracao_minutos(duracao_base_aceite),
+        "hora_fim_base_aceite": hora_fim_base_aceite,
+        "horas_adicionais_aceite": horas_adicionais_aceite,
+        "valor_horas_adicionais_aceite": valor_horas_adicionais_aceite,
+        "limite_retirada_aceite": limite_retirada_aceite,
         "suporte_contrato": horario_suporte_contrato(empresa, item),
         "retirada_texto": texto_retirada_contrato(item),
     }, headers={"Cache-Control": "no-store"})
@@ -17841,7 +18282,13 @@ def cancelar_contrato(slug: str, solicitacao_id: str, db: Session = Depends(get_
 
 
 @app.post("/e/{slug}/aceitar/{solicitacao_id}")
-def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: Optional[str] = Form(None), db: Session = Depends(get_db)):
+def aceitar_contrato(
+        slug: str, solicitacao_id: str, request: Request,
+        aceite: Optional[str] = Form(None),
+        retirada_mesmo_dia: Optional[str] = Form(None),
+        horas_adicionais_aceite: int = Form(0),
+        db: Session = Depends(get_db)):
+
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:
@@ -17849,8 +18296,45 @@ def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: O
     if aceite != "sim":
         return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=aceite", status_code=303)
 
-    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count()
+    itens_reserva_lista = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    itens_reserva = len(itens_reserva_lista)
     if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
+        # Uma única regra de horário vale para vitrine e contrato: empresa/tipo define o período base;
+        # o item somente pode ampliar esse período. No aceite o cliente confirma retirada e horas pagas.
+        duracao_base = _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)
+        cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+        mesmo_dia = bool(retirada_mesmo_dia) if cortesia_configurada else True
+        try:
+            horas_extras = max(0, min(24, int(horas_adicionais_aceite or 0)))
+        except Exception:
+            horas_extras = 0
+        if cortesia_configurada and not mesmo_dia:
+            horas_extras = 0
+        duracao_total = duracao_base + horas_extras * 60
+        if not item.hora_inicio:
+            return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=retirada", status_code=303)
+        if mesmo_dia:
+            limite = _hora_maxima_retirada_empresa(empresa)
+            fim_min = item.hora_inicio.hour * 60 + item.hora_inicio.minute + duracao_total
+            limite_min = limite.hour * 60 + limite.minute
+            if fim_min >= 24 * 60 or fim_min > limite_min:
+                return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=retirada", status_code=303)
+        fim_obj = somar_minutos(item.hora_inicio, duracao_total)
+        valor_horas = _valor_horas_adicionais_empresa(empresa, horas_extras) if mesmo_dia else 0.0
+        item.duracao_contratada_minutos = duracao_base
+        item.horas_adicionais = horas_extras
+        item.valor_horas_adicionais = valor_horas
+        item.cortesia_retirada = bool(cortesia_configurada and not mesmo_dia)
+        item.hora_fim = fim_obj
+        item.retirada_obrigatoria = mesmo_dia
+        item.retirada_data = item.data_evento if mesmo_dia else None
+        item.retirada_hora = fim_obj if mesmo_dia else None
+        comp_atual = composicao_valores_contrato(item)
+        cupom_atual = _cupom_valido_ou_snapshot(db, empresa.id, getattr(item, "cupom_codigo", "") or "", item)
+        _aplicar_composicao_comercial(
+            item, comp_atual["equipamentos"], comp_atual["frete"], cupom_atual, valor_horas
+        )
+
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):
             # O aceite confirma a reserva independentemente do pagamento.
@@ -17862,10 +18346,7 @@ def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: O
                 item.sinal = sinal_configurado
             item.status = "reserva_confirmada"
             item.aprovado_em = item.aceite_em
-            fim_obj = item.hora_fim or (
-                somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
-                if item.produto and item.produto.duracao_minutos else None
-            )
+            fim_obj = item.hora_fim or (somar_minutos(item.hora_inicio, _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)) if item.hora_inicio else None)
             item.hora_fim = fim_obj
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)
@@ -17875,10 +18356,7 @@ def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: O
             # A interface passa a oferecer o PIX no mesmo link, sem abrir WhatsApp.
             item.status = "aguardando_pagamento" if (item.sinal or 0) > 0 else "reserva_confirmada"
             item.aprovado_em = item.aceite_em
-            fim_obj = item.hora_fim or (
-                somar_minutos(item.hora_inicio, item.produto.duracao_minutos)
-                if item.produto and item.produto.duracao_minutos else None
-            )
+            fim_obj = item.hora_fim or (somar_minutos(item.hora_inicio, _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)) if item.hora_inicio else None)
             item.hora_fim = fim_obj
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)

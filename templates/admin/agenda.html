@@ -33,6 +33,8 @@
   </div>
 </form>
 
+{% if bloqueios_periodo %}<div class="box" style="margin:10px 0"><b>Datas bloqueadas neste período</b>{% for b in bloqueios_periodo %}<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-top:1px solid #eef2f7"><span>{{ b.data_inicio.strftime('%d/%m/%Y') }}{% if b.data_fim != b.data_inicio %} a {{ b.data_fim.strftime('%d/%m/%Y') }}{% endif %}{% if b.descricao %} · {{ b.descricao }}{% endif %}</span><form method="post" action="/painel/agenda/bloqueios/{{ b.id }}/excluir" onsubmit="return confirm('Excluir este bloqueio?')"><button class="botao-secundario" type="submit">Excluir</button></form></div>{% endfor %}</div>{% endif %}
+
 {% if request.query_params.get('google_erro') %}<div class="alerta erro">{{ request.query_params.get('google_erro') }}</div>{% endif %}
 {% if (request.query_params.get('google_ok') is not none) or (empresa.google_calendar_ativo and empresa.google_calendar_contratos) %}
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0">

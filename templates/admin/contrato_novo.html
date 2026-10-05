@@ -86,6 +86,8 @@
       <div><label>Data do evento *</label><input name="data_evento" type="date" value="{{ form.data_evento or '' }}" required></div>
       <div><label>Hora de início *</label><input name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio or '' }}" required></div>
     </div>
+    <label>Tipo de evento</label>
+    <select name="tipo_evento_comercial" id="tipoEventoContrato"><option value="residencial" {% if (form.tipo_evento_comercial or 'residencial') == 'residencial' %}selected{% endif %}>Residencial</option><option value="empresa" {% if form.tipo_evento_comercial == 'empresa' %}selected{% endif %}>Empresa</option></select>
     <label>Nome do local</label>
     <input name="local_nome" value="{{ form.local_nome or '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
     <label>Acesso ao local</label>
@@ -94,11 +96,21 @@
       {% for acesso in ['Térreo','Elevador','Escada','Elevador + escada'] %}<option {% if form.acesso_local == acesso %}selected{% endif %}>{{ acesso }}</option>{% endfor %}
     </select>
 
-    <div class="retirada-obrigatoria-box">
-      <label class="check"><input type="checkbox" name="retirada_obrigatoria" value="1" {% if form.retirada_obrigatoria %}checked{% endif %}> Retirada obrigatória solicitada pelo cliente</label>
-      <div class="grid duas">
-        <div><label>Data da retirada</label><input name="retirada_data" type="date" value="{{ form.retirada_data or form.data_evento or '' }}"></div>
-        <div><label>Hora da retirada</label><input name="retirada_hora" type="time" step="1800" value="{{ form.retirada_hora or '' }}"></div>
+    <div class="retirada-obrigatoria-box etapa-manual" id="horarioManualBox"
+         data-base-res="{{ duracoes_tipo_evento.get('residencial', empresa.duracao_padrao_minutos or 240) }}"
+         data-base-emp="{{ duracoes_tipo_evento.get('empresa', empresa.duracao_padrao_minutos or 240) }}"
+         data-primeira="{{ empresa.hora_extra_primeira_valor or 0 }}"
+         data-demais="{{ empresa.hora_extra_demais_valor or 0 }}"
+         data-limite="{{ empresa.retirada_hora_maxima or '22:00' }}">
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">
+        <div><small>Duração</small><b id="duracaoManualTexto">—</b></div><div><small>Término</small><b id="terminoManualTexto">—</b></div><div><small>Horas adicionais</small><b id="valorHorasManualTexto">R$ 0,00</b></div>
+      </div>
+      {% if empresa.retirada_cortesia_proximo_dia %}<div style="padding:10px 12px;border-radius:12px;background:#ecfdf3;border:1px solid #a7f3d0;color:#067647;margin-bottom:10px"><b>Cortesia:</b> retirada no próximo dia.</div><label class="check"><input id="retiradaMesmoDiaManual" type="checkbox" name="retirada_mesmo_dia" value="1" {% if form.retirada_mesmo_dia %}checked{% endif %}> Preciso que retire no mesmo dia</label>{% else %}<input type="hidden" name="retirada_mesmo_dia" value="1">{% endif %}
+      <div id="horasExtrasManual" style="margin-top:10px" {% if empresa.retirada_cortesia_proximo_dia and not form.retirada_mesmo_dia %}hidden{% endif %}>
+        <b>Adicionar horas?</b><div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button type="button" class="botao-secundario" id="menosHoraManual">−</button><strong id="qtdHorasManual">{{ form.horas_adicionais_manual or 0 }}</strong><button type="button" class="botao-secundario" id="maisHoraManual">+ 1 hora</button></div>
+        <input type="hidden" name="horas_adicionais_manual" id="horasAdicionaisManual" value="{{ form.horas_adicionais_manual or 0 }}">
+        <small class="texto-discreto">1ª hora: R$ {{ empresa.hora_extra_primeira_valor|moeda_br }} · próximas: R$ {{ empresa.hora_extra_demais_valor|moeda_br }} · limite {{ empresa.retirada_hora_maxima or '22:00' }}.</small>
+        <div id="limiteHoraManual" class="erro" style="margin-top:7px" hidden>Limite de retirada no mesmo dia atingido.</div>
       </div>
     </div>
   </section>
@@ -118,7 +130,7 @@
     <label>Item principal</label>
     <select name="produto_id">
       <option value="">Selecionar depois</option>
-      {% for p in produtos %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
+      {% for p in produtos %}{% set dp = duracoes_produtos_evento.get(p.id, {}) %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" data-dur-res="{{ dp.get('residencial', empresa.duracao_padrao_minutos or 240) }}" data-dur-emp="{{ dp.get('empresa', empresa.duracao_padrao_minutos or 240) }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
     </select>
     <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
     <div id="recursosNovoContrato" class="box" style="margin-top:10px" hidden>
@@ -155,6 +167,7 @@
       <div><small>Equipamento</small><b id="manualEquipResumo">R$ 0,00</b></div>
       <div><small>Desconto</small><b id="manualDescResumo">- R$ 0,00</b></div>
       <div><small>Frete</small><b id="manualFreteResumo">R$ 0,00</b></div>
+      <div><small>Horas adicionais</small><b id="manualHorasResumo">R$ 0,00</b></div>
       <div><small>Total</small><b id="manualTotalResumo">R$ 0,00</b></div>
     </div>
     <label>Valor pago / sinal</label>
@@ -200,15 +213,68 @@ function aplicarValorBaseContrato(select){
   if(campo) campo.value = formatarMoedaContrato(valor);
   recalcularValoresContratoManual();
 }
+function valorHorasContratoManual(){
+  const box=document.getElementById('horarioManualBox');
+  const toggle=document.getElementById('retiradaMesmoDiaManual');
+  const mesmoDia=!toggle || toggle.checked;
+  if(!mesmoDia) return 0;
+  const qtd=Math.max(0,parseInt(document.getElementById('horasAdicionaisManual')?.value||'0',10)||0);
+  if(!qtd) return 0;
+  const primeira=parseFloat(box?.dataset.primeira||'0')||0;
+  const demais=parseFloat(box?.dataset.demais||'0')||0;
+  return primeira+Math.max(0,qtd-1)*demais;
+}
 function recalcularValoresContratoManual(){
   const equip = moedaNumeroContrato(document.getElementById('valorEquipamentoManual')?.value || '0');
   const cupom = document.getElementById('cupomManual');
   const pct = parseFloat(cupom?.options[cupom.selectedIndex]?.dataset.percentual || '0') || 0;
   const desconto = equip * pct / 100;
   const frete = moedaNumeroContrato(document.getElementById('freteManual')?.value || '0');
-  const total = Math.max(equip - desconto + frete, 0);
-  const vals = {manualEquipResumo:equip,manualDescResumo:desconto,manualFreteResumo:frete,manualTotalResumo:total};
+  const horas = valorHorasContratoManual();
+  const total = Math.max(equip - desconto + frete + horas, 0);
+  const vals = {manualEquipResumo:equip,manualDescResumo:desconto,manualFreteResumo:frete,manualHorasResumo:horas,manualTotalResumo:total};
   Object.entries(vals).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=(id==='manualDescResumo'?'- R$ ':'R$ ')+formatarMoedaContrato(v);});
+}
+function atualizarHorarioContratoManual(){
+  const box=document.getElementById('horarioManualBox'); if(!box) return;
+  const inicioEl=document.querySelector('input[name="hora_inicio"]');
+  const produto=document.querySelector('select[name="produto_id"]');
+  const tipo=document.getElementById('tipoEventoContrato')?.value||'residencial';
+  const opt=produto?.options[produto.selectedIndex];
+  const basePadrao=parseInt(tipo==='empresa'?(box.dataset.baseEmp||'240'):(box.dataset.baseRes||'240'),10)||240;
+  const duracao=parseInt(opt?.dataset?.[tipo==='empresa'?'durEmp':'durRes']||String(basePadrao),10)||basePadrao;
+  const horasCampo=document.getElementById('horasAdicionaisManual');
+  const toggle=document.getElementById('retiradaMesmoDiaManual');
+  const mesmoDia=!toggle || toggle.checked;
+  let extras=Math.max(0,parseInt(horasCampo?.value||'0',10)||0);
+  if(!mesmoDia){ extras=0; if(horasCampo) horasCampo.value='0'; }
+  const inicio=(inicioEl?.value||'').split(':').map(Number);
+  const durTxt=document.getElementById('duracaoManualTexto');
+  const fimTxt=document.getElementById('terminoManualTexto');
+  const valorTxt=document.getElementById('valorHorasManualTexto');
+  const qtdTxt=document.getElementById('qtdHorasManual');
+  const extrasBox=document.getElementById('horasExtrasManual');
+  const erro=document.getElementById('limiteHoraManual');
+  const menos=document.getElementById('menosHoraManual');
+  const mais=document.getElementById('maisHoraManual');
+  if(durTxt) durTxt.textContent=(duracao/60)+(duracao===60?' hora':' horas');
+  if(qtdTxt) qtdTxt.textContent=String(extras);
+  if(extrasBox) extrasBox.hidden=!mesmoDia;
+  const valorHoras=valorHorasContratoManual(); if(valorTxt) valorTxt.textContent='R$ '+formatarMoedaContrato(valorHoras);
+  let valido=true;
+  if(inicioEl?.value){
+    const inicioMin=(inicio[0]||0)*60+(inicio[1]||0);
+    const fimMin=inicioMin+duracao+extras*60;
+    const lim=(box.dataset.limite||'22:00').split(':').map(Number);
+    const limiteMin=(lim[0]||22)*60+(lim[1]||0);
+    valido=!mesmoDia || (fimMin<1440 && fimMin<=limiteMin);
+    const h=Math.floor((fimMin%1440)/60),m=fimMin%60;
+    if(fimTxt) fimTxt.textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    if(mais) mais.disabled=mesmoDia && ((inicioMin+duracao+(extras+1)*60)>limiteMin || (inicioMin+duracao+(extras+1)*60)>=1440);
+  }else if(fimTxt){ fimTxt.textContent='—'; }
+  if(erro) erro.hidden=valido;
+  if(menos) menos.disabled=extras<=0;
+  recalcularValoresContratoManual();
 }
 function alternarTipoTelefone(){
   const marcado = document.getElementById('whatsappBrasil').checked;
@@ -247,8 +313,10 @@ async function buscarCEP(){
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
+  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); atualizarHorarioContratoManual(); }
   if(ev.target?.name === 'cupom_codigo') recalcularValoresContratoManual();
+  if(ev.target?.name === 'tipo_evento_comercial' || ev.target?.name === 'hora_inicio') atualizarHorarioContratoManual();
+  if(ev.target?.id === 'retiradaMesmoDiaManual'){ if(!ev.target.checked){const h=document.getElementById('horasAdicionaisManual');if(h)h.value='0';} atualizarHorarioContratoManual(); }
   if(ev.target?.name === 'modo_criacao') alternarEtapas();
   if(ev.target?.name === 'data_evento'){
     const dr=document.querySelector('input[name="retirada_data"]'); if(dr && !dr.value) dr.value=ev.target.value;
@@ -324,13 +392,16 @@ async function consultarClientePorTelefone(){
   }catch(e){st.textContent='Não foi possível consultar agora. Você pode continuar preenchendo.';}finally{if(window.fecharCarregando)fecharCarregando();}
 }
 
+document.getElementById('menosHoraManual')?.addEventListener('click',()=>{const h=document.getElementById('horasAdicionaisManual');if(h)h.value=String(Math.max(0,(parseInt(h.value||'0',10)||0)-1));atualizarHorarioContratoManual();});
+document.getElementById('maisHoraManual')?.addEventListener('click',()=>{const h=document.getElementById('horasAdicionaisManual');if(h)h.value=String((parseInt(h.value||'0',10)||0)+1);atualizarHorarioContratoManual();});
 document.addEventListener('input', function(ev){
   if(ev.target?.id === 'valorEquipamentoManual' || ev.target?.id === 'freteManual') recalcularValoresContratoManual();
+  if(ev.target?.name === 'hora_inicio') atualizarHorarioContratoManual();
 });
 
 document.addEventListener('DOMContentLoaded', function(){
   const produto=document.querySelector('select[name="produto_id"]'); if(produto){ aplicarContratoPadrao(produto); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
-  alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto(); recalcularValoresContratoManual();
+  alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto(); atualizarHorarioContratoManual(); recalcularValoresContratoManual();
   const tel=document.getElementById('telefoneCliente');
   if(tel){
     tel.addEventListener('input',()=>{clearTimeout(timerBuscaCliente);timerBuscaCliente=setTimeout(consultarClientePorTelefone,500);});

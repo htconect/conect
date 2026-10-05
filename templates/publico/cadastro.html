@@ -123,7 +123,7 @@
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
     {% if vitrine_pedido is defined and vitrine_pedido %}
       <div id="horarioVitrineBox" class="vitrine-horario-box">
-        <h3><i class="bi bi-clock"></i> Contrato: {{ vitrine_pedido.duracao_rotulo or '4 horas' }}</h3>
+        <h3><i class="bi bi-clock"></i> Contrato: {{ vitrine_pedido.duracao_rotulo or duracao_padrao_publica_rotulo }}</h3>
         <div class="vitrine-horario-linha"><span>Término do período contratado</span><strong id="horaFimCalculada">--:--</strong></div>
         {% if empresa.retirada_cortesia_proximo_dia %}
           <div class="cortesia-box"><b><i class="bi bi-gift"></i> Cortesia:</b> buscamos no próximo dia para você aproveitar o equipamento por mais tempo, sem cobrança de permanência.</div>
@@ -150,7 +150,8 @@
     {% elif empresa.mostrar_mensagem_hora_fim %}
       <div id="avisoHorarioContrato" class="box aviso aviso-horario-contrato" hidden>
         <strong>Horário padrão do contrato: <span id="horaFimCalculada">--:--</span></strong>
-        <p>{{ empresa.mensagem_hora_fim or 'A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico.' }}</p>
+        {% set mensagem_hora_legada = 'A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico.' %}
+        <p>{% if not empresa.mensagem_hora_fim or empresa.mensagem_hora_fim == mensagem_hora_legada %}Período padrão: {{ duracao_padrao_publica_rotulo }}. A duração final pode aumentar conforme os itens do contrato e as horas adicionais escolhidas.{% else %}{{ empresa.mensagem_hora_fim }}{% endif %}</p>
       </div>
     {% endif %}
     <label>Nome do local</label><input name="local_nome" value="{{ form.local_nome if form is defined else '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">
@@ -224,7 +225,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('cnpjClientePublico')?.addEventListener('input',agendarConsulta);
   const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}
 });
-const VITRINE_DURACAO_MINUTOS={{ vitrine_pedido.duracao_maxima_minutos if vitrine_pedido is defined and vitrine_pedido else 240 }};
+const VITRINE_DURACAO_MINUTOS={{ vitrine_pedido.duracao_maxima_minutos if vitrine_pedido is defined and vitrine_pedido else duracao_padrao_publica_minutos }};
 const VITRINE_CORTESIA={{ 'true' if empresa.retirada_cortesia_proximo_dia else 'false' }};
 const VITRINE_HORA_EXTRA_1={{ empresa.hora_extra_primeira_valor or 0 }};
 const VITRINE_HORA_EXTRA_DEMAIS={{ empresa.hora_extra_demais_valor or 0 }};

@@ -70,6 +70,11 @@
     <section class="empresa-bloco" id="horarios">
       <div class="empresa-bloco-cab"><i class="bi bi-clock-history"></i><div><h2>Horários e retirada</h2><p>Regras gerais usadas pela vitrine para duração extra e retirada.</p></div></div>
       <div class="empresa-bloco-corpo">
+        <div class="empresa-grade" style="margin-bottom:14px">
+          <div><label>Duração padrão — Residencial</label><select name="duracao_residencial_minutos">{% set dr = duracoes_tipo_evento.get('residencial', 240) %}{% for minutos, rotulo in [(60,'1 hora'),(120,'2 horas'),(180,'3 horas'),(240,'4 horas'),(300,'5 horas'),(360,'6 horas'),(420,'7 horas'),(480,'8 horas')] %}<option value="{{ minutos }}" {% if dr == minutos %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select></div>
+          <div><label>Duração padrão — Empresa</label><select name="duracao_empresa_minutos">{% set de = duracoes_tipo_evento.get('empresa', empresa.duracao_padrao_minutos or 240) %}{% for minutos, rotulo in [(60,'1 hora'),(120,'2 horas'),(180,'3 horas'),(240,'4 horas'),(300,'5 horas'),(360,'6 horas'),(420,'7 horas'),(480,'8 horas')] %}<option value="{{ minutos }}" {% if de == minutos %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}</select></div>
+        </div>
+        <p class="texto-ajuda" style="margin-top:-6px;margin-bottom:14px">A duração padrão pertence à empresa. No item, você só informa se ele acrescenta horas sobre este período.</p>
         <label class="check"><input type="checkbox" name="retirada_cortesia_proximo_dia" value="1" {% if empresa.retirada_cortesia_proximo_dia %}checked{% endif %}> Oferecer cortesia de retirada no próximo dia</label>
         <p class="texto-ajuda" style="margin-top:6px">Com a cortesia ativa, o cliente pode ficar com o equipamento após o período contratado e a retirada é feita no próximo dia. Se ele exigir retirada no mesmo dia, perde a cortesia e horas adicionais passam a ser cobradas.</p>
         <div class="empresa-grade tres" style="margin-top:14px">
@@ -77,7 +82,7 @@
           <div><label>1ª hora adicional</label><input name="hora_extra_primeira_valor" data-mascara="moeda" inputmode="decimal" value="{{ empresa.hora_extra_primeira_valor|moeda_br if empresa.hora_extra_primeira_valor is not none else '100,00' }}"></div>
           <div><label>Demais horas adicionais</label><input name="hora_extra_demais_valor" data-mascara="moeda" inputmode="decimal" value="{{ empresa.hora_extra_demais_valor|moeda_br if empresa.hora_extra_demais_valor is not none else '50,00' }}"></div>
         </div>
-        <div style="margin-top:12px;padding:12px 14px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;font-size:13px;color:#475569"><b>Exemplo:</b> contrato de 4 horas iniciado às 12:00 termina às 16:00. Com cortesia, a retirada padrão fica para o próximo dia. Se o cliente pedir retirada no mesmo dia, 16:00 é o horário inicial de retirada; cada hora acrescentada usa os valores acima, respeitando o limite da empresa.</div>
+        <div style="margin-top:12px;padding:12px 14px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc;font-size:13px;color:#475569"><b>Exemplo:</b> o término é calculado pela duração da empresa para o tipo de evento, mais eventual hora incluída pelo item. Com cortesia, a retirada padrão fica para o próximo dia. Se o cliente pedir retirada no mesmo dia, 16:00 é o horário inicial de retirada; cada hora acrescentada usa os valores acima, respeitando o limite da empresa.</div>
       </div>
     </section>
 

@@ -71,8 +71,9 @@ class Empresa(Base):
     lokafest_ativo = Column(Boolean, default=False)
     lokafest_url = Column(String(300), nullable=True)
 
-    # Horários e retirada da vitrine. A duração base continua no item; aqui ficam
-    # as regras comuns da empresa para cortesia e horas adicionais.
+    # Horários e retirada. A duração padrão pertence à empresa; itens apenas
+    # podem acrescentar tempo sobre a regra da empresa/tipo de evento.
+    duracao_padrao_minutos = Column(Integer, default=240)
     retirada_cortesia_proximo_dia = Column(Boolean, default=False)
     retirada_hora_maxima = Column(String(5), default="22:00")
     hora_extra_primeira_valor = Column(Float, default=100)
@@ -404,6 +405,7 @@ class TipoEventoEmpresa(Base):
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
     nome = Column(String(100), nullable=False)
     descricao = Column(String(240), nullable=True)
+    duracao_minutos = Column(Integer, nullable=True)
     ordem = Column(Integer, nullable=False, default=0)
     ativo = Column(Boolean, nullable=False, default=True)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
@@ -515,6 +517,9 @@ class Solicitacao(Base):
     data_evento = Column(Date, nullable=False)
     hora_inicio = Column(Time, nullable=False)
     hora_fim = Column(Time, nullable=True)
+    # Tipo comercial usado para resolver preço/duração: Residencial ou Empresa.
+    # A duração base pertence à empresa; o item pode apenas acrescentar horas.
+    tipo_evento_comercial = Column(String(30), nullable=True, default="residencial")
     retirada_obrigatoria = Column(Boolean, default=False)
     retirada_data = Column(Date, nullable=True)
     retirada_hora = Column(Time, nullable=True)
@@ -542,8 +547,8 @@ class Solicitacao(Base):
     cupom_percentual = Column(Float, default=0)
     valor_desconto = Column(Float, default=0)
     valor_frete = Column(Float, default=0)
-    # Snapshot da duração/horas extras escolhidas na vitrine. Contratos normais
-    # continuam usando a duração do produto sem depender destes campos.
+    # Snapshot da duração/horas extras do contrato. A duração base vem da empresa/tipo
+    # de evento; cada item pode apenas acrescentar tempo à regra da empresa.
     duracao_contratada_minutos = Column(Integer, nullable=True)
     horas_adicionais = Column(Integer, nullable=False, default=0)
     valor_horas_adicionais = Column(Float, nullable=False, default=0)
@@ -753,6 +758,20 @@ class InfinitePayCobranca(Base):
     motivo_cancelamento = Column(Text, nullable=True)
     criado_em = Column(DateTime, server_default=func.now())
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class BloqueioData(Base):
+    __tablename__ = "bloqueios_data"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    data_inicio = Column(Date, nullable=False, index=True)
+    data_fim = Column(Date, nullable=False, index=True)
+    descricao = Column(String(160), nullable=True)
+    ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
 
 
 class Agenda(Base):
