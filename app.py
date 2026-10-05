@@ -781,11 +781,12 @@ def resumo_financeiro(itens):
 def composicao_valores_contrato(item: Solicitacao) -> dict:
     """Retorna a composição comercial preservando contratos legados.
 
-    O desconto incide somente sobre equipamentos. Frete é somado depois do desconto.
-    ``item.valor`` continua sendo o total líquido final usado pelo financeiro.
+    O desconto incide somente sobre equipamentos. Horas adicionais e frete são
+    somados depois do desconto. ``item.valor`` continua sendo o total líquido final.
     """
     desconto = max(float(getattr(item, "valor_desconto", 0) or 0), 0.0)
     frete = max(float(getattr(item, "valor_frete", 0) or 0), 0.0)
+    horas_adicionais_valor = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
     equipamentos = max(float(getattr(item, "valor_equipamentos", 0) or 0), 0.0)
     if equipamentos <= 0.009:
         itens = list(getattr(item, "itens", None) or [])
@@ -795,7 +796,7 @@ def composicao_valores_contrato(item: Solicitacao) -> dict:
         else:
             equipamentos = max(float(getattr(item, "valor", 0) or 0) + desconto - frete, 0.0)
     total = max(float(getattr(item, "valor", 0) or 0), 0.0)
-    calculado = max(equipamentos - desconto + frete, 0.0)
+    calculado = max(equipamentos - desconto + horas_adicionais_valor + frete, 0.0)
     if total <= 0.009 and calculado > 0.009:
         total = calculado
     return {
@@ -803,6 +804,7 @@ def composicao_valores_contrato(item: Solicitacao) -> dict:
         "cupom_codigo": str(getattr(item, "cupom_codigo", "") or "").strip().upper(),
         "cupom_percentual": max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0),
         "desconto": round(desconto, 2),
+        "horas_adicionais": round(horas_adicionais_valor, 2),
         "frete": round(frete, 2),
         "total": round(total, 2),
     }
@@ -859,17 +861,24 @@ def _cupom_valido_ou_snapshot(db: Session, empresa_id: int, codigo: str, item: S
     return _cupom_valido(db, empresa_id, codigo_limpo)
 
 
-def _aplicar_composicao_comercial(item: Solicitacao, valor_equipamentos: float, frete: float, cupom: Cupom | None) -> None:
+def _aplicar_composicao_comercial(
+        item: Solicitacao, valor_equipamentos: float, frete: float, cupom: Cupom | None,
+        valor_horas_adicionais: float | None = None) -> None:
     subtotal = max(float(valor_equipamentos or 0), 0.0)
     valor_frete = max(float(frete or 0), 0.0)
+    if valor_horas_adicionais is None:
+        valor_horas = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
+    else:
+        valor_horas = max(float(valor_horas_adicionais or 0), 0.0)
     percentual = max(float(cupom.percentual or 0), 0.0) if cupom else 0.0
     desconto = round(subtotal * percentual / 100.0, 2) if percentual > 0 else 0.0
-    total = round(max(subtotal - desconto + valor_frete, 0.0), 2)
+    total = round(max(subtotal - desconto + valor_horas + valor_frete, 0.0), 2)
     item.valor_equipamentos = round(subtotal, 2)
     item.cupom_codigo = cupom.codigo.upper() if cupom else None
     item.cupom_percentual = percentual
     item.valor_desconto = desconto
     item.valor_frete = round(valor_frete, 2)
+    item.valor_horas_adicionais = round(valor_horas, 2)
     item.valor = total
 
 
@@ -1734,13 +1743,15 @@ def horario_suporte_contrato(empresa: Empresa, item: Solicitacao) -> tuple[str, 
 
 
 def texto_retirada_contrato(item: Solicitacao) -> str:
-    """Texto contratual da retirada normal ou obrigatória."""
+    """Texto contratual da retirada normal, por cortesia ou obrigatória."""
     if retirada_obrigatoria_ativa(item):
         data_ret = item.retirada_data or item.data_evento
         hora_ret = item.retirada_hora or item.hora_fim or item.hora_inicio
         data_txt = data_ret.strftime("%d/%m/%Y") if data_ret else "data combinada"
         hora_txt = hora_ret.strftime("%H:%M") if hora_ret else "horário combinado"
-        return f"Retirada obrigatória em {data_txt} às {hora_txt}."
+        return f"Retirada no mesmo dia em {data_txt} às {hora_txt}."
+    if bool(getattr(item, "cortesia_retirada", False)):
+        return "Cortesia: após o período contratado, o equipamento pode permanecer no local e será retirado no próximo dia, conforme a rota operacional."
     return "Retirada a partir das 08:00, conforme a nossa rota operacional."
 
 
@@ -1779,6 +1790,12 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     add(linhas, "Data do evento", fmt_data(item.data_evento))
     add(linhas, "Hora de início", fmt_hora(item.hora_inicio))
     add(linhas, "Hora de fim", fmt_hora(item.hora_fim))
+    duracao_snapshot = max(0, int(getattr(item, "duracao_contratada_minutos", 0) or 0))
+    if duracao_snapshot:
+        add(linhas, "Período contratado", _rotulo_duracao_minutos(duracao_snapshot))
+    qtd_horas_extra = max(0, int(getattr(item, "horas_adicionais", 0) or 0))
+    if qtd_horas_extra:
+        add(linhas, "Horas adicionais", f"{qtd_horas_extra} hora{'s' if qtd_horas_extra != 1 else ''} — R$ {float(getattr(item, 'valor_horas_adicionais', 0) or 0):.2f}".replace('.', ','))
     if empresa:
         faixa_suporte = horario_suporte_contrato(empresa, item)
         if faixa_suporte:
@@ -1864,6 +1881,7 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
         *([f"*Cupom:* {comp['cupom_codigo']} ({moeda_br(comp['cupom_percentual'])}%)",
            f"*Desconto:* - R$ {moeda_br(comp['desconto'])}"]
           if comp['cupom_codigo'] and comp['desconto'] > 0 else []),
+        *([f"*Horas adicionais:* R$ {moeda_br(comp['horas_adicionais'])}"] if comp['horas_adicionais'] > 0 else []),
         f"*Frete:* R$ {moeda_br(comp['frete'])}",
         f"*Total:* R$ {moeda_br(total)}",
         f"*Pago:* R$ {moeda_br(pago)}",
@@ -2036,6 +2054,7 @@ def garantir_colunas_novas():
 
     comandos = []
     nova_col_whatsapp_contrato_acionado = False
+    nova_col_retirada_cortesia = False
 
     if "usuarios_empresa" not in tabelas:
         comandos.append("""
@@ -2151,6 +2170,15 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_ativo BOOLEAN DEFAULT false")
     if "lokafest_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_url VARCHAR(300)")
+    if "retirada_cortesia_proximo_dia" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN retirada_cortesia_proximo_dia BOOLEAN DEFAULT false")
+        nova_col_retirada_cortesia = True
+    if "retirada_hora_maxima" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN retirada_hora_maxima VARCHAR(5) DEFAULT '22:00'")
+    if "hora_extra_primeira_valor" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN hora_extra_primeira_valor FLOAT DEFAULT 100")
+    if "hora_extra_demais_valor" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN hora_extra_demais_valor FLOAT DEFAULT 50")
     if "humiat_slug" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN humiat_slug VARCHAR(80)")
         comandos.append("CREATE INDEX IF NOT EXISTS ix_empresas_humiat_slug ON empresas (humiat_slug)")
@@ -2242,6 +2270,13 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN preco_por_tipo_evento BOOLEAN DEFAULT false")
         if "utiliza_opcionais" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN utiliza_opcionais BOOLEAN DEFAULT false")
+
+    if "produto_precos_evento" in tabelas:
+        cols_preco_evt = colunas("produto_precos_evento")
+        if "horas_modo" not in cols_preco_evt:
+            comandos.append("ALTER TABLE produto_precos_evento ADD COLUMN horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL")
+        if "horas_adicionais" not in cols_preco_evt:
+            comandos.append("ALTER TABLE produto_precos_evento ADD COLUMN horas_adicionais INTEGER DEFAULT 0 NOT NULL")
 
     if "produto_fotos" in tabelas:
         cols_fotos = colunas("produto_fotos")
@@ -2426,6 +2461,14 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN status_geocodificacao VARCHAR(20) DEFAULT 'pendente'")
         if "data_geocodificacao" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN data_geocodificacao TIMESTAMP")
+        if "duracao_contratada_minutos" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN duracao_contratada_minutos INTEGER")
+        if "horas_adicionais" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN horas_adicionais INTEGER DEFAULT 0 NOT NULL")
+        if "valor_horas_adicionais" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_horas_adicionais FLOAT DEFAULT 0 NOT NULL")
+        if "cortesia_retirada" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN cortesia_retirada BOOLEAN DEFAULT false NOT NULL")
 
     if "humiat_movimentos" not in tabelas:
         comandos.append("""
@@ -2849,6 +2892,10 @@ def garantir_colunas_novas():
             conn.execute(text("UPDATE empresas SET inteligencia_ativa = true WHERE id IN (SELECT DISTINCT empresa_id FROM rotas_inteligentes)"))
         # A regra atual de deslocamento por KM é sempre ida + volta.
         conn.execute(text("UPDATE empresas SET frete_multiplicador_km = 2 WHERE frete_tipo = 'km'"))
+        # Na estreia da regra de horários, preserva o diferencial já praticado pela
+        # Karaoke RJ sem ligar a cortesia automaticamente para as demais empresas.
+        if nova_col_retirada_cortesia:
+            conn.execute(text("UPDATE empresas SET retirada_cortesia_proximo_dia = true, retirada_hora_maxima = '22:00', hora_extra_primeira_valor = 100, hora_extra_demais_valor = 50 WHERE lower(slug) = 'karaokerj'"))
 
     # Preserva a auditoria das versões anteriores sem presumir recebimento.
     if nova_col_whatsapp_contrato_acionado and "solicitacoes" in tabelas:
@@ -3686,8 +3733,104 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
     ).start()
 
 
+
+def _garantir_colunas_v113_criticas() -> None:
+    """Adiciona apenas as colunas indispensáveis da v1.0.113.
+
+    É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
+    mas garante que os SELECTs das tabelas principais não falhem após o deploy.
+    """
+    comandos_pg = [
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_cortesia_proximo_dia BOOLEAN DEFAULT false",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_hora_maxima VARCHAR(5) DEFAULT '22:00'",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_primeira_valor FLOAT DEFAULT 100",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
+        "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
+        "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS duracao_contratada_minutos INTEGER",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS valor_horas_adicionais FLOAT DEFAULT 0 NOT NULL",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS cortesia_retirada BOOLEAN DEFAULT false NOT NULL",
+    ]
+    try:
+        if engine.dialect.name == "postgresql":
+            with engine.begin() as conn:
+                for comando in comandos_pg:
+                    conn.execute(text(comando))
+            return
+        # Desenvolvimento/SQLite: reutiliza a rotina compatível já existente.
+        garantir_colunas_novas()
+    except Exception:
+        logger.exception("Falha ao garantir colunas críticas da v1.0.113")
+        raise
+
+
+def _migrar_horarios_karaokerj_v113_uma_vez() -> None:
+    """Configura os padrões combinados para a Karaokê RJ sem sobrescrever depois."""
+    chave = "20261005_karaokerj_horarios_v113"
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                chave VARCHAR(160) PRIMARY KEY,
+                aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        db.commit()
+        if db.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave}).first():
+            return
+        empresa = db.query(Empresa).filter(
+            or_(
+                func.lower(Empresa.slug).in_(["karaokerj", "karaoke-rj"]),
+                func.lower(Empresa.nome).in_(["karaokê rj", "karaoke rj"]),
+            )
+        ).first()
+        if not empresa:
+            return
+        empresa.retirada_cortesia_proximo_dia = True
+        empresa.retirada_hora_maxima = "22:00"
+        empresa.hora_extra_primeira_valor = 100.0
+        empresa.hora_extra_demais_valor = 50.0
+        tipos = {str(t.nome or "").strip().casefold(): t for t in _tipos_evento_empresa(db, empresa.id, somente_ativos=False)}
+        tipo_empresa = tipos.get("empresa")
+        tipo_residencial = tipos.get("residencial")
+        for produto in db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all():
+            produto.preco_por_tipo_evento = True
+            if tipo_empresa:
+                cfg = db.query(ProdutoPrecoEvento).filter_by(
+                    empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo_empresa.id
+                ).first()
+                if not cfg:
+                    cfg = ProdutoPrecoEvento(empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo_empresa.id, modo="normal")
+                    db.add(cfg)
+                cfg.horas_modo = "adicionar"
+                cfg.horas_adicionais = 1
+            if tipo_residencial:
+                cfg_res = db.query(ProdutoPrecoEvento).filter_by(
+                    empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo_residencial.id
+                ).first()
+                if cfg_res:
+                    cfg_res.horas_modo = "padrao"
+                    cfg_res.horas_adicionais = 0
+        db.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave})
+        db.commit()
+        logger.info("Migração v1.0.113 aplicada: horários e retirada da Karaokê RJ.")
+    except Exception:
+        db.rollback()
+        logger.exception("Falha na migração única de horários v1.0.113")
+    finally:
+        db.close()
+
+
+def _iniciar_migracao_horarios_v113_em_background() -> None:
+    threading.Thread(target=_migrar_horarios_karaokerj_v113_uma_vez, name="connect-migracao-horarios-v113", daemon=True).start()
+
 @app.on_event("startup")
 def startup():
+    # Migração estrutural mínima: somente colunas novas desta versão.
+    _garantir_colunas_v113_criticas()
+    _iniciar_migracao_horarios_v113_em_background()
+
     # Nunca bloquear o bind da porta do Render por causa de uma migração de dados.
     # A migração é idempotente e roda em background; app_migrations impede repetição.
     _iniciar_migracao_precos_v106_em_background()
@@ -3924,11 +4067,15 @@ def _previsao_retirada_operacional(reserva: Solicitacao, entrega: Agenda | None 
         hora_prevista = reserva.retirada_hora or reserva.hora_fim or reserva.hora_inicio
         return data_prevista, hora_prevista
 
+    data_entrega = (entrega.data if entrega and entrega.data else reserva.data_evento)
+    if bool(getattr(reserva, "cortesia_retirada", False)):
+        # Vitrine com cortesia: a regra da empresa prevalece sobre o prazo antigo do item.
+        return data_entrega + timedelta(days=1), time(8, 0)
+
     prazo_dias = 1
     if reserva.produto and reserva.produto.prazo_retirada_dias is not None:
         prazo_dias = max(0, int(reserva.produto.prazo_retirada_dias or 0))
 
-    data_entrega = (entrega.data if entrega and entrega.data else reserva.data_evento)
     data_prevista = data_entrega + timedelta(days=prazo_dias)
     # Retirada comum entra na rota a partir das 08:00; a roteirização pode
     # posicioná-la depois conforme a sequência operacional.
@@ -5989,7 +6136,15 @@ def _mapa_precos_evento_produto(db: Session, empresa_id: int, produto_id: int | 
     if not produto_id:
         return {}
     linhas = db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa_id, produto_id=produto_id).all()
-    return {int(l.tipo_evento_id): {"modo": l.modo or "normal", "valor": l.valor} for l in linhas}
+    return {
+        int(l.tipo_evento_id): {
+            "modo": l.modo or "normal",
+            "valor": l.valor,
+            "horas_modo": str(getattr(l, "horas_modo", "padrao") or "padrao"),
+            "horas_adicionais": max(0, int(getattr(l, "horas_adicionais", 0) or 0)),
+        }
+        for l in linhas
+    }
 
 
 def _normalizar_tipo_evento_vitrine(valor: str) -> str:
@@ -6024,6 +6179,63 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
         valor_especifico = max(float(getattr(cfg, "valor", 0) or 0), 0.0)
         return {"modo": "especifico", "valor": valor_especifico, "valor_normal": valor_normal, "sob_consulta": False, "promocao": valor_especifico < (valor_normal - 0.009)}
     return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
+
+
+def _duracao_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServico, tipo_evento: str) -> int:
+    """Duração contratada na vitrine, respeitando a regra do tipo de evento."""
+    base = max(60, int(getattr(produto, "duracao_minutos", 240) or 240))
+    if not bool(getattr(produto, "preco_por_tipo_evento", False)):
+        return base
+    tipo_chave = _normalizar_tipo_evento_vitrine(tipo_evento)
+    tipo = db.query(TipoEventoEmpresa).filter(
+        TipoEventoEmpresa.empresa_id == empresa.id,
+        func.lower(TipoEventoEmpresa.nome) == TIPOS_EVENTO_VITRINE[tipo_chave].casefold(),
+    ).first()
+    if not tipo:
+        return base
+    cfg = db.query(ProdutoPrecoEvento).filter_by(
+        empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id
+    ).first()
+    if cfg and str(getattr(cfg, "horas_modo", "padrao") or "padrao").lower() == "adicionar":
+        base += max(0, int(getattr(cfg, "horas_adicionais", 0) or 0)) * 60
+    return base
+
+
+def _duracao_pedido_vitrine(pedido: dict | None) -> int:
+    if not pedido:
+        return 240
+    duracoes = []
+    for reg in pedido.get("itens") or []:
+        try:
+            duracoes.append(max(60, int(reg.get("duracao_minutos") or 240)))
+        except Exception:
+            continue
+    return max(duracoes or [240])
+
+
+def _valor_horas_adicionais_empresa(empresa: Empresa, quantidade: int) -> float:
+    qtd = max(0, int(quantidade or 0))
+    if qtd <= 0:
+        return 0.0
+    primeira = max(float(getattr(empresa, "hora_extra_primeira_valor", 100) or 0), 0.0)
+    demais = max(float(getattr(empresa, "hora_extra_demais_valor", 50) or 0), 0.0)
+    return round(primeira + max(0, qtd - 1) * demais, 2)
+
+
+def _hora_maxima_retirada_empresa(empresa: Empresa) -> time:
+    texto = str(getattr(empresa, "retirada_hora_maxima", "22:00") or "22:00").strip()
+    try:
+        return datetime.strptime(texto, "%H:%M").time()
+    except Exception:
+        return time(22, 0)
+
+
+def _rotulo_duracao_minutos(minutos: int) -> str:
+    minutos = max(0, int(minutos or 0))
+    horas, resto = divmod(minutos, 60)
+    if resto:
+        return f"{horas}h{resto:02d}" if horas else f"{resto} min"
+    return f"{horas} hora" if horas == 1 else f"{horas} horas"
 
 
 def _opcionais_catalogo_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[OpcionalEmpresa]:
@@ -6132,6 +6344,7 @@ def _migrar_opcionais_legados_catalogo(db: Session) -> int:
 def _salvar_precos_evento_produto(
     db: Session, empresa_id: int, produto: ProdutoServico,
     tipo_ids: list[str], modos: list[str], valores: list[str],
+    horas_modos: list[str] | None = None, horas_adicionais: list[str] | None = None,
 ) -> None:
     tipos_validos = {t.id for t in _tipos_evento_empresa(db, empresa_id, somente_ativos=False)}
     existentes = {
@@ -6139,6 +6352,8 @@ def _salvar_precos_evento_produto(
         for l in db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa_id, produto_id=produto.id).all()
     }
     vistos: set[int] = set()
+    horas_modos = horas_modos or []
+    horas_adicionais = horas_adicionais or []
     for idx, bruto in enumerate(tipo_ids or []):
         try:
             tipo_id = int(bruto)
@@ -6153,8 +6368,21 @@ def _salvar_precos_evento_produto(
         valor = None
         if modo == "especifico":
             valor = max(0.0, texto_para_float(valores[idx] if idx < len(valores) else "0"))
+
+        horas_modo = str(horas_modos[idx] if idx < len(horas_modos) else "padrao").strip().lower()
+        if horas_modo not in {"padrao", "adicionar"}:
+            horas_modo = "padrao"
+        try:
+            qtd_horas = max(0, min(24, int(horas_adicionais[idx] if idx < len(horas_adicionais) else 0)))
+        except Exception:
+            qtd_horas = 0
+        if horas_modo != "adicionar" or qtd_horas <= 0:
+            horas_modo = "padrao"
+            qtd_horas = 0
+
         atual = existentes.get(tipo_id)
-        if modo == "normal":
+        # Sem personalização de preço nem de duração: não precisa manter linha.
+        if modo == "normal" and horas_modo == "padrao":
             if atual:
                 db.delete(atual)
             continue
@@ -6165,10 +6393,38 @@ def _salvar_precos_evento_produto(
             db.add(atual)
         atual.modo = modo
         atual.valor = valor
-    # Remove configurações antigas de tipos que deixaram de ser enviados/foram excluídos.
+        atual.horas_modo = horas_modo
+        atual.horas_adicionais = qtd_horas
+
+    # Remove apenas configurações órfãs de tipos excluídos da empresa.
     for tipo_id, atual in existentes.items():
         if tipo_id not in vistos and tipo_id not in tipos_validos:
             db.delete(atual)
+
+
+def _aplicar_preco_horas_evento_a_todos(db: Session, empresa: Empresa, origem: ProdutoServico) -> int:
+    """Replica somente preço/duração por tipo de evento; não altera demais campos do item."""
+    origem_cfgs = db.query(ProdutoPrecoEvento).filter_by(
+        empresa_id=empresa.id, produto_id=origem.id
+    ).all()
+    destinos = db.query(ProdutoServico).filter(
+        ProdutoServico.empresa_id == empresa.id,
+        ProdutoServico.ativo == True,
+        ProdutoServico.id != origem.id,
+    ).all()
+    for destino in destinos:
+        destino.preco_por_tipo_evento = bool(origem.preco_por_tipo_evento)
+        db.query(ProdutoPrecoEvento).filter_by(
+            empresa_id=empresa.id, produto_id=destino.id
+        ).delete(synchronize_session=False)
+        for cfg in origem_cfgs:
+            db.add(ProdutoPrecoEvento(
+                empresa_id=empresa.id, produto_id=destino.id, tipo_evento_id=cfg.tipo_evento_id,
+                modo=cfg.modo or "normal", valor=cfg.valor,
+                horas_modo=str(getattr(cfg, "horas_modo", "padrao") or "padrao"),
+                horas_adicionais=max(0, int(getattr(cfg, "horas_adicionais", 0) or 0)),
+            ))
+    return len(destinos)
 
 
 
@@ -6189,31 +6445,48 @@ def _opcionais_descricao_reserva(descricao: str) -> list[dict]:
 
 
 def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
+    obs = str(item.observacoes or "")
+    m_tipo = re.search(r"\[VITRINE_TIPO_EVENTO=([^\]]+)\]", obs)
+    tipo_evento = _normalizar_tipo_evento_vitrine(m_tipo.group(1) if m_tipo else "residencial")
+    empresa = db.get(Empresa, item.empresa_id)
     itens = []
     subtotal = 0.0
     possui_sob_consulta = False
+    duracao_maxima = 0
     for ri in item.itens or []:
         produto = db.get(ProdutoServico, ri.produto_id) if ri.produto_id else None
         sob = "Preço do item: sob consulta." in str(ri.descricao or "")
         total_ri = max(float(ri.valor_total or 0), 0.0)
         subtotal += total_ri
         possui_sob_consulta = possui_sob_consulta or sob
+        duracao_item = (
+            _duracao_vitrine_produto(db, empresa, produto, tipo_evento)
+            if empresa and produto else max(60, int(getattr(produto, "duracao_minutos", 240) or 240))
+        )
+        duracao_maxima = max(duracao_maxima, duracao_item)
         itens.append({
             "produto": produto, "produto_id": ri.produto_id, "nome": ri.nome,
             "quantidade": max(1, int(ri.quantidade or 1)), "valor_unitario": float(ri.valor_unitario or 0),
             "valor_total": total_ri, "opcionais": _opcionais_descricao_reserva(ri.descricao),
             "sob_consulta": sob, "foto": _foto_capa_produto(produto) if produto else "",
+            "duracao_minutos": duracao_item, "duracao_rotulo": _rotulo_duracao_minutos(duracao_item),
         })
-    obs = str(item.observacoes or "")
-    m_tipo = re.search(r"\[VITRINE_TIPO_EVENTO=([^\]]+)\]", obs)
-    tipo_evento = _normalizar_tipo_evento_vitrine(m_tipo.group(1) if m_tipo else "residencial")
     desconto = max(float(item.valor_desconto or 0), 0.0)
     frete_valor = max(float(item.valor_frete or 0), 0.0)
+    horas_valor = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
+    duracao_snapshot = max(0, int(getattr(item, "duracao_contratada_minutos", 0) or 0))
+    if duracao_snapshot:
+        duracao_maxima = duracao_snapshot
     return {
         "data_evento": item.data_evento,
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE.get(tipo_evento, tipo_evento.title()),
         "itens": itens,
+        "duracao_maxima_minutos": max(60, duracao_maxima or 240),
+        "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
+        "horas_adicionais": max(0, int(getattr(item, "horas_adicionais", 0) or 0)),
+        "valor_horas_adicionais": round(horas_valor, 2),
+        "cortesia_retirada": bool(getattr(item, "cortesia_retirada", False)),
         "subtotal": round(subtotal, 2),
         "cupom": None,
         "cupom_codigo": str(item.cupom_codigo or ""),
@@ -6229,6 +6502,7 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         "total": round(float(item.valor or 0), 2),
         "total_sob_consulta": possui_sob_consulta,
     }
+
 
 
 def _vitrine_autorizou_parceiros(item: Solicitacao) -> bool:
@@ -6975,6 +7249,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
         categoria = str(produto.vitrine_categoria or '').strip()
         fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
         preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
+        duracao_vitrine = _duracao_vitrine_produto(db, empresa, produto, tipo_evento)
         opcionais = [o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True) if int(o.quantidade or 0) > 0]
         saida.append({
             'produto': produto,
@@ -6990,6 +7265,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             'preco_normal': preco.get('valor_normal'),
             'promocao': bool(preco.get('promocao')),
             'sob_consulta': bool(preco.get('sob_consulta')),
+            'duracao_minutos': duracao_vitrine,
+            'duracao_rotulo': _rotulo_duracao_minutos(duracao_vitrine),
             'opcionais': opcionais,
         })
     return saida
@@ -7008,6 +7285,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     itens = []
     total = 0.0
     possui_sob_consulta = False
+    duracao_maxima = 0
     for reg in itens_brutos:
         try:
             produto_id = int(reg.get("produto_id"))
@@ -7018,6 +7296,8 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
             continue
         preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
+        duracao_item = _duracao_vitrine_produto(db, empresa, produto, tipo_evento)
+        duracao_maxima = max(duracao_maxima, duracao_item)
         sob_consulta = bool(preco.get("sob_consulta"))
         valor_unitario = 0.0 if sob_consulta else max(float(preco.get("valor") or 0), 0.0)
         valor_base_total = round(valor_unitario * quantidade, 2)
@@ -7049,6 +7329,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
             "quantidade": quantidade, "valor_unitario": valor_unitario, "valor_total": valor_total,
             "valor_base_total": valor_base_total, "opcionais": opcionais_escolhidos,
             "sob_consulta": sob_consulta, "foto": _foto_capa_produto(produto),
+            "duracao_minutos": duracao_item, "duracao_rotulo": _rotulo_duracao_minutos(duracao_item),
         })
     if not itens:
         return None
@@ -7063,6 +7344,8 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
         "itens": itens,
+        "duracao_maxima_minutos": max(60, duracao_maxima or 240),
+        "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
         "subtotal": round(total, 2),
         "cupom": cupom,
         "cupom_codigo": cupom.codigo if cupom else "",
@@ -7897,6 +8180,10 @@ async def salvar_cadastro_empresa_guiado(
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
+        retirada_cortesia_proximo_dia: Optional[str] = Form(None),
+        retirada_hora_maxima: str = Form("22:00"),
+        hora_extra_primeira_valor: str = Form("100"),
+        hora_extra_demais_valor: str = Form("50"),
         mensagem_tipo_residencial: str = Form(""),
         mensagem_tipo_empresa: str = Form(""),
         frete_tipo: str = Form("consultar"),
@@ -7929,6 +8216,14 @@ async def salvar_cadastro_empresa_guiado(
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = (suporte_inicio or "").strip() or empresa.suporte_inicio or "09:00"
     empresa.suporte_fim = (suporte_fim or "").strip() or empresa.suporte_fim or "20:00"
+    empresa.retirada_cortesia_proximo_dia = bool(retirada_cortesia_proximo_dia)
+    try:
+        hora_limite = datetime.strptime((retirada_hora_maxima or "22:00").strip(), "%H:%M").strftime("%H:%M")
+    except Exception:
+        hora_limite = "22:00"
+    empresa.retirada_hora_maxima = hora_limite
+    empresa.hora_extra_primeira_valor = max(texto_para_float(hora_extra_primeira_valor), 0.0)
+    empresa.hora_extra_demais_valor = max(texto_para_float(hora_extra_demais_valor), 0.0)
     _salvar_mensagens_tipos_evento_empresa(db, empresa.id, mensagem_tipo_residencial, mensagem_tipo_empresa)
 
     tipo_frete = (frete_tipo or "consultar").strip().lower()
@@ -8711,6 +9006,9 @@ def salvar_produto_url(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
+        preco_evento_horas_modo: list[str] = Form(default=[]),
+        preco_evento_horas_adicionais: list[str] = Form(default=[]),
+        aplicar_evento_todos: Optional[str] = Form(None),
         utiliza_opcionais: Optional[str] = Form(None),
         opcional_catalogo_id: list[str] = Form(default=[]),
         opcional_utiliza: list[str] = Form(default=[]),
@@ -8732,7 +9030,8 @@ def salvar_produto_url(
         vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem,
         preco_por_tipo_evento=preco_por_tipo_evento, preco_evento_tipo_id=preco_evento_tipo_id,
         preco_evento_modo=preco_evento_modo, preco_evento_valor=preco_evento_valor,
-        utiliza_opcionais=utiliza_opcionais, opcional_catalogo_id=opcional_catalogo_id, opcional_utiliza=opcional_utiliza,
+        preco_evento_horas_modo=preco_evento_horas_modo, preco_evento_horas_adicionais=preco_evento_horas_adicionais,
+        aplicar_evento_todos=aplicar_evento_todos, utiliza_opcionais=utiliza_opcionais, opcional_catalogo_id=opcional_catalogo_id, opcional_utiliza=opcional_utiliza,
         fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
@@ -8753,6 +9052,9 @@ def salvar_produto(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
+        preco_evento_horas_modo: list[str] = Form(default=[]),
+        preco_evento_horas_adicionais: list[str] = Form(default=[]),
+        aplicar_evento_todos: Optional[str] = Form(None),
         utiliza_opcionais: Optional[str] = Form(None),
         opcional_catalogo_id: list[str] = Form(default=[]),
         opcional_utiliza: list[str] = Form(default=[]),
@@ -8819,8 +9121,12 @@ def salvar_produto(
     produto.preco_por_tipo_evento = bool(preco_por_tipo_evento)
     db.flush()
     _salvar_precos_evento_produto(
-        db, empresa.id, produto, preco_evento_tipo_id, preco_evento_modo, preco_evento_valor
+        db, empresa.id, produto, preco_evento_tipo_id, preco_evento_modo, preco_evento_valor,
+        preco_evento_horas_modo, preco_evento_horas_adicionais
     )
+    if bool(aplicar_evento_todos):
+        db.flush()
+        _aplicar_preco_horas_evento_a_todos(db, empresa, produto)
     _salvar_opcionais_produto(
         db, empresa.id, produto, bool(utiliza_opcionais), opcional_catalogo_id, opcional_utiliza
     )
@@ -8899,6 +9205,8 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         db.add(ProdutoPrecoEvento(
             empresa_id=empresa.id, produto_id=novo.id, tipo_evento_id=preco_evento.tipo_evento_id,
             modo=preco_evento.modo, valor=preco_evento.valor,
+            horas_modo=str(getattr(preco_evento, "horas_modo", "padrao") or "padrao"),
+            horas_adicionais=max(0, int(getattr(preco_evento, "horas_adicionais", 0) or 0)),
         ))
     for oid in _ids_opcionais_excluidos(db, empresa.id, origem.id):
         db.add(ProdutoOpcionalExclusao(empresa_id=empresa.id, produto_id=novo.id, opcional_id=oid))
@@ -16670,6 +16978,7 @@ def salvar_pre_cadastro(
         local_responsavel_telefone: str = Form(""),
         data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
         como_conheceu: str = Form(""), acao: str = Form("salvar"), responsavel_token: str = Form(""),
+        retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais_vitrine: int = Form(0),
         pre_reserva_token: str = Form(""), db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -16710,6 +17019,8 @@ def salvar_pre_cadastro(
         "acesso_local": acesso_local, "local_responsavel_nome": local_responsavel_nome,
         "local_responsavel_telefone": local_responsavel_telefone, "data_evento": data_evento,
         "hora_inicio": hora_inicio, "observacoes": observacoes, "como_conheceu": como_conheceu,
+        "retirada_mesmo_dia": "1" if retirada_mesmo_dia else "",
+        "horas_adicionais_vitrine": max(0, int(horas_adicionais_vitrine or 0)),
         "pre_reserva_token": pre_reserva_token
     }
 
@@ -16721,9 +17032,10 @@ def salvar_pre_cadastro(
             cpf_confirmacao="", form=form_data
         )
         contexto_erro["campos_cfg"] = campos_empresa
+        if pedido_vitrine:
+            contexto_erro["vitrine_pedido"] = pedido_vitrine
         if pre_reserva_existente:
             contexto_erro["pre_reserva_token"] = pre_reserva_existente.public_token
-            contexto_erro["vitrine_pedido"] = pedido_vitrine
         return templates.TemplateResponse("publico/cadastro.html", contexto_erro, status_code=400)
 
     if not celular_brasileiro_valido(telefone):
@@ -16836,8 +17148,36 @@ def salvar_pre_cadastro(
     responsavel_pre_nome = responsavel_pre[0] if responsavel_pre else ""
     responsavel_pre_telefone = responsavel_pre[1] if responsavel_pre else ""
 
-    # O pré-contrato público usa a duração padrão de 4 horas até que os itens sejam definidos.
-    fim_obj = somar_minutos(inicio_obj, 240)
+    # O contrato normal fora da vitrine continua com o comportamento legado.
+    # Na vitrine, a duração vem do item/tipo de evento e a retirada segue a empresa.
+    duracao_base_vitrine = 0
+    horas_extra_vitrine = 0
+    valor_horas_extra_vitrine = 0.0
+    cortesia_retirada_vitrine = False
+    retirada_mesmo_dia_vitrine = False
+    if pedido_vitrine:
+        duracao_base_vitrine = _duracao_pedido_vitrine(pedido_vitrine)
+        cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+        retirada_mesmo_dia_vitrine = bool(retirada_mesmo_dia) if cortesia_configurada else True
+        try:
+            horas_extra_vitrine = max(0, min(24, int(horas_adicionais_vitrine or 0)))
+        except Exception:
+            horas_extra_vitrine = 0
+        if cortesia_configurada and not retirada_mesmo_dia_vitrine:
+            horas_extra_vitrine = 0
+            cortesia_retirada_vitrine = True
+        valor_horas_extra_vitrine = _valor_horas_adicionais_empresa(empresa, horas_extra_vitrine)
+        duracao_total_vitrine = duracao_base_vitrine + horas_extra_vitrine * 60
+        minutos_inicio = inicio_obj.hour * 60 + inicio_obj.minute
+        minutos_fim = minutos_inicio + duracao_total_vitrine
+        if retirada_mesmo_dia_vitrine:
+            limite = _hora_maxima_retirada_empresa(empresa)
+            minutos_limite = limite.hour * 60 + limite.minute
+            if minutos_fim >= 24 * 60 or minutos_fim > minutos_limite:
+                return render_erro("retirada_limite")
+        fim_obj = somar_minutos(inicio_obj, duracao_total_vitrine)
+    else:
+        fim_obj = somar_minutos(inicio_obj, 240)
     if pre_reserva_existente:
         solicitacao = pre_reserva_existente
         solicitacao.cliente_id = cliente.id
@@ -16868,11 +17208,26 @@ def salvar_pre_cadastro(
         db.add(solicitacao)
         db.flush()
 
+    if pedido_vitrine:
+        solicitacao.duracao_contratada_minutos = max(60, int(duracao_base_vitrine or 240))
+        solicitacao.horas_adicionais = max(0, int(horas_extra_vitrine or 0))
+        solicitacao.valor_horas_adicionais = round(valor_horas_extra_vitrine, 2)
+        solicitacao.cortesia_retirada = bool(cortesia_retirada_vitrine)
+        solicitacao.hora_fim = fim_obj
+        if retirada_mesmo_dia_vitrine:
+            solicitacao.retirada_obrigatoria = True
+            solicitacao.retirada_data = data_obj
+            solicitacao.retirada_hora = fim_obj
+        else:
+            solicitacao.retirada_obrigatoria = False
+            solicitacao.retirada_data = None
+            solicitacao.retirada_hora = None
+
     if pedido_vitrine and not pre_reserva_existente:
         total_itens = 0.0
         produto_principal = None
         contrato_padrao_id = None
-        duracao_maxima = 240
+        duracao_maxima = max(60, int(duracao_base_vitrine or 240))
         possui_item_sob_consulta = bool(pedido_vitrine.get("possui_sob_consulta"))
         for reg in pedido_vitrine["itens"]:
             produto = reg["produto"]
@@ -16880,7 +17235,6 @@ def salvar_pre_cadastro(
             valor_unitario = max(float(reg.get("valor_unitario") or 0), 0.0)
             valor_total = max(float(reg.get("valor_total") or 0), 0.0)
             total_itens += valor_total
-            duracao_maxima = max(duracao_maxima, int(produto.duracao_minutos or 240))
             descricao_reserva = str(produto.descricao or "").strip()
             opcionais = reg.get("opcionais") or []
             if opcionais:
@@ -16900,20 +17254,27 @@ def salvar_pre_cadastro(
 
         solicitacao.produto_id = produto_principal.id if produto_principal else None
         solicitacao.contrato_id = contrato_padrao_id
-        solicitacao.hora_fim = somar_minutos(inicio_obj, duracao_maxima)
+        solicitacao.hora_fim = fim_obj
         frete_info = pedido_vitrine.get("frete") or {}
         frete_vitrine = max(float(frete_info.get("valor") or 0), 0.0)
         cupom_vitrine = None
         if _empresa_modulo_ativo(empresa, "cupons") and pedido_vitrine.get("cupom_codigo"):
             cupom_vitrine = _cupom_valido(db, empresa.id, pedido_vitrine.get("cupom_codigo"), referencia=data_obj)
-        _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), frete_vitrine, cupom_vitrine)
+        _aplicar_composicao_comercial(
+            solicitacao, round(total_itens, 2), frete_vitrine, cupom_vitrine, valor_horas_extra_vitrine
+        )
         fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar")) or possui_item_sob_consulta
         solicitacao.status = "pre_reserva" if precisa_aprovacao else ("contrato_enviado" if contrato_padrao_id else "pre_reserva")
 
     if pre_reserva_existente:
-        duracao_maxima = max([int((ri.produto.duracao_minutos if ri.produto else 240) or 240) for ri in solicitacao.itens] or [240])
-        solicitacao.hora_fim = somar_minutos(inicio_obj, duracao_maxima)
+        solicitacao.hora_fim = fim_obj
+        frete_existente = max(float(getattr(solicitacao, "valor_frete", 0) or 0), 0.0)
+        cupom_existente = _cupom_valido_ou_snapshot(db, empresa.id, getattr(solicitacao, "cupom_codigo", "") or "", solicitacao)
+        subtotal_existente = max(float(pedido_vitrine.get("subtotal") or 0), 0.0) if pedido_vitrine else max(float(getattr(solicitacao, "valor_equipamentos", 0) or 0), 0.0)
+        _aplicar_composicao_comercial(
+            solicitacao, subtotal_existente, frete_existente, cupom_existente, valor_horas_extra_vitrine
+        )
         solicitacao.status = "contrato_enviado" if solicitacao.contrato_id else "pre_reserva"
 
     db.commit()
@@ -17309,6 +17670,13 @@ def salvar_dados_contrato_cliente(
 
     item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
     item.hora_inicio = datetime.strptime(hora_inicio, "%H:%M").time()
+    duracao_snapshot = max(0, int(getattr(item, "duracao_contratada_minutos", 0) or 0))
+    if duracao_snapshot:
+        duracao_total = duracao_snapshot + max(0, int(getattr(item, "horas_adicionais", 0) or 0)) * 60
+        item.hora_fim = somar_minutos(item.hora_inicio, duracao_total)
+        if retirada_obrigatoria_ativa(item):
+            item.retirada_data = item.data_evento
+            item.retirada_hora = item.hora_fim
     item.bairro = bairro.strip()
     item.local = endereco.strip() or local.strip()
     item.local_numero = numero.strip()

@@ -67,6 +67,8 @@
     <div class="secao-corpo">
       <p><b>Data:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
       <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
+      {% if item.duracao_contratada_minutos %}<p><b>Período contratado:</b> {{ (item.duracao_contratada_minutos / 60)|int }} {{ 'hora' if (item.duracao_contratada_minutos / 60)|int == 1 else 'horas' }}{% if item.horas_adicionais %} + {{ item.horas_adicionais }} {{ 'hora adicional' if item.horas_adicionais == 1 else 'horas adicionais' }}{% endif %}</p>{% endif %}
+      {% if item.cortesia_retirada %}<div style="padding:11px 12px;border-radius:12px;background:#ecfdf3;border:1px solid #a7f3d0;color:#067647;margin:8px 0"><b>Cortesia:</b> após o período contratado, aproveite o equipamento por mais tempo. A retirada será realizada no próximo dia.</div>{% elif item.retirada_obrigatoria and item.retirada_hora %}<p><b>Retirada no mesmo dia:</b> {{ item.retirada_hora.strftime('%H:%M') }}</p>{% endif %}
       <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
       <p><b>Endereço:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
       {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
@@ -96,6 +98,7 @@
       {% if comp.cupom_codigo and comp.desconto > 0 %}
         <p><b>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_percentual|moeda_br }}%):</b> - R$ {{ comp.desconto|moeda_br }}</p>
       {% endif %}
+      {% if comp.horas_adicionais > 0 %}<p><b>Horas adicionais:</b> R$ {{ comp.horas_adicionais|moeda_br }}</p>{% endif %}
       <p><b>Frete:</b> R$ {{ comp.frete|moeda_br }}</p>
       <p><b>Valor do contrato:</b> R$ {{ item.valor|moeda_br }}</p>
       {% if sinal_exibido and sinal_exibido > 0 %}<p><b>Sinal:</b> R$ {{ sinal_exibido|moeda_br }}</p>{% endif %}

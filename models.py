@@ -71,6 +71,13 @@ class Empresa(Base):
     lokafest_ativo = Column(Boolean, default=False)
     lokafest_url = Column(String(300), nullable=True)
 
+    # Horários e retirada da vitrine. A duração base continua no item; aqui ficam
+    # as regras comuns da empresa para cortesia e horas adicionais.
+    retirada_cortesia_proximo_dia = Column(Boolean, default=False)
+    retirada_hora_maxima = Column(String(5), default="22:00")
+    hora_extra_primeira_valor = Column(Float, default=100)
+    hora_extra_demais_valor = Column(Float, default=50)
+
     # Metadados compartilhados pelo ecossistema Humiat. O slug local do Connect
     # continua em ``slug``; ``humiat_slug`` preserva o identificador global quando
     # Humiat ID enviar um alias diferente.
@@ -414,6 +421,8 @@ class ProdutoPrecoEvento(Base):
     tipo_evento_id = Column(Integer, ForeignKey("tipos_evento_empresa.id", ondelete="CASCADE"), nullable=False, index=True)
     modo = Column(String(20), nullable=False, default="normal")  # normal, especifico, consulta
     valor = Column(Float, nullable=True)
+    horas_modo = Column(String(20), nullable=False, default="padrao")  # padrao, adicionar
+    horas_adicionais = Column(Integer, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     empresa = relationship("Empresa")
@@ -533,6 +542,12 @@ class Solicitacao(Base):
     cupom_percentual = Column(Float, default=0)
     valor_desconto = Column(Float, default=0)
     valor_frete = Column(Float, default=0)
+    # Snapshot da duração/horas extras escolhidas na vitrine. Contratos normais
+    # continuam usando a duração do produto sem depender destes campos.
+    duracao_contratada_minutos = Column(Integer, nullable=True)
+    horas_adicionais = Column(Integer, nullable=False, default=0)
+    valor_horas_adicionais = Column(Float, nullable=False, default=0)
+    cortesia_retirada = Column(Boolean, nullable=False, default=False)
     campanha_organiza_id = Column(Integer, nullable=True, index=True)
     campanha_organiza_nome = Column(String(180), nullable=True)
     campanha_resultado = Column(Boolean, nullable=False, default=False, index=True)
