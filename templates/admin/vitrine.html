@@ -39,7 +39,7 @@
           {% for p in produtos %}
           {% set capa = (p.fotos|selectattr('capa')|list|first) or (p.fotos|list|first) %}
           <div class="produto-linha-admin">
-            {% if capa %}<img src="{{ capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-img-vazia"><i class="bi bi-image"></i></div>{% endif %}
+            {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-img-vazia" title="Imagem ausente — reenviar no cadastro do item"><i class="bi bi-image"></i></div>{% endif %}
             <div><h3>{{ p.nome }}</h3><p>{{ p.vitrine_categoria or 'Sem categoria' }} · R$ {{ p.valor_base|moeda_br }}</p><span class="tag-status {% if not p.vitrine_ativo %}inativo{% endif %}">{{ 'Na vitrine' if p.vitrine_ativo else 'Fora da vitrine' }}</span></div>
             <a class="botao-secundario" href="/painel/produto/{{ p.id }}#vitrine-produto">Editar</a>
           </div>
@@ -49,7 +49,7 @@
     </section>
 
     <aside style="display:grid;gap:16px">
-      <section class="painel-card"><header><div><h2>Prévia</h2><p>A identidade é configurada na Empresa.</p></div></header><div class="painel-corpo"><div class="preview-pub"><div class="preview-capa"><div class="preview-medalhao">{% if empresa.logo_url or empresa.logo_idb_url %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}">{% else %}<span><i class="bi bi-image"></i></span>{% endif %}</div></div><h3>{{ empresa.nome }}</h3><p>{{ empresa.vitrine_descricao or empresa.vitrine_subtitulo or 'Sua apresentação aparecerá aqui.' }}</p></div></div></section>
+      <section class="painel-card"><header><div><h2>Prévia</h2><p>A identidade é configurada na Empresa.</p></div></header><div class="painel-corpo"><div class="preview-pub"><div class="preview-capa"><div class="preview-medalhao">{% set logo_empresa = empresa.logo_url or empresa.logo_idb_url %}{% if logo_empresa and imagem_disponivel(logo_empresa) %}<img src="{{ logo_empresa }}">{% else %}<span><i class="bi bi-image"></i></span>{% endif %}</div></div><h3>{{ empresa.nome }}</h3><p>{{ empresa.vitrine_descricao or empresa.vitrine_subtitulo or 'Sua apresentação aparecerá aqui.' }}</p></div></div></section>
       <section class="painel-card"><header><div><h2>Saúde da vitrine</h2><p>O essencial para o cliente conseguir reservar.</p></div></header><div class="painel-corpo"><div class="saude-box"><div class="saude-ok"><i class="bi bi-check-lg"></i></div><b>{% if empresa.vitrine_ativa and (produtos|selectattr('vitrine_ativo')|list|length) %}Vitrine pronta{% else %}Ainda falta configurar{% endif %}</b><p class="texto-discreto">Logo, cores, produtos e deslocamento ficam em um fluxo simples.</p></div></div></section>
       <section class="painel-card"><header><div><h2>Link público</h2></div></header><div class="painel-corpo"><div class="link-publico"><code id="linkVitrine">{{ link_publico }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkVitrine').textContent)"><i class="bi bi-copy"></i></button></div></div></section>
     </aside>

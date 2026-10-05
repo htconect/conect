@@ -1,7 +1,7 @@
 import secrets
 from datetime import time
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Time,
+    Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, Numeric, String, Text, Time,
     UniqueConstraint, func
 )
 from sqlalchemy.orm import relationship
@@ -36,6 +36,7 @@ class Empresa(Base):
     suporte_fim = Column(String(5), nullable=True)
     mostrar_suporte_contrato = Column(Boolean, default=False)
     logo_url = Column(String(300), nullable=True)
+    logo_original_url = Column(String(300), nullable=True)
     tema = Column(String(30), default="azul")
     # Identidade da experiência pública / vitrine do cliente.
     vitrine_ativa = Column(Boolean, default=False)
@@ -44,6 +45,7 @@ class Empresa(Base):
     vitrine_cor_primaria = Column(String(20), default="#6D4AFF")
     vitrine_cor_secundaria = Column(String(20), default="#EEF0FF")
     vitrine_fundo_url = Column(String(300), nullable=True)
+    vitrine_fundo_original_url = Column(String(300), nullable=True)
     # Cadastro guiado da empresa e vitrine simplificada.
     cidade_atendimento = Column(String(120), nullable=True)
     vitrine_descricao = Column(String(500), nullable=True)
@@ -346,12 +348,32 @@ class ProdutoFoto(Base):
     empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
     produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
     arquivo_url = Column(String(300), nullable=False)
+    original_url = Column(String(300), nullable=True)
+    miniatura_url = Column(String(300), nullable=True)
     ordem = Column(Integer, nullable=False, default=0)
     capa = Column(Boolean, nullable=False, default=False)
     criado_em = Column(DateTime, server_default=func.now())
 
     empresa = relationship("Empresa")
     produto = relationship("ProdutoServico", back_populates="fotos")
+
+
+class MidiaImagem(Base):
+    __tablename__ = "midias_imagens"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    contexto = Column(String(40), nullable=False, index=True)
+    entidade_tipo = Column(String(40), nullable=True, index=True)
+    entidade_id = Column(Integer, nullable=True, index=True)
+    mime_type = Column(String(40), nullable=False, default="image/webp")
+    largura = Column(Integer, nullable=True)
+    altura = Column(Integer, nullable=True)
+    tamanho_bytes = Column(Integer, nullable=False, default=0)
+    dados = Column(LargeBinary, nullable=False)
+    criado_em = Column(DateTime, server_default=func.now())
+
+    empresa = relationship("Empresa")
 
 
 class ItemProdutoServicoEstoque(Base):

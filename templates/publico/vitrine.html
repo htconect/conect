@@ -24,7 +24,7 @@
   <div class="grade-vitrine" id="gradeVitrine">
     {% for reg in itens %}{% set p=reg.produto %}
     <article class="produto-publico" data-produto data-categoria="{{ (reg.categoria or '')|lower }}" data-preco="{{ p.valor_base or 0 }}" data-disponivel="{{ reg.disponiveis }}">
-      <div class="produto-foto detalhes-click" data-detalhes="{{ p.id }}" title="Ver detalhes">{% if reg.foto %}<img src="{{ reg.foto }}" alt="{{ p.nome }}">{% else %}<i class="bi bi-image"></i>{% endif %}</div>
+      <div class="produto-foto detalhes-click" data-detalhes="{{ p.id }}" title="Ver detalhes">{% if reg.foto %}<img src="{{ reg.foto }}" alt="{{ p.nome }}" onerror="this.style.display='none';this.parentElement.insertAdjacentHTML('beforeend','<i class=&quot;bi bi-image&quot;></i>')">{% else %}<i class="bi bi-image"></i>{% endif %}</div>
       <div class="produto-corpo"><div class="produto-linha"><h2>{{ p.nome }}</h2>{% if reg.disponiveis > 1 %}<span class="disp">{{ reg.disponiveis }} disponíveis</span>{% elif reg.disponiveis == 1 %}<span class="disp ultimo">Última unidade</span>{% else %}<span class="disp fora">Indisponível</span>{% endif %}</div>
         {% if reg.resumo %}<p class="produto-resumo">{{ reg.resumo }}</p>{% endif %}
         <button type="button" class="btn-detalhes" data-detalhes="{{ p.id }}">Ver detalhes{% if reg.fotos|length > 1 %} · {{ reg.fotos|length }} fotos{% endif %}</button>

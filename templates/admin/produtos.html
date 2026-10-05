@@ -102,7 +102,8 @@
     <label>Resumo curto</label>
     <input name="vitrine_resumo" maxlength="240" value="{{ produto.vitrine_resumo if produto else '' }}" placeholder="Ex.: Completo para festas e eventos">
     <label>Fotos</label>
-    <input id="fotoArquivos" name="foto_arquivos" type="file" accept="image/*,.jfif,.jpe" multiple hidden>
+    <input id="fotoArquivos" name="foto_originais" type="file" accept="image/*,.jfif,.jpe" multiple hidden>
+    <input id="fotoAjustadas" name="foto_arquivos" type="file" accept="image/jpeg" multiple hidden>
     <input id="fotosAjustadasJson" name="fotos_ajustadas_json" type="hidden" value="">
     <button type="button" class="botao-secundario largura-total" onclick="document.getElementById('fotoArquivos').click()"><i class="bi bi-images"></i> Escolher fotos</button>
     <small id="fotoArquivosStatus" class="texto-discreto">Ao escolher, o Connect abre o ajuste de zoom e recorte. JPG, JPEG, JFIF, PNG e WebP.</small>
@@ -148,10 +149,14 @@
   <div class="grid">
     {% for foto in produto.fotos %}
     <div class="card" style="padding:10px">
-      <img src="{{ foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para carregar outra foto" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer">
-      <p style="margin:8px 0"><b>{% if foto.capa %}Foto principal{% else %}Foto {{ loop.index }}{% endif %}</b></p>
+      {% if imagem_disponivel(foto.arquivo_url) %}
+      <img src="{{ foto.miniatura_url if foto.miniatura_url and imagem_disponivel(foto.miniatura_url) else foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para carregar outra foto" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer">
+      {% else %}
+      <div onclick="document.getElementById('fotoArquivos').click()" title="Imagem ausente — clique para reenviar" style="width:100%;aspect-ratio:1/1;border-radius:12px;cursor:pointer;display:grid;place-items:center;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;text-align:center;padding:12px"><div><i class="bi bi-image" style="font-size:30px"></i><br><b>Imagem ausente</b><br><small>O cadastro existe, mas o arquivo não está mais no servidor. Clique para reenviar.</small></div></div>
+      {% endif %}
+      <p style="margin:8px 0"><b>{% if foto.capa %}Foto principal{% else %}Foto {{ loop.index }}{% endif %}</b>{% if foto.original_url %}<br><small class="texto-discreto">Original preservado</small>{% endif %}</p>
       <div class="foto-card-acoes">
-        <button type="button" class="secundario ajustar-foto-existente" data-src="{{ foto.arquivo_url }}" data-produto="{{ produto.id }}" data-foto="{{ foto.id }}"><i class="bi bi-crop"></i> Ajustar</button>
+        {% if imagem_disponivel(foto.arquivo_url) %}<button type="button" class="secundario ajustar-foto-existente" data-src="{{ foto.original_url if foto.original_url and imagem_disponivel(foto.original_url) else foto.arquivo_url }}" data-produto="{{ produto.id }}" data-foto="{{ foto.id }}"><i class="bi bi-crop"></i> Ajustar</button>{% endif %}
         {% if not foto.capa %}<form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/capa"><button type="submit" class="secundario">Usar como principal</button></form>{% endif %}
         <form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/excluir"><button type="submit" class="secundario">Excluir</button></form>
       </div>
@@ -165,7 +170,8 @@
 <div class="grid">
 {% for p in produtos %}
 <div class="card">
-  {% if p.fotos %}<img src="{{ (p.fotos|selectattr('capa')|list|first).arquivo_url if (p.fotos|selectattr('capa')|list) else p.fotos[0].arquivo_url }}" alt="{{ p.nome }}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:12px;margin-bottom:10px">{% endif %}
+  {% set capa = (p.fotos|selectattr('capa')|list|first) if (p.fotos|selectattr('capa')|list) else (p.fotos[0] if p.fotos else none) %}
+  {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:12px;margin-bottom:10px">{% elif p.fotos %}<div style="aspect-ratio:16/9;border-radius:12px;margin-bottom:10px;background:#f8fafc;border:1px dashed #cbd5e1;display:grid;place-items:center;color:#64748b"><span><i class="bi bi-image"></i> Imagem ausente — reenviar</span></div>{% endif %}
   <h3>{{ p.nome }}</h3>
   <p>{{ p.descricao }}</p>
   <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
@@ -198,21 +204,21 @@
 
 <script>
 (function(){
-const input=document.getElementById('fotoArquivos'), hidden=document.getElementById('fotosAjustadasJson'), status=document.getElementById('fotoArquivosStatus');
+const input=document.getElementById('fotoArquivos'), adjustedInput=document.getElementById('fotoAjustadas'), hidden=document.getElementById('fotosAjustadasJson'), status=document.getElementById('fotoArquivosStatus');
 const modal=document.getElementById('fotoEditor'), canvas=document.getElementById('fotoEditorCanvas'), ctx=canvas?.getContext('2d'), zoom=document.getElementById('fotoZoom'), px=document.getElementById('fotoX'), py=document.getElementById('fotoY');
-let imagem=null, rot=0, fila=[], ajustadasFiles=[], modoExistente=null;
+let imagem=null, rot=0, fila=[], ajustadasFiles=[], originaisUsados=[], arquivoAtual=null, modoExistente=null;
 function render(){if(!imagem||!ctx)return;const w=1200,h=1200;canvas.width=w;canvas.height=h;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);const ang=(rot%360)*Math.PI/180,troca=Math.abs(rot%180)===90,iw=troca?imagem.height:imagem.width,ih=troca?imagem.width:imagem.height,escalaBase=Math.max(w/iw,h/ih),escala=escalaBase*(Number(zoom.value)||1),dx=(Number(px.value)||0)/100*w*.45,dy=(Number(py.value)||0)/100*h*.45;ctx.save();ctx.translate(w/2+dx,h/2+dy);ctx.rotate(ang);ctx.drawImage(imagem,-imagem.width*escala/2,-imagem.height*escala/2,imagem.width*escala,imagem.height*escala);ctx.restore();}
 function abrirSrc(src,existente=null){modoExistente=existente;rot=0;zoom.value='1';px.value='0';py.value='0';imagem=new Image();imagem.onload=()=>{render();modal.classList.add('ativo');modal.setAttribute('aria-hidden','false')};imagem.onerror=()=>{alert('Não conseguimos abrir esta imagem para ajuste.')};imagem.src=src;}
-function abrirArquivo(file){const r=new FileReader();r.onload=()=>abrirSrc(r.result,null);r.readAsDataURL(file)}
+function abrirArquivo(file){arquivoAtual=file;const r=new FileReader();r.onload=()=>abrirSrc(r.result,null);r.readAsDataURL(file)}
 function fechar(){modal.classList.remove('ativo');modal.setAttribute('aria-hidden','true')}
-function aplicarArquivosAjustados(){const dt=new DataTransfer();ajustadasFiles.forEach(f=>dt.items.add(f));if(input)input.files=dt.files;if(hidden)hidden.value='';if(status)status.textContent=ajustadasFiles.length+(ajustadasFiles.length===1?' foto ajustada. Salve o item para enviar.':' fotos ajustadas. Salve o item para enviar.');}
+function aplicarArquivosAjustados(){const dtA=new DataTransfer(),dtO=new DataTransfer();ajustadasFiles.forEach(f=>dtA.items.add(f));originaisUsados.forEach(f=>dtO.items.add(f));if(adjustedInput)adjustedInput.files=dtA.files;if(input)input.files=dtO.files;if(hidden)hidden.value='';if(status)status.textContent=ajustadasFiles.length+(ajustadasFiles.length===1?' foto ajustada. O original será preservado ao salvar.':' fotos ajustadas. Os originais serão preservados ao salvar.');}
 function proxima(){if(fila.length){abrirArquivo(fila.shift())}else{fechar();aplicarArquivosAjustados();}}
-input?.addEventListener('change',function(){fila=[...(this.files||[])];ajustadasFiles=[];if(!fila.length)return;proxima();});
+input?.addEventListener('change',function(){fila=[...(this.files||[])];ajustadasFiles=[];originaisUsados=[];arquivoAtual=null;if(!fila.length)return;proxima();});
 [zoom,px,py].forEach(el=>el?.addEventListener('input',render));
 document.getElementById('fotoGirarEsq')?.addEventListener('click',()=>{rot-=90;render()});document.getElementById('fotoGirarDir')?.addEventListener('click',()=>{rot+=90;render()});
 document.getElementById('fecharFotoEditor')?.addEventListener('click',()=>{fila=[];fechar();if(ajustadasFiles.length)aplicarArquivosAjustados()});document.getElementById('fotoCancelar')?.addEventListener('click',()=>{if(modoExistente){fechar()}else{proxima()}});
 function canvasBlob(){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Não foi possível gerar a foto ajustada.')),'image/jpeg',.86))}
-document.getElementById('fotoUsar')?.addEventListener('click',async()=>{const btn=document.getElementById('fotoUsar');btn.disabled=true;try{const blob=await canvasBlob();if(modoExistente){const fd=new FormData();fd.append('foto_arquivo',blob,'foto-ajustada.jpg');const resp=await fetch(`/painel/produto/${modoExistente.produto}/foto/${modoExistente.foto}/ajustar`,{method:'POST',body:fd});if(!resp.ok)throw new Error('Não foi possível salvar o ajuste.');location.reload()}else{ajustadasFiles.push(new File([blob],`foto-ajustada-${ajustadasFiles.length+1}.jpg`,{type:'image/jpeg'}));proxima()}}catch(e){alert(e.message||'Não foi possível ajustar a foto.')}finally{btn.disabled=false}});
+document.getElementById('fotoUsar')?.addEventListener('click',async()=>{const btn=document.getElementById('fotoUsar');btn.disabled=true;try{const blob=await canvasBlob();if(modoExistente){const fd=new FormData();fd.append('foto_arquivo',blob,'foto-ajustada.jpg');const resp=await fetch(`/painel/produto/${modoExistente.produto}/foto/${modoExistente.foto}/ajustar`,{method:'POST',body:fd});if(!resp.ok)throw new Error('Não foi possível salvar o ajuste.');location.reload()}else{ajustadasFiles.push(new File([blob],`foto-ajustada-${ajustadasFiles.length+1}.jpg`,{type:'image/jpeg'}));if(arquivoAtual)originaisUsados.push(arquivoAtual);arquivoAtual=null;proxima()}}catch(e){alert(e.message||'Não foi possível ajustar a foto.')}finally{btn.disabled=false}});
 document.querySelectorAll('.ajustar-foto-existente').forEach(b=>b.addEventListener('click',()=>abrirSrc(b.dataset.src,{produto:b.dataset.produto,foto:b.dataset.foto})));
 const promptBtn=document.getElementById('gerarPromptFotoIA');promptBtn?.addEventListener('click',async()=>{const empresa={{ empresa.nome|tojson }},telefone={{ (empresa.whatsapp_retorno or '')|tojson }},nome=(document.querySelector('input[name="nome"]')?.value||'').trim(),preco=(document.querySelector('input[name="valor_base"]')?.value||'').trim(),descricao=(document.querySelector('textarea[name="descricao"]')?.value||'').trim(),categoria=(document.querySelector('select[name="vitrine_categoria"]')?.value||'').trim();const prompt=`Você é um designer profissional especializado em capas comerciais para divulgação de produtos e serviços de locação.\n\nCrie uma imagem de capa profissional usando a foto real anexada como referência principal. Mantenha o item reconhecível, fiel ao original, valorizado e em destaque. Use também o logo da empresa anexado, se houver.\n\nDados exatos que podem aparecer na arte:\nNome da empresa: ${empresa}\nTelefone/WhatsApp: ${telefone||'não informado — não inclua se não estiver disponível'}\nNome do item: ${nome||'não informado'}\nPreço: ${preco?`R$ ${preco}`:'não informado — não invente'}\nCategoria: ${categoria||'não informada'}\nDescrição/contexto: ${descricao||'não informado — não invente características'}\n\nDireção visual:\n- item em destaque no centro;\n- arte comercial brasileira, moderna, confiável e sem poluição visual;\n- preço bem visível em selo ou card quando informado;\n- nome do item em destaque;\n- telefone/WhatsApp no rodapé somente quando informado;\n- logo no topo, sem ocupar espaço demais;\n- composição legível em celular;\n- não corte o item principal;\n- não invente medidas, idade, características, preço, telefone ou qualquer dado ausente;\n- não altere o nome da empresa nem o nome do item;\n- não use personagens protegidos, exceto se já estiverem visíveis na foto real.\n\nFormato: imagem quadrada 1:1, ideal para WhatsApp, Instagram e vitrine online.\n\nAnexe à ferramenta de IA: 1) a foto atual do item; 2) o logo da empresa; 3) este prompt.`;try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Anexe a foto atual do item e o logo no ChatGPT, Gemini ou Canva.')}catch(e){window.prompt('Copie este prompt:',prompt)}});
 })();

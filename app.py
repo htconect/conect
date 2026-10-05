@@ -44,13 +44,14 @@ from config import (
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, \
-    ProdutoServico, ProdutoFoto, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
+    ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
 
 from fastapi.templating import Jinja2Templates
+from PIL import Image, ImageOps
 
 class ControleAcessoMiddleware:
     """Bloqueia a entrada nos módulos sem esconder cards, alertas ou pendências."""
@@ -233,6 +234,83 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+# Compatibilidade com imagens antigas que ainda existam no repositório/disco local.
+# Novos uploads são tratados e persistidos no Neon/Postgres (tabela midias_imagens).
+LEGACY_UPLOAD_ROOT = Path("static/uploads")
+MEDIA_ROOT = Path("data/media").resolve()
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def _media_destino(destino_dir: Path) -> Path:
+    """Converte destinos legados static/uploads/... para o armazenamento persistente."""
+    destino = Path(destino_dir)
+    try:
+        rel = destino.relative_to(LEGACY_UPLOAD_ROOT)
+        return MEDIA_ROOT / rel
+    except Exception:
+        pass
+    try:
+        destino.resolve().relative_to(MEDIA_ROOT)
+        return destino.resolve()
+    except Exception:
+        return destino
+
+
+def _media_url(destino: Path) -> str:
+    destino = Path(destino).resolve()
+    try:
+        rel = destino.relative_to(MEDIA_ROOT)
+        return "/media/" + rel.as_posix()
+    except Exception:
+        try:
+            return "/" + destino.relative_to(Path.cwd().resolve()).as_posix()
+        except Exception:
+            return "/" + destino.as_posix().lstrip("/")
+
+
+def _caminho_local_imagem(url: str) -> Path | None:
+    valor = str(url or "").strip()
+    if not valor or valor.startswith(("http://", "https://", "data:")):
+        return None
+    if valor.startswith("/media/"):
+        return MEDIA_ROOT / valor.removeprefix("/media/")
+    if valor.startswith("/static/uploads/"):
+        return Path(valor.lstrip("/"))
+    return None
+
+
+def _imagem_disponivel(url: str) -> bool:
+    valor = str(url or "").strip()
+    if not valor:
+        return False
+    if valor.startswith(("http://", "https://", "data:")):
+        return True
+    if re.fullmatch(r"/midia/\d+", valor):
+        return True
+    caminho = _caminho_local_imagem(valor)
+    return bool(caminho and caminho.exists() and caminho.is_file())
+
+
+def _remover_imagem_local(url: str) -> None:
+    caminho = _caminho_local_imagem(url)
+    if not caminho:
+        return
+    try:
+        # Nunca remove arquivos fora das raízes de upload conhecidas.
+        resolvido = caminho.resolve()
+        permitido = False
+        for raiz in (MEDIA_ROOT, LEGACY_UPLOAD_ROOT.resolve()):
+            try:
+                resolvido.relative_to(raiz)
+                permitido = True
+                break
+            except Exception:
+                pass
+        if permitido and resolvido.exists() and resolvido.is_file():
+            resolvido.unlink()
+    except Exception:
+        pass
+
 app = FastAPI(
     title=APP_NOME, version=APP_VERSION,
     docs_url="/docs" if API_DOCS_ENABLED else None,
@@ -248,10 +326,27 @@ app.add_middleware(BasicRateLimitMiddleware)
 app.add_middleware(ScannerNoiseMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/media", StaticFiles(directory=str(MEDIA_ROOT)), name="media")
 templates = Jinja2Templates(directory="templates")
 templates.env.globals["APP_VERSION"] = APP_VERSION
 templates.env.globals["LOCAL_LOGIN_ENABLED"] = LOCAL_LOGIN_ENABLED
 templates.env.globals["HUMIAT_SSO_ATIVO"] = not LOCAL_LOGIN_ENABLED
+templates.env.globals["imagem_disponivel"] = _imagem_disponivel
+
+
+@app.get("/midia/{midia_id}")
+def servir_midia_banco(midia_id: int, db: Session = Depends(get_db)):
+    midia = db.get(MidiaImagem, midia_id)
+    if not midia or not midia.dados:
+        raise HTTPException(404, "Imagem não encontrada.")
+    return Response(
+        content=bytes(midia.dados),
+        media_type=midia.mime_type or "image/webp",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": str(int(midia.tamanho_bytes or len(midia.dados))),
+        },
+    )
 Path("static/uploads/logos").mkdir(parents=True, exist_ok=True)
 Path("static/uploads/vitrine").mkdir(parents=True, exist_ok=True)
 
@@ -2020,6 +2115,8 @@ def garantir_colunas_novas():
     # O contrato usa apenas a parcela dessa janela que coincide com a duração da locação.
     if "logo_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN logo_url VARCHAR(300)")
+    if "logo_original_url" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN logo_original_url VARCHAR(300)")
     if "tema" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN tema VARCHAR(30) DEFAULT 'azul'")
     if "vitrine_ativa" not in cols_emp:
@@ -2034,6 +2131,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_cor_secundaria VARCHAR(20) DEFAULT '#EEF0FF'")
     if "vitrine_fundo_url" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fundo_url VARCHAR(300)")
+    if "vitrine_fundo_original_url" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fundo_original_url VARCHAR(300)")
     if "cidade_atendimento" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN cidade_atendimento VARCHAR(120)")
     if "vitrine_descricao" not in cols_emp:
@@ -2161,6 +2260,13 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_categoria VARCHAR(80)")
         if "vitrine_ordem" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_ordem INTEGER DEFAULT 0")
+
+    if "produto_fotos" in tabelas:
+        cols_fotos = colunas("produto_fotos")
+        if "original_url" not in cols_fotos:
+            comandos.append("ALTER TABLE produto_fotos ADD COLUMN original_url VARCHAR(300)")
+        if "miniatura_url" not in cols_fotos:
+            comandos.append("ALTER TABLE produto_fotos ADD COLUMN miniatura_url VARCHAR(300)")
 
     if "veiculos_logisticos" in tabelas:
         cols_vei = colunas("veiculos_logisticos")
@@ -3391,6 +3497,101 @@ def normalizar_pagamentos_infinitepay_historicos(db: Session) -> int:
     return alterados
 
 
+def migrar_midias_legadas_para_persistente(db: Session) -> int:
+    """Migra arquivos locais ainda existentes para o Neon e troca as URLs pelo endpoint do banco.
+
+    Em Render Free o disco é efêmero, então esta migração só recupera o que ainda
+    estiver disponível no deploy/repositório. Referências cujo arquivo já sumiu
+    continuam sinalizadas para reenvio, sem inventar imagem.
+    """
+    alterados = 0
+    for emp in db.query(Empresa).all():
+        # Logo
+        logo_original = str(emp.logo_original_url or "")
+        if logo_original and not _id_midia_banco(logo_original):
+            dados = _bytes_imagem_por_url(db, logo_original)
+            if dados:
+                emp.logo_original_url = _salvar_midia_banco(
+                    db, dados, emp.id, "logo-original", "empresa", emp.id,
+                    max_dim=900, alvo_bytes=150 * 1024, qualidade=80
+                )
+                alterados += 1
+        logo_atual = str(emp.logo_url or "")
+        if logo_atual and not _id_midia_banco(logo_atual):
+            if logo_atual == logo_original and emp.logo_original_url:
+                emp.logo_url = emp.logo_original_url
+                alterados += 1
+            else:
+                dados = _bytes_imagem_por_url(db, logo_atual)
+                if dados:
+                    emp.logo_url = _salvar_midia_banco(
+                        db, dados, emp.id, "logo-ajustada", "empresa", emp.id,
+                        max_dim=700, alvo_bytes=120 * 1024, qualidade=82
+                    )
+                    alterados += 1
+
+        # Capa
+        capa_original = str(emp.vitrine_fundo_original_url or "")
+        if capa_original and not _id_midia_banco(capa_original):
+            dados = _bytes_imagem_por_url(db, capa_original)
+            if dados:
+                emp.vitrine_fundo_original_url = _salvar_midia_banco(
+                    db, dados, emp.id, "capa-original", "empresa", emp.id,
+                    max_dim=1800, alvo_bytes=420 * 1024, qualidade=78
+                )
+                alterados += 1
+        capa_atual = str(emp.vitrine_fundo_url or "")
+        if capa_atual and not _id_midia_banco(capa_atual):
+            if capa_atual == capa_original and emp.vitrine_fundo_original_url:
+                emp.vitrine_fundo_url = emp.vitrine_fundo_original_url
+                alterados += 1
+            else:
+                dados = _bytes_imagem_por_url(db, capa_atual)
+                if dados:
+                    emp.vitrine_fundo_url = _salvar_midia_banco(
+                        db, dados, emp.id, "capa-ajustada", "empresa", emp.id,
+                        max_dim=1600, alvo_bytes=350 * 1024, qualidade=80
+                    )
+                    alterados += 1
+
+    for foto in db.query(ProdutoFoto).all():
+        original_antigo = str(foto.original_url or "")
+        atual_antigo = str(foto.arquivo_url or "")
+        thumb_antigo = str(foto.miniatura_url or "")
+
+        if original_antigo and not _id_midia_banco(original_antigo):
+            dados = _bytes_imagem_por_url(db, original_antigo)
+            if dados:
+                foto.original_url = _salvar_midia_banco(
+                    db, dados, foto.empresa_id, "produto-original", "produto", foto.produto_id,
+                    max_dim=1600, alvo_bytes=450 * 1024, qualidade=78
+                )
+                alterados += 1
+
+        if atual_antigo and not _id_midia_banco(atual_antigo):
+            if atual_antigo == original_antigo and foto.original_url:
+                foto.arquivo_url = foto.original_url
+                alterados += 1
+            else:
+                dados = _bytes_imagem_por_url(db, atual_antigo)
+                if dados:
+                    foto.arquivo_url = _salvar_midia_banco(
+                        db, dados, foto.empresa_id, "produto-ajustada", "produto", foto.produto_id,
+                        max_dim=1200, alvo_bytes=300 * 1024, qualidade=80
+                    )
+                    alterados += 1
+
+        if foto.arquivo_url and (not thumb_antigo or not _id_midia_banco(thumb_antigo)):
+            nova_thumb = _gerar_miniatura_banco(db, foto.arquivo_url, foto.empresa_id, foto.produto_id)
+            if nova_thumb:
+                foto.miniatura_url = nova_thumb
+                alterados += 1
+
+    if alterados:
+        db.commit()
+    return alterados
+
+
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
@@ -3404,6 +3605,7 @@ def startup():
     db = SessionLocal()
     try:
         inicializar_dados(db)
+        migrar_midias_legadas_para_persistente(db)
         normalizar_pagamentos_infinitepay_historicos(db)
         for emp in db.query(Empresa).all():
             # Atualiza somente a antiga mensagem padrão de aceite; mensagens personalizadas são preservadas.
@@ -4230,13 +4432,19 @@ def admin_criar_empresa(
     db.refresh(empresa)
 
     if logo_arquivo and logo_arquivo.filename:
-        empresa.logo_url = _salvar_imagem_upload_segura(
-            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        empresa.logo_original_url = _salvar_upload_midia_banco(
+            db, logo_arquivo, empresa.id, "logo-original", "empresa", empresa.id,
+            max_dim=900, alvo_bytes=150 * 1024, qualidade=80
         )
+        empresa.logo_url = empresa.logo_original_url
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
     elif logo_idb_url.strip():
         empresa.logo_idb_url = logo_idb_url.strip()
+    _limpar_midias_contexto(
+        db, empresa.id, {"logo-original", "logo-ajustada"},
+        {str(empresa.logo_url or ""), str(empresa.logo_original_url or "")}, "empresa", empresa.id
+    )
     if empresa.infinitepay_ativa:
         _infinitepay_seed_taxas(db, empresa.id)
     db.commit()
@@ -4400,9 +4608,11 @@ def admin_salvar_empresa(
     empresa.suporte_fim = suporte_fim.strip() or None
     empresa.mostrar_suporte_contrato = bool(mostrar_suporte_contrato)
     if logo_arquivo and logo_arquivo.filename:
-        empresa.logo_url = _salvar_imagem_upload_segura(
-            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        empresa.logo_original_url = _salvar_upload_midia_banco(
+            db, logo_arquivo, empresa.id, "logo-original", "empresa", empresa.id,
+            max_dim=900, alvo_bytes=150 * 1024, qualidade=80
         )
+        empresa.logo_url = empresa.logo_original_url
         empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
@@ -4410,6 +4620,10 @@ def admin_salvar_empresa(
     elif logo_idb_url.strip():
         empresa.logo_idb_url = logo_idb_url.strip()
         empresa.logo_url = ""
+    _limpar_midias_contexto(
+        db, empresa.id, {"logo-original", "logo-ajustada"},
+        {str(empresa.logo_url or ""), str(empresa.logo_original_url or "")}, "empresa", empresa.id
+    )
     empresa.tema = tema
     empresa.ativa = bool(ativa)
     empresa.humiat_gratis_mes = max(0, int(humiat_gratis_mes or 0))
@@ -5608,6 +5822,172 @@ def _tipo_imagem_real(dados: bytes) -> str | None:
     return None
 
 
+def _otimizar_imagem_para_banco(
+        dados: bytes, *, max_dim: int = 1400, alvo_bytes: int = 300 * 1024, qualidade: int = 80
+) -> tuple[bytes, int, int, str]:
+    """Normaliza a imagem e comprime antes de persistir no Neon.
+
+    O banco nunca recebe o arquivo gigante enviado pelo usuário: preservamos a
+    composição do original, mas redimensionamos e comprimimos para WebP.
+    """
+    try:
+        with Image.open(BytesIO(dados)) as original:
+            img = ImageOps.exif_transpose(original)
+            try:
+                img.seek(0)
+            except Exception:
+                pass
+            tem_alpha = "A" in img.getbands() or (img.mode == "P" and "transparency" in img.info)
+            img = img.convert("RGBA" if tem_alpha else "RGB")
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            ultimo = b""
+            for rodada in range(4):
+                for q in range(int(qualidade), 47, -6):
+                    out = BytesIO()
+                    img.save(out, format="WEBP", quality=q, method=6)
+                    ultimo = out.getvalue()
+                    if len(ultimo) <= alvo_bytes:
+                        return ultimo, img.width, img.height, "image/webp"
+                # Se a qualidade já caiu bastante e ainda ficou grande, reduz um pouco
+                # as dimensões. Isso mantém o arquivo pequeno para o Neon e o celular.
+                if max(img.size) <= 640:
+                    break
+                nova = (max(1, int(img.width * 0.85)), max(1, int(img.height * 0.85)))
+                img = img.resize(nova, Image.Resampling.LANCZOS)
+            return ultimo, img.width, img.height, "image/webp"
+    except Exception as exc:
+        raise HTTPException(400, "Não conseguimos processar esta imagem. Escolha outra foto JPG, PNG ou WebP.") from exc
+
+
+def _url_midia_banco(midia_id: int) -> str:
+    return f"/midia/{int(midia_id)}"
+
+
+def _id_midia_banco(url: str) -> int | None:
+    m = re.fullmatch(r"/midia/(\d+)", str(url or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def _salvar_midia_banco(
+        db: Session, dados: bytes, empresa_id: int, contexto: str,
+        entidade_tipo: str | None = None, entidade_id: int | None = None,
+        max_dim: int = 1400, alvo_bytes: int = 300 * 1024, qualidade: int = 80,
+) -> str:
+    otimizada, largura, altura, mime = _otimizar_imagem_para_banco(
+        dados, max_dim=max_dim, alvo_bytes=alvo_bytes, qualidade=qualidade
+    )
+    midia = MidiaImagem(
+        empresa_id=empresa_id, contexto=contexto[:40], entidade_tipo=(entidade_tipo or None),
+        entidade_id=entidade_id, mime_type=mime, largura=largura, altura=altura,
+        tamanho_bytes=len(otimizada), dados=otimizada,
+    )
+    db.add(midia)
+    db.flush()
+    return _url_midia_banco(midia.id)
+
+
+def _salvar_upload_midia_banco(
+        db: Session, upload: UploadFile | None, empresa_id: int, contexto: str,
+        entidade_tipo: str | None = None, entidade_id: int | None = None,
+        max_dim: int = 1400, alvo_bytes: int = 300 * 1024, qualidade: int = 80,
+) -> str:
+    if not upload or not getattr(upload, "filename", ""):
+        return ""
+    dados = upload.file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+    if len(dados) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(413, f"Imagem muito grande. Limite: {MAX_IMAGE_UPLOAD_BYTES // (1024 * 1024)} MB.")
+    if not _tipo_imagem_real(dados):
+        raise HTTPException(400, "Não conseguimos usar esta imagem. Escolha uma foto JPG, JPEG, JFIF, PNG, WEBP ou GIF.")
+    return _salvar_midia_banco(
+        db, dados, empresa_id, contexto, entidade_tipo, entidade_id,
+        max_dim=max_dim, alvo_bytes=alvo_bytes, qualidade=qualidade
+    )
+
+
+def _salvar_data_url_midia_banco(
+        db: Session, data_url: str, empresa_id: int, contexto: str,
+        entidade_tipo: str | None = None, entidade_id: int | None = None,
+        max_dim: int = 1400, alvo_bytes: int = 300 * 1024, qualidade: int = 80,
+) -> str:
+    bruto = str(data_url or "").strip()
+    m = re.match(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=\s]+)$", bruto, re.IGNORECASE)
+    if not m:
+        return ""
+    try:
+        dados = base64.b64decode(re.sub(r"\s+", "", m.group(2)), validate=True)
+    except Exception as exc:
+        raise HTTPException(400, "Imagem ajustada inválida.") from exc
+    if not dados or len(dados) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(400, "A imagem ajustada é inválida ou muito grande.")
+    return _salvar_midia_banco(
+        db, dados, empresa_id, contexto, entidade_tipo, entidade_id,
+        max_dim=max_dim, alvo_bytes=alvo_bytes, qualidade=qualidade
+    )
+
+
+def _bytes_imagem_por_url(db: Session, url: str) -> bytes | None:
+    midia_id = _id_midia_banco(url)
+    if midia_id:
+        midia = db.get(MidiaImagem, midia_id)
+        return bytes(midia.dados) if midia and midia.dados else None
+    caminho = _caminho_local_imagem(url)
+    if caminho and caminho.exists() and caminho.is_file():
+        try:
+            return caminho.read_bytes()
+        except Exception:
+            return None
+    return None
+
+
+def _remover_midia_banco(db: Session, url: str) -> None:
+    midia_id = _id_midia_banco(url)
+    if midia_id:
+        midia = db.get(MidiaImagem, midia_id)
+        if midia:
+            db.delete(midia)
+
+
+def _limpar_midias_contexto(
+        db: Session, empresa_id: int, contextos: set[str], manter_urls: set[str],
+        entidade_tipo: str | None = None, entidade_id: int | None = None,
+) -> None:
+    manter_ids = {mid for url in manter_urls if (mid := _id_midia_banco(url))}
+    q = db.query(MidiaImagem).filter(
+        MidiaImagem.empresa_id == empresa_id, MidiaImagem.contexto.in_(list(contextos))
+    )
+    if entidade_tipo is not None:
+        q = q.filter(MidiaImagem.entidade_tipo == entidade_tipo)
+    if entidade_id is not None:
+        q = q.filter(MidiaImagem.entidade_id == entidade_id)
+    for midia in q.all():
+        if midia.id not in manter_ids:
+            db.delete(midia)
+
+
+def _gerar_miniatura_banco(db: Session, url: str, empresa_id: int, produto_id: int) -> str:
+    dados = _bytes_imagem_por_url(db, url)
+    if not dados:
+        return ""
+    return _salvar_midia_banco(
+        db, dados, empresa_id, "produto-thumb", "produto", produto_id,
+        max_dim=480, alvo_bytes=90 * 1024, qualidade=72
+    )
+
+
+def _salvar_original_produto_banco(db: Session, upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
+    return _salvar_upload_midia_banco(
+        db, upload, empresa_id, "produto-original", "produto", produto_id,
+        max_dim=1600, alvo_bytes=450 * 1024, qualidade=78
+    )
+
+
+def _salvar_ajustada_produto_banco(db: Session, upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
+    return _salvar_upload_midia_banco(
+        db, upload, empresa_id, "produto-ajustada", "produto", produto_id,
+        max_dim=1200, alvo_bytes=300 * 1024, qualidade=80
+    )
+
+
 def _salvar_imagem_upload_segura(upload: UploadFile | None, destino_dir: Path, prefixo: str = "") -> str:
     """Valida a assinatura real da imagem e normaliza a extensão automaticamente.
 
@@ -5622,11 +6002,12 @@ def _salvar_imagem_upload_segura(upload: UploadFile | None, destino_dir: Path, p
     real = _tipo_imagem_real(dados)
     if not real:
         raise HTTPException(400, "Não conseguimos usar esta imagem. Escolha uma foto JPG, JPEG, JFIF, PNG, WEBP ou GIF.")
+    destino_dir = _media_destino(destino_dir)
     destino_dir.mkdir(parents=True, exist_ok=True)
     nome = f"{prefixo}{uuid.uuid4().hex}{real}"
     destino = destino_dir / nome
     destino.write_bytes(dados)
-    return "/" + destino.as_posix()
+    return _media_url(destino)
 
 
 def _salvar_arquivo_vitrine(upload: UploadFile | None, empresa_id: int, pasta: str = "empresa") -> str:
@@ -5638,8 +6019,15 @@ def _foto_capa_produto(produto: ProdutoServico) -> str:
     fotos = list(getattr(produto, "fotos", []) or [])
     if not fotos:
         return ""
-    capa = next((f for f in fotos if f.capa), None) or fotos[0]
-    return str(capa.arquivo_url or "")
+    ordenadas = sorted(fotos, key=lambda f: (0 if f.capa else 1, int(f.ordem or 0), int(f.id or 0)))
+    for foto in ordenadas:
+        candidata = str(getattr(foto, "miniatura_url", "") or getattr(foto, "arquivo_url", "") or "")
+        if _imagem_disponivel(candidata):
+            return candidata
+        arquivo = str(getattr(foto, "arquivo_url", "") or "")
+        if _imagem_disponivel(arquivo):
+            return arquivo
+    return ""
 
 
 
@@ -5667,12 +6055,58 @@ def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str, pasta:
     if not assinatura_ok:
         raise HTTPException(400, "O arquivo ajustado não é uma imagem válida.")
     extensao = {"jpeg": "jpg", "png": "png", "webp": "webp"}[tipo]
-    destino_dir = Path("static/uploads/vitrine") / str(empresa_id) / str(pasta or "empresa")
+    destino_dir = MEDIA_ROOT / "vitrine" / str(empresa_id) / str(pasta or "empresa")
     destino_dir.mkdir(parents=True, exist_ok=True)
     nome = f"{prefixo}_{uuid.uuid4().hex[:14]}.{extensao}"
     destino = destino_dir / nome
     destino.write_bytes(dados)
-    return "/" + destino.as_posix()
+    return _media_url(destino)
+
+
+def _copiar_url_para_media(url: str, empresa_id: int, pasta: str, prefixo: str = "original") -> str:
+    """Copia uma imagem local legada para o disco persistente sem alterar a origem."""
+    caminho = _caminho_local_imagem(url)
+    if not caminho or not caminho.exists() or not caminho.is_file():
+        return ""
+    dados = caminho.read_bytes()
+    real = _tipo_imagem_real(dados)
+    if not real:
+        return ""
+    destino_dir = MEDIA_ROOT / "vitrine" / str(empresa_id) / pasta
+    destino_dir.mkdir(parents=True, exist_ok=True)
+    destino = destino_dir / f"{prefixo}_{uuid.uuid4().hex[:14]}{real}"
+    destino.write_bytes(dados)
+    return _media_url(destino)
+
+
+def _gerar_miniatura_url(url: str, empresa_id: int, produto_id: int) -> str:
+    caminho = _caminho_local_imagem(url)
+    if not caminho or not caminho.exists() or not caminho.is_file():
+        return ""
+    try:
+        with Image.open(caminho) as img:
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            img.thumbnail((720, 720), Image.Resampling.LANCZOS)
+            destino_dir = MEDIA_ROOT / "vitrine" / str(empresa_id) / f"produto_{produto_id}" / "thumb"
+            destino_dir.mkdir(parents=True, exist_ok=True)
+            destino = destino_dir / f"thumb_{uuid.uuid4().hex[:14]}.webp"
+            img.save(destino, format="WEBP", quality=82, method=6)
+            return _media_url(destino)
+    except Exception:
+        logger.exception("Não foi possível gerar miniatura de %s", url)
+        return ""
+
+
+def _salvar_original_produto(upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
+    return _salvar_imagem_upload_segura(
+        upload, MEDIA_ROOT / "vitrine" / str(empresa_id) / f"produto_{produto_id}" / "original", "original_"
+    )
+
+
+def _salvar_ajustada_produto(upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
+    return _salvar_imagem_upload_segura(
+        upload, MEDIA_ROOT / "vitrine" / str(empresa_id) / f"produto_{produto_id}" / "ajustada", "ajustada_"
+    )
 
 
 def _cep_limpo(valor: str) -> str:
@@ -5811,7 +6245,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
         else:
             disponiveis = disponivel_fisico
         categoria = str(produto.vitrine_categoria or '').strip()
-        fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip()]
+        fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
         saida.append({
             'produto': produto,
             'disponiveis': max(0, int(disponiveis)),
@@ -6738,17 +7172,42 @@ async def salvar_cadastro_empresa_guiado(
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
     empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
 
+    # Preserva sempre o arquivo original; o recorte/zoom gera somente uma derivada.
+    if logo_arquivo and logo_arquivo.filename:
+        empresa.logo_original_url = _salvar_upload_midia_banco(
+            db, logo_arquivo, empresa.id, "logo-original", "empresa", empresa.id,
+            max_dim=900, alvo_bytes=150 * 1024, qualidade=80
+        )
     if logo_ajustada.strip():
-        empresa.logo_url = _salvar_data_url_imagem(logo_ajustada, empresa.id, "logo")
+        empresa.logo_url = _salvar_data_url_midia_banco(
+            db, logo_ajustada, empresa.id, "logo-ajustada", "empresa", empresa.id,
+            max_dim=700, alvo_bytes=120 * 1024, qualidade=82
+        )
         empresa.logo_idb_url = ""
-    elif logo_arquivo and logo_arquivo.filename:
-        empresa.logo_url = _salvar_imagem_upload_segura(logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_")
+    elif empresa.logo_original_url:
+        empresa.logo_url = empresa.logo_original_url
         empresa.logo_idb_url = ""
+    if capa_arquivo and capa_arquivo.filename:
+        empresa.vitrine_fundo_original_url = _salvar_upload_midia_banco(
+            db, capa_arquivo, empresa.id, "capa-original", "empresa", empresa.id,
+            max_dim=1800, alvo_bytes=420 * 1024, qualidade=78
+        )
     if capa_ajustada.strip():
-        empresa.vitrine_fundo_url = _salvar_data_url_imagem(capa_ajustada, empresa.id, "capa")
-    elif capa_arquivo and capa_arquivo.filename:
-        empresa.vitrine_fundo_url = _salvar_arquivo_vitrine(capa_arquivo, empresa.id, "empresa")
+        empresa.vitrine_fundo_url = _salvar_data_url_midia_banco(
+            db, capa_ajustada, empresa.id, "capa-ajustada", "empresa", empresa.id,
+            max_dim=1600, alvo_bytes=350 * 1024, qualidade=80
+        )
+    elif empresa.vitrine_fundo_original_url:
+        empresa.vitrine_fundo_url = empresa.vitrine_fundo_original_url
 
+    _limpar_midias_contexto(
+        db, empresa.id, {"logo-original", "logo-ajustada"},
+        {str(empresa.logo_url or ""), str(empresa.logo_original_url or "")}, "empresa", empresa.id
+    )
+    _limpar_midias_contexto(
+        db, empresa.id, {"capa-original", "capa-ajustada"},
+        {str(empresa.vitrine_fundo_url or ""), str(empresa.vitrine_fundo_original_url or "")}, "empresa", empresa.id
+    )
     db.commit()
     empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/painel/empresa?salvo=1", status_code=303)
@@ -6812,9 +7271,11 @@ async def salvar_configuracoes_empresa(
     # Logo: o caminho mais simples para o locador é enviar do próprio PC/celular.
     # Mantemos URL apenas como alternativa técnica.
     if logo_arquivo and logo_arquivo.filename:
-        empresa.logo_url = _salvar_imagem_upload_segura(
-            logo_arquivo, Path("static/uploads/logos"), f"empresa_{empresa.id}_"
+        empresa.logo_original_url = _salvar_upload_midia_banco(
+            db, logo_arquivo, empresa.id, "logo-original", "empresa", empresa.id,
+            max_dim=900, alvo_bytes=150 * 1024, qualidade=80
         )
+        empresa.logo_url = empresa.logo_original_url
         empresa.logo_idb_url = ""
     elif logo_url.strip():
         empresa.logo_url = logo_url.strip()
@@ -6822,6 +7283,10 @@ async def salvar_configuracoes_empresa(
     elif logo_idb_url.strip():
         empresa.logo_idb_url = logo_idb_url.strip()
         empresa.logo_url = ""
+    _limpar_midias_contexto(
+        db, empresa.id, {"logo-original", "logo-ajustada"},
+        {str(empresa.logo_url or ""), str(empresa.logo_original_url or "")}, "empresa", empresa.id
+    )
     empresa.tema = tema
     empresa.mensagem_reserva = mensagem_reserva.strip()
     empresa.mensagem_aceite = mensagem_aceite.strip()
@@ -6974,7 +7439,15 @@ def salvar_painel_vitrine(
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
     empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
     if vitrine_fundo_arquivo and vitrine_fundo_arquivo.filename:
-        empresa.vitrine_fundo_url = _salvar_arquivo_vitrine(vitrine_fundo_arquivo, empresa.id, "empresa")
+        empresa.vitrine_fundo_original_url = _salvar_upload_midia_banco(
+            db, vitrine_fundo_arquivo, empresa.id, "capa-original", "empresa", empresa.id,
+            max_dim=1800, alvo_bytes=420 * 1024, qualidade=78
+        )
+        empresa.vitrine_fundo_url = empresa.vitrine_fundo_original_url
+    _limpar_midias_contexto(
+        db, empresa.id, {"capa-original", "capa-ajustada"},
+        {str(empresa.vitrine_fundo_url or ""), str(empresa.vitrine_fundo_original_url or "")}, "empresa", empresa.id
+    )
     db.commit()
     empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/painel/vitrine?salvo=1", status_code=303)
@@ -6983,6 +7456,10 @@ def salvar_painel_vitrine(
 @app.post("/painel/vitrine/remover-fundo")
 def remover_fundo_vitrine(db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     empresa.vitrine_fundo_url = None
+    empresa.vitrine_fundo_original_url = None
+    _limpar_midias_contexto(
+        db, empresa.id, {"capa-original", "capa-ajustada"}, set(), "empresa", empresa.id
+    )
     db.commit()
     empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/painel/vitrine", status_code=303)
@@ -7009,17 +7486,28 @@ def ajustar_foto_produto(
     if not produto or produto.empresa_id != empresa.id or not foto or foto.empresa_id != empresa.id or foto.produto_id != produto.id:
         raise HTTPException(404)
     url_antiga = str(foto.arquivo_url or "")
-    nova_url = _salvar_arquivo_vitrine(foto_arquivo, empresa.id, f"produto_{produto.id}")
+    thumb_antiga = str(getattr(foto, "miniatura_url", "") or "")
+    # Se a foto veio de uma versão antiga, preserva a melhor imagem disponível como original
+    # antes de substituir a derivada. O original nunca é apagado durante novos ajustes.
+    if not str(getattr(foto, "original_url", "") or "") and _imagem_disponivel(url_antiga):
+        dados_legados = _bytes_imagem_por_url(db, url_antiga)
+        foto.original_url = (
+            _salvar_midia_banco(db, dados_legados, empresa.id, "produto-original", "produto", produto.id,
+                                max_dim=1600, alvo_bytes=450 * 1024, qualidade=78)
+            if dados_legados else url_antiga
+        )
+    nova_url = _salvar_ajustada_produto_banco(db, foto_arquivo, empresa.id, produto.id)
     if not nova_url:
         raise HTTPException(400, "Não conseguimos salvar a foto ajustada.")
     foto.arquivo_url = nova_url
+    foto.miniatura_url = _gerar_miniatura_banco(db, nova_url, empresa.id, produto.id) or nova_url
+    if url_antiga and url_antiga != str(foto.original_url or ""):
+        _remover_midia_banco(db, url_antiga)
+        _remover_imagem_local(url_antiga)
+    if thumb_antiga and thumb_antiga not in {url_antiga, str(foto.original_url or "")}:
+        _remover_midia_banco(db, thumb_antiga)
+        _remover_imagem_local(thumb_antiga)
     db.commit()
-    try:
-        caminho = Path(url_antiga.lstrip("/"))
-        if caminho.exists() and caminho.is_file() and caminho.as_posix() != Path(nova_url.lstrip("/")).as_posix():
-            caminho.unlink()
-    except Exception:
-        pass
     return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
 
 
@@ -7030,19 +7518,18 @@ def excluir_foto_produto(produto_id: int, foto_id: int, db: Session = Depends(ge
     if not produto or produto.empresa_id != empresa.id or not foto or foto.empresa_id != empresa.id or foto.produto_id != produto.id:
         raise HTTPException(404)
     era_capa = bool(foto.capa)
-    caminho = Path(str(foto.arquivo_url or "").lstrip("/"))
+    urls_apagar = {str(foto.arquivo_url or ""), str(getattr(foto, "original_url", "") or ""), str(getattr(foto, "miniatura_url", "") or "")}
     db.delete(foto)
     db.flush()
     if era_capa:
         proxima = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).order_by(ProdutoFoto.ordem.asc(), ProdutoFoto.id.asc()).first()
         if proxima:
             proxima.capa = True
+    for url in urls_apagar:
+        if url:
+            _remover_midia_banco(db, url)
+            _remover_imagem_local(url)
     db.commit()
-    try:
-        if caminho.exists() and caminho.is_file():
-            caminho.unlink()
-    except Exception:
-        pass
     return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
 
 
@@ -7176,6 +7663,7 @@ def salvar_produto_url(
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
+        foto_originais: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
@@ -7188,7 +7676,7 @@ def salvar_produto_url(
         carga_pontos=carga_pontos, volume_logistico=volume_logistico,
         permite_interno=permite_interno, permite_mala=permite_mala, permite_teto=permite_teto,
         contrato_id=contrato_id, vitrine_ativo=vitrine_ativo, vitrine_resumo=vitrine_resumo,
-        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos,
+        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
     )
@@ -7206,6 +7694,7 @@ def salvar_produto(
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
+        foto_originais: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
@@ -7251,36 +7740,39 @@ def salvar_produto(
     fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
     proxima_ordem = fotos_existentes
     primeira_nova = None
-    ajustadas = []
-    if str(fotos_ajustadas_json or "").strip():
-        try:
-            bruto_ajustadas = json.loads(fotos_ajustadas_json)
-            ajustadas = bruto_ajustadas if isinstance(bruto_ajustadas, list) else []
-        except Exception:
-            raise HTTPException(400, "Não conseguimos ler as fotos ajustadas. Selecione as imagens novamente.")
-    for data_url in ajustadas[:12]:
-        url = _salvar_data_url_imagem(str(data_url or ""), empresa.id, f"produto_{produto.id}", f"produto_{produto.id}")
-        if not url:
-            continue
-        foto = ProdutoFoto(
-            empresa_id=empresa.id, produto_id=produto.id, arquivo_url=url, ordem=proxima_ordem,
-            capa=(fotos_existentes == 0 and primeira_nova is None),
-        )
-        db.add(foto)
-        if primeira_nova is None:
-            primeira_nova = foto
-        proxima_ordem += 1
 
-    # Compatibilidade: se o navegador não usar o ajustador, o upload tradicional continua funcionando.
-    if not ajustadas:
-        for upload in foto_arquivos or []:
-            if not getattr(upload, "filename", ""):
+    # Navegadores modernos enviam duas versões da mesma seleção: original e ajustada.
+    # O original é imutável; a vitrine usa a derivada e uma miniatura otimizada.
+    ajustadas_upload = [u for u in (foto_arquivos or []) if getattr(u, "filename", "")]
+    originais_upload = [u for u in (foto_originais or []) if getattr(u, "filename", "")]
+    if ajustadas_upload:
+        for idx, ajustada in enumerate(ajustadas_upload[:12]):
+            original = originais_upload[idx] if idx < len(originais_upload) else None
+            original_url = _salvar_original_produto_banco(db, original, empresa.id, produto.id) if original else ""
+            ajustada_url = _salvar_ajustada_produto_banco(db, ajustada, empresa.id, produto.id)
+            if not ajustada_url:
                 continue
-            url = _salvar_arquivo_vitrine(upload, empresa.id, f"produto_{produto.id}")
-            if not url:
-                continue
+            thumb_url = _gerar_miniatura_banco(db, ajustada_url, empresa.id, produto.id) or ajustada_url
             foto = ProdutoFoto(
-                empresa_id=empresa.id, produto_id=produto.id, arquivo_url=url, ordem=proxima_ordem,
+                empresa_id=empresa.id, produto_id=produto.id, arquivo_url=ajustada_url,
+                original_url=original_url or ajustada_url, miniatura_url=thumb_url, ordem=proxima_ordem,
+                capa=(fotos_existentes == 0 and primeira_nova is None),
+            )
+            db.add(foto)
+            if primeira_nova is None:
+                primeira_nova = foto
+            proxima_ordem += 1
+    else:
+        # Fallback sem JavaScript: preserva o upload como original e usa a própria imagem
+        # como derivada. Ainda gera miniatura para a vitrine.
+        for original in originais_upload[:12]:
+            original_url = _salvar_original_produto_banco(db, original, empresa.id, produto.id)
+            if not original_url:
+                continue
+            thumb_url = _gerar_miniatura_banco(db, original_url, empresa.id, produto.id) or original_url
+            foto = ProdutoFoto(
+                empresa_id=empresa.id, produto_id=produto.id, arquivo_url=original_url,
+                original_url=original_url, miniatura_url=thumb_url, ordem=proxima_ordem,
                 capa=(fotos_existentes == 0 and primeira_nova is None),
             )
             db.add(foto)
