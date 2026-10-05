@@ -3651,30 +3651,38 @@ def _migrar_precos_karaokerj_v106_uma_vez() -> None:
         tipos["empresa"].descricao = "Valores diferenciados com emissão de NFS-e."
 
         produtos = db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+        tipo_ids = {tipos["residencial"].id, tipos["empresa"].id}
+        precos_existentes = {
+            (p.produto_id, p.tipo_evento_id): p
+            for p in db.query(ProdutoPrecoEvento).filter(
+                ProdutoPrecoEvento.empresa_id == empresa.id,
+                ProdutoPrecoEvento.tipo_evento_id.in_(tipo_ids),
+            ).all()
+        }
         for produto in produtos:
             valor_atual = max(float(produto.valor_base or 0), 0.0)
             produto.valor_base = round(valor_atual + 200.0, 2)
             produto.preco_por_tipo_evento = True
 
-            residencial = db.query(ProdutoPrecoEvento).filter_by(
-                empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["residencial"].id
-            ).first()
+            chave_res = (produto.id, tipos["residencial"].id)
+            residencial = precos_existentes.get(chave_res)
             if not residencial:
                 residencial = ProdutoPrecoEvento(
                     empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["residencial"].id
                 )
                 db.add(residencial)
+                precos_existentes[chave_res] = residencial
             residencial.modo = "especifico"
             residencial.valor = round(valor_atual, 2)
 
-            empresarial = db.query(ProdutoPrecoEvento).filter_by(
-                empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["empresa"].id
-            ).first()
+            chave_emp = (produto.id, tipos["empresa"].id)
+            empresarial = precos_existentes.get(chave_emp)
             if not empresarial:
                 empresarial = ProdutoPrecoEvento(
                     empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["empresa"].id
                 )
                 db.add(empresarial)
+                precos_existentes[chave_emp] = empresarial
             empresarial.modo = "normal"
             empresarial.valor = None
 
@@ -3688,10 +3696,26 @@ def _migrar_precos_karaokerj_v106_uma_vez() -> None:
         db.close()
 
 
+def _iniciar_migracao_precos_v106_em_background() -> None:
+    """Dispara a migração versionada sem bloquear a porta do Render."""
+    def executar():
+        try:
+            _migrar_precos_karaokerj_v106_uma_vez()
+        except Exception:
+            logger.exception("Falha inesperada na thread de migração de preços v1.0.106")
+
+    threading.Thread(
+        target=executar,
+        name="connect-migracao-precos-v106",
+        daemon=True,
+    ).start()
+
+
 @app.on_event("startup")
 def startup():
-    # Migração de dados pequena e versionada: executa uma única vez e depois vira apenas uma checagem por chave.
-    _migrar_precos_karaokerj_v106_uma_vez()
+    # Nunca bloquear o bind da porta do Render por causa de uma migração de dados.
+    # A migração é idempotente e roda em background; app_migrations impede repetição.
+    _iniciar_migracao_precos_v106_em_background()
 
     # Produção: as migrações já foram executadas. Não bloquear a abertura da porta
     # do Render com inspeções/migrações de banco a cada deploy. Para uma manutenção
@@ -6527,15 +6551,36 @@ def _cep_limpo(valor: str) -> str:
 
 
 def _coordenadas_cep(cep: str, identificador: str = "cep"):
+    """Geocodifica o CEP usando primeiro o endereço completo retornado pelo ViaCEP.
+
+    Geocodificar somente o número do CEP pode fazer Nominatim/Photon escolherem um
+    ponto homônimo em outro município/estado. Para frete isso é perigoso: uma rota
+    local pode virar mais de mil quilômetros. O endereço completo é sempre a primeira
+    tentativa; o CEP isolado fica apenas como fallback.
+    """
     cep = _cep_limpo(cep)
     if len(cep) != 8:
         return None, None, "CEP inválido"
     if cep in _CEP_COORD_CACHE:
         lat, lon = _CEP_COORD_CACHE[cep]
         return lat, lon, "cache"
-    lat, lon, detalhe = _geocodificar_consultas(
-        [f"{cep[:5]}-{cep[5:]}, Brasil", f"CEP {cep}, Brasil"], identificador=identificador
-    )
+
+    cep_fmt = f"{cep[:5]}-{cep[5:]}"
+    consultas = []
+    dados_cep = _dados_cep_brasil(cep)
+    if dados_cep:
+        completo = _partes_unicas_endereco(
+            dados_cep.get("logradouro"), dados_cep.get("bairro"),
+            dados_cep.get("cidade"), dados_cep.get("estado"), cep_fmt, "Brasil"
+        )
+        if completo:
+            consultas.append(completo)
+        cidade_uf = _partes_unicas_endereco(cep_fmt, dados_cep.get("cidade"), dados_cep.get("estado"), "Brasil")
+        if cidade_uf:
+            consultas.append(cidade_uf)
+    consultas.extend([f"{cep_fmt}, Brasil", f"CEP {cep}, Brasil"])
+
+    lat, lon, detalhe = _geocodificar_consultas(consultas, identificador=identificador)
     if lat is not None and lon is not None:
         _CEP_COORD_CACHE[cep] = (float(lat), float(lon))
     return lat, lon, detalhe
@@ -6607,6 +6652,26 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         if distancia_ida is None:
             return {"ok": False, "erro": "Não foi possível calcular o deslocamento agora."}
         distancia_ida = max(float(distancia_ida), 0.0)
+
+        # Trava de segurança: se origem e destino pertencem ao mesmo município/UF,
+        # uma rota extremamente longa indica geocodificação incorreta. Nunca cobrar
+        # milhares de quilômetros silenciosamente do cliente.
+        dados_origem = _dados_cep_brasil(origem)
+        mesma_cidade = bool(
+            dados_origem and dados_destino
+            and str(dados_origem.get("cidade") or "").strip().casefold() == str(dados_destino.get("cidade") or "").strip().casefold()
+            and str(dados_origem.get("estado") or "").strip().upper() == str(dados_destino.get("estado") or "").strip().upper()
+        )
+        if mesma_cidade and distancia_ida > 300:
+            geo_logger.error(
+                "[FRETE] rota rejeitada por inconsistência geográfica empresa=%s origem=%s destino=%s distancia=%.1fkm",
+                empresa.id, origem, cep, distancia_ida,
+            )
+            return {
+                "ok": False,
+                "erro": "Não foi possível validar a distância deste endereço. Tente novamente em alguns instantes.",
+            }
+
         quantidade_km = distancia_ida * 2.0
         valor = round(quantidade_km * valor_km, 2)
         return {

@@ -14,6 +14,9 @@ engine_kwargs = {
 # Render e Neon se beneficiam de conexões reaproveitadas. Mantemos o pool
 # pequeno para não exceder o limite do banco em planos enxutos.
 if not DATABASE_URL.startswith("sqlite"):
+    # Evita que uma nova instância do Render fique minutos presa antes de abrir
+    # a porta quando a conexão inicial com o PostgreSQL/Neon não responde.
+    connect_args.update({"connect_timeout": 10})
     engine_kwargs.update({
         "pool_size": 5,
         "max_overflow": 5,
