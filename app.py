@@ -3599,8 +3599,20 @@ def migrar_midias_legadas_para_persistente(db: Session) -> int:
     return alterados
 
 
+def _startup_manutencao_habilitada() -> bool:
+    return str(os.getenv("CONNECT_RUN_STARTUP_MAINTENANCE", "0") or "0").strip().lower() in {"1", "true", "yes", "sim", "on"}
+
+
 @app.on_event("startup")
 def startup():
+    # Produção: as migrações já foram executadas. Não bloquear a abertura da porta
+    # do Render com inspeções/migrações de banco a cada deploy. Para uma manutenção
+    # excepcional, definir CONNECT_RUN_STARTUP_MAINTENANCE=1 temporariamente.
+    if not _startup_manutencao_habilitada():
+        logger.info("Startup leve: migrações/manutenções automáticas desativadas.")
+        return
+
+    logger.warning("Startup de manutenção habilitado por CONNECT_RUN_STARTUP_MAINTENANCE=1")
     Base.metadata.create_all(bind=engine)
     garantir_colunas_novas()
     garantir_tokens_publicos_solicitacoes()
@@ -4000,6 +4012,17 @@ def empresa_logada(request: Request, db: Session = Depends(get_db)) -> Empresa:
         request.session.clear()
         raise HTTPException(status_code=303, headers={"Location": "/empresa/login"})
     return empresa
+
+
+@app.get("/health", include_in_schema=False)
+@app.head("/health", include_in_schema=False)
+def healthcheck():
+    return Response(status_code=200)
+
+
+@app.head("/", include_in_schema=False)
+def home_head():
+    return Response(status_code=200)
 
 
 @app.get("/", response_class=HTMLResponse)

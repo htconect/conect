@@ -31,6 +31,7 @@
         <summary aria-label="Abrir menu"><i class="bi bi-list"></i></summary>
         <div class="menu-topo-card">
           <a href="/painel/vitrine"><i class="bi bi-shop"></i> Vitrine pública</a>
+          <a href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i> Contratos</a>
           <strong>Cadastros</strong>
           <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
           <a href="/painel/empresa"><i class="bi bi-building"></i> Empresa</a>
@@ -80,6 +81,7 @@
     <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
     <a class="{% if request.url.path == '/painel/vitrine' %}ativo{% endif %}" href="/painel/vitrine"><i class="bi bi-shop"></i><span>Vitrine pública</span></a>
     <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
+    <a class="{% if request.url.path.startswith('/painel/solicitacoes') or request.url.path.startswith('/painel/solicitacao/') or request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i><span>Contratos</span></a>
     <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3-week"></i><span>Agenda</span></a>
     <a class="{% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas"><i class="bi bi-truck"></i><span>Operação</span></a>
     <a class="{% if request.url.path.startswith('/painel/financeiro') or request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
@@ -560,8 +562,23 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     if (!form || form.dataset.noLoading === "1") return;
     const msg = form.dataset.loadingText || "Atualizando informações...";
     mostrarCarregando(form.dataset.loadingTitle || "Processando solicitação", msg);
-    const botao = form.querySelector('button[type="submit"], button:not([type])');
+
+    // Usa exatamente o botão que disparou o submit. Quando o botão possui
+    // name/value (ex.: direcao=cima/baixo), preserva esse valor em um hidden
+    // antes de desabilitá-lo. Sem isso o navegador remove o submitter do POST
+    // e o FastAPI responde 422 por campo obrigatório ausente.
+    const botao = (e.submitter && e.submitter.tagName === "BUTTON")
+      ? e.submitter
+      : form.querySelector('button[type="submit"], button:not([type])');
     if (botao) {
+      if (botao.name) {
+        const preservado = document.createElement("input");
+        preservado.type = "hidden";
+        preservado.name = botao.name;
+        preservado.value = botao.value || "";
+        preservado.dataset.submitterPreservado = "1";
+        form.appendChild(preservado);
+      }
       botao.dataset.textoOriginal = botao.textContent;
       botao.textContent = "Aguarde...";
       botao.disabled = true;
