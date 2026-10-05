@@ -17,21 +17,22 @@
 {% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
 {% set em_credito = item.status == "aguardando_nova_data" %}
 {% set em_rascunho = item.status in ["pre_reserva", "reserva"] %}
-{% set pre_reserva_vitrine = item.status == "vitrine_pre_reserva" %}
-{% set pre_reserva_vitrine_aprovada = item.status == "vitrine_aprovada" %}
+{% set pre_reserva_vitrine = vitrine_pendente_aprovacao(item) %}
+{% set pre_reserva_vitrine_aprovada = vitrine_cadastro_liberado(item) %}
+{% set vitrine_lokafest_cancelado = vitrine_enviado_lokafest(item) %}
 {% set erro = request.query_params.get("erro") %}
 
 {% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
 
 {% if pre_reserva_vitrine %}
 <section class="proxima-acao" style="border:2px solid #2563eb;background:#eff6ff">
-  <small>PRÉ-RESERVA DA VITRINE</small>
-  <b>Analise antes de confirmar</b>
-  <p>O cliente já escolheu os itens, opcionais, endereço, deslocamento e valores. Esta etapa ainda não reserva o estoque.</p>
+  <small>RASCUNHO DA VITRINE · PENDENTE</small>
+  <b>Decida se vai atender ou indicar</b>
+  <p>O cliente já preencheu equipamento, opcionais, endereço, deslocamento, horários e valores. Este é o mesmo rascunho padrão do Connect; não é necessário cadastrar o equipamento novamente.</p>
   <form method="post" action="/painel/solicitacao/{{ item.id }}/pre-reserva/aprovar" style="margin:10px 0">
-    <button class="botao largura-total btn-krj-primary" type="submit"><i class="bi bi-whatsapp"></i> Aceitar pré-reserva e enviar cadastro</button>
+    <button class="botao largura-total btn-krj-primary" type="submit"><i class="bi bi-whatsapp"></i> Atender e enviar cadastro</button>
   </form>
-  <p class="texto-discreto">Ao aceitar, o Connect libera o mesmo cadastro usado na reserva direta e abre o WhatsApp do cliente com o link já preenchido. O envio continua sendo feito pela pessoa.</p>
+  <p class="texto-discreto">Ao atender, o Connect apenas libera o cadastro já preenchido para o cliente completar o que falta. Depois ele segue direto para aceite e pagamento, usando o mesmo fluxo da reserva direta.</p>
 
   {% if empresa.lokafest_ativo and empresa.lokafest_url %}
     {% if vitrine_autorizou_parceiros(item) %}
@@ -51,9 +52,9 @@
 
 {% if pre_reserva_vitrine_aprovada %}
 <section class="proxima-acao ok-acao">
-  <small>PRÉ-RESERVA APROVADA</small>
+  <small>RASCUNHO DA VITRINE · LIBERADO</small>
   <b>Aguardando o cliente completar o cadastro</b>
-  <p>O orçamento da vitrine já está preservado. O cliente só precisa completar/revisar os dados da locação no mesmo formulário usado pela reserva direta.</p>
+  <p>Equipamentos e condições comerciais já estão preenchidos. O cliente completa somente os dados restantes e segue direto para aceite e pagamento.</p>
   <a class="botao-whats largura-total" href="/painel/solicitacao/{{ item.id }}/pre-reserva/cadastro-whatsapp" target="_blank"><i class="bi bi-whatsapp"></i> Enviar / reenviar cadastro pelo WhatsApp</a>
 </section>
 {% endif %}
@@ -172,6 +173,15 @@
   <small>Status</small>
   <b>Aguardando aceite do cliente</b>
   <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
+</section>
+{% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] and vitrine_lokafest_cancelado %}
+<section class="proxima-acao aviso-acao">
+  <small>Status</small>
+  <b>Cancelado — enviado para o LokaFest</b>
+  <p>Este rascunho saiu do fluxo operacional do Connect. Se a indicação não foi concluída ou ocorreu algum erro no LokaFest, você pode abrir a indicação novamente.</p>
+  {% if empresa.lokafest_ativo and empresa.lokafest_url and vitrine_autorizou_parceiros(item) %}
+    <a class="botao largura-total secundario" href="/painel/solicitacao/{{ item.id }}/lokafest" target="_blank"><i class="bi bi-arrow-repeat"></i> Indicar novamente no LokaFest</a>
+  {% endif %}
 </section>
 {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
 <section class="proxima-acao aviso-acao">

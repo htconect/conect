@@ -3782,7 +3782,7 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
 
 
 def _garantir_colunas_v113_criticas() -> None:
-    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.118.
+    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.119.
 
     É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
@@ -3847,7 +3847,7 @@ def _garantir_colunas_v113_criticas() -> None:
         garantir_colunas_novas()
         VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
     except Exception:
-        logger.exception("Falha ao garantir colunas críticas da v1.0.118")
+        logger.exception("Falha ao garantir colunas críticas da v1.0.119")
         raise
 
 
@@ -6821,6 +6821,46 @@ def _vitrine_autorizou_parceiros(item: Solicitacao) -> bool:
     return "[VITRINE_AUTORIZA_PARCEIROS=1]" in str(item.observacoes or "")
 
 
+def _vitrine_origem(item: Solicitacao | None) -> bool:
+    return bool(item and "[VITRINE_ORIGEM=1]" in str(item.observacoes or ""))
+
+
+def _vitrine_pendente_aprovacao(item: Solicitacao | None) -> bool:
+    return bool(
+        item
+        and _vitrine_origem(item)
+        and "[VITRINE_PENDENTE_APROVACAO=1]" in str(item.observacoes or "")
+        and (item.status or "") in STATUS_CONTRATO_RASCUNHO
+    )
+
+
+def _vitrine_cadastro_liberado(item: Solicitacao | None) -> bool:
+    return bool(
+        item
+        and _vitrine_origem(item)
+        and "[VITRINE_APROVADA=1]" in str(item.observacoes or "")
+        and "[VITRINE_PENDENTE_APROVACAO=1]" not in str(item.observacoes or "")
+        and (item.status or "") in STATUS_CONTRATO_RASCUNHO
+    )
+
+
+def _vitrine_enviado_lokafest(item: Solicitacao | None) -> bool:
+    return bool(item and _vitrine_origem(item) and "[VITRINE_ENVIADO_LOKAFEST=1]" in str(item.observacoes or ""))
+
+
+def _vitrine_definir_marcador(item: Solicitacao, marcador: str, ativo: bool = True) -> None:
+    linhas = [ln for ln in str(item.observacoes or "").splitlines() if ln.strip() != marcador]
+    if ativo:
+        linhas.insert(0, marcador)
+    item.observacoes = "\n".join(linhas).strip()
+
+
+templates.env.globals["vitrine_origem"] = _vitrine_origem
+templates.env.globals["vitrine_pendente_aprovacao"] = _vitrine_pendente_aprovacao
+templates.env.globals["vitrine_cadastro_liberado"] = _vitrine_cadastro_liberado
+templates.env.globals["vitrine_enviado_lokafest"] = _vitrine_enviado_lokafest
+
+
 def _vitrine_autorizacao_parceiros_origem(item: Solicitacao) -> str:
     obs = str(item.observacoes or "")
     marcador = "[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM="
@@ -6852,7 +6892,10 @@ def _vitrine_marcar_autorizacao_parceiros(item: Solicitacao, origem: str = "what
     item.observacoes = "\n".join(cab + linhas).strip()
 
 
-def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, whatsapp: str, autorizou_parceiros: bool = False) -> Solicitacao:
+def _criar_pre_reserva_vitrine(
+        db: Session, empresa: Empresa, pedido: dict, whatsapp: str,
+        autorizou_parceiros: bool = False, pendente_aprovacao: bool = True
+) -> Solicitacao:
     cliente = db.query(Cliente).filter(
         Cliente.empresa_id == empresa.id,
         or_(Cliente.telefone == whatsapp, Cliente.identificador == whatsapp),
@@ -6872,10 +6915,12 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
         else "Cliente não autorizou indicação a parceiros no carrinho. O WhatsApp continua autorizado para o atendimento da pré-reserva e envio do cadastro da locação."
     )
     obs = (
-        f"[VITRINE_TIPO_EVENTO={pedido.get('tipo_evento', 'residencial')}]\n"
-        f"[VITRINE_AUTORIZA_PARCEIROS={autorizacao}]\n"
+        "[VITRINE_ORIGEM=1]\n"
+        + ("[VITRINE_PENDENTE_APROVACAO=1]\n" if pendente_aprovacao else "[VITRINE_APROVADA=1]\n")
+        + f"[VITRINE_TIPO_EVENTO={pedido.get('tipo_evento', 'residencial')}]\n"
+        + f"[VITRINE_AUTORIZA_PARCEIROS={autorizacao}]\n"
         + ("[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM=carrinho]\n" if autorizou_parceiros else "")
-        + "Pré-reserva criada pela vitrine. WhatsApp informado para contato sobre a solicitação e envio do cadastro da locação.\n"
+        + "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente.\n"
         + texto_autorizacao
     )
     inicio_pedido = pedido.get("hora_inicio")
@@ -6895,7 +6940,7 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
     cortesia_retirada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False) and not retirada_mesmo_dia)
     item = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=pedido["data_evento"],
-        hora_inicio=inicio_pedido, hora_fim=fim_pedido, status="vitrine_pre_reserva",
+        hora_inicio=inicio_pedido, hora_fim=fim_pedido, status="pre_reserva",
         bairro=str(frete.get("bairro") or "")[:120], local=str(frete.get("logradouro") or "")[:200],
         local_numero=str(frete.get("numero") or "")[:30], local_cidade=str(frete.get("cidade") or "")[:120],
         local_estado=str(frete.get("estado") or "")[:40], local_cep=str(frete.get("cep") or "")[:20],
@@ -9140,13 +9185,13 @@ def atender_oportunidade_vitrine(
     try:
         pedido = _pedido_oportunidade_para_contexto(db, empresa, oportunidade)
         solicitacao = _criar_pre_reserva_vitrine(
-            db, empresa, pedido, oportunidade.whatsapp, autorizou_parceiros=False
+            db, empresa, pedido, oportunidade.whatsapp, autorizou_parceiros=False, pendente_aprovacao=False
         )
     except ValueError as exc:
         db.rollback()
         return RedirectResponse(f"/painel/vitrine?erro={quote(str(exc))}", status_code=303)
-    # O contrato nasce somente aqui, quando a empresa decidiu atender.
-    solicitacao.status = "vitrine_aprovada"
+    # Compatibilidade com oportunidades criadas na v1.0.118: ao atender, converte
+    # para o mesmo rascunho padrão já liberado para cadastro.
     solicitacao.aprovado_em = agora_utc()
     # Preserva exatamente a composição que o cliente viu antes da análise.
     snap = _snapshot_oportunidade(oportunidade)
@@ -10875,9 +10920,10 @@ def aprovar_pre_reserva_vitrine(
     item = db.query(Solicitacao).options(
         joinedload(Solicitacao.cliente), selectinload(Solicitacao.itens)
     ).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
-    if not item or item.status != "vitrine_pre_reserva":
+    if not item or not _vitrine_pendente_aprovacao(item):
         raise HTTPException(404)
-    item.status = "vitrine_aprovada"
+    _vitrine_definir_marcador(item, "[VITRINE_PENDENTE_APROVACAO=1]", False)
+    _vitrine_definir_marcador(item, "[VITRINE_APROVADA=1]", True)
     item.aprovado_em = agora_utc()
     db.commit()
     alvo = _url_whatsapp_cadastro_pre_reserva(request, db, empresa, item)
@@ -10898,7 +10944,7 @@ def reenviar_cadastro_pre_reserva_whatsapp(
     item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente)).filter_by(
         id=solicitacao_id, empresa_id=empresa.id
     ).first()
-    if not item or item.status != "vitrine_aprovada":
+    if not item or not _vitrine_cadastro_liberado(item):
         raise HTTPException(404)
     alvo = _url_whatsapp_cadastro_pre_reserva(request, db, empresa, item)
     if not alvo:
@@ -10916,7 +10962,7 @@ def solicitar_autorizacao_lokafest(
     item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente)).filter_by(
         id=solicitacao_id, empresa_id=empresa.id
     ).first()
-    if not item or item.status != "vitrine_pre_reserva":
+    if not item or not _vitrine_pendente_aprovacao(item):
         raise HTTPException(404)
     alvo = _url_whatsapp_solicitar_autorizacao_lokafest(empresa, item)
     if not alvo:
@@ -10932,7 +10978,7 @@ def registrar_autorizacao_lokafest(
         solicitacao_id: int, request: Request, db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)):
     item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
-    if not item or item.status != "vitrine_pre_reserva":
+    if not item or not _vitrine_pendente_aprovacao(item):
         raise HTTPException(404)
     usuario = (
         request.session.get("usuario_nome")
@@ -10949,7 +10995,13 @@ def registrar_autorizacao_lokafest(
 @app.get("/painel/solicitacao/{solicitacao_id}/lokafest")
 def preparar_indicacao_lokafest(solicitacao_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente), selectinload(Solicitacao.itens)).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
-    if not item or item.status != "vitrine_pre_reserva":
+    pode_indicar = bool(
+        item and _vitrine_origem(item) and (
+            _vitrine_pendente_aprovacao(item)
+            or ((item.status or "") in {"cancelada", "cancelado_cliente", "rejeitada"} and _vitrine_enviado_lokafest(item))
+        )
+    )
+    if not pode_indicar:
         raise HTTPException(404)
     if not getattr(empresa, "lokafest_ativo", False) or not getattr(empresa, "lokafest_url", None):
         return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=LokaFest não está configurado nesta empresa.", status_code=303)
@@ -10958,7 +11010,21 @@ def preparar_indicacao_lokafest(solicitacao_id: int, db: Session = Depends(get_d
     alvo = _url_lokafest_solicitacao(empresa, item)
     if not alvo:
         return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Não foi possível preparar o LokaFest.", status_code=303)
-    # Importante: apenas abre o formulário. O LokaFest NÃO recebe POST nem cria indicação aqui.
+
+    # A partir da decisão de indicar, o contrato deixa o fluxo operacional do Connect.
+    # O LokaFest é externo: se a indicação não for concluída, o rascunho permanece
+    # em Cancelados e o botão de reenviar continua disponível no detalhe.
+    item.status = "cancelada"
+    item.aprovado_em = None
+    _vitrine_definir_marcador(item, "[VITRINE_PENDENTE_APROVACAO=1]", False)
+    _vitrine_definir_marcador(item, "[VITRINE_APROVADA=1]", False)
+    _vitrine_definir_marcador(item, "[VITRINE_ENVIADO_LOKAFEST=1]", True)
+    obs_visivel = observacoes_visiveis(item.observacoes)
+    if "Enviado para o LokaFest." not in obs_visivel:
+        linhas = str(item.observacoes or "").splitlines()
+        linhas.append("Enviado para o LokaFest.")
+        item.observacoes = "\n".join(linhas).strip()
+    db.commit()
     return RedirectResponse(alvo, status_code=303)
 
 
@@ -11522,7 +11588,15 @@ def salvar_edicao_solicitacao(
     item.acesso_local = acesso_local
     item.valor = texto_para_float(valor)
     item.sinal = texto_para_float(sinal)
-    item.observacoes = observacoes
+    if _vitrine_origem(item):
+        marcadores_vitrine = [ln for ln in str(item.observacoes or "").splitlines() if ln.strip().startswith("[VITRINE_")]
+        origem_txt = "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente."
+        partes = marcadores_vitrine + [origem_txt]
+        if observacoes.strip() and observacoes.strip() != origem_txt:
+            partes.append(observacoes.strip())
+        item.observacoes = "\n".join(partes).strip()
+    else:
+        item.observacoes = observacoes
 
     tem_itens = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count() > 0
 
@@ -17234,20 +17308,22 @@ def vitrine_publica_reservar(
     }
 
     fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
-    # Pré-reserva é uma etapa ANTERIOR ao contrato. Não cria Cliente, Solicitação,
-    # rascunho nem reserva de estoque. A empresa decide na Vitrine entre atender
-    # (quando então o contrato nasce) ou abrir a indicação no LokaFest.
+    # Reaproveita o rascunho padrão do Connect. Quando a empresa exige análise,
+    # a vitrine já grava o mesmo contrato em status pre_reserva, com os itens e a
+    # composição comercial preenchidos. A aprovação apenas libera o cadastro do
+    # cliente; não existe um fluxo paralelo de oportunidade.
     if fluxo == "aprovacao":
         pedido_ctx = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
-        oportunidade = _criar_oportunidade_vitrine(
-            db, empresa, pedido_ctx, whatsapp_pedido, autorizou_parceiros=bool(autoriza_parceiros)
+        solicitacao = _criar_pre_reserva_vitrine(
+            db, empresa, pedido_ctx, whatsapp_pedido,
+            autorizou_parceiros=bool(autoriza_parceiros), pendente_aprovacao=True
         )
         db.commit()
-        db.refresh(oportunidade)
+        db.refresh(solicitacao)
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
-        return RedirectResponse(f"/e/{slug}/pedido-vitrine/{oportunidade.public_token}", status_code=303)
+        return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
 
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
@@ -17913,8 +17989,8 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
 def cadastro_pre_reserva_aprovada(slug: str, solicitacao_ref: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_ref) if empresa else None
-    if not empresa or not item or item.empresa_id != empresa.id or item.status != "vitrine_aprovada":
-        raise HTTPException(404, "Pré-reserva ainda não foi aprovada.")
+    if not empresa or not item or item.empresa_id != empresa.id or not _vitrine_cadastro_liberado(item):
+        raise HTTPException(404, "Pedido da vitrine ainda não foi liberado para cadastro.")
     pedido = _pedido_vitrine_solicitacao(db, item)
     form = {
         "telefone": item.cliente.telefone or item.cliente.identificador or "" if item.cliente else "",
@@ -17992,8 +18068,8 @@ def salvar_pre_cadastro(
     pre_reserva_existente = None
     if pre_reserva_token:
         pre_reserva_existente = _solicitacao_publica_por_ref(db, empresa, pre_reserva_token)
-        if not pre_reserva_existente or pre_reserva_existente.empresa_id != empresa.id or pre_reserva_existente.status != "vitrine_aprovada":
-            raise HTTPException(404, "Pré-reserva não encontrada ou ainda não aprovada.")
+        if not pre_reserva_existente or pre_reserva_existente.empresa_id != empresa.id or not _vitrine_cadastro_liberado(pre_reserva_existente):
+            raise HTTPException(404, "Pedido da vitrine não encontrado ou ainda não liberado para cadastro.")
     pedido_vitrine = _pedido_vitrine_solicitacao(db, pre_reserva_existente) if pre_reserva_existente else _pedido_vitrine_sessao(request, db, empresa)
     if pedido_vitrine:
         # O mesmo endereço usado no cálculo do deslocamento segue para o rascunho do contrato.
@@ -18198,7 +18274,9 @@ def salvar_pre_cadastro(
         solicitacao.local_responsavel_nome = local_responsavel_nome; solicitacao.local_responsavel_telefone = local_responsavel_telefone
         solicitacao.acesso_local = acesso_local
         marcadores = "\n".join(l for l in str(solicitacao.observacoes or "").splitlines() if l.startswith("[VITRINE_"))
-        solicitacao.observacoes = (marcadores + ("\n" if marcadores and observacoes.strip() else "") + observacoes.strip()).strip()
+        origem_visivel = "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente." if _vitrine_origem(solicitacao) else ""
+        partes_obs = [p for p in [marcadores, origem_visivel, observacoes.strip()] if p]
+        solicitacao.observacoes = "\n".join(partes_obs).strip()
         solicitacao.responsavel_contrato = responsavel_pre_nome[:120] if responsavel_pre_nome else solicitacao.responsavel_contrato
         solicitacao.responsavel_contrato_telefone = responsavel_pre_telefone[:30] if responsavel_pre_telefone else solicitacao.responsavel_contrato_telefone
         db.flush()
@@ -18297,6 +18375,12 @@ def salvar_pre_cadastro(
 
     if pedido_vitrine:
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
+        # Se este rascunho veio da vitrine e já foi liberado pelo atendente, a
+        # validação acabou. Não volta para análise: segue exatamente o fluxo direto.
+        if pre_reserva_existente and _vitrine_origem(solicitacao):
+            if solicitacao.contrato_id:
+                return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
+            return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
         fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar")) or bool(pedido_vitrine.get("possui_sob_consulta"))
         if precisa_aprovacao or solicitacao.status == "pre_reserva":
