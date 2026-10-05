@@ -23,12 +23,11 @@
     <input type="hidden" name="volume_logistico" value="1"><input type="hidden" name="carga_pontos" value="1">
 
     <section class="produto-bloco" id="principal">
-      <div class="produto-bloco-cab"><span class="produto-num">1</span><div><h2>Informações principais</h2><p>O que identifica o item e organiza sua posição na vitrine.</p></div></div>
+      <div class="produto-bloco-cab"><span class="produto-num">1</span><div><h2>Informações principais</h2><p>O que identifica o item. A posição na vitrine é organizada visualmente na lista de produtos.</p></div></div>
       <div class="produto-corpo">
         <div class="produto-grade">
           <div><label>Nome do produto/serviço *</label><input name="nome" value="{{ produto.nome if produto else '' }}" required></div>
           <div><label>Categoria da vitrine</label><select name="vitrine_categoria"><option value="">Sem categoria</option>{% for c in categorias_vitrine %}<option value="{{ c.nome }}" {% if produto and produto.vitrine_categoria == c.nome %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}</select><small class="texto-ajuda">As categorias são gerenciadas em <a href="/painel/categorias-vitrine">Cadastros → Categorias da vitrine</a>.</small></div>
-          <div><label>Ordem de exibição</label><input name="vitrine_ordem" type="number" value="{{ produto.vitrine_ordem if produto else 0 }}"><small class="texto-ajuda">A categoria é ordenada primeiro; depois vem a ordem do item.</small></div>
         </div>
         <label>Descrição para o cliente</label><textarea name="descricao" rows="4" placeholder="Explique o item de forma clara. Se não fizer sentido, deixe em branco.">{{ produto.descricao if produto else '' }}</textarea>
       </div>

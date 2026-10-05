@@ -7609,7 +7609,7 @@ def categorias_vitrine_painel(request: Request, db: Session = Depends(get_db), e
 
 @app.post("/painel/vitrine/categorias")
 def salvar_categoria_vitrine(
-        categoria_id: str = Form(""), nome: str = Form(...), ordem: int = Form(0),
+        categoria_id: str = Form(""), nome: str = Form(...), ordem: str = Form(""),
         ativa: Optional[str] = Form(None), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     nome_limpo = " ".join((nome or "").strip().split())[:80]
     if not nome_limpo:
@@ -7624,16 +7624,50 @@ def salvar_categoria_vitrine(
     if conflito and (not categoria or conflito.id != categoria.id):
         raise HTTPException(400, "Já existe uma categoria com este nome.")
     nome_anterior = categoria.nome if categoria else ""
+    nova_categoria = categoria is None
     if not categoria:
         categoria = VitrineCategoria(empresa_id=empresa.id)
         db.add(categoria)
     categoria.nome = nome_limpo
-    categoria.ordem = int(ordem or 0)
+    ordem_texto = str(ordem or "").strip()
+    if ordem_texto.lstrip("-").isdigit():
+        categoria.ordem = int(ordem_texto)
+    elif nova_categoria:
+        maior_ordem = db.query(func.max(VitrineCategoria.ordem)).filter(VitrineCategoria.empresa_id == empresa.id).scalar() or 0
+        categoria.ordem = int(maior_ordem) + 10
+    # Em edição, sem campo numérico, preserva a posição atual.
     categoria.ativa = bool(ativa)
     if nome_anterior and nome_anterior.casefold() != nome_limpo.casefold():
         db.query(ProdutoServico).filter(
             ProdutoServico.empresa_id == empresa.id, func.lower(ProdutoServico.vitrine_categoria) == nome_anterior.lower()
         ).update({ProdutoServico.vitrine_categoria: nome_limpo}, synchronize_session=False)
+    db.commit()
+    return RedirectResponse("/painel/categorias-vitrine", status_code=303)
+
+
+def _normalizar_ordem_categorias_vitrine(db: Session, empresa_id: int) -> list[VitrineCategoria]:
+    categorias = db.query(VitrineCategoria).filter(VitrineCategoria.empresa_id == empresa_id).order_by(
+        VitrineCategoria.ordem.asc(), VitrineCategoria.nome.asc(), VitrineCategoria.id.asc()
+    ).all()
+    for pos, categoria in enumerate(categorias, start=1):
+        categoria.ordem = pos * 10
+    return categorias
+
+
+@app.post("/painel/vitrine/categoria/{categoria_id}/mover")
+def mover_categoria_vitrine(
+        categoria_id: int, direcao: str = Form(...), db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    categoria = db.get(VitrineCategoria, categoria_id)
+    if not categoria or categoria.empresa_id != empresa.id:
+        raise HTTPException(404)
+    categorias = _normalizar_ordem_categorias_vitrine(db, empresa.id)
+    indice = next((i for i, item in enumerate(categorias) if item.id == categoria.id), -1)
+    destino = indice - 1 if direcao == "cima" else indice + 1 if direcao == "baixo" else indice
+    if indice >= 0 and 0 <= destino < len(categorias) and destino != indice:
+        categorias[indice], categorias[destino] = categorias[destino], categorias[indice]
+    for pos, item in enumerate(categorias, start=1):
+        item.ordem = pos * 10
     db.commit()
     return RedirectResponse("/painel/categorias-vitrine", status_code=303)
 
@@ -7898,6 +7932,36 @@ def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa =
     })
 
 
+def _produtos_mesma_categoria(db: Session, empresa_id: int, categoria: str | None) -> list[ProdutoServico]:
+    consulta = db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa_id)
+    if categoria:
+        consulta = consulta.filter(func.lower(ProdutoServico.vitrine_categoria) == categoria.lower())
+    else:
+        consulta = consulta.filter(ProdutoServico.vitrine_categoria.is_(None))
+    itens = consulta.order_by(ProdutoServico.vitrine_ordem.asc(), ProdutoServico.nome.asc(), ProdutoServico.id.asc()).all()
+    for pos, item in enumerate(itens, start=1):
+        item.vitrine_ordem = pos * 10
+    return itens
+
+
+@app.post("/painel/produto/{produto_id}/mover")
+def mover_produto_vitrine(
+        produto_id: int, direcao: str = Form(...), db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa.id:
+        raise HTTPException(404)
+    itens = _produtos_mesma_categoria(db, empresa.id, produto.vitrine_categoria)
+    indice = next((i for i, item in enumerate(itens) if item.id == produto.id), -1)
+    destino = indice - 1 if direcao == "cima" else indice + 1 if direcao == "baixo" else indice
+    if indice >= 0 and 0 <= destino < len(itens) and destino != indice:
+        itens[indice], itens[destino] = itens[destino], itens[indice]
+    for pos, item in enumerate(itens, start=1):
+        item.vitrine_ordem = pos * 10
+    db.commit()
+    return RedirectResponse("/painel/produtos", status_code=303)
+
+
 def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, produto: ProdutoServico | None):
     usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
@@ -8006,7 +8070,7 @@ def salvar_produto_url(
         permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
-        vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        vitrine_categoria: str = Form(""), vitrine_ordem: str = Form(""),
         preco_por_tipo_evento: Optional[str] = Form(None),
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
@@ -8049,7 +8113,7 @@ def salvar_produto(
         permite_interno: bool = Form(False), permite_mala: bool = Form(False), permite_teto: bool = Form(False),
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
-        vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        vitrine_categoria: str = Form(""), vitrine_ordem: str = Form(""),
         preco_por_tipo_evento: Optional[str] = Form(None),
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
@@ -8072,6 +8136,9 @@ def salvar_produto(
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
     if produto and produto.empresa_id != empresa.id:
         raise HTTPException(404)
+    produto_existente = produto is not None
+    categoria_anterior = produto.vitrine_categoria if produto else None
+    ordem_anterior = int(produto.vitrine_ordem or 0) if produto else 0
     if not produto:
         produto = ProdutoServico(empresa_id=empresa.id)
         db.add(produto)
@@ -8100,8 +8167,21 @@ def salvar_produto(
         VitrineCategoria.empresa_id == empresa.id, VitrineCategoria.ativa == True,
         func.lower(VitrineCategoria.nome) == categoria_nome.lower(),
     ).first() if categoria_nome else None
-    produto.vitrine_categoria = categoria_valida.nome if categoria_valida else None
-    produto.vitrine_ordem = int(vitrine_ordem or 0)
+    nova_categoria_produto = categoria_valida.nome if categoria_valida else None
+    produto.vitrine_categoria = nova_categoria_produto
+    ordem_texto = str(vitrine_ordem or "").strip()
+    if ordem_texto.lstrip("-").isdigit():
+        produto.vitrine_ordem = int(ordem_texto)
+    elif produto_existente and str(categoria_anterior or "").casefold() == str(nova_categoria_produto or "").casefold():
+        produto.vitrine_ordem = ordem_anterior
+    else:
+        consulta_ordem = db.query(func.max(ProdutoServico.vitrine_ordem)).filter(ProdutoServico.empresa_id == empresa.id)
+        if nova_categoria_produto:
+            consulta_ordem = consulta_ordem.filter(func.lower(ProdutoServico.vitrine_categoria) == nova_categoria_produto.lower())
+        else:
+            consulta_ordem = consulta_ordem.filter(ProdutoServico.vitrine_categoria.is_(None))
+        maior_ordem = consulta_ordem.scalar() or 0
+        produto.vitrine_ordem = int(maior_ordem) + 10
     produto.preco_por_tipo_evento = bool(preco_por_tipo_evento)
     db.flush()
     _salvar_precos_evento_produto(
