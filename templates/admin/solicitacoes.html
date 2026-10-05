@@ -2,19 +2,51 @@
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Contratos e reservas</h1>
+
+<form method="get" class="filtro-periodo" style="margin-bottom:14px">
+  <label style="min-width:220px;flex:1">
+    <span>Buscar cliente</span>
+    <input name="busca" value="{{ busca or '' }}" placeholder="Nome, WhatsApp, CPF ou CNPJ">
+  </label>
+  <label>
+    <span>Início</span>
+    <input type="date" name="data_inicial" value="{{ data_inicial or '' }}">
+  </label>
+  <label>
+    <span>Fim</span>
+    <input type="date" name="data_final" value="{{ data_final or '' }}">
+  </label>
+  <div class="filtros-status-agenda">
+    <label class="check"><input type="checkbox" name="ativos" value="1" {% if filtro_ativos %}checked{% endif %}> Ativos</label>
+    <label class="check"><input type="checkbox" name="credito" value="1" {% if filtro_credito %}checked{% endif %}> Em crédito</label>
+    <label class="check"><input type="checkbox" name="cancelados" value="1" {% if filtro_cancelados %}checked{% endif %}> Cancelados</label>
+  </div>
+  <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+    <button class="botao" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
+    <a class="botao-secundario" href="/painel/solicitacoes"><i class="bi bi-x-circle"></i> Limpar filtros</a>
+  </div>
+</form>
+
 <div class="lista-agenda agenda-compacta">
 {% for s in itens %}
   {% set item_nome = s.produto.nome if s.produto else "A definir" %}
-  <a class="linha-agenda {{ classe_alerta_contrato(s.status) }}" href="/painel/solicitacao/{{ s.id }}">
-    <div class="data-agenda">{{ s.data_evento.strftime('%d/%m') }}</div>
+  {% set eh_credito = s.status == "aguardando_nova_data" %}
+  {% set eh_cancelado = s.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
+  <a class="linha-agenda {{ classe_alerta_contrato(s.status) }}{% if eh_credito %} agenda-credito{% elif eh_cancelado %} agenda-cancelado{% endif %}" href="/painel/solicitacao/{{ s.id }}">
+    <div class="data-agenda">{{ s.data_evento.strftime('%d/%m') if s.data_evento else '-' }}</div>
     <div class="info-agenda">
-      <b>{{ s.hora_inicio.strftime('%H:%M') }} · {{ s.cliente.nome }}</b>
-      <small>{{ item_nome }} · {{ s.bairro or '-' }}</small>
+      <b>{{ s.hora_inicio.strftime('%H:%M') if s.hora_inicio else '-' }} · {{ s.cliente.nome if s.cliente else 'Cliente' }}</b>
+      <small>
+        {% if s.itens %}{% for ri in s.itens %}{% if not loop.first %} + {% endif %}{% if (ri.quantidade or 1) > 1 %}{{ ri.quantidade }}x {% endif %}{{ ri.nome }}{% endfor %}{% else %}{{ item_nome }}{% endif %}
+        · {{ s.bairro or '-' }}
+      </small>
+      {% if eh_credito %}<small class="financeiro-mini">Situação: Em crédito</small>{% elif eh_cancelado %}<small class="financeiro-mini">Situação: Cancelado</small>{% endif %}
+      {% if s.responsavel_contrato_exibicao %}<small class="responsavel-card-mini">Resp.: {{ s.responsavel_contrato_exibicao }}</small>{% endif %}
     </div>
     <span class="seta-card">›</span>
   </a>
 {% else %}
-  <div class="box"><p>Nenhum contrato ou reserva encontrado.</p></div>
+  <div class="box"><p>Nenhum contrato ou reserva encontrado com estes filtros.</p></div>
 {% endfor %}
 </div>
 {% endblock %}

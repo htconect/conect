@@ -2159,6 +2159,9 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_modelo VARCHAR(30) DEFAULT 'moderno'")
     if "vitrine_botao_texto" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_botao_texto VARCHAR(60) DEFAULT 'Adicionar ao pedido'")
+    if "catalogo_musicas_url" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN catalogo_musicas_url VARCHAR(500)")
+        comandos.append("UPDATE empresas SET catalogo_musicas_url = 'https://karaokerj.com.br/catalogo' WHERE lower(slug) IN ('karaokerj', 'karaoke-rj') OR lower(nome) IN ('karaokê rj', 'karaoke rj')")
     if "frete_tipo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_tipo VARCHAR(20) DEFAULT 'consultar'")
     if "frete_valor_fixo" not in cols_emp:
@@ -2187,6 +2190,9 @@ def garantir_colunas_novas():
         nova_col_inteligencia = True
     if "vitrine_fluxo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_fluxo VARCHAR(20) DEFAULT 'direto'")
+    if "vitrine_link_direto_token" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_link_direto_token VARCHAR(64)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_empresas_vitrine_link_direto_token ON empresas (vitrine_link_direto_token)")
     if "lokafest_ativo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN lokafest_ativo BOOLEAN DEFAULT false")
     if "lokafest_url" not in cols_emp:
@@ -3793,6 +3799,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_hora_maxima VARCHAR(5) DEFAULT '22:00'",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_primeira_valor FLOAT DEFAULT 100",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_link_direto_token VARCHAR(64)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
@@ -3818,6 +3825,7 @@ def _garantir_colunas_v113_criticas() -> None:
                         criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
                     )
                 """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_empresas_vitrine_link_direto_token ON empresas (vitrine_link_direto_token)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_empresa_id ON bloqueios_data (empresa_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_inicio ON bloqueios_data (data_inicio)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_fim ON bloqueios_data (data_fim)"))
@@ -4498,10 +4506,11 @@ def admin_geral_logado(request: Request):
 @app.get("/admin/performance", response_class=HTMLResponse)
 def admin_performance(
         request: Request,
-        limit: int = 200,
+        limit: int = 40,
         ok: bool = Depends(admin_geral_logado),
 ):
     """Painel temporário de diagnóstico, sem dados pessoais ou parâmetros SQL."""
+    limit = max(10, min(int(limit or 40), 80))
     resumo = performance_summary(limit)
     return templates.TemplateResponse("admin/performance.html", {
         "request": request,
@@ -4515,9 +4524,10 @@ def admin_performance(
 
 @app.get("/admin/performance/dados", response_class=JSONResponse)
 def admin_performance_dados(
-        limit: int = 200,
+        limit: int = 80,
         ok: bool = Depends(admin_geral_logado),
 ):
+    limit = max(10, min(int(limit or 80), 120))
     resumo = performance_summary(limit)
     return {"monitor": monitor_status(), **resumo}
 
@@ -5749,11 +5759,30 @@ def _comprometimento_recursos_data(
         empresa_id: int,
         data_consulta: date,
         excluir_solicitacao_id: int | None = None,
+        reservas: list[Solicitacao] | None = None,
 ) -> dict[int, int]:
+    """Soma recursos comprometidos em lote, sem consultar ajustes reserva a reserva."""
     mapa_produtos = _mapa_recursos_produtos(db, empresa_id)
+    reservas = list(reservas) if reservas is not None else _reservas_ativas_na_data(
+        db, empresa_id, data_consulta, excluir_solicitacao_id
+    )
+    ids = [int(r.id) for r in reservas if getattr(r, "id", None)]
+    ajustes_por_solicitacao: dict[int, dict[int, int]] = {}
+    if ids:
+        rows = db.query(SolicitacaoRecurso).filter(
+            SolicitacaoRecurso.empresa_id == empresa_id,
+            SolicitacaoRecurso.solicitacao_id.in_(ids),
+        ).all()
+        for row in rows:
+            ajustes_por_solicitacao.setdefault(int(row.solicitacao_id), {})[int(row.item_estoque_id)] = max(0, int(row.quantidade or 0))
+
     totais: dict[int, int] = {}
-    for reserva in _reservas_ativas_na_data(db, empresa_id, data_consulta, excluir_solicitacao_id):
-        _, efetivo, _ = _requisitos_solicitacao_efetivos(db, reserva, mapa_produtos)
+    for reserva in reservas:
+        efetivo = _requisitos_solicitacao_padrao(reserva, mapa_produtos)
+        ajustes = ajustes_por_solicitacao.get(int(reserva.id), {})
+        for item_estoque_id in list(efetivo.keys()):
+            if item_estoque_id in ajustes:
+                efetivo[item_estoque_id] = ajustes[item_estoque_id]
         for item_estoque_id, qtd in efetivo.items():
             if qtd <= 0:
                 continue
@@ -7840,21 +7869,22 @@ def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) ->
 
 
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, tipo_evento: str = "residencial") -> list[dict]:
-    """Disponibilidade pública com preço já resolvido para o tipo de evento escolhido."""
+    """Disponibilidade pública em lote, sem consultas repetidas por produto."""
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_consulta)
     _garantir_categorias_vitrine_existentes(db, empresa)
     _garantir_tipos_evento_padrao(db, empresa)
-    categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
-    ordem_categoria = {c.nome.casefold(): (int(c.ordem or 0), c.nome) for c in categorias}
-    categorias_cadastradas = {c.nome.casefold() for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)}
-    categorias_inativas = {
-        c.nome.casefold() for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False) if not c.ativa
-    }
+
+    # Uma única leitura de categorias atende ordem, cadastro e inativas.
+    categorias_todas = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
+    categorias_ativas = [c for c in categorias_todas if bool(c.ativa)]
+    ordem_categoria = {c.nome.casefold(): (int(c.ordem or 0), c.nome) for c in categorias_ativas}
+    categorias_cadastradas = {c.nome.casefold() for c in categorias_todas}
+    categorias_inativas = {c.nome.casefold() for c in categorias_todas if not c.ativa}
 
     produtos = (
         db.query(ProdutoServico)
-        .options(selectinload(ProdutoServico.fotos), selectinload(ProdutoServico.opcionais))
+        .options(selectinload(ProdutoServico.fotos))
         .filter(
             ProdutoServico.empresa_id == empresa.id,
             ProdutoServico.ativo == True,
@@ -7862,12 +7892,46 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
         )
         .all()
     )
-    produtos = [p for p in produtos if (str(p.vitrine_categoria or '').strip().casefold() not in categorias_inativas)]
+    produtos = [p for p in produtos if str(p.vitrine_categoria or '').strip().casefold() not in categorias_inativas]
     produtos.sort(key=lambda p: (
         ordem_categoria.get(str(p.vitrine_categoria or '').strip().casefold(), (999999, str(p.vitrine_categoria or 'Outros')))[0],
         int(p.vitrine_ordem or 0),
         str(p.nome or '').casefold(),
     ))
+    produto_ids = [int(p.id) for p in produtos]
+
+    # Tipo de evento e configurações de preço/duração são carregados uma única vez.
+    tipo_cfg = _tipo_evento_empresa_por_chave(db, empresa.id, tipo_evento)
+    duracao_base = _duracao_padrao_empresa(empresa)
+    if tipo_cfg and getattr(tipo_cfg, "duracao_minutos", None):
+        try:
+            duracao_base = max(60, int(tipo_cfg.duracao_minutos or duracao_base))
+        except Exception:
+            pass
+    precos_evento: dict[int, ProdutoPrecoEvento] = {}
+    if tipo_cfg and produto_ids:
+        for cfg in db.query(ProdutoPrecoEvento).filter(
+            ProdutoPrecoEvento.empresa_id == empresa.id,
+            ProdutoPrecoEvento.tipo_evento_id == tipo_cfg.id,
+            ProdutoPrecoEvento.produto_id.in_(produto_ids),
+        ).all():
+            precos_evento[int(cfg.produto_id)] = cfg
+
+    # O catálogo de opcionais é da empresa; por produto guardamos apenas exclusões.
+    catalogo_opcionais = []
+    excluidos_por_produto: dict[int, set[int]] = {}
+    if produto_ids and any(bool(getattr(p, "utiliza_opcionais", False)) for p in produtos):
+        catalogo_opcionais = [
+            o for o in _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True)
+            if int(o.quantidade or 0) > 0
+        ]
+        for pid, oid in db.query(
+            ProdutoOpcionalExclusao.produto_id, ProdutoOpcionalExclusao.opcional_id
+        ).filter(
+            ProdutoOpcionalExclusao.empresa_id == empresa.id,
+            ProdutoOpcionalExclusao.produto_id.in_(produto_ids),
+        ).all():
+            excluidos_por_produto.setdefault(int(pid), set()).add(int(oid))
 
     reservas_do_dia = _reservas_ativas_na_data(db, empresa.id, data_consulta)
     alugado_por_produto: dict[int, int] = {}
@@ -7875,11 +7939,12 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
         for ri in reserva.itens:
             if not ri.produto_id:
                 continue
-            alugado_por_produto[int(ri.produto_id)] = alugado_por_produto.get(int(ri.produto_id), 0) + max(1, int(ri.quantidade or 1))
+            pid = int(ri.produto_id)
+            alugado_por_produto[pid] = alugado_por_produto.get(pid, 0) + max(1, int(ri.quantidade or 1))
 
     usa_recursos = _empresa_modulo_ativo(empresa, 'recursos')
     mapa_recursos = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
-    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta) if usa_recursos else {}
+    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta, reservas=reservas_do_dia) if usa_recursos else {}
     itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)} if usa_recursos else {}
 
     saida = []
@@ -7895,11 +7960,37 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             disponiveis = disponivel_fisico
         if bloqueio_data:
             disponiveis = 0
+
         categoria = str(produto.vitrine_categoria or '').strip()
-        fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
-        preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
-        duracao_vitrine = _duracao_vitrine_produto(db, empresa, produto, tipo_evento)
-        opcionais = [o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True) if int(o.quantidade or 0) > 0]
+        fotos_publicas = [
+            str(f.arquivo_url or '') for f in (produto.fotos or [])
+            if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))
+        ]
+
+        valor_normal = max(float(produto.valor_base or 0), 0.0)
+        cfg = precos_evento.get(int(produto.id)) if bool(getattr(produto, "preco_por_tipo_evento", False)) else None
+        modo = str(getattr(cfg, "modo", "normal") or "normal").lower() if cfg else "normal"
+        if modo == "consulta":
+            preco = {"modo": "consulta", "valor": None, "valor_normal": valor_normal, "sob_consulta": True, "promocao": False}
+        elif modo == "especifico":
+            valor_especifico = max(float(getattr(cfg, "valor", 0) or 0), 0.0)
+            preco = {
+                "modo": "especifico", "valor": valor_especifico, "valor_normal": valor_normal,
+                "sob_consulta": False, "promocao": valor_especifico < (valor_normal - 0.009),
+            }
+        else:
+            preco = {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
+
+        duracao_vitrine = duracao_base
+        if cfg and str(getattr(cfg, "horas_modo", "padrao") or "padrao").lower() == "adicionar":
+            duracao_vitrine += max(0, int(getattr(cfg, "horas_adicionais", 0) or 0)) * 60
+
+        if bool(getattr(produto, "utiliza_opcionais", False)):
+            excluidos = excluidos_por_produto.get(int(produto.id), set())
+            opcionais = [o for o in catalogo_opcionais if int(o.id) not in excluidos]
+        else:
+            opcionais = []
+
         saida.append({
             'produto': produto,
             'disponiveis': max(0, int(disponiveis)),
@@ -7914,8 +8005,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             'preco_normal': preco.get('valor_normal'),
             'promocao': bool(preco.get('promocao')),
             'sob_consulta': bool(preco.get('sob_consulta')),
-            'duracao_minutos': duracao_vitrine,
-            'duracao_rotulo': _rotulo_duracao_minutos(duracao_vitrine),
+            'duracao_minutos': max(60, int(duracao_vitrine)),
+            'duracao_rotulo': _rotulo_duracao_minutos(max(60, int(duracao_vitrine))),
             'opcionais': opcionais,
         })
     return saida
@@ -8830,10 +8921,15 @@ def alterar_senha_salvar(
 @app.get("/painel/empresa", response_class=HTMLResponse)
 def cadastro_empresa_guiado(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     _garantir_tipos_evento_padrao(db, empresa)
+    if not _token_vitrine_direta(empresa):
+        empresa.vitrine_link_direto_token = secrets.token_urlsafe(24)[:48]
+        db.commit()
+        db.refresh(empresa)
     return templates.TemplateResponse("admin/empresa_guiada.html", {
         "request": request,
         "empresa": empresa,
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
+        "link_direto": url_publica(request, f"/e/{empresa.slug}/direto/{empresa.vitrine_link_direto_token}"),
         "salvo": request.query_params.get("salvo", ""),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
         "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
@@ -8873,6 +8969,7 @@ async def salvar_cadastro_empresa_guiado(
         vitrine_descricao: str = Form(""),
         vitrine_modelo: str = Form("moderno"),
         vitrine_botao_texto: str = Form("Adicionar ao pedido"),
+        catalogo_musicas_url: str = Form(""),
         vitrine_cor_primaria: str = Form("#6D4AFF"),
         vitrine_cor_secundaria: str = Form("#EEF0FF"),
         lokafest_ativo: Optional[str] = Form(None),
@@ -8929,6 +9026,10 @@ async def salvar_cadastro_empresa_guiado(
     modelo = (vitrine_modelo or "moderno").strip().lower()
     empresa.vitrine_modelo = modelo if modelo in {"classico", "moderno", "divertido"} else "moderno"
     empresa.vitrine_botao_texto = (vitrine_botao_texto or "Adicionar ao pedido").strip()[:60] or "Adicionar ao pedido"
+    catalogo_url = (catalogo_musicas_url or "").strip()[:500]
+    if catalogo_url and not catalogo_url.lower().startswith(("http://", "https://")):
+        catalogo_url = "https://" + catalogo_url.lstrip("/")
+    empresa.catalogo_musicas_url = catalogo_url or None
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
     empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
     empresa.lokafest_ativo = bool(lokafest_ativo)
@@ -9411,6 +9512,18 @@ def remover_fundo_vitrine(db: Session = Depends(get_db), empresa: Empresa = Depe
     db.commit()
     empresa_cache_invalidar(empresa.id)
     return RedirectResponse("/painel/vitrine", status_code=303)
+
+
+@app.post("/painel/empresa/remover-capa")
+def remover_capa_empresa(db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    empresa.vitrine_fundo_url = None
+    empresa.vitrine_fundo_original_url = None
+    _limpar_midias_contexto(
+        db, empresa.id, {"capa-original", "capa-ajustada"}, set(), "empresa", empresa.id
+    )
+    db.commit()
+    empresa_cache_invalidar(empresa.id)
+    return RedirectResponse("/painel/empresa?salvo=1#vitrine", status_code=303)
 
 
 
@@ -10712,18 +10825,90 @@ def localizar_operacao_vinculada(
 
 
 @app.get("/painel/solicitacoes", response_class=HTMLResponse)
-def solicitacoes(request: Request, busca: str = "", db: Session = Depends(get_db),
-                 empresa: Empresa = Depends(empresa_logada)):
-    q = db.query(Solicitacao).filter_by(empresa_id=empresa.id)
-    termo = limpar_identificador(busca)
-    if termo:
-        q = q.join(Cliente).filter((Cliente.cpf.contains(termo)) | (Cliente.telefone.contains(termo)) | (
-            Cliente.identificador.contains(termo)))
-    itens = q.join(Cliente, Solicitacao.cliente_id == Cliente.id).order_by(Solicitacao.data_evento, Cliente.nome,
-                                                                           Solicitacao.hora_inicio,
-                                                                           Solicitacao.id).all()
-    return templates.TemplateResponse("admin/solicitacoes.html",
-                                      {"request": request, "empresa": empresa, "itens": itens, "busca": busca})
+def solicitacoes(
+        request: Request, busca: str = "", data_inicial: str = "", data_final: str = "",
+        ativos: str = "1", credito: str = "", cancelados: str = "",
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    """Lista de contratos com os filtros históricos preservados.
+
+    A Agenda pode abrir esta mesma tela já com período/status preenchidos; os filtros
+    continuam visíveis e editáveis. O carregamento usa eager loading para evitar o
+    N+1 de cliente/produto que chegou a gerar ~150 SELECTs por abertura.
+    """
+    q = (
+        db.query(Solicitacao)
+        .options(
+            joinedload(Solicitacao.cliente),
+            joinedload(Solicitacao.produto),
+            selectinload(Solicitacao.itens),
+            selectinload(Solicitacao.pagamentos),
+        )
+        .filter(Solicitacao.empresa_id == empresa.id)
+    )
+
+    busca_limpa = str(busca or "").strip()
+    if busca_limpa:
+        termo_num = limpar_identificador(busca_limpa)
+        q = q.join(Cliente, Solicitacao.cliente_id == Cliente.id)
+        filtros_busca = [Cliente.nome.ilike(f"%{busca_limpa}%")]
+        if termo_num:
+            filtros_busca.extend([
+                Cliente.cpf.contains(termo_num),
+                Cliente.cnpj.contains(termo_num),
+                Cliente.telefone.contains(termo_num),
+                Cliente.identificador.contains(termo_num),
+            ])
+        q = q.filter(or_(*filtros_busca))
+
+    def _data_filtro(valor: str):
+        try:
+            return datetime.strptime((valor or "").strip(), "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    inicio = _data_filtro(data_inicial)
+    fim = _data_filtro(data_final)
+    if inicio:
+        q = q.filter(Solicitacao.data_evento >= inicio)
+    if fim:
+        q = q.filter(Solicitacao.data_evento <= fim)
+
+    # Se a URL trouxer checkboxes de status (ex.: vinda da Agenda), respeita
+    # exatamente o que veio. Sem filtro explícito, mantém Ativos como padrão.
+    tem_status_na_url = any(chave in request.query_params for chave in ("ativos", "credito", "cancelados"))
+    if tem_status_na_url:
+        ativos = "1" if "ativos" in request.query_params else ""
+        credito = "1" if "credito" in request.query_params else ""
+        cancelados = "1" if "cancelados" in request.query_params else ""
+
+    status_credito = {"aguardando_nova_data"}
+    status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada"}
+    status_inativos = status_credito | status_cancelados
+    condicoes_status = []
+    if ativos:
+        condicoes_status.append(or_(Solicitacao.status.is_(None), ~Solicitacao.status.in_(list(status_inativos))))
+    if credito:
+        condicoes_status.append(Solicitacao.status.in_(list(status_credito)))
+    if cancelados:
+        condicoes_status.append(Solicitacao.status.in_(list(status_cancelados)))
+    if condicoes_status:
+        q = q.filter(or_(*condicoes_status))
+    else:
+        q = q.filter(Solicitacao.id == -1)
+
+    itens = q.order_by(
+        Solicitacao.data_evento.asc(),
+        Solicitacao.hora_inicio.asc(),
+        Solicitacao.id.asc(),
+    ).all()
+    _anexar_responsaveis_exibicao(itens)
+    return templates.TemplateResponse("admin/solicitacoes.html", {
+        "request": request, "empresa": empresa, "itens": itens, "busca": busca_limpa,
+        "data_inicial": inicio.isoformat() if inicio else "",
+        "data_final": fim.isoformat() if fim else "",
+        "filtro_ativos": bool(ativos), "filtro_credito": bool(credito),
+        "filtro_cancelados": bool(cancelados),
+    })
 
 
 
@@ -17082,18 +17267,62 @@ def assumir_comunicacao_operacao(
     return {"ok": True, "responsavel": solicitacao.responsavel_operacao}
 
 
+def _token_vitrine_direta(empresa: Empresa) -> str:
+    token = str(getattr(empresa, "vitrine_link_direto_token", "") or "").strip()
+    return token
+
+
+def _vitrine_direta_sessao_valida(request: Request, empresa: Empresa) -> bool:
+    dados = request.session.get(f"vitrine_direta_{empresa.slug}") or {}
+    token = str(dados.get("token") or "")
+    expira = float(dados.get("expira") or 0)
+    esperado = _token_vitrine_direta(empresa)
+    if not token or not esperado or expira < time_module.time():
+        request.session.pop(f"vitrine_direta_{empresa.slug}", None)
+        return False
+    return hmac.compare_digest(token, esperado)
+
+
+def _autorizar_vitrine_direta(request: Request, empresa: Empresa, token: str) -> bool:
+    esperado = _token_vitrine_direta(empresa)
+    informado = str(token or "").strip()
+    if not esperado or not informado or not hmac.compare_digest(esperado, informado):
+        return False
+    request.session[f"vitrine_direta_{empresa.slug}"] = {
+        "token": informado,
+        "expira": time_module.time() + 4 * 60 * 60,
+    }
+    return True
+
+
+@app.get("/e/{slug}/direto/{token}", response_class=HTMLResponse)
+def portal_empresa_direto(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not _autorizar_vitrine_direta(request, empresa, token):
+        raise HTTPException(404, "Link direto inválido")
+    return templates.TemplateResponse("publico/vitrine_inicio.html", {
+        "request": request,
+        "empresa": empresa,
+        "hoje": date.today().isoformat(),
+        "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
+        "modo_direto": True,
+    })
+
+
 @app.get("/e/{slug}", response_class=HTMLResponse)
 def portal_empresa(slug: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
-    if not getattr(empresa, "vitrine_ativa", True):
+    direto = _vitrine_direta_sessao_valida(request, empresa)
+    if not getattr(empresa, "vitrine_ativa", True) and not direto:
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
         "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
+        "modo_direto": direto,
     })
 
 
@@ -17113,7 +17342,8 @@ def vitrine_publica(
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
-    if not getattr(empresa, "vitrine_ativa", True):
+    direto = _vitrine_direta_sessao_valida(request, empresa)
+    if not getattr(empresa, "vitrine_ativa", True) and not direto:
         return RedirectResponse(f"/e/{slug}/identificar", status_code=303)
     try:
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -17121,7 +17351,6 @@ def vitrine_publica(
         return RedirectResponse(f"/e/{slug}", status_code=303)
     if data_obj < date.today():
         return RedirectResponse(f"/e/{slug}?erro=data", status_code=303)
-    _garantir_categorias_vitrine_existentes(db, empresa)
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     itens = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)
     nomes_presentes = {str(reg.get("categoria") or "Outros").casefold() for reg in itens}
@@ -17147,7 +17376,7 @@ def vitrine_publica(
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
-        "fluxo_vitrine": str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
+        "fluxo_vitrine": "direto" if direto else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
@@ -17157,9 +17386,9 @@ def vitrine_publica(
 
 @app.post("/e/{slug}/vitrine/calcular-deslocamento")
 def vitrine_calcular_deslocamento(
-        slug: str, cep: str = Form(...), numero: str = Form(...), db: Session = Depends(get_db)):
+        slug: str, request: Request, cep: str = Form(...), numero: str = Form(...), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or not getattr(empresa, "vitrine_ativa", True):
+    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
         raise HTTPException(404)
     resultado = _calcular_frete_vitrine(empresa, cep, numero)
     return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 400)
@@ -17167,9 +17396,9 @@ def vitrine_calcular_deslocamento(
 
 @app.post("/e/{slug}/vitrine/validar-cupom")
 def vitrine_validar_cupom(
-        slug: str, codigo: str = Form(""), data_evento: str = Form(""), db: Session = Depends(get_db)):
+        slug: str, request: Request, codigo: str = Form(""), data_evento: str = Form(""), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or not getattr(empresa, "vitrine_ativa", True):
+    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
         raise HTTPException(404)
     if not _empresa_modulo_ativo(empresa, "cupons"):
         return JSONResponse({"ok": False, "erro": "Cupons não estão disponíveis nesta vitrine."}, status_code=404)
@@ -17201,7 +17430,8 @@ def vitrine_publica_reservar(
         db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or not getattr(empresa, "vitrine_ativa", True):
+    direto = bool(empresa and _vitrine_direta_sessao_valida(request, empresa))
+    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not direto):
         raise HTTPException(404)
     try:
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -17210,7 +17440,9 @@ def vitrine_publica_reservar(
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     if _bloqueio_data_empresa(db, empresa.id, data_obj):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=data_bloqueada", status_code=303)
-    disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)}
+    itens_disponiveis = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)
+    disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in itens_disponiveis}
+    vitrine_por_produto = {int(reg["produto"].id): reg for reg in itens_disponiveis}
     opcionais_por_produto: dict[int, list[dict]] = {}
     for idx, pid_op_bruto in enumerate(opcional_produto_id or []):
         try:
@@ -17228,7 +17460,8 @@ def vitrine_publica_reservar(
             qtd = max(1, int(quantidade[idx] if idx < len(quantidade) else 1))
         except Exception:
             continue
-        produto = db.get(ProdutoServico, pid)
+        reg_vitrine = vitrine_por_produto.get(pid)
+        produto = reg_vitrine.get("produto") if reg_vitrine else None
         if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
             continue
         limite = max(0, int(disponiveis.get(pid, 0)))
@@ -17243,10 +17476,10 @@ def vitrine_publica_reservar(
     inicio_vitrine = datetime.strptime(hora_inicio_vitrine, "%H:%M").time()
     duracao_base_vitrine = 0
     for reg in pedido:
-        produto = db.get(ProdutoServico, int(reg.get("produto_id") or 0))
-        if produto:
-            duracao_base_vitrine = max(duracao_base_vitrine, _duracao_vitrine_produto(db, empresa, produto, tipo_evento))
-    duracao_base_vitrine = max(60, int(duracao_base_vitrine or 240))
+        vitrine_reg = vitrine_por_produto.get(int(reg.get("produto_id") or 0))
+        if vitrine_reg:
+            duracao_base_vitrine = max(duracao_base_vitrine, int(vitrine_reg.get("duracao_minutos") or 0))
+    duracao_base_vitrine = max(60, int(duracao_base_vitrine or _duracao_base_empresa_tipo(db, empresa, tipo_evento)))
     cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
     retirada_mesmo_dia_vitrine = bool(retirada_mesmo_dia) if cortesia_configurada else True
     horas_extra_vitrine = max(0, min(24, int(horas_adicionais_vitrine or 0)))
@@ -17307,7 +17540,7 @@ def vitrine_publica_reservar(
         },
     }
 
-    fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+    fluxo = "direto" if direto else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
     # Reaproveita o rascunho padrão do Connect. Quando a empresa exige análise,
     # a vitrine já grava o mesmo contrato em status pre_reserva, com os itens e a
     # composição comercial preenchidos. A aprovação apenas libera o cadastro do
@@ -17325,6 +17558,8 @@ def vitrine_publica_reservar(
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
         return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
 
+    if direto:
+        request.session.pop(f"vitrine_direta_{empresa.slug}", None)
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
 

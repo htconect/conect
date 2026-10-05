@@ -50,7 +50,7 @@
       {% if celula %}
         {% set r = celula.resumo %}
         {% if modo == 'contratos' %}
-          {% set destino = '/painel/agenda?visao=lista&data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&ativos=1&credito=1&cancelados=1' %}
+          {% set destino = '/painel/solicitacoes?data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&ativos=1&credito=1&cancelados=1' %}
         {% else %}
           {% set destino = '/painel/reservas?data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&mostrar_entregas=1&mostrar_retiradas=1' %}
         {% endif %}
@@ -73,7 +73,7 @@
   </div>
 
   <div class="agenda-rodape">
-    {% if modo == 'contratos' %}<a href="/painel/agenda?visao=lista&data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&ativos=1&credito=1&cancelados=1">Abrir lista do mês →</a>{% else %}<a href="/painel/reservas?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&mostrar_entregas=1&mostrar_retiradas=1">Abrir operação do mês →</a>{% endif %}
+    {% if modo == 'contratos' %}<a href="/painel/solicitacoes?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&ativos=1&credito=1&cancelados=1">Abrir lista do mês →</a>{% else %}<a href="/painel/reservas?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&mostrar_entregas=1&mostrar_retiradas=1">Abrir operação do mês →</a>{% endif %}
   </div>
 </div>
 {% endblock %}

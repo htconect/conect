@@ -54,6 +54,11 @@ def _sql_signature(statement: str) -> tuple[str, str, list[str]]:
 def enabled_for_path(path: str) -> bool:
     if not PERFORMANCE_MONITORING:
         return False
+    path = str(path or "")
+    # Assets, mídia e o próprio diagnóstico não ajudam a localizar gargalos de
+    # regra de negócio e só aumentam memória/log, podendo deixar o painel pesado.
+    if path.startswith(("/static/", "/midia/")) or path in {"/health", "/favicon.ico"} or path.startswith("/admin/performance"):
+        return False
     if not PERFORMANCE_ROUTES or "all" in PERFORMANCE_ROUTES:
         return True
     return any(path == prefix or path.startswith(prefix.rstrip("/") + "/") for prefix in PERFORMANCE_ROUTES)
@@ -177,7 +182,18 @@ class PerformanceMiddleware:
             if should_store:
                 record = dict(metrics)
                 _recent_records.appendleft(record)
-                logger.warning("PERF %s", json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+                # O detalhe completo permanece disponível no painel/JSON. No log do
+                # Render registramos só o resumo para não gerar linhas gigantes.
+                logger.warning("PERF %s", json.dumps({
+                    "request_id": record.get("request_id"),
+                    "method": record.get("method"),
+                    "path": record.get("path"),
+                    "status": record.get("status"),
+                    "total_ms": record.get("total_ms"),
+                    "sql_ms": record.get("sql_ms"),
+                    "sql_count": record.get("sql_count"),
+                    "error": record.get("error"),
+                }, ensure_ascii=False, separators=(",", ":")))
 
 
 def recent_records(limit: int = 100) -> list[dict[str, Any]]:

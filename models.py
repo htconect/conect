@@ -51,6 +51,7 @@ class Empresa(Base):
     vitrine_descricao = Column(String(500), nullable=True)
     vitrine_modelo = Column(String(30), default="moderno")
     vitrine_botao_texto = Column(String(60), default="Adicionar ao pedido")
+    catalogo_musicas_url = Column(String(500), nullable=True)
     frete_tipo = Column(String(20), default="consultar")  # consultar, fixo, km
     frete_valor_fixo = Column(Float, default=0)
     frete_valor_km = Column(Float, default=0)
@@ -68,6 +69,8 @@ class Empresa(Base):
     # Fluxo da vitrine: direto = cadastro da locação; aprovacao = oportunidade
     # anterior ao contrato, para a empresa decidir entre atender ou indicar no LokaFest.
     vitrine_fluxo = Column(String(20), default="direto")
+    # Link reutilizável que força o fluxo direto da vitrine sem alterar a regra pública.
+    vitrine_link_direto_token = Column(String(64), nullable=True, index=True)
     lokafest_ativo = Column(Boolean, default=False)
     lokafest_url = Column(String(300), nullable=True)
 

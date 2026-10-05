@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block conteudo %}
 <style>
-.perf-wrap{max-width:1450px;margin:0 auto;padding-bottom:40px}.perf-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.perf-actions{display:flex;gap:10px;flex-wrap:wrap}.perf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.perf-card{background:var(--card,#fff);border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px}.perf-card strong{font-size:1.7rem;display:block;margin-top:4px}.perf-table-wrap{overflow:auto;border:1px solid rgba(15,23,42,.12);border-radius:14px;background:var(--card,#fff);margin-top:14px}.perf-table{width:100%;border-collapse:collapse;min-width:920px}.perf-table th,.perf-table td{padding:11px 12px;border-bottom:1px solid rgba(15,23,42,.08);text-align:left;vertical-align:top}.perf-table th{position:sticky;top:0;background:#eef4ff;z-index:1}.perf-badge{display:inline-flex;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:700}.perf-ok{background:#dcfce7;color:#166534}.perf-warn{background:#fef3c7;color:#92400e}.perf-bad{background:#fee2e2;color:#991b1b}.perf-off{background:#e5e7eb;color:#374151}.perf-details{max-width:540px;white-space:normal}.perf-details summary{cursor:pointer;font-weight:700}.perf-details pre{white-space:pre-wrap;word-break:break-word;font-size:.75rem;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:9px;max-height:260px;overflow:auto}.perf-empty{padding:28px;text-align:center;color:#64748b}.perf-note{font-size:.88rem;color:#64748b}.perf-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.perf-alert{padding:10px 13px;border-radius:10px;background:#dcfce7;color:#166534;margin:12px 0}@media(max-width:850px){.perf-grid{grid-template-columns:repeat(2,1fr)}.perf-head{display:block}.perf-actions{margin-top:12px}}@media(max-width:520px){.perf-grid{grid-template-columns:1fr}}
+.perf-wrap{max-width:1450px;margin:0 auto;padding-bottom:40px}.perf-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.perf-actions{display:flex;gap:10px;flex-wrap:wrap}.perf-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:16px 0}.perf-card{background:var(--card,#fff);border:1px solid rgba(15,23,42,.12);border-radius:14px;padding:16px}.perf-card strong{font-size:1.7rem;display:block;margin-top:4px}.perf-table-wrap{overflow:auto;max-width:100%;border:1px solid rgba(15,23,42,.12);border-radius:14px;background:var(--card,#fff);margin-top:14px;scrollbar-gutter:stable}.perf-table{width:100%;border-collapse:collapse;min-width:920px}.perf-table th,.perf-table td{overflow-wrap:anywhere;word-break:break-word}.perf-table th:first-child,.perf-table td:first-child{position:sticky;left:0;background:var(--card,#fff);z-index:2}.perf-table th:first-child{background:#eef4ff;z-index:3}.perf-table th,.perf-table td{padding:11px 12px;border-bottom:1px solid rgba(15,23,42,.08);text-align:left;vertical-align:top}.perf-table th{position:sticky;top:0;background:#eef4ff;z-index:1}.perf-badge{display:inline-flex;padding:4px 9px;border-radius:999px;font-size:.78rem;font-weight:700}.perf-ok{background:#dcfce7;color:#166534}.perf-warn{background:#fef3c7;color:#92400e}.perf-bad{background:#fee2e2;color:#991b1b}.perf-off{background:#e5e7eb;color:#374151}.perf-details{max-width:540px;white-space:normal}.perf-details summary{cursor:pointer;font-weight:700}.perf-details pre{white-space:pre-wrap;word-break:break-word;font-size:.75rem;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:9px;max-height:260px;overflow:auto}.perf-empty{padding:28px;text-align:center;color:#64748b}.perf-note{font-size:.88rem;color:#64748b}.perf-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}.perf-alert{padding:10px 13px;border-radius:10px;background:#dcfce7;color:#166534;margin:12px 0}@media(max-width:850px){.perf-grid{grid-template-columns:repeat(2,1fr)}.perf-head{display:block}.perf-actions{margin-top:12px}.perf-table{min-width:780px}}@media(max-width:520px){.perf-grid{grid-template-columns:1fr}.perf-table{min-width:720px}}
 </style>
 <div class="perf-wrap">
   <div class="perf-head">
@@ -14,7 +14,7 @@
       <a class="botao" href="/admin">Voltar</a>
       <a class="botao" href="/admin/performance">Atualizar painel</a>
       <form method="post" action="/admin/performance/limpar" onsubmit="return confirm('Limpar os registros de diagnóstico desta instância?')">
-        <button type="submit">Limpar registros</button>
+        <button type="submit" class="botao-secundario">Limpar registros</button>
       </form>
     </div>
   </div>
@@ -47,7 +47,7 @@
   </div>
 
   <div class="box">
-    <div class="perf-toolbar"><div><h2>Requisições recentes</h2><p class="perf-note">Até {{ limite }} registros, mais recentes primeiro.</p></div><a class="botao" href="/admin/performance/dados?limit={{ limite }}" target="_blank">Ver JSON</a></div>
+    <div class="perf-toolbar"><div><h2>Requisições recentes</h2><p class="perf-note">Até {{ limite }} registros recentes. O JSON continua disponível para análise completa.</p></div><a class="botao" href="/admin/performance/dados?limit={{ limite }}" target="_blank">Ver JSON</a></div>
     <div class="perf-table-wrap">
       <table class="perf-table">
         <thead><tr><th>Horário UTC</th><th>Rota</th><th>Total</th><th>SQL</th><th>Queries</th><th>Status</th><th>Detalhes</th></tr></thead>
@@ -62,11 +62,11 @@
               {% if r.sql_groups %}
                 <h4>Consultas agrupadas</h4>
                 <p class="perf-note">Ordenadas pelo tempo total acumulado. Os parâmetros não são registrados.</p>
-                {% for sql in r.sql_groups %}
+                {% for sql in r.sql_groups[:8] %}
                   <pre>{{ sql.verb }} — {{ sql.count }}x — total {{ sql.total_ms }} ms — média {{ sql.avg_ms }} ms — máx. {{ sql.max_ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>
                 {% endfor %}
               {% endif %}
-              {% if r.slow_sql %}<h4>Execuções individuais lentas</h4>{% for sql in r.slow_sql %}<pre>{{ sql.verb }} — {{ sql.ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
+              {% if r.slow_sql %}<h4>Execuções individuais lentas</h4>{% for sql in r.slow_sql[:8] %}<pre>{{ sql.verb }} — {{ sql.ms }} ms{% if sql.tables %}\nTabelas: {{ sql.tables|join(', ') }}{% endif %}\n{{ sql.signature }}</pre>{% endfor %}{% endif %}
               {% if not r.stages and not r.sql_groups and not r.slow_sql %}<p class="perf-note">Sem detalhes adicionais neste registro.</p>{% endif %}
             </details></td>
           </tr>
@@ -76,4 +76,5 @@
     </div>
   </div>
 </div>
+<script>document.querySelectorAll('.perf-table-wrap').forEach(el=>{el.scrollLeft=0});</script>
 {% endblock %}
