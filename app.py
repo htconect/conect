@@ -2011,7 +2011,7 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     return "\n".join(linhas).strip()
 
 
-def montar_mensagem_whatsapp_saldo_operacao(request: Request, empresa: Empresa, item: Solicitacao) -> str:
+def montar_mensagem_whatsapp_saldo_operacao(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
     """Mensagem da Operação para solicitar somente o saldo pendente da reserva."""
     saldo = max(float(item.valor or 0) - float(item.valor_pago or 0), 0.0)
     link = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
@@ -8190,7 +8190,7 @@ def preparar_reservas(
             continue
         saldo = max(float(sol.valor or 0) - float(sol.valor_pago or 0), 0.0)
         sol.saldo_operacao_view = saldo
-        sol.mensagem_saldo_operacao_view = montar_mensagem_whatsapp_saldo_operacao(request, empresa, sol) if saldo > 0.009 else ""
+        sol.mensagem_saldo_operacao_view = montar_mensagem_whatsapp_saldo_operacao(request, empresa, sol, db) if saldo > 0.009 else ""
 
     # Mapa de vínculo entre ENTREGA e RETIRADA da mesma solicitação.
     # A consulta ignora os filtros da tela para permitir localizar também
