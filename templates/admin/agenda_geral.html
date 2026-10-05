@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+.agenda-geral{max-width:1220px;margin:0 auto}.agenda-geral-topo{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px}.agenda-geral-topo h1{margin:0}.agenda-modos{display:flex;gap:8px;background:#eef2f7;padding:5px;border-radius:14px}.agenda-modos a{padding:9px 15px;border-radius:10px;text-decoration:none;font-weight:850;color:#475569}.agenda-modos a.ativo{background:#fff;color:#155bb5;box-shadow:0 2px 9px rgba(15,23,42,.08)}.agenda-nav-mes{display:grid;grid-template-columns:48px 1fr 48px;gap:8px;align-items:center;margin:10px 0 14px}.agenda-nav-mes a{display:grid;place-items:center;height:44px;border:1px solid #dbe3ee;border-radius:12px;text-decoration:none;font-size:24px;background:#fff;color:#334155}.agenda-nav-mes strong{text-align:center;font-size:19px;text-transform:capitalize}.agenda-semana,.agenda-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}.agenda-semana span{text-align:center;font-size:.78rem;font-weight:850;color:#64748b;padding:5px}.agenda-dia{min-height:116px;border:1px solid #dbe3ee;background:#fff;border-radius:16px;padding:10px;text-decoration:none;color:#0f172a;display:flex;flex-direction:column;gap:7px;transition:.15s}.agenda-dia:hover{border-color:#8eb6ea;transform:translateY(-1px)}.agenda-dia.vazio{visibility:hidden}.agenda-numero{font-weight:900;font-size:1.05rem}.agenda-badge{display:inline-flex;align-items:center;width:max-content;max-width:100%;gap:5px;border-radius:999px;padding:5px 8px;font-size:.74rem;font-weight:850;background:#eef4ff;color:#155bb5}.agenda-badge.pendencia{background:#fff1f0;color:#b42318}.agenda-badge.retirada{background:#fff7e6;color:#b54708}.agenda-badge.entrega{background:#f0fdf4;color:#067647}.agenda-vazio-msg{font-size:.76rem;color:#94a3b8;margin-top:auto}.agenda-rodape{display:flex;justify-content:flex-end;margin-top:14px}.agenda-rodape a{text-decoration:none;font-weight:800}
+@media(max-width:720px){.agenda-semana,.agenda-grid{gap:4px}.agenda-semana span{font-size:.68rem}.agenda-dia{min-height:82px;padding:7px;border-radius:12px}.agenda-badge{font-size:.64rem;padding:4px 6px}.agenda-badge span{display:none}.agenda-vazio-msg{display:none}.agenda-numero{font-size:.95rem}.agenda-modos{width:100%}.agenda-modos a{flex:1;text-align:center}.agenda-geral-topo{align-items:flex-start}}
+</style>
+{% endblock %}
+{% block conteudo %}
+<div class="agenda-geral">
+  <div class="agenda-geral-topo">
+    <div><a class="voltar" href="/painel">← Início</a><h1>Agenda</h1><p class="texto-discreto">Visão geral do mês. Clique em um dia para abrir a tela que você já usa.</p></div>
+    <div class="agenda-modos">
+      <a class="{% if modo == 'contratos' %}ativo{% endif %}" href="/painel/agenda?modo=contratos&mes={{ referencia.strftime('%Y-%m') }}">Contratos</a>
+      {% if pode_operacao %}<a class="{% if modo == 'operacao' %}ativo{% endif %}" href="/painel/agenda?modo=operacao&mes={{ referencia.strftime('%Y-%m') }}">Operação</a>{% endif %}
+    </div>
+  </div>
+
+  <div class="agenda-nav-mes">
+    <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_anterior }}" aria-label="Mês anterior">‹</a>
+    <strong>{{ mes_titulo }}</strong>
+    <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_proximo }}" aria-label="Próximo mês">›</a>
+  </div>
+
+  <div class="agenda-semana"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div>
+  <div class="agenda-grid">
+    {% for celula in celulas %}
+      {% if celula %}
+        {% set r = celula.resumo %}
+        {% if modo == 'contratos' %}
+          {% set destino = '/painel/agenda?visao=lista&data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&ativos=1&credito=1&cancelados=1' %}
+        {% else %}
+          {% set destino = '/painel/reservas?data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&mostrar_entregas=1&mostrar_retiradas=1' %}
+        {% endif %}
+        <a class="agenda-dia" href="{{ destino }}">
+          <span class="agenda-numero">{{ celula.data.day }}</span>
+          {% if modo == 'contratos' %}
+            {% if r.contratos %}<span class="agenda-badge"><i class="bi bi-file-earmark-text"></i> {{ r.contratos }} <span>contrato{% if r.contratos != 1 %}s{% endif %}</span></span>{% endif %}
+            {% if r.contratos_pendentes %}<span class="agenda-badge pendencia"><i class="bi bi-exclamation-circle"></i> {{ r.contratos_pendentes }} <span>pendência{% if r.contratos_pendentes != 1 %}s{% endif %}</span></span>{% endif %}
+            {% if not r.contratos %}<span class="agenda-vazio-msg">Sem contratos</span>{% endif %}
+          {% else %}
+            {% if r.operacoes %}<span class="agenda-badge"><i class="bi bi-truck"></i> {{ r.operacoes }} <span>operações</span></span>{% endif %}
+            {% if r.entregas_pendentes %}<span class="agenda-badge entrega"><i class="bi bi-box-arrow-right"></i> {{ r.entregas_pendentes }} <span>entrega{% if r.entregas_pendentes != 1 %}s{% endif %} pend.</span></span>{% endif %}
+            {% if r.retiradas_pendentes %}<span class="agenda-badge retirada"><i class="bi bi-box-arrow-in-left"></i> {{ r.retiradas_pendentes }} <span>retirada{% if r.retiradas_pendentes != 1 %}s{% endif %} pend.</span></span>{% endif %}
+            {% if not r.operacoes %}<span class="agenda-vazio-msg">Sem operação</span>{% endif %}
+          {% endif %}
+        </a>
+      {% else %}<div class="agenda-dia vazio"></div>{% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="agenda-rodape">
+    {% if modo == 'contratos' %}<a href="/painel/agenda?visao=lista&data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&ativos=1&credito=1&cancelados=1">Abrir lista do mês →</a>{% else %}<a href="/painel/reservas?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&mostrar_entregas=1&mostrar_retiradas=1">Abrir operação do mês →</a>{% endif %}
+  </div>
+</div>
+{% endblock %}

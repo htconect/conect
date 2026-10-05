@@ -1,4 +1,10 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<style>
+.foto-editor-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.foto-editor-overlay.ativo{display:flex}.foto-editor-card{width:min(760px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:22px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.28)}.foto-editor-canvas-wrap{background:#0f172a;border-radius:16px;overflow:hidden;display:grid;place-items:center;min-height:320px}.foto-editor-canvas-wrap canvas{display:block;width:min(100%,620px);height:auto;aspect-ratio:1/1;background:#fff}.foto-editor-controles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.foto-editor-controles label{margin:0}.foto-editor-acoes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:14px}.foto-editor-ajuda{font-size:.82rem;color:#64748b;margin:6px 0 0}.foto-prompt-box{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.foto-card-acoes{display:flex;gap:7px;flex-wrap:wrap}.foto-card-acoes form{margin:0}.foto-ajustada-badge{font-size:.78rem;color:#067647;margin-top:6px}.foto-principal-click{cursor:pointer}.
+@media(max-width:640px){.foto-editor-controles{grid-template-columns:1fr}.foto-editor-card{padding:14px}.foto-editor-canvas-wrap{min-height:240px}}
+</style>
+{% endblock %}
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Produtos e serviços</h1>
@@ -97,8 +103,11 @@
     <input name="vitrine_resumo" maxlength="240" value="{{ produto.vitrine_resumo if produto else '' }}" placeholder="Ex.: Completo para festas e eventos">
     <label>Fotos</label>
     <input id="fotoArquivos" name="foto_arquivos" type="file" accept="image/*,.jfif,.jpe" multiple hidden>
-    <button type="button" class="botao-secundario largura-total" onclick="document.getElementById('fotoArquivos').click()"><i class="bi bi-images"></i> Toque aqui para escolher fotos</button>
-    <small id="fotoArquivosStatus" class="texto-discreto">JPG, JPEG, JFIF, PNG e WebP. No celular, abre a galeria.</small>
+    <input id="fotosAjustadasJson" name="fotos_ajustadas_json" type="hidden" value="">
+    <button type="button" class="botao-secundario largura-total" onclick="document.getElementById('fotoArquivos').click()"><i class="bi bi-images"></i> Escolher fotos</button>
+    <small id="fotoArquivosStatus" class="texto-discreto">Ao escolher, o Connect abre o ajuste de zoom e recorte. JPG, JPEG, JFIF, PNG e WebP.</small>
+    <div class="foto-prompt-box"><button type="button" class="secundario" id="gerarPromptFotoIA"><i class="bi bi-stars"></i> Gerar prompt para IA</button></div>
+    <small class="texto-discreto">O prompt usa os dados deste item e orienta a IA a preservar a foto real, o preço, o nome e a identidade da empresa.</small>
   </div>
 
   {% if usa_recursos %}
@@ -139,9 +148,10 @@
   <div class="grid">
     {% for foto in produto.fotos %}
     <div class="card" style="padding:10px">
-      <img src="{{ foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para adicionar/substituir fotos" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:12px;cursor:pointer">
+      <img src="{{ foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para carregar outra foto" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer">
       <p style="margin:8px 0"><b>{% if foto.capa %}Foto principal{% else %}Foto {{ loop.index }}{% endif %}</b></p>
-      <div style="display:flex;gap:7px;flex-wrap:wrap">
+      <div class="foto-card-acoes">
+        <button type="button" class="secundario ajustar-foto-existente" data-src="{{ foto.arquivo_url }}" data-produto="{{ produto.id }}" data-foto="{{ foto.id }}"><i class="bi bi-crop"></i> Ajustar</button>
         {% if not foto.capa %}<form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/capa"><button type="submit" class="secundario">Usar como principal</button></form>{% endif %}
         <form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/excluir"><button type="submit" class="secundario">Excluir</button></form>
       </div>
@@ -169,8 +179,43 @@
 {% endfor %}
 </div>
 
+<div class="foto-editor-overlay" id="fotoEditor" aria-hidden="true">
+  <div class="foto-editor-card">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><h2 style="margin:0">Ajustar foto</h2><p class="foto-editor-ajuda">Arraste os controles para enquadrar. A foto final fica quadrada para manter a vitrine padronizada.</p></div>
+      <button type="button" class="secundario" id="fecharFotoEditor">Fechar</button>
+    </div>
+    <div class="foto-editor-canvas-wrap"><canvas id="fotoEditorCanvas" width="1200" height="1200"></canvas></div>
+    <div class="foto-editor-controles">
+      <label>Zoom <input id="fotoZoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+      <label>Horizontal <input id="fotoX" type="range" min="-100" max="100" step="1" value="0"></label>
+      <label>Vertical <input id="fotoY" type="range" min="-100" max="100" step="1" value="0"></label>
+      <div><label>Rotação</label><div style="display:flex;gap:8px"><button type="button" class="secundario" id="fotoGirarEsq">↶ 90°</button><button type="button" class="secundario" id="fotoGirarDir">↷ 90°</button></div></div>
+    </div>
+    <div class="foto-editor-acoes"><button type="button" class="secundario" id="fotoCancelar">Cancelar</button><button type="button" id="fotoUsar"><i class="bi bi-check2"></i> Usar esta foto</button></div>
+  </div>
+</div>
+
 <script>
-document.getElementById('fotoArquivos')?.addEventListener('change',function(){const n=this.files?.length||0;const status=document.getElementById('fotoArquivosStatus');if(status&&n)status.textContent=n+(n===1?' foto selecionada. Salve o item para enviar.':' fotos selecionadas. Salve o item para enviar.');});
+(function(){
+const input=document.getElementById('fotoArquivos'), hidden=document.getElementById('fotosAjustadasJson'), status=document.getElementById('fotoArquivosStatus');
+const modal=document.getElementById('fotoEditor'), canvas=document.getElementById('fotoEditorCanvas'), ctx=canvas?.getContext('2d'), zoom=document.getElementById('fotoZoom'), px=document.getElementById('fotoX'), py=document.getElementById('fotoY');
+let imagem=null, rot=0, fila=[], ajustadasFiles=[], modoExistente=null;
+function render(){if(!imagem||!ctx)return;const w=1200,h=1200;canvas.width=w;canvas.height=h;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);const ang=(rot%360)*Math.PI/180,troca=Math.abs(rot%180)===90,iw=troca?imagem.height:imagem.width,ih=troca?imagem.width:imagem.height,escalaBase=Math.max(w/iw,h/ih),escala=escalaBase*(Number(zoom.value)||1),dx=(Number(px.value)||0)/100*w*.45,dy=(Number(py.value)||0)/100*h*.45;ctx.save();ctx.translate(w/2+dx,h/2+dy);ctx.rotate(ang);ctx.drawImage(imagem,-imagem.width*escala/2,-imagem.height*escala/2,imagem.width*escala,imagem.height*escala);ctx.restore();}
+function abrirSrc(src,existente=null){modoExistente=existente;rot=0;zoom.value='1';px.value='0';py.value='0';imagem=new Image();imagem.onload=()=>{render();modal.classList.add('ativo');modal.setAttribute('aria-hidden','false')};imagem.onerror=()=>{alert('Não conseguimos abrir esta imagem para ajuste.')};imagem.src=src;}
+function abrirArquivo(file){const r=new FileReader();r.onload=()=>abrirSrc(r.result,null);r.readAsDataURL(file)}
+function fechar(){modal.classList.remove('ativo');modal.setAttribute('aria-hidden','true')}
+function aplicarArquivosAjustados(){const dt=new DataTransfer();ajustadasFiles.forEach(f=>dt.items.add(f));if(input)input.files=dt.files;if(hidden)hidden.value='';if(status)status.textContent=ajustadasFiles.length+(ajustadasFiles.length===1?' foto ajustada. Salve o item para enviar.':' fotos ajustadas. Salve o item para enviar.');}
+function proxima(){if(fila.length){abrirArquivo(fila.shift())}else{fechar();aplicarArquivosAjustados();}}
+input?.addEventListener('change',function(){fila=[...(this.files||[])];ajustadasFiles=[];if(!fila.length)return;proxima();});
+[zoom,px,py].forEach(el=>el?.addEventListener('input',render));
+document.getElementById('fotoGirarEsq')?.addEventListener('click',()=>{rot-=90;render()});document.getElementById('fotoGirarDir')?.addEventListener('click',()=>{rot+=90;render()});
+document.getElementById('fecharFotoEditor')?.addEventListener('click',()=>{fila=[];fechar();if(ajustadasFiles.length)aplicarArquivosAjustados()});document.getElementById('fotoCancelar')?.addEventListener('click',()=>{if(modoExistente){fechar()}else{proxima()}});
+function canvasBlob(){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Não foi possível gerar a foto ajustada.')),'image/jpeg',.86))}
+document.getElementById('fotoUsar')?.addEventListener('click',async()=>{const btn=document.getElementById('fotoUsar');btn.disabled=true;try{const blob=await canvasBlob();if(modoExistente){const fd=new FormData();fd.append('foto_arquivo',blob,'foto-ajustada.jpg');const resp=await fetch(`/painel/produto/${modoExistente.produto}/foto/${modoExistente.foto}/ajustar`,{method:'POST',body:fd});if(!resp.ok)throw new Error('Não foi possível salvar o ajuste.');location.reload()}else{ajustadasFiles.push(new File([blob],`foto-ajustada-${ajustadasFiles.length+1}.jpg`,{type:'image/jpeg'}));proxima()}}catch(e){alert(e.message||'Não foi possível ajustar a foto.')}finally{btn.disabled=false}});
+document.querySelectorAll('.ajustar-foto-existente').forEach(b=>b.addEventListener('click',()=>abrirSrc(b.dataset.src,{produto:b.dataset.produto,foto:b.dataset.foto})));
+const promptBtn=document.getElementById('gerarPromptFotoIA');promptBtn?.addEventListener('click',async()=>{const empresa={{ empresa.nome|tojson }},telefone={{ (empresa.whatsapp_retorno or '')|tojson }},nome=(document.querySelector('input[name="nome"]')?.value||'').trim(),preco=(document.querySelector('input[name="valor_base"]')?.value||'').trim(),descricao=(document.querySelector('textarea[name="descricao"]')?.value||'').trim(),categoria=(document.querySelector('select[name="vitrine_categoria"]')?.value||'').trim();const prompt=`Você é um designer profissional especializado em capas comerciais para divulgação de produtos e serviços de locação.\n\nCrie uma imagem de capa profissional usando a foto real anexada como referência principal. Mantenha o item reconhecível, fiel ao original, valorizado e em destaque. Use também o logo da empresa anexado, se houver.\n\nDados exatos que podem aparecer na arte:\nNome da empresa: ${empresa}\nTelefone/WhatsApp: ${telefone||'não informado — não inclua se não estiver disponível'}\nNome do item: ${nome||'não informado'}\nPreço: ${preco?`R$ ${preco}`:'não informado — não invente'}\nCategoria: ${categoria||'não informada'}\nDescrição/contexto: ${descricao||'não informado — não invente características'}\n\nDireção visual:\n- item em destaque no centro;\n- arte comercial brasileira, moderna, confiável e sem poluição visual;\n- preço bem visível em selo ou card quando informado;\n- nome do item em destaque;\n- telefone/WhatsApp no rodapé somente quando informado;\n- logo no topo, sem ocupar espaço demais;\n- composição legível em celular;\n- não corte o item principal;\n- não invente medidas, idade, características, preço, telefone ou qualquer dado ausente;\n- não altere o nome da empresa nem o nome do item;\n- não use personagens protegidos, exceto se já estiverem visíveis na foto real.\n\nFormato: imagem quadrada 1:1, ideal para WhatsApp, Instagram e vitrine online.\n\nAnexe à ferramenta de IA: 1) a foto atual do item; 2) o logo da empresa; 3) este prompt.`;try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Anexe a foto atual do item e o logo no ChatGPT, Gemini ou Canva.')}catch(e){window.prompt('Copie este prompt:',prompt)}});
+})();
 function alternarRecursoProduto(check){
   const linha = check.closest('.linha');
   const hidden = linha.querySelector('.recurso-utiliza');

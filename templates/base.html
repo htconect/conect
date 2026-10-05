@@ -76,7 +76,7 @@
     <span class="sidebar-adminator-titulo">Operação</span>
     <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
     <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
-    <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-file-earmark-text"></i><span>Contratos</span></a>
+    <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3-week"></i><span>Agenda</span></a>
     <a class="{% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas"><i class="bi bi-truck"></i><span>Operação</span></a>
     <a class="{% if request.url.path.startswith('/painel/financeiro') or request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
     {% if empresa is defined and empresa and empresa.inteligencia_ativa %}<a class="{% if request.url.path.startswith('/painel/inteligencia-logistica') %}ativo{% endif %}" href="/painel/inteligencia-logistica"><i class="bi bi-stars"></i><span>Inteligência</span></a>{% endif %}
@@ -475,7 +475,7 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     <i class="bi bi-calendar3"></i><span>Disponibilidade</span>
   </a>
   <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">
-    <i class="bi bi-file-earmark-text"></i><span>Contratos</span>
+    <i class="bi bi-calendar3-week"></i><span>Agenda</span>
   </a>
   <a class="nav-item {% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas">
     <i class="bi bi-truck"></i><span>Operação</span>

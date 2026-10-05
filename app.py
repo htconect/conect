@@ -5646,7 +5646,7 @@ def _foto_capa_produto(produto: ProdutoServico) -> str:
 
 _CEP_COORD_CACHE: dict[str, tuple[float, float]] = {}
 
-def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str) -> str:
+def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str, pasta: str = "empresa") -> str:
     """Salva apenas PNG/JPEG/WebP gerado pelo ajustador do navegador."""
     bruto = str(data_url or "").strip()
     m = re.match(r"^data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=\s]+)$", bruto, re.IGNORECASE)
@@ -5667,10 +5667,10 @@ def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str) -> str
     if not assinatura_ok:
         raise HTTPException(400, "O arquivo ajustado não é uma imagem válida.")
     extensao = {"jpeg": "jpg", "png": "png", "webp": "webp"}[tipo]
-    pasta = Path("static/uploads/vitrine") / str(empresa_id) / "empresa"
-    pasta.mkdir(parents=True, exist_ok=True)
+    destino_dir = Path("static/uploads/vitrine") / str(empresa_id) / str(pasta or "empresa")
+    destino_dir.mkdir(parents=True, exist_ok=True)
     nome = f"{prefixo}_{uuid.uuid4().hex[:14]}.{extensao}"
-    destino = pasta / nome
+    destino = destino_dir / nome
     destino.write_bytes(dados)
     return "/" + destino.as_posix()
 
@@ -5811,11 +5811,14 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
         else:
             disponiveis = disponivel_fisico
         categoria = str(produto.vitrine_categoria or '').strip()
+        fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip()]
         saida.append({
             'produto': produto,
             'disponiveis': max(0, int(disponiveis)),
             'foto': _foto_capa_produto(produto),
+            'fotos': fotos_publicas,
             'resumo': (produto.vitrine_resumo or produto.descricao or '').strip(),
+            'descricao': (produto.descricao or '').strip(),
             'categoria': categoria or 'Outros',
             'categoria_cadastrada': (categoria.casefold() in categorias_cadastradas) if categoria else False,
         })
@@ -6997,6 +7000,29 @@ def definir_capa_produto(produto_id: int, foto_id: int, db: Session = Depends(ge
     return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
 
 
+@app.post("/painel/produto/{produto_id}/foto/{foto_id}/ajustar")
+def ajustar_foto_produto(
+        produto_id: int, foto_id: int, foto_arquivo: UploadFile = File(...),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    foto = db.get(ProdutoFoto, foto_id)
+    if not produto or produto.empresa_id != empresa.id or not foto or foto.empresa_id != empresa.id or foto.produto_id != produto.id:
+        raise HTTPException(404)
+    url_antiga = str(foto.arquivo_url or "")
+    nova_url = _salvar_arquivo_vitrine(foto_arquivo, empresa.id, f"produto_{produto.id}")
+    if not nova_url:
+        raise HTTPException(400, "Não conseguimos salvar a foto ajustada.")
+    foto.arquivo_url = nova_url
+    db.commit()
+    try:
+        caminho = Path(url_antiga.lstrip("/"))
+        if caminho.exists() and caminho.is_file() and caminho.as_posix() != Path(nova_url.lstrip("/")).as_posix():
+            caminho.unlink()
+    except Exception:
+        pass
+    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+
+
 @app.post("/painel/produto/{produto_id}/foto/{foto_id}/excluir")
 def excluir_foto_produto(produto_id: int, foto_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     produto = db.get(ProdutoServico, produto_id)
@@ -7148,6 +7174,7 @@ def salvar_produto_url(
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
@@ -7161,7 +7188,7 @@ def salvar_produto_url(
         carga_pontos=carga_pontos, volume_logistico=volume_logistico,
         permite_interno=permite_interno, permite_mala=permite_mala, permite_teto=permite_teto,
         contrato_id=contrato_id, vitrine_ativo=vitrine_ativo, vitrine_resumo=vitrine_resumo,
-        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, foto_arquivos=foto_arquivos,
+        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
     )
@@ -7177,6 +7204,7 @@ def salvar_produto(
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
@@ -7223,10 +7251,15 @@ def salvar_produto(
     fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
     proxima_ordem = fotos_existentes
     primeira_nova = None
-    for upload in foto_arquivos or []:
-        if not getattr(upload, "filename", ""):
-            continue
-        url = _salvar_arquivo_vitrine(upload, empresa.id, f"produto_{produto.id}")
+    ajustadas = []
+    if str(fotos_ajustadas_json or "").strip():
+        try:
+            bruto_ajustadas = json.loads(fotos_ajustadas_json)
+            ajustadas = bruto_ajustadas if isinstance(bruto_ajustadas, list) else []
+        except Exception:
+            raise HTTPException(400, "Não conseguimos ler as fotos ajustadas. Selecione as imagens novamente.")
+    for data_url in ajustadas[:12]:
+        url = _salvar_data_url_imagem(str(data_url or ""), empresa.id, f"produto_{produto.id}", f"produto_{produto.id}")
         if not url:
             continue
         foto = ProdutoFoto(
@@ -7237,6 +7270,23 @@ def salvar_produto(
         if primeira_nova is None:
             primeira_nova = foto
         proxima_ordem += 1
+
+    # Compatibilidade: se o navegador não usar o ajustador, o upload tradicional continua funcionando.
+    if not ajustadas:
+        for upload in foto_arquivos or []:
+            if not getattr(upload, "filename", ""):
+                continue
+            url = _salvar_arquivo_vitrine(upload, empresa.id, f"produto_{produto.id}")
+            if not url:
+                continue
+            foto = ProdutoFoto(
+                empresa_id=empresa.id, produto_id=produto.id, arquivo_url=url, ordem=proxima_ordem,
+                capa=(fotos_existentes == 0 and primeira_nova is None),
+            )
+            db.add(foto)
+            if primeira_nova is None:
+                primeira_nova = foto
+            proxima_ordem += 1
     if _empresa_modulo_ativo(empresa, "recursos"):
         _salvar_vinculos_recursos_produto(
             db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
@@ -13554,11 +13604,59 @@ def google_calendar_sincronizar_operacao(
     return redirect_preservando_filtros(request, "/painel/reservas", {"google_ok": sincronizados, "google_excluidos": excluidos, "google_ignorados": ignorados, "google_erros": erros})
 
 
+def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_mes: date) -> dict:
+    """Resumo leve para o calendário mensal de Contratos e Operação."""
+    resumo = {}
+    solicitacoes = db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id,
+        Solicitacao.data_evento >= inicio_mes,
+        Solicitacao.data_evento <= fim_mes,
+    ).all()
+    status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada"}
+    status_pendentes = {"reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite", "aceite_pagamento_pendente"}
+    for item in solicitacoes:
+        if not item.data_evento:
+            continue
+        chave = item.data_evento.isoformat()
+        dia = resumo.setdefault(chave, {"contratos": 0, "contratos_pendentes": 0, "operacoes": 0, "entregas_pendentes": 0, "retiradas_pendentes": 0})
+        if (item.status or "") not in status_cancelados:
+            dia["contratos"] += 1
+            pendente = (item.status or "") in status_pendentes
+            if empresa.exige_sinal and not pendente and (item.sinal or 0) > 0 and (item.valor_pago or 0) <= 0.009:
+                pendente = True
+            if not pendente and item.contrato_id and item.contrato_enviado_em is None and (item.status or "") in STATUS_CONTRATO_APROVADO:
+                pendente = True
+            if pendente:
+                dia["contratos_pendentes"] += 1
+
+    agendas = db.query(Agenda).join(Solicitacao, Agenda.solicitacao_id == Solicitacao.id).filter(
+        Agenda.empresa_id == empresa.id,
+        Agenda.data >= inicio_mes,
+        Agenda.data <= fim_mes,
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+    ).all()
+    for op in agendas:
+        if not op.data:
+            continue
+        chave = op.data.isoformat()
+        dia = resumo.setdefault(chave, {"contratos": 0, "contratos_pendentes": 0, "operacoes": 0, "entregas_pendentes": 0, "retiradas_pendentes": 0})
+        dia["operacoes"] += 1
+        if (op.status_operacional or "pendente") != "concluido":
+            if (op.tipo_evento or "entrega") == "retirada":
+                dia["retiradas_pendentes"] += 1
+            else:
+                dia["entregas_pendentes"] += 1
+    return resumo
+
+
 @app.get("/painel/agenda", response_class=HTMLResponse)
 def agenda(
         request: Request,
         data_inicial: str = "",
         data_final: str = "",
+        visao: str = "",
+        modo: str = "contratos",
+        mes: str = "",
         ativos: str = "1",
         credito: str = "",
         cancelados: str = "",
@@ -13567,6 +13665,36 @@ def agenda(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
+    # Sem um período explícito, Agenda abre primeiro a visão mensal.
+    if visao != "lista" and not data_inicial and not data_final:
+        pode_operacao = bool(request.session.get("acesso_total") or (request.session.get("acessos") or {}).get("operacao"))
+        if modo == "operacao" and not pode_operacao:
+            return RedirectResponse("/painel/acesso-negado?area=operacao", status_code=303)
+        try:
+            referencia = datetime.strptime((mes or "").strip(), "%Y-%m").date().replace(day=1) if mes else date.today().replace(day=1)
+        except ValueError:
+            referencia = date.today().replace(day=1)
+        ultimo = monthrange(referencia.year, referencia.month)[1]
+        fim_mes = referencia.replace(day=ultimo)
+        anterior = (referencia - timedelta(days=1)).replace(day=1)
+        proximo = (fim_mes + timedelta(days=1)).replace(day=1)
+        resumo_mes = _agenda_resumo_mensal(db, empresa, referencia, fim_mes)
+        primeiro_semana = referencia.weekday()  # segunda=0
+        celulas = [None] * primeiro_semana
+        for n in range(1, ultimo + 1):
+            d = referencia.replace(day=n)
+            celulas.append({"data": d, "resumo": resumo_mes.get(d.isoformat(), {})})
+        while len(celulas) % 7:
+            celulas.append(None)
+        nomes_meses = ("Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro")
+        return templates.TemplateResponse("admin/agenda_geral.html", {
+            "request": request, "empresa": empresa, "modo": "operacao" if modo == "operacao" else "contratos",
+            "referencia": referencia, "fim_mes": fim_mes, "celulas": celulas,
+            "mes_titulo": f"{nomes_meses[referencia.month-1]} {referencia.year}",
+            "mes_anterior": anterior.strftime("%Y-%m"), "mes_proximo": proximo.strftime("%Y-%m"),
+            "resumo_mes": resumo_mes, "pode_operacao": pode_operacao,
+        })
+
     # Agenda em modo consulta não executa auditoria nem manutenção automática.
     equipes = equipes_visiveis_usuario(request, db, empresa.id)
     ids_equipes = {e.id for e in equipes}
