@@ -340,6 +340,23 @@ class ProdutoServico(Base):
     empresa = relationship("Empresa", back_populates="produtos")
     contrato = relationship("Contrato")
     fotos = relationship("ProdutoFoto", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoFoto.ordem, ProdutoFoto.id")
+    opcionais = relationship("ProdutoOpcional", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoOpcional.ordem, ProdutoOpcional.id")
+
+
+class ProdutoOpcional(Base):
+    __tablename__ = "produto_opcionais"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    nome = Column(String(140), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    valor = Column(Float, nullable=False, default=0)
+    ativo = Column(Boolean, nullable=False, default=True)
+    ordem = Column(Integer, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    produto = relationship("ProdutoServico", back_populates="opcionais")
 
 
 class TipoEventoEmpresa(Base):

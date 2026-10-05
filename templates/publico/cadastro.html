@@ -11,12 +11,12 @@
 <p class="texto-discreto">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Corrija seus dados e salve. Depois confira novamente o contrato para aceitar.{% else %}{% if vitrine_pedido is defined and vitrine_pedido %}Seu pedido já está montado. Agora complete os dados do contrato.{% else %}Preencha os dados abaixo para a empresa montar seu pré-contrato. Seus dados ficam protegidos.{% endif %}{% endif %}</p>
 {% if vitrine_pedido is defined and vitrine_pedido %}
 <div class="pedido-vitrine-resumo">
-  <h2>Seu pedido · {{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</h2>
-  {% for reg in vitrine_pedido.itens %}<div class="pedido-vitrine-item">{% if reg.foto %}<img src="{{ reg.foto }}" alt="">{% endif %}<div><strong>{{ reg.quantidade }}x {{ reg.nome }}</strong><small class="texto-discreto">R$ {{ reg.valor_total|moeda_br }}</small></div></div>{% endfor %}
-  <div class="pedido-vitrine-total"><span>Itens</span><span>R$ {{ (vitrine_pedido.subtotal if vitrine_pedido.subtotal is defined else vitrine_pedido.total)|moeda_br }}</span></div>
+  <h2>Seu pedido · {{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }} · {{ vitrine_pedido.tipo_evento_nome or 'Residencial' }}</h2>
+  {% for reg in vitrine_pedido.itens %}<div class="pedido-vitrine-item">{% if reg.foto %}<img src="{{ reg.foto }}" alt="">{% endif %}<div><strong>{{ reg.quantidade }}x {{ reg.nome }}</strong><small class="texto-discreto">{% if reg.sob_consulta %}Sob consulta{% else %}R$ {{ reg.valor_total|moeda_br }}{% endif %}</small>{% if reg.opcionais %}{% for opc in reg.opcionais %}<small class="texto-discreto" style="display:block">+ {{ opc.quantidade }}x {{ opc.nome }} · R$ {{ opc.valor_total|moeda_br }}</small>{% endfor %}{% endif %}</div></div>{% endfor %}
+  <div class="pedido-vitrine-total"><span>Itens + opcionais</span><span>{% if vitrine_pedido.possui_sob_consulta %}R$ {{ vitrine_pedido.subtotal|moeda_br }} + sob consulta{% else %}R$ {{ vitrine_pedido.subtotal|moeda_br }}{% endif %}</span></div>
   {% if vitrine_pedido.desconto %}<div class="pedido-vitrine-total" style="color:#067647"><span>Desconto{% if vitrine_pedido.cupom_codigo %} · {{ vitrine_pedido.cupom_codigo }}{% endif %}</span><span>− R$ {{ vitrine_pedido.desconto|moeda_br }}</span></div>{% endif %}
   {% if vitrine_pedido.frete is defined and vitrine_pedido.frete %}<div class="pedido-vitrine-total"><span>Deslocamento{% if vitrine_pedido.frete.cep %} · CEP {{ vitrine_pedido.frete.cep[:5] }}-{{ vitrine_pedido.frete.cep[5:] }}{% if vitrine_pedido.frete.numero %}, nº {{ vitrine_pedido.frete.numero }}{% endif %}{% endif %}</span><span>{% if vitrine_pedido.frete.consultar %}Sob consulta{% else %}R$ {{ vitrine_pedido.frete.valor|moeda_br }}{% endif %}</span></div>{% endif %}
-  <div class="pedido-vitrine-total"><strong>{% if vitrine_pedido.frete.consultar %}Total parcial{% else %}Total{% endif %}</strong><strong>R$ {{ vitrine_pedido.total|moeda_br }}</strong></div>
+  <div class="pedido-vitrine-total"><strong>Total</strong><strong>{% if vitrine_pedido.total_sob_consulta %}Sob consulta{% else %}R$ {{ vitrine_pedido.total|moeda_br }}{% endif %}</strong></div>
 </div>
 {% endif %}
 

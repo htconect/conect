@@ -43,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -5783,34 +5783,49 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
 
 
 TIPOS_EVENTO_PADRAO = (
-    ("Festa particular", "Aniversários, festas em casa ou salão."),
-    ("Escola ou creche", "Festas escolares, formaturas e atividades infantis."),
-    ("Empresa", "Confraternizações e eventos corporativos."),
-    ("Prefeitura ou evento público", "Praças, órgãos públicos e eventos abertos ao público."),
-    ("Igreja ou comunidade", "Eventos religiosos, comunitários ou beneficentes."),
-    ("Feira ou evento de grande porte", "Feiras, exposições, festivais e eventos com grande circulação."),
-    ("Outro", "Para situações que não se encaixam nas opções anteriores."),
+    ("Residencial", "Evento residencial. O item pode usar preço normal, preço fixo ou ficar sob consulta."),
+    ("Empresa", "Evento empresarial. O item pode usar preço normal, preço fixo ou ficar sob consulta."),
 )
+TIPOS_EVENTO_VITRINE = {"residencial": "Residencial", "empresa": "Empresa"}
 
 
 def _garantir_tipos_evento_padrao(db: Session, empresa: Empresa) -> None:
-    """Cria a lista inicial de tipos de evento uma única vez para a empresa.
+    """Garante os dois tipos usados nesta etapa da vitrine: Residencial e Empresa.
 
-    Os registros são por empresa para permitir edição/ordenação futura sem deixar
-    regras de preço fixas no código.
+    Tipos antigos permanecem no banco para não apagar histórico, mas ficam fora
+    do cadastro e da vitrine atual.
     """
-    existentes = db.query(TipoEventoEmpresa.id).filter(TipoEventoEmpresa.empresa_id == empresa.id).first()
-    if existentes:
-        return
+    existentes = {
+        str(t.nome or "").strip().casefold(): t
+        for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa.id).all()
+    }
+    mudou = False
     for idx, (nome, descricao) in enumerate(TIPOS_EVENTO_PADRAO, start=1):
-        db.add(TipoEventoEmpresa(
-            empresa_id=empresa.id, nome=nome, descricao=descricao, ordem=idx * 10, ativo=True
-        ))
-    db.commit()
+        chave = nome.casefold()
+        atual = existentes.get(chave)
+        if atual:
+            if not atual.ativo:
+                atual.ativo = True
+                mudou = True
+            if int(atual.ordem or 0) != idx * 10:
+                atual.ordem = idx * 10
+                mudou = True
+            if not atual.descricao:
+                atual.descricao = descricao
+                mudou = True
+        else:
+            db.add(TipoEventoEmpresa(empresa_id=empresa.id, nome=nome, descricao=descricao, ordem=idx * 10, ativo=True))
+            mudou = True
+    if mudou:
+        db.commit()
 
 
 def _tipos_evento_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[TipoEventoEmpresa]:
-    q = db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa_id)
+    nomes = [nome.casefold() for nome in TIPOS_EVENTO_VITRINE.values()]
+    q = db.query(TipoEventoEmpresa).filter(
+        TipoEventoEmpresa.empresa_id == empresa_id,
+        func.lower(TipoEventoEmpresa.nome).in_(nomes),
+    )
     if somente_ativos:
         q = q.filter(TipoEventoEmpresa.ativo == True)
     return q.order_by(TipoEventoEmpresa.ordem.asc(), TipoEventoEmpresa.nome.asc()).all()
@@ -5821,6 +5836,89 @@ def _mapa_precos_evento_produto(db: Session, empresa_id: int, produto_id: int | 
         return {}
     linhas = db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa_id, produto_id=produto_id).all()
     return {int(l.tipo_evento_id): {"modo": l.modo or "normal", "valor": l.valor} for l in linhas}
+
+
+def _normalizar_tipo_evento_vitrine(valor: str) -> str:
+    chave = str(valor or "").strip().lower()
+    return chave if chave in TIPOS_EVENTO_VITRINE else "residencial"
+
+
+def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServico, tipo_evento: str) -> dict:
+    """Resolve o preço que deve aparecer na vitrine para Residencial/Empresa.
+
+    `normal` usa o valor principal; `especifico` usa o valor fixo cadastrado;
+    `consulta` não expõe valor ao cliente.
+    """
+    tipo_chave = _normalizar_tipo_evento_vitrine(tipo_evento)
+    valor_normal = max(float(produto.valor_base or 0), 0.0)
+    if not bool(getattr(produto, "preco_por_tipo_evento", False)):
+        return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+    tipo_nome = TIPOS_EVENTO_VITRINE[tipo_chave]
+    tipo = db.query(TipoEventoEmpresa).filter(
+        TipoEventoEmpresa.empresa_id == empresa.id,
+        func.lower(TipoEventoEmpresa.nome) == tipo_nome.casefold(),
+    ).first()
+    if not tipo:
+        return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+    cfg = db.query(ProdutoPrecoEvento).filter_by(
+        empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id
+    ).first()
+    modo = str(getattr(cfg, "modo", "normal") or "normal").lower() if cfg else "normal"
+    if modo == "consulta":
+        return {"modo": "consulta", "valor": None, "sob_consulta": True}
+    if modo == "especifico":
+        return {"modo": "especifico", "valor": max(float(getattr(cfg, "valor", 0) or 0), 0.0), "sob_consulta": False}
+    return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+
+
+def _opcionais_produto(db: Session, empresa_id: int, produto_id: int, somente_ativos: bool = True) -> list[ProdutoOpcional]:
+    q = db.query(ProdutoOpcional).filter_by(empresa_id=empresa_id, produto_id=produto_id)
+    if somente_ativos:
+        q = q.filter(ProdutoOpcional.ativo == True)
+    return q.order_by(ProdutoOpcional.ordem.asc(), ProdutoOpcional.id.asc()).all()
+
+
+def _salvar_opcionais_produto(
+    db: Session, empresa_id: int, produto: ProdutoServico,
+    opcional_ids: list[str], nomes: list[str], quantidades: list[str], valores: list[str],
+) -> None:
+    existentes = {o.id: o for o in _opcionais_produto(db, empresa_id, produto.id, somente_ativos=False)}
+    vistos: set[int] = set()
+    total_linhas = max(len(nomes or []), len(opcional_ids or []))
+    ordem = 0
+    for idx in range(total_linhas):
+        nome = str(nomes[idx] if idx < len(nomes) else "").strip()[:140]
+        bruto_id = str(opcional_ids[idx] if idx < len(opcional_ids) else "").strip()
+        try:
+            opcional_id = int(bruto_id) if bruto_id else None
+        except ValueError:
+            opcional_id = None
+        atual = existentes.get(opcional_id) if opcional_id else None
+        if not nome:
+            if atual:
+                atual.ativo = False
+                vistos.add(atual.id)
+            continue
+        ordem += 10
+        qtd = max(1, int(float(quantidades[idx] if idx < len(quantidades) and str(quantidades[idx]).strip() else 1)))
+        valor = max(0.0, texto_para_float(valores[idx] if idx < len(valores) else "0"))
+        if not atual:
+            atual = ProdutoOpcional(
+                empresa_id=empresa_id, produto_id=produto.id, nome=nome, quantidade=qtd,
+                valor=valor, ordem=ordem, ativo=True,
+            )
+            db.add(atual)
+            db.flush()
+        else:
+            atual.nome = nome
+            atual.quantidade = qtd
+            atual.valor = valor
+            atual.ordem = ordem
+            atual.ativo = True
+        vistos.add(atual.id)
+    for oid, atual in existentes.items():
+        if oid not in vistos:
+            atual.ativo = False
 
 
 def _salvar_precos_evento_produto(
@@ -6273,9 +6371,11 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         "distancia_ida_km": None, "quantidade_km": None, "valor_km": None, "consultar": True,
     }
 
-def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -> list[dict]:
-    """Disponibilidade pública ordenada por categoria e, depois, pela ordem do item."""
+def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, tipo_evento: str = "residencial") -> list[dict]:
+    """Disponibilidade pública com preço já resolvido para o tipo de evento escolhido."""
+    tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     _garantir_categorias_vitrine_existentes(db, empresa)
+    _garantir_tipos_evento_padrao(db, empresa)
     categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
     ordem_categoria = {c.nome.casefold(): (int(c.ordem or 0), c.nome) for c in categorias}
     categorias_cadastradas = {c.nome.casefold() for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)}
@@ -6285,7 +6385,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
 
     produtos = (
         db.query(ProdutoServico)
-        .options(selectinload(ProdutoServico.fotos))
+        .options(selectinload(ProdutoServico.fotos), selectinload(ProdutoServico.opcionais))
         .filter(
             ProdutoServico.empresa_id == empresa.id,
             ProdutoServico.ativo == True,
@@ -6293,7 +6393,6 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
         )
         .all()
     )
-    # Categoria inativa tira seus itens da vitrine, sem alterar o histórico/cadastro.
     produtos = [p for p in produtos if (str(p.vitrine_categoria or '').strip().casefold() not in categorias_inativas)]
     produtos.sort(key=lambda p: (
         ordem_categoria.get(str(p.vitrine_categoria or '').strip().casefold(), (999999, str(p.vitrine_categoria or 'Outros')))[0],
@@ -6327,6 +6426,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
             disponiveis = disponivel_fisico
         categoria = str(produto.vitrine_categoria or '').strip()
         fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
+        preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
+        opcionais = [o for o in (produto.opcionais or []) if bool(o.ativo) and int(o.quantidade or 0) > 0]
         saida.append({
             'produto': produto,
             'disponiveis': max(0, int(disponiveis)),
@@ -6336,6 +6437,10 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date) -
             'descricao': (produto.descricao or '').strip(),
             'categoria': categoria or 'Outros',
             'categoria_cadastrada': (categoria.casefold() in categorias_cadastradas) if categoria else False,
+            'preco': preco.get('valor'),
+            'preco_modo': preco.get('modo'),
+            'sob_consulta': bool(preco.get('sob_consulta')),
+            'opcionais': opcionais,
         })
     return saida
 
@@ -6348,9 +6453,11 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         data_obj = datetime.strptime(str(bruto.get("data_evento") or ""), "%Y-%m-%d").date()
     except Exception:
         return None
+    tipo_evento = _normalizar_tipo_evento_vitrine(str(bruto.get("tipo_evento") or "residencial"))
     itens_brutos = bruto.get("itens") or []
     itens = []
     total = 0.0
+    possui_sob_consulta = False
     for reg in itens_brutos:
         try:
             produto_id = int(reg.get("produto_id"))
@@ -6360,13 +6467,38 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         produto = db.get(ProdutoServico, produto_id)
         if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
             continue
-        valor_unitario = max(float(produto.valor_base or 0), 0.0)
-        valor_total = round(valor_unitario * quantidade, 2)
+        preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
+        sob_consulta = bool(preco.get("sob_consulta"))
+        valor_unitario = 0.0 if sob_consulta else max(float(preco.get("valor") or 0), 0.0)
+        valor_base_total = round(valor_unitario * quantidade, 2)
+        opcionais_escolhidos = []
+        total_opcionais = 0.0
+        mapa_opcionais = {o.id: o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True)}
+        for oreg in reg.get("opcionais") or []:
+            try:
+                oid = int(oreg.get("opcional_id"))
+                oqtd = max(0, int(oreg.get("quantidade") or 0))
+            except Exception:
+                continue
+            opc = mapa_opcionais.get(oid)
+            if not opc or oqtd <= 0:
+                continue
+            oqtd = min(oqtd, max(1, int(opc.quantidade or 1)))
+            ovalor = max(float(opc.valor or 0), 0.0)
+            ototal = round(ovalor * oqtd, 2)
+            total_opcionais += ototal
+            opcionais_escolhidos.append({
+                "id": opc.id, "nome": opc.nome, "quantidade": oqtd,
+                "valor_unitario": ovalor, "valor_total": ototal,
+            })
+        valor_total = round(valor_base_total + total_opcionais, 2)
         total += valor_total
+        possui_sob_consulta = possui_sob_consulta or sob_consulta
         itens.append({
             "produto": produto, "produto_id": produto.id, "nome": produto.nome,
             "quantidade": quantidade, "valor_unitario": valor_unitario, "valor_total": valor_total,
-            "foto": _foto_capa_produto(produto),
+            "valor_base_total": valor_base_total, "opcionais": opcionais_escolhidos,
+            "sob_consulta": sob_consulta, "foto": _foto_capa_produto(produto),
         })
     if not itens:
         return None
@@ -6375,14 +6507,18 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     cupom_codigo = _normalizar_codigo_cupom(str(bruto.get("cupom_codigo") or ""))
     cupom = _cupom_valido(db, empresa.id, cupom_codigo) if (_empresa_modulo_ativo(empresa, 'cupons') and cupom_codigo) else None
     desconto = round(total * (float(cupom.percentual or 0) / 100.0), 2) if cupom else 0.0
+    frete_consulta = bool(frete_bruto.get("consultar"))
     return {
         "data_evento": data_obj,
+        "tipo_evento": tipo_evento,
+        "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
         "itens": itens,
         "subtotal": round(total, 2),
         "cupom": cupom,
         "cupom_codigo": cupom.codigo if cupom else "",
         "cupom_percentual": float(cupom.percentual or 0) if cupom else 0.0,
         "desconto": desconto,
+        "possui_sob_consulta": possui_sob_consulta,
         "frete": {
             "cep": _cep_limpo(frete_bruto.get("cep") or ""),
             "numero": str(frete_bruto.get("numero") or "").strip()[:30],
@@ -6391,9 +6527,10 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
             "distancia_ida_km": frete_bruto.get("distancia_ida_km") or frete_bruto.get("distancia_km"),
             "quantidade_km": frete_bruto.get("quantidade_km"),
             "valor_km": frete_bruto.get("valor_km"),
-            "consultar": bool(frete_bruto.get("consultar")),
+            "consultar": frete_consulta,
         },
         "total": round(max(total - desconto, 0) + frete_valor, 2),
+        "total_sob_consulta": bool(possui_sob_consulta or frete_consulta),
     }
 
 
@@ -7774,6 +7911,7 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
         "tipos_evento": _tipos_evento_empresa(db, empresa.id, somente_ativos=True),
         "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id) if produto else {},
+        "opcionais_produto": _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True) if produto else [],
         "salvo": request.query_params.get("salvo", ""),
     }
 
@@ -7873,6 +8011,10 @@ def salvar_produto_url(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
+        opcional_id: list[str] = Form(default=[]),
+        opcional_nome: list[str] = Form(default=[]),
+        opcional_quantidade: list[str] = Form(default=[]),
+        opcional_valor: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -7891,6 +8033,7 @@ def salvar_produto_url(
         vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem,
         preco_por_tipo_evento=preco_por_tipo_evento, preco_evento_tipo_id=preco_evento_tipo_id,
         preco_evento_modo=preco_evento_modo, preco_evento_valor=preco_evento_valor,
+        opcional_id=opcional_id, opcional_nome=opcional_nome, opcional_quantidade=opcional_quantidade, opcional_valor=opcional_valor,
         fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
@@ -7911,6 +8054,10 @@ def salvar_produto(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
+        opcional_id: list[str] = Form(default=[]),
+        opcional_nome: list[str] = Form(default=[]),
+        opcional_quantidade: list[str] = Form(default=[]),
+        opcional_valor: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -7959,6 +8106,9 @@ def salvar_produto(
     db.flush()
     _salvar_precos_evento_produto(
         db, empresa.id, produto, preco_evento_tipo_id, preco_evento_modo, preco_evento_valor
+    )
+    _salvar_opcionais_produto(
+        db, empresa.id, produto, opcional_id, opcional_nome, opcional_quantidade, opcional_valor
     )
 
     fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
@@ -8034,6 +8184,11 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         db.add(ProdutoPrecoEvento(
             empresa_id=empresa.id, produto_id=novo.id, tipo_evento_id=preco_evento.tipo_evento_id,
             modo=preco_evento.modo, valor=preco_evento.valor,
+        ))
+    for opcional in _opcionais_produto(db, empresa.id, origem.id, somente_ativos=False):
+        db.add(ProdutoOpcional(
+            empresa_id=empresa.id, produto_id=novo.id, nome=opcional.nome, quantidade=opcional.quantidade,
+            valor=opcional.valor, ativo=opcional.ativo, ordem=opcional.ordem,
         ))
     for vinculo in db.query(ProdutoServicoRecurso).filter_by(
         empresa_id=empresa.id, produto_id=origem.id
@@ -14700,7 +14855,7 @@ def portal_empresa_identificar(slug: str, request: Request, db: Session = Depend
 
 
 @app.get("/e/{slug}/vitrine", response_class=HTMLResponse)
-def vitrine_publica(slug: str, request: Request, data_evento: str = "", db: Session = Depends(get_db)):
+def vitrine_publica(slug: str, request: Request, data_evento: str = "", tipo_evento: str = "residencial", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
@@ -14713,13 +14868,15 @@ def vitrine_publica(slug: str, request: Request, data_evento: str = "", db: Sess
     if data_obj < date.today():
         return RedirectResponse(f"/e/{slug}?erro=data", status_code=303)
     _garantir_categorias_vitrine_existentes(db, empresa)
-    itens = _itens_vitrine_publica(db, empresa, data_obj)
+    tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
+    itens = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)
     nomes_presentes = {str(reg.get("categoria") or "Outros").casefold() for reg in itens}
     categorias = [c.nome for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True) if c.nome.casefold() in nomes_presentes]
     if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
         categorias.append("Outros")
     return templates.TemplateResponse("publico/vitrine.html", {
-        "request": request, "empresa": empresa, "data_evento": data_obj, "itens": itens,
+        "request": request, "empresa": empresa, "data_evento": data_obj, "tipo_evento": tipo_evento,
+        "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
         "fluxo_vitrine": str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
@@ -14760,9 +14917,12 @@ def vitrine_validar_cupom(
 @app.post("/e/{slug}/vitrine/reservar")
 def vitrine_publica_reservar(
         slug: str, request: Request,
-        data_evento: str = Form(...),
+        data_evento: str = Form(...), tipo_evento: str = Form("residencial"),
         produto_id: list[str] = Form(default=[]),
         quantidade: list[str] = Form(default=[]),
+        opcional_produto_id: list[str] = Form(default=[]),
+        opcional_id: list[str] = Form(default=[]),
+        opcional_quantidade: list[str] = Form(default=[]),
         cep_frete: str = Form(""), numero_frete: str = Form(""), cupom_codigo: str = Form(""),
         db: Session = Depends(get_db),
 ):
@@ -14773,7 +14933,18 @@ def vitrine_publica_reservar(
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
     except Exception:
         return RedirectResponse(f"/e/{slug}", status_code=303)
-    disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in _itens_vitrine_publica(db, empresa, data_obj)}
+    tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
+    disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)}
+    opcionais_por_produto: dict[int, list[dict]] = {}
+    for idx, pid_op_bruto in enumerate(opcional_produto_id or []):
+        try:
+            pid_op = int(pid_op_bruto)
+            oid = int(opcional_id[idx] if idx < len(opcional_id) else 0)
+            oqtd = max(0, int(opcional_quantidade[idx] if idx < len(opcional_quantidade) else 0))
+        except Exception:
+            continue
+        if oqtd > 0:
+            opcionais_por_produto.setdefault(pid_op, []).append({"opcional_id": oid, "quantidade": oqtd})
     pedido = []
     for idx, pid_bruto in enumerate(produto_id or []):
         try:
@@ -14786,26 +14957,26 @@ def vitrine_publica_reservar(
             continue
         limite = max(0, int(disponiveis.get(pid, 0)))
         if limite <= 0 or qtd > limite:
-            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=indisponivel", status_code=303)
-        pedido.append({"produto_id": pid, "quantidade": qtd})
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=indisponivel", status_code=303)
+        pedido.append({"produto_id": pid, "quantidade": qtd, "opcionais": opcionais_por_produto.get(pid, [])})
     if not pedido:
-        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=selecione", status_code=303)
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
 
     frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
     if not frete.get("ok"):
-        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=frete", status_code=303)
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=frete", status_code=303)
 
     codigo = _normalizar_codigo_cupom(cupom_codigo)
     cupom = None
     if codigo:
         if not _empresa_modulo_ativo(empresa, "cupons"):
-            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=cupom", status_code=303)
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=cupom", status_code=303)
         cupom = _cupom_valido(db, empresa.id, codigo, referencia=data_obj)
         if not cupom:
-            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&erro=cupom", status_code=303)
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=cupom", status_code=303)
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
-        "data_evento": data_obj.isoformat(), "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
         "frete": {
             "cep": frete.get("cep"), "numero": frete.get("numero"), "tipo": frete.get("tipo"),
             "valor": float(frete.get("valor") or 0), "distancia_ida_km": frete.get("distancia_ida_km"),
@@ -15653,7 +15824,7 @@ def salvar_pre_cadastro(
         data_obj = pedido_vitrine["data_evento"]
         disponibilidade_atual = {
             int(reg["produto"].id): int(reg["disponiveis"])
-            for reg in _itens_vitrine_publica(db, empresa, data_obj)
+            for reg in _itens_vitrine_publica(db, empresa, data_obj, pedido_vitrine.get("tipo_evento", "residencial"))
         }
         for reg in pedido_vitrine["itens"]:
             if int(reg["quantidade"]) > max(0, disponibilidade_atual.get(int(reg["produto_id"]), 0)):
@@ -15698,16 +15869,24 @@ def salvar_pre_cadastro(
         produto_principal = None
         contrato_padrao_id = None
         duracao_maxima = 240
+        possui_item_sob_consulta = bool(pedido_vitrine.get("possui_sob_consulta"))
         for reg in pedido_vitrine["itens"]:
             produto = reg["produto"]
             quantidade_item = max(1, int(reg["quantidade"] or 1))
-            valor_unitario = max(float(produto.valor_base or 0), 0.0)
-            valor_total = round(valor_unitario * quantidade_item, 2)
+            valor_unitario = max(float(reg.get("valor_unitario") or 0), 0.0)
+            valor_total = max(float(reg.get("valor_total") or 0), 0.0)
             total_itens += valor_total
             duracao_maxima = max(duracao_maxima, int(produto.duracao_minutos or 240))
+            descricao_reserva = str(produto.descricao or "").strip()
+            opcionais = reg.get("opcionais") or []
+            if opcionais:
+                linhas_op = [f"{o['quantidade']}x {o['nome']} — R$ {o['valor_total']:.2f}".replace('.', ',') for o in opcionais]
+                descricao_reserva = (descricao_reserva + "\n\nOpcionais: " + "; ".join(linhas_op)).strip()
+            if reg.get("sob_consulta"):
+                descricao_reserva = (descricao_reserva + "\n\nPreço do item: sob consulta.").strip()
             db.add(ReservaItem(
                 empresa_id=empresa.id, solicitacao_id=solicitacao.id, produto_id=produto.id,
-                nome=produto.nome, descricao=produto.descricao, quantidade=quantidade_item,
+                nome=produto.nome, descricao=descricao_reserva, quantidade=quantidade_item,
                 valor_unitario=valor_unitario, valor_total=valor_total,
             ))
             if produto_principal is None:
@@ -15725,7 +15904,7 @@ def salvar_pre_cadastro(
             cupom_vitrine = _cupom_valido(db, empresa.id, pedido_vitrine.get("cupom_codigo"), referencia=data_obj)
         _aplicar_composicao_comercial(solicitacao, round(total_itens, 2), frete_vitrine, cupom_vitrine)
         fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
-        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar"))
+        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar")) or possui_item_sob_consulta
         solicitacao.status = "pre_reserva" if precisa_aprovacao else ("contrato_enviado" if contrato_padrao_id else "pre_reserva")
 
     db.commit()
@@ -15734,7 +15913,7 @@ def salvar_pre_cadastro(
     if pedido_vitrine:
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
         fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
-        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar"))
+        precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar")) or bool(pedido_vitrine.get("possui_sob_consulta"))
         if precisa_aprovacao or solicitacao.status == "pre_reserva":
             return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
         return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
