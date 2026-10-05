@@ -3566,7 +3566,7 @@ def migrar_midias_legadas_para_persistente(db: Session) -> int:
             if dados:
                 foto.original_url = _salvar_midia_banco(
                     db, dados, foto.empresa_id, "produto-original", "produto", foto.produto_id,
-                    max_dim=1600, alvo_bytes=450 * 1024, qualidade=78
+                    max_dim=1400, alvo_bytes=260 * 1024, qualidade=78
                 )
                 alterados += 1
 
@@ -3579,7 +3579,7 @@ def migrar_midias_legadas_para_persistente(db: Session) -> int:
                 if dados:
                     foto.arquivo_url = _salvar_midia_banco(
                         db, dados, foto.empresa_id, "produto-ajustada", "produto", foto.produto_id,
-                        max_dim=1200, alvo_bytes=300 * 1024, qualidade=80
+                        max_dim=1200, alvo_bytes=220 * 1024, qualidade=78
                     )
                     alterados += 1
 
@@ -6051,21 +6051,21 @@ def _gerar_miniatura_banco(db: Session, url: str, empresa_id: int, produto_id: i
         return ""
     return _salvar_midia_banco(
         db, dados, empresa_id, "produto-thumb", "produto", produto_id,
-        max_dim=480, alvo_bytes=90 * 1024, qualidade=72
+        max_dim=420, alvo_bytes=55 * 1024, qualidade=70
     )
 
 
 def _salvar_original_produto_banco(db: Session, upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
     return _salvar_upload_midia_banco(
         db, upload, empresa_id, "produto-original", "produto", produto_id,
-        max_dim=1600, alvo_bytes=450 * 1024, qualidade=78
+        max_dim=1400, alvo_bytes=260 * 1024, qualidade=78
     )
 
 
 def _salvar_ajustada_produto_banco(db: Session, upload: UploadFile | None, empresa_id: int, produto_id: int) -> str:
     return _salvar_upload_midia_banco(
         db, upload, empresa_id, "produto-ajustada", "produto", produto_id,
-        max_dim=1200, alvo_bytes=300 * 1024, qualidade=80
+        max_dim=1200, alvo_bytes=220 * 1024, qualidade=78
     )
 
 
@@ -7555,6 +7555,130 @@ def remover_fundo_vitrine(db: Session = Depends(get_db), empresa: Empresa = Depe
     return RedirectResponse("/painel/vitrine", status_code=303)
 
 
+
+def _tamanho_midia_url(db: Session, url: str) -> int:
+    midia_id = _id_midia_banco(url)
+    if not midia_id:
+        return 0
+    midia = db.get(MidiaImagem, midia_id)
+    return int(midia.tamanho_bytes or 0) if midia else 0
+
+
+def _otimizar_registro_foto_produto(db: Session, foto: ProdutoFoto) -> dict:
+    """Regrava original/derivada/thumb no padrão leve atual sem perder o enquadramento já salvo."""
+    urls_antigas = {
+        str(foto.original_url or ""), str(foto.arquivo_url or ""), str(foto.miniatura_url or "")
+    }
+    antes = sum(_tamanho_midia_url(db, u) for u in urls_antigas if u)
+    origem_original = _bytes_imagem_por_url(db, str(foto.original_url or foto.arquivo_url or ""))
+    origem_ajustada = _bytes_imagem_por_url(db, str(foto.arquivo_url or foto.original_url or ""))
+    if not origem_original and not origem_ajustada:
+        return {"ok": False, "antes": antes, "depois": antes}
+    origem_original = origem_original or origem_ajustada
+    origem_ajustada = origem_ajustada or origem_original
+    nova_original = _salvar_midia_banco(
+        db, origem_original, foto.empresa_id, "produto-original", "produto", foto.produto_id,
+        max_dim=1400, alvo_bytes=260 * 1024, qualidade=78,
+    )
+    # Se a foto já tinha uma derivada diferente do original, preserva esse enquadramento.
+    tinha_ajuste = bool(foto.original_url and foto.arquivo_url and foto.original_url != foto.arquivo_url)
+    nova_ajustada = (
+        _salvar_midia_banco(
+            db, origem_ajustada, foto.empresa_id, "produto-ajustada", "produto", foto.produto_id,
+            max_dim=1200, alvo_bytes=220 * 1024, qualidade=78,
+        ) if tinha_ajuste else nova_original
+    )
+    nova_thumb = _gerar_miniatura_banco(db, nova_ajustada, foto.empresa_id, foto.produto_id) or nova_ajustada
+    foto.original_url = nova_original
+    foto.arquivo_url = nova_ajustada
+    foto.miniatura_url = nova_thumb
+    urls_novas = {nova_original, nova_ajustada, nova_thumb}
+    for url in urls_antigas:
+        if url and url not in urls_novas:
+            _remover_midia_banco(db, url)
+            _remover_imagem_local(url)
+    depois = sum(_tamanho_midia_url(db, u) for u in urls_novas if u)
+    return {"ok": True, "antes": antes, "depois": depois}
+
+
+@app.post("/painel/produto/{produto_id}/foto/upload")
+def upload_foto_produto_imediato(
+        produto_id: int, foto_arquivo: UploadFile = File(...),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa.id:
+        raise HTTPException(404)
+    existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
+    if existentes >= 12:
+        return JSONResponse({"ok": False, "erro": "Este item já possui o limite de 12 fotos."}, status_code=400)
+    dados = foto_arquivo.file.read(MAX_IMAGE_UPLOAD_BYTES + 1)
+    if len(dados) > MAX_IMAGE_UPLOAD_BYTES:
+        return JSONResponse({"ok": False, "erro": f"Imagem muito grande. Limite: {MAX_IMAGE_UPLOAD_BYTES // (1024 * 1024)} MB."}, status_code=413)
+    if not _tipo_imagem_real(dados):
+        return JSONResponse({"ok": False, "erro": "Escolha uma foto JPG, JPEG, JFIF, PNG, WEBP ou GIF."}, status_code=400)
+    tamanho_original = len(dados)
+    original_url = _salvar_midia_banco(
+        db, dados, empresa.id, "produto-original", "produto", produto.id,
+        max_dim=1400, alvo_bytes=260 * 1024, qualidade=78,
+    )
+    thumb_url = _gerar_miniatura_banco(db, original_url, empresa.id, produto.id) or original_url
+    maior_ordem = db.query(func.max(ProdutoFoto.ordem)).filter_by(empresa_id=empresa.id, produto_id=produto.id).scalar()
+    foto = ProdutoFoto(
+        empresa_id=empresa.id, produto_id=produto.id, arquivo_url=original_url,
+        original_url=original_url, miniatura_url=thumb_url,
+        ordem=int(maior_ordem or -1) + 1, capa=(existentes == 0),
+    )
+    db.add(foto)
+    db.commit()
+    db.refresh(foto)
+    tamanho_final = _tamanho_midia_url(db, original_url) + (_tamanho_midia_url(db, thumb_url) if thumb_url != original_url else 0)
+    midia = db.get(MidiaImagem, _id_midia_banco(original_url)) if _id_midia_banco(original_url) else None
+    return JSONResponse({
+        "ok": True, "foto_id": foto.id, "url": foto.arquivo_url, "thumb": foto.miniatura_url,
+        "capa": bool(foto.capa), "tamanho_original": tamanho_original, "tamanho_final": tamanho_final,
+        "largura": int(midia.largura or 0) if midia else 0, "altura": int(midia.altura or 0) if midia else 0,
+    })
+
+
+@app.post("/painel/produto/{produto_id}/fotos/otimizar")
+def otimizar_fotos_produto(
+        produto_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa.id:
+        raise HTTPException(404)
+    fotos = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).order_by(ProdutoFoto.id).all()
+    antes = depois = ajustadas = falhas = 0
+    for foto in fotos:
+        try:
+            reg = _otimizar_registro_foto_produto(db, foto)
+            antes += int(reg.get("antes", 0)); depois += int(reg.get("depois", 0))
+            ajustadas += 1 if reg.get("ok") else 0
+            falhas += 0 if reg.get("ok") else 1
+        except Exception:
+            logger.exception("Falha ao otimizar foto %s do produto %s", foto.id, produto.id)
+            falhas += 1
+    db.commit()
+    return JSONResponse({"ok": True, "ajustadas": ajustadas, "falhas": falhas, "antes": antes, "depois": depois})
+
+
+@app.post("/painel/produtos/fotos/otimizar")
+def otimizar_todas_fotos_empresa(
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    fotos = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id).order_by(ProdutoFoto.id).all()
+    antes = depois = ajustadas = falhas = 0
+    for foto in fotos:
+        try:
+            reg = _otimizar_registro_foto_produto(db, foto)
+            antes += int(reg.get("antes", 0)); depois += int(reg.get("depois", 0))
+            ajustadas += 1 if reg.get("ok") else 0
+            falhas += 0 if reg.get("ok") else 1
+        except Exception:
+            logger.exception("Falha ao otimizar foto %s da empresa %s", foto.id, empresa.id)
+            falhas += 1
+    db.commit()
+    return JSONResponse({"ok": True, "ajustadas": ajustadas, "falhas": falhas, "antes": antes, "depois": depois})
+
+
 @app.post("/painel/produto/{produto_id}/foto/{foto_id}/capa")
 def definir_capa_produto(produto_id: int, foto_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     produto = db.get(ProdutoServico, produto_id)
@@ -7583,7 +7707,7 @@ def ajustar_foto_produto(
         dados_legados = _bytes_imagem_por_url(db, url_antiga)
         foto.original_url = (
             _salvar_midia_banco(db, dados_legados, empresa.id, "produto-original", "produto", produto.id,
-                                max_dim=1600, alvo_bytes=450 * 1024, qualidade=78)
+                                max_dim=1400, alvo_bytes=260 * 1024, qualidade=78)
             if dados_legados else url_antiga
         )
     nova_url = _salvar_ajustada_produto_banco(db, foto_arquivo, empresa.id, produto.id)
@@ -7822,7 +7946,7 @@ def salvar_produto(
     if not (produto.permite_interno or produto.permite_mala or produto.permite_teto):
         produto.permite_interno = True
     produto.tipo_locacao = "horas_fixas"
-    produto.vitrine_ativo = bool(vitrine_ativo)
+    produto.vitrine_ativo = str(vitrine_ativo or "").strip().lower() in {"1", "true", "on", "sim", "yes"}
     produto.vitrine_resumo = (vitrine_resumo or "").strip()[:240] or None
     categoria_nome = (vitrine_categoria or "").strip()[:80]
     categoria_valida = db.query(VitrineCategoria).filter(

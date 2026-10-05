@@ -12,7 +12,7 @@
     <div class="produtos-acoes">
       <a class="botao btn-krj-ghost" href="/painel/categorias-vitrine"><i class="bi bi-tags"></i> Categorias</a>
       {% if usa_recursos %}<a class="botao btn-krj-ghost" href="/painel/recursos"><i class="bi bi-boxes"></i> Recursos</a>{% endif %}
-      <a class="botao" href="/painel/produto/novo"><i class="bi bi-plus-lg"></i> Novo item</a>
+      <button type="button" class="botao btn-krj-ghost" id="otimizarTodasFotos"><i class="bi bi-magic"></i> Otimizar fotos</button><a class="botao" href="/painel/produto/novo"><i class="bi bi-plus-lg"></i> Novo item</a>
     </div>
   </section>
 
@@ -39,4 +39,25 @@
     {% endfor %}
   </div>
 </div>
+{% endblock %}
+{% block scripts_extra %}
+<script>
+(function(){
+ const btn=document.getElementById('otimizarTodasFotos');
+ const kb=n=>n?`${Math.max(1,Math.round(n/1024)).toLocaleString('pt-BR')} KB`:'—';
+ btn?.addEventListener('click',async function(){
+   if(!confirm('Otimizar todas as fotos da vitrine agora? O enquadramento já salvo será preservado.')) return;
+   this.disabled=true; const original=this.innerHTML; this.innerHTML='<i class="bi bi-hourglass-split"></i> Processando...';
+   if(window.mostrarCarregando) window.mostrarCarregando('Aguarde','Processando e melhorando todas as fotos da vitrine...');
+   try{
+     const resp=await fetch('/painel/produtos/fotos/otimizar',{method:'POST',credentials:'same-origin'});
+     const d=await resp.json();
+     if(!resp.ok||!d.ok) throw new Error(d.erro||'Não foi possível otimizar as fotos.');
+     if(window.fecharCarregando) window.fecharCarregando();
+     alert(`${d.ajustadas} foto(s) otimizadas. ${kb(d.antes)} → ${kb(d.depois)}${d.falhas?` · ${d.falhas} falha(s)`:''}`);
+     location.reload();
+   }catch(e){ if(window.fecharCarregando) window.fecharCarregando(); alert(e.message||'Não foi possível otimizar as fotos.'); this.disabled=false; this.innerHTML=original; }
+ });
+})();
+</script>
 {% endblock %}
