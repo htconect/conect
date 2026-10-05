@@ -1647,33 +1647,8 @@ def _google_calendar_status_contrato(db: Session, empresa: Empresa, item: Solici
         return "atualizar"
 
 
-def _google_calendar_auto_contrato(db: Session, empresa: Empresa, item: Solicitacao, request: Request | None = None) -> None:
-    if not (getattr(empresa, "google_calendar_ativo", False) and getattr(empresa, "google_calendar_contratos", True)):
-        return
-    if not _google_calendar_conectado(empresa):
-        return
-    try:
-        _google_calendar_enviar_evento(db, empresa, item, "contrato", None, request)
-        db.commit()
-    except Exception as exc:
-        logger.exception("Falha ao sincronizar contrato #%s com Google Agenda", item.id)
-        _google_calendar_registrar_erro(item, exc)
-        db.commit()
-
-
-def _google_calendar_auto_excluir(db: Session, empresa: Empresa, item: Solicitacao) -> None:
-    if not getattr(item, "google_calendar_event_id", None):
-        return
-    if not getattr(empresa, "google_calendar_ativo", False) or not _google_calendar_conectado(empresa):
-        return
-    try:
-        _google_calendar_excluir_evento(db, empresa, item)
-        db.commit()
-    except Exception as exc:
-        logger.exception("Falha ao excluir Google Agenda do contrato #%s", item.id)
-        _google_calendar_registrar_erro(item, exc)
-        db.commit()
-
+# A sincronização com Google Agenda é sempre manual.
+# Contratos, pagamentos, aceite e operação nunca dependem da API do Google.
 
 def linhas_endereco_reserva(item: Solicitacao) -> list[str]:
     """Monta o endereço completo a partir do snapshot do contrato/reserva."""
@@ -7892,6 +7867,7 @@ async def salvar_cadastro_empresa_guiado(
         frete_cep_origem: str = Form(""),
         frete_multiplicador_km: str = Form("2"),
         vitrine_ativa: Optional[str] = Form(None),
+        vitrine_fluxo: str = Form("direto"),
         vitrine_titulo: str = Form(""),
         vitrine_subtitulo: str = Form(""),
         vitrine_descricao: str = Form(""),
@@ -7928,6 +7904,8 @@ async def salvar_cadastro_empresa_guiado(
     empresa.frete_multiplicador_km = 2.0
 
     empresa.vitrine_ativa = bool(vitrine_ativa)
+    fluxo_vitrine = (vitrine_fluxo or "direto").strip().lower()
+    empresa.vitrine_fluxo = fluxo_vitrine if fluxo_vitrine in {"direto", "aprovacao"} else "direto"
     empresa.vitrine_titulo = (vitrine_titulo or "").strip()[:160] or None
     empresa.vitrine_subtitulo = (vitrine_subtitulo or "").strip()[:240] or None
     empresa.vitrine_descricao = (vitrine_descricao or "").strip()[:500] or None
@@ -10327,10 +10305,6 @@ def salvar_edicao_solicitacao(
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     _tentar_geocodificar_solicitacao(db, item)
-    if item.status in STATUS_CONTRATO_APROVADO:
-        _google_calendar_auto_contrato(db, empresa, item)
-    elif item.status in {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}:
-        _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -10393,7 +10367,6 @@ def colocar_solicitacao_em_credito(
 
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
-    _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(
         f"/painel/solicitacao/{solicitacao_id}?credito=ok",
         status_code=303,
@@ -10431,10 +10404,6 @@ def atualizar_status_solicitacao(
 
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
-    if item.status in STATUS_CONTRATO_APROVADO:
-        _google_calendar_auto_contrato(db, empresa, item)
-    elif item.status in {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}:
-        _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -10729,7 +10698,6 @@ def aceite_manual_solicitacao(
     criar_eventos_operacionais(db, item)
     _processar_humiat_aceite(db, empresa, item)
     db.commit()
-    _google_calendar_auto_contrato(db, empresa, item, request)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
 
@@ -15116,6 +15084,40 @@ def _anexar_responsaveis_exibicao(itens):
     return itens
 
 
+def _google_calendar_sincronizar_solicitacao_manual(
+        db: Session, empresa: Empresa, item: Solicitacao, request: Request | None = None) -> str:
+    """Reconcilia um contrato com o Google somente quando o usuário solicita.
+
+    Retornos: sincronizado, excluido ou ignorado. Cancelamentos/crédito também
+    são tratados aqui para que a agenda externa acompanhe o estado atual sem
+    qualquer automação escondida no fluxo do contrato.
+    """
+    status = (item.status or "").strip().lower()
+    if status in {"aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"}:
+        if item.google_calendar_event_id:
+            _google_calendar_excluir_evento(db, empresa, item)
+            return "excluido"
+        return "ignorado"
+    if item.status not in STATUS_CONTRATO_APROVADO:
+        return "ignorado"
+
+    entrega, retirada = _google_calendar_operacoes_solicitacao(db, item)
+    agenda_ref = None
+    etapa = "contrato"
+    if retirada and retirada.status_operacional == "concluido":
+        if item.google_calendar_event_id:
+            _google_calendar_excluir_evento(db, empresa, item)
+            return "excluido"
+        return "ignorado"
+    if entrega and entrega.status_operacional == "concluido" and retirada and retirada.roteirizado:
+        etapa, agenda_ref = "retirada", retirada
+    elif entrega and entrega.roteirizado:
+        etapa, agenda_ref = "entrega", entrega
+
+    resultado = _google_calendar_enviar_evento(db, empresa, item, etapa, agenda_ref, request)
+    return "sincronizado" if resultado in {"sincronizado", "sem_alteracao"} else "ignorado"
+
+
 @app.post("/painel/agenda/google-calendar/sincronizar")
 def google_calendar_sincronizar_contratos(
         request: Request, solicitacao_ids: list[int] = Form(default=[]),
@@ -15128,30 +15130,21 @@ def google_calendar_sincronizar_contratos(
     itens = (db.query(Solicitacao)
         .options(joinedload(Solicitacao.cliente), joinedload(Solicitacao.produto), selectinload(Solicitacao.itens))
         .filter(Solicitacao.empresa_id == empresa.id, Solicitacao.id.in_(ids or [-1])).all())
-    sincronizados = ignorados = erros = 0
+    sincronizados = ignorados = excluidos = erros = 0
     for item in itens:
-        if item.status not in STATUS_CONTRATO_APROVADO:
-            ignorados += 1; continue
-        entrega, retirada = _google_calendar_operacoes_solicitacao(db, item)
-        agenda_ref = None; etapa = "contrato"
-        if retirada and retirada.status_operacional == "concluido":
-            try:
-                _google_calendar_excluir_evento(db, empresa, item); sincronizados += 1
-            except Exception as exc:
-                item.google_calendar_erro = str(exc)[:1200]; erros += 1
-            continue
-        if entrega and entrega.status_operacional == "concluido" and retirada and retirada.roteirizado:
-            etapa, agenda_ref = "retirada", retirada
-        elif entrega and entrega.roteirizado:
-            etapa, agenda_ref = "entrega", entrega
         try:
-            resultado = _google_calendar_enviar_evento(db, empresa, item, etapa, agenda_ref, request)
-            if resultado in {"sincronizado", "sem_alteracao"}: sincronizados += 1
-            else: ignorados += 1
+            resultado = _google_calendar_sincronizar_solicitacao_manual(db, empresa, item, request)
+            if resultado == "sincronizado":
+                sincronizados += 1
+            elif resultado == "excluido":
+                excluidos += 1
+            else:
+                ignorados += 1
         except Exception as exc:
-            item.google_calendar_erro = str(exc)[:1200]; erros += 1
+            item.google_calendar_erro = str(exc)[:1200]
+            erros += 1
     db.commit()
-    return redirect_preservando_filtros(request, "/painel/agenda", {"google_ok": sincronizados, "google_ignorados": ignorados, "google_erros": erros})
+    return redirect_preservando_filtros(request, "/painel/agenda", {"google_ok": sincronizados, "google_excluidos": excluidos, "google_ignorados": ignorados, "google_erros": erros})
 
 
 @app.post("/painel/reservas/google-calendar/sincronizar")
@@ -15189,6 +15182,87 @@ def google_calendar_sincronizar_operacao(
             item.google_calendar_erro = str(exc)[:1200]; erros += 1
     db.commit()
     return redirect_preservando_filtros(request, "/painel/reservas", {"google_ok": sincronizados, "google_excluidos": excluidos, "google_ignorados": ignorados, "google_erros": erros})
+
+
+@app.post("/painel/agenda/google-calendar/sincronizar-mes")
+def google_calendar_sincronizar_mes(
+        request: Request, mes: str = Form(""), modo: str = Form("contratos"),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    modo = "operacao" if (modo or "").strip().lower() == "operacao" else "contratos"
+    try:
+        inicio_mes = datetime.strptime((mes or "").strip(), "%Y-%m").date().replace(day=1)
+    except ValueError:
+        inicio_mes = date.today().replace(day=1)
+    fim_mes = inicio_mes.replace(day=monthrange(inicio_mes.year, inicio_mes.month)[1])
+    mes_ref = inicio_mes.strftime("%Y-%m")
+    destino = f"/painel/agenda?modo={modo}&mes={mes_ref}"
+
+    if not getattr(empresa, "google_calendar_ativo", False):
+        return RedirectResponse(destino + "&google_erro=" + quote("Google Agenda não está ativo nesta empresa."), status_code=303)
+    if modo == "operacao" and not getattr(empresa, "google_calendar_operacao", True):
+        return RedirectResponse(destino + "&google_erro=" + quote("Google Agenda está desativado para Operação nesta empresa."), status_code=303)
+    if modo == "contratos" and not getattr(empresa, "google_calendar_contratos", True):
+        return RedirectResponse(destino + "&google_erro=" + quote("Google Agenda está desativado para Contratos nesta empresa."), status_code=303)
+    if not _google_calendar_conectado(empresa):
+        return RedirectResponse(destino + "&google_erro=" + quote("Conecte a conta Google no cadastro da empresa."), status_code=303)
+
+    sincronizados = ignorados = excluidos = erros = 0
+    if modo == "contratos":
+        itens = (db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente), joinedload(Solicitacao.produto), selectinload(Solicitacao.itens))
+            .filter(
+                Solicitacao.empresa_id == empresa.id,
+                Solicitacao.data_evento >= inicio_mes,
+                Solicitacao.data_evento <= fim_mes,
+            )
+            .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc(), Solicitacao.id.asc())
+            .all())
+        for item in itens:
+            try:
+                resultado = _google_calendar_sincronizar_solicitacao_manual(db, empresa, item, request)
+                if resultado == "sincronizado":
+                    sincronizados += 1
+                elif resultado == "excluido":
+                    excluidos += 1
+                else:
+                    ignorados += 1
+            except Exception as exc:
+                item.google_calendar_erro = str(exc)[:1200]
+                erros += 1
+    else:
+        eventos = (db.query(Agenda)
+            .options(
+                joinedload(Agenda.solicitacao).joinedload(Solicitacao.cliente),
+                joinedload(Agenda.solicitacao).joinedload(Solicitacao.produto),
+                joinedload(Agenda.solicitacao).selectinload(Solicitacao.itens),
+            )
+            .filter(Agenda.empresa_id == empresa.id, Agenda.data >= inicio_mes, Agenda.data <= fim_mes)
+            .order_by(Agenda.data.asc(), Agenda.hora_inicio.asc(), Agenda.id.asc())
+            .all())
+        solicitacoes_vistas = set()
+        for agenda_item in eventos:
+            item = agenda_item.solicitacao
+            if not item or item.id in solicitacoes_vistas:
+                continue
+            solicitacoes_vistas.add(item.id)
+            try:
+                resultado = _google_calendar_sincronizar_solicitacao_manual(db, empresa, item, request)
+                if resultado == "sincronizado":
+                    sincronizados += 1
+                elif resultado == "excluido":
+                    excluidos += 1
+                else:
+                    ignorados += 1
+            except Exception as exc:
+                item.google_calendar_erro = str(exc)[:1200]
+                erros += 1
+
+    db.commit()
+    parametros = urlencode({
+        "modo": modo, "mes": mes_ref, "google_ok": sincronizados,
+        "google_excluidos": excluidos, "google_ignorados": ignorados, "google_erros": erros,
+    })
+    return RedirectResponse(f"/painel/agenda?{parametros}", status_code=303)
 
 
 def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_mes: date) -> dict:
@@ -15280,6 +15354,11 @@ def agenda(
             "mes_titulo": f"{nomes_meses[referencia.month-1]} {referencia.year}",
             "mes_anterior": anterior.strftime("%Y-%m"), "mes_proximo": proximo.strftime("%Y-%m"),
             "resumo_mes": resumo_mes, "pode_operacao": pode_operacao,
+            "google_disponivel": bool(
+                getattr(empresa, "google_calendar_ativo", False)
+                and _google_calendar_conectado(empresa)
+                and (getattr(empresa, "google_calendar_operacao", True) if modo == "operacao" else getattr(empresa, "google_calendar_contratos", True))
+            ),
         })
 
     # Agenda em modo consulta não executa auditoria nem manutenção automática.
@@ -15507,14 +15586,6 @@ def atualizar_roteiro(
     # operacional; elas serão atualizadas somente dentro do próprio módulo de
     # Inteligência quando o usuário solicitar gerar/recalcular a rota.
     db.commit()
-    if (
-        item.tipo_evento == "retirada"
-        and item.status_operacional == "concluido"
-        and item.solicitacao
-        and item.solicitacao.google_calendar_event_id
-        and getattr(empresa, "google_calendar_ativo", False)
-    ):
-        _google_calendar_auto_excluir(db, empresa, item.solicitacao)
     destino = request.headers.get("referer") or "/painel/reservas"
     return RedirectResponse(destino, status_code=303)
 
@@ -17115,7 +17186,6 @@ def cancelar_contrato(slug: str, solicitacao_id: str, db: Session = Depends(get_
         item.status = "cancelado_cliente"
         item.cancelado_em = agora_utc()
         db.commit()
-        _google_calendar_auto_excluir(db, empresa, item)
     return RedirectResponse(f"/e/{slug}/obrigado/{_ref_publica(db, item)}", status_code=303)
 
 
@@ -17162,7 +17232,6 @@ def aceitar_contrato(slug: str, solicitacao_id: str, request: Request, aceite: O
             criar_eventos_operacionais(db, item)
             _processar_humiat_aceite(db, empresa, item)
         db.commit()
-        _google_calendar_auto_contrato(db, empresa, item, request)
 
         # Após o aceite, empresas com InfinitePay seguem AUTOMATICAMENTE para
         # o checkout do SINAL. A reserva já está confirmada neste ponto; portanto,

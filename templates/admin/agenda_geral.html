@@ -21,6 +21,18 @@
     <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_proximo }}" aria-label="Próximo mês">›</a>
   </div>
 
+  {% if request.query_params.get('google_erro') %}<div class="alerta erro">{{ request.query_params.get('google_erro') }}</div>{% endif %}
+  {% if request.query_params.get('google_ok') is not none %}
+    <div class="box" style="margin:0 0 12px"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} removido(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
+  {% endif %}
+  {% if google_disponivel %}
+    <form method="post" action="/painel/agenda/google-calendar/sincronizar-mes" style="display:flex;justify-content:flex-end;margin:0 0 12px">
+      <input type="hidden" name="mes" value="{{ referencia.strftime('%Y-%m') }}">
+      <input type="hidden" name="modo" value="{{ modo }}">
+      <button type="submit" class="botao btn-krj-primary"><i class="bi bi-calendar-check"></i> Sincronizar agenda — {{ mes_titulo }}</button>
+    </form>
+  {% endif %}
+
   <div class="agenda-semana"><span>SEG</span><span>TER</span><span>QUA</span><span>QUI</span><span>SEX</span><span>SÁB</span><span>DOM</span></div>
   <div class="agenda-grid">
     {% for celula in celulas %}

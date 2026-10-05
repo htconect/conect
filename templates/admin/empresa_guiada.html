@@ -96,6 +96,14 @@
       <div class="empresa-bloco-cab"><i class="bi bi-stars"></i><div><h2>Vitrine</h2><p>Logo, cores, capa e uma mensagem curta. Sem editor complicado.</p></div></div>
       <div class="empresa-bloco-corpo">
         <label class="check"><input type="checkbox" name="vitrine_ativa" value="1" {% if empresa.vitrine_ativa %}checked{% endif %}> Vitrine pública ativa</label>
+        <div style="margin-top:14px">
+          <label>Como o cliente continua depois do carrinho?</label>
+          <select name="vitrine_fluxo">
+            <option value="direto" {% if (empresa.vitrine_fluxo or 'direto') == 'direto' %}selected{% endif %}>Reserva direta — abrir o cadastro da locação</option>
+            <option value="aprovacao" {% if empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Pré-reserva — a empresa analisa antes de confirmar</option>
+          </select>
+          <p class="texto-ajuda"><b>Pré-reserva:</b> o cliente envia o carrinho e o WhatsApp; você decide se aprova ou prepara a indicação no LokaFest. <b>Reserva direta:</b> o formulário da locação abre imediatamente com os dados da vitrine já preenchidos.</p>
+        </div>
         <div class="empresa-grade" style="margin-top:12px">
           <div>
             <label>Título principal</label><input name="vitrine_titulo" id="vitrineTitulo" maxlength="160" value="{{ empresa.vitrine_titulo or '' }}" placeholder="Vamos encontrar as opções certas para seu evento.">
