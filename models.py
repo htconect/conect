@@ -336,6 +336,7 @@ class ProdutoServico(Base):
     vitrine_categoria = Column(String(80), nullable=True)
     vitrine_ordem = Column(Integer, default=0)
     preco_por_tipo_evento = Column(Boolean, default=False)
+    utiliza_opcionais = Column(Boolean, default=False)
 
     empresa = relationship("Empresa", back_populates="produtos")
     contrato = relationship("Contrato")
@@ -357,6 +358,35 @@ class ProdutoOpcional(Base):
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     produto = relationship("ProdutoServico", back_populates="opcionais")
+
+
+class OpcionalEmpresa(Base):
+    __tablename__ = "opcionais_empresa"
+    __table_args__ = (UniqueConstraint("empresa_id", "nome", name="uq_opcional_empresa_nome"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    nome = Column(String(140), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    valor = Column(Float, nullable=False, default=0)
+    ativo = Column(Boolean, nullable=False, default=True)
+    ordem = Column(Integer, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+
+
+class ProdutoOpcionalExclusao(Base):
+    __tablename__ = "produto_opcionais_exclusoes"
+    __table_args__ = (UniqueConstraint("produto_id", "opcional_id", name="uq_produto_opcional_exclusao"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    opcional_id = Column(Integer, ForeignKey("opcionais_empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    opcional = relationship("OpcionalEmpresa")
 
 
 class TipoEventoEmpresa(Base):

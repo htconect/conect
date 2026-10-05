@@ -43,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -86,8 +86,11 @@ class ControleAcessoMiddleware:
             return "financeiro"
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/") or path == "/painel/marketing" or path.startswith("/painel/marketing/"):
             return "relatorios"
+        # A Vitrine pública é um módulo principal, não um cadastro.
+        if path == "/painel/vitrine":
+            return None
         prefixos_cadastro = (
-            "/painel/empresa", "/painel/configuracoes", "/painel/vitrine", "/painel/categorias-vitrine", "/painel/produtos", "/painel/produto/", "/painel/recursos", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
+            "/painel/empresa", "/painel/configuracoes", "/painel/vitrine", "/painel/categorias-vitrine", "/painel/produtos", "/painel/produto/", "/painel/opcionais", "/painel/recursos", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -2262,6 +2265,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_ordem INTEGER DEFAULT 0")
         if "preco_por_tipo_evento" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN preco_por_tipo_evento BOOLEAN DEFAULT false")
+        if "utiliza_opcionais" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN utiliza_opcionais BOOLEAN DEFAULT false")
 
     if "produto_fotos" in tabelas:
         cols_fotos = colunas("produto_fotos")
@@ -3607,6 +3612,7 @@ def startup():
     db = SessionLocal()
     try:
         inicializar_dados(db)
+        _migrar_opcionais_legados_catalogo(db)
         migrar_midias_legadas_para_persistente(db)
         normalizar_pagamentos_infinitepay_historicos(db)
         for emp in db.query(Empresa).all():
@@ -5871,54 +5877,107 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
     return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
 
 
-def _opcionais_produto(db: Session, empresa_id: int, produto_id: int, somente_ativos: bool = True) -> list[ProdutoOpcional]:
-    q = db.query(ProdutoOpcional).filter_by(empresa_id=empresa_id, produto_id=produto_id)
+def _opcionais_catalogo_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[OpcionalEmpresa]:
+    q = db.query(OpcionalEmpresa).filter_by(empresa_id=empresa_id)
     if somente_ativos:
-        q = q.filter(ProdutoOpcional.ativo == True)
-    return q.order_by(ProdutoOpcional.ordem.asc(), ProdutoOpcional.id.asc()).all()
+        q = q.filter(OpcionalEmpresa.ativo == True)
+    return q.order_by(OpcionalEmpresa.ordem.asc(), OpcionalEmpresa.id.asc()).all()
+
+
+def _ids_opcionais_excluidos(db: Session, empresa_id: int, produto_id: int) -> set[int]:
+    return {int(x[0]) for x in db.query(ProdutoOpcionalExclusao.opcional_id).filter_by(
+        empresa_id=empresa_id, produto_id=produto_id
+    ).all()}
+
+
+def _opcionais_produto(db: Session, empresa_id: int, produto_id: int, somente_ativos: bool = True) -> list[OpcionalEmpresa]:
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa_id or not bool(getattr(produto, "utiliza_opcionais", False)):
+        return []
+    excluidos = _ids_opcionais_excluidos(db, empresa_id, produto_id)
+    return [o for o in _opcionais_catalogo_empresa(db, empresa_id, somente_ativos) if o.id not in excluidos]
 
 
 def _salvar_opcionais_produto(
     db: Session, empresa_id: int, produto: ProdutoServico,
-    opcional_ids: list[str], nomes: list[str], quantidades: list[str], valores: list[str],
+    utiliza_opcionais: bool, opcional_catalogo_ids: list[str], opcional_utiliza: list[str],
 ) -> None:
-    existentes = {o.id: o for o in _opcionais_produto(db, empresa_id, produto.id, somente_ativos=False)}
-    vistos: set[int] = set()
-    total_linhas = max(len(nomes or []), len(opcional_ids or []))
-    ordem = 0
-    for idx in range(total_linhas):
-        nome = str(nomes[idx] if idx < len(nomes) else "").strip()[:140]
-        bruto_id = str(opcional_ids[idx] if idx < len(opcional_ids) else "").strip()
+    produto.utiliza_opcionais = bool(utiliza_opcionais)
+    db.query(ProdutoOpcionalExclusao).filter_by(empresa_id=empresa_id, produto_id=produto.id).delete(synchronize_session=False)
+    if not produto.utiliza_opcionais:
+        return
+    validos = {o.id for o in _opcionais_catalogo_empresa(db, empresa_id, somente_ativos=True)}
+    usa_map = {}
+    for idx, bruto in enumerate(opcional_catalogo_ids or []):
         try:
-            opcional_id = int(bruto_id) if bruto_id else None
-        except ValueError:
-            opcional_id = None
-        atual = existentes.get(opcional_id) if opcional_id else None
-        if not nome:
-            if atual:
-                atual.ativo = False
-                vistos.add(atual.id)
+            oid = int(bruto)
+        except Exception:
             continue
-        ordem += 10
-        qtd = max(1, int(float(quantidades[idx] if idx < len(quantidades) and str(quantidades[idx]).strip() else 1)))
-        valor = max(0.0, texto_para_float(valores[idx] if idx < len(valores) else "0"))
-        if not atual:
-            atual = ProdutoOpcional(
-                empresa_id=empresa_id, produto_id=produto.id, nome=nome, quantidade=qtd,
-                valor=valor, ordem=ordem, ativo=True,
-            )
-            db.add(atual)
-            db.flush()
-        else:
-            atual.nome = nome
-            atual.quantidade = qtd
-            atual.valor = valor
-            atual.ordem = ordem
-            atual.ativo = True
-        vistos.add(atual.id)
-    for oid, atual in existentes.items():
-        if oid not in vistos:
-            atual.ativo = False
+        valor = str(opcional_utiliza[idx] if idx < len(opcional_utiliza) else "0").strip().lower()
+        usa_map[oid] = valor in {"1", "true", "on", "sim", "yes"}
+    for oid in validos:
+        if oid in usa_map and not usa_map[oid]:
+            db.add(ProdutoOpcionalExclusao(empresa_id=empresa_id, produto_id=produto.id, opcional_id=oid))
+
+
+def _migrar_opcionais_legados_catalogo(db: Session) -> int:
+    """Migra uma única vez os opcionais antigos por item para o catálogo da empresa.
+
+    Primeiro consolida o catálogo inteiro da empresa; depois preserva, por produto,
+    somente os opcionais que ele possuía antes. Produtos já migrados não são
+    reprocessados, então novos opcionais cadastrados futuramente entram
+    automaticamente em todo item que usa opcionais, até que sejam excluídos nele.
+    """
+    candidatos = []
+    por_empresa: dict[int, list[tuple[ProdutoServico, list[ProdutoOpcional]]]] = {}
+    produtos = db.query(ProdutoServico).filter(ProdutoServico.utiliza_opcionais == False).all()
+    for produto in produtos:
+        legados = db.query(ProdutoOpcional).filter_by(empresa_id=produto.empresa_id, produto_id=produto.id, ativo=True).order_by(ProdutoOpcional.ordem, ProdutoOpcional.id).all()
+        if legados:
+            candidatos.append((produto, legados))
+            por_empresa.setdefault(produto.empresa_id, []).append((produto, legados))
+    if not candidatos:
+        return 0
+
+    # 1) cria todo o catálogo da empresa antes de calcular exclusões.
+    for empresa_id, regs in por_empresa.items():
+        maior = db.query(func.max(OpcionalEmpresa.ordem)).filter(OpcionalEmpresa.empresa_id == empresa_id).scalar() or 0
+        ordem = int(maior)
+        for _produto, legados in regs:
+            for antigo in legados:
+                nome = " ".join(str(antigo.nome or "").split()).strip()[:140]
+                if not nome:
+                    continue
+                mestre = db.query(OpcionalEmpresa).filter(
+                    OpcionalEmpresa.empresa_id == empresa_id,
+                    func.lower(OpcionalEmpresa.nome) == nome.lower(),
+                ).first()
+                if not mestre:
+                    ordem += 10
+                    db.add(OpcionalEmpresa(
+                        empresa_id=empresa_id, nome=nome,
+                        quantidade=max(1, int(antigo.quantidade or 1)),
+                        valor=max(float(antigo.valor or 0), 0.0), ativo=True, ordem=ordem,
+                    ))
+                    db.flush()
+
+    # 2) preserva a lista antiga de cada produto por meio das exclusões.
+    alterados = 0
+    for produto, legados in candidatos:
+        ativos_nomes = {
+            " ".join(str(o.nome or "").split()).strip().casefold()
+            for o in legados if str(o.nome or "").strip()
+        }
+        produto.utiliza_opcionais = True
+        db.flush()
+        for mestre in _opcionais_catalogo_empresa(db, produto.empresa_id, somente_ativos=True):
+            if mestre.nome.casefold() not in ativos_nomes:
+                db.add(ProdutoOpcionalExclusao(
+                    empresa_id=produto.empresa_id, produto_id=produto.id, opcional_id=mestre.id
+                ))
+        alterados += 1
+    db.commit()
+    return alterados
 
 
 def _salvar_precos_evento_produto(
@@ -6212,6 +6271,31 @@ def _foto_capa_produto(produto: ProdutoServico) -> str:
 
 
 _CEP_COORD_CACHE: dict[str, tuple[float, float]] = {}
+_CEP_DADOS_CACHE: dict[str, dict] = {}
+
+def _dados_cep_brasil(cep: str) -> dict:
+    cep_limpo = _cep_limpo(cep) if "_cep_limpo" in globals() else re.sub(r"\D", "", str(cep or ""))[:8]
+    if len(cep_limpo) != 8:
+        return {}
+    if cep_limpo in _CEP_DADOS_CACHE:
+        return dict(_CEP_DADOS_CACHE[cep_limpo])
+    try:
+        req = UrlRequest(f"https://viacep.com.br/ws/{cep_limpo}/json/", headers={"User-Agent": "Connect-Humiat/1.0"})
+        with urlopen(req, timeout=3.5) as resp:
+            bruto = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(bruto, dict) or bruto.get("erro"):
+            bruto = {}
+    except Exception:
+        bruto = {}
+    dados = {
+        "logradouro": str(bruto.get("logradouro") or "").strip(),
+        "bairro": str(bruto.get("bairro") or "").strip(),
+        "cidade": str(bruto.get("localidade") or "").strip(),
+        "estado": str(bruto.get("uf") or "").strip().upper(),
+    } if bruto else {}
+    _CEP_DADOS_CACHE[cep_limpo] = dados
+    return dict(dados)
+
 
 def _salvar_data_url_imagem(data_url: str, empresa_id: int, prefixo: str, pasta: str = "empresa") -> str:
     """Salva apenas PNG/JPEG/WebP gerado pelo ajustador do navegador."""
@@ -6318,6 +6402,12 @@ def _coordenadas_cep_numero(cep: str, numero: str = "", identificador: str = "ce
         return lat, lon, "cache"
     cep_fmt = f"{cep_limpo[:5]}-{cep_limpo[5:]}"
     consultas = []
+    dados_cep = _dados_cep_brasil(cep_limpo)
+    if dados_cep:
+        partes = [dados_cep.get("logradouro"), numero_limpo, dados_cep.get("bairro"), dados_cep.get("cidade"), dados_cep.get("estado"), cep_fmt, "Brasil"]
+        completo = ", ".join(str(x).strip() for x in partes if str(x or "").strip())
+        if completo:
+            consultas.append(completo)
     if numero_limpo:
         consultas.extend([f"{cep_fmt}, {numero_limpo}, Brasil", f"CEP {cep_limpo}, número {numero_limpo}, Brasil"])
     consultas.extend([f"{cep_fmt}, Brasil", f"CEP {cep_limpo}, Brasil"])
@@ -6334,13 +6424,25 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         return {"ok": False, "erro": "Informe um CEP válido."}
     if not numero:
         return {"ok": False, "erro": "Informe o número do endereço."}
+    dados_destino = _dados_cep_brasil(cep)
+    partes_endereco = [dados_destino.get("logradouro") if dados_destino else "", numero, dados_destino.get("bairro") if dados_destino else "",
+                      (f"{dados_destino.get('cidade')}/{dados_destino.get('estado')}" if dados_destino and dados_destino.get('cidade') else ""),
+                      f"CEP {cep[:5]}-{cep[5:]}"]
+    endereco_formatado = " · ".join(str(x).strip() for x in partes_endereco if str(x or "").strip())
+    extra_endereco = {
+        "logradouro": dados_destino.get("logradouro", "") if dados_destino else "",
+        "bairro": dados_destino.get("bairro", "") if dados_destino else "",
+        "cidade": dados_destino.get("cidade", "") if dados_destino else "",
+        "estado": dados_destino.get("estado", "") if dados_destino else "",
+        "endereco_formatado": endereco_formatado,
+    }
     tipo = str(getattr(empresa, "frete_tipo", "consultar") or "consultar").lower()
     if tipo == "fixo":
         valor = max(float(getattr(empresa, "frete_valor_fixo", 0) or 0), 0.0)
         return {
             "ok": True, "tipo": "fixo", "cep": cep, "numero": numero,
             "valor": round(valor, 2), "distancia_ida_km": None, "quantidade_km": None,
-            "valor_km": None,
+            "valor_km": None, **extra_endereco,
         }
     if tipo == "km":
         origem = _cep_limpo(getattr(empresa, "frete_cep_origem", "") or "")
@@ -6364,11 +6466,11 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
             "valor_km": round(valor_km, 2),
             # Compatibilidade com a tela antiga: distancia_km passa a representar a ida.
             "distancia_km": round(distancia_ida, 1),
-            "fonte": fonte,
+            "fonte": fonte, **extra_endereco,
         }
     return {
         "ok": True, "tipo": "consultar", "cep": cep, "numero": numero, "valor": 0.0,
-        "distancia_ida_km": None, "quantidade_km": None, "valor_km": None, "consultar": True,
+        "distancia_ida_km": None, "quantidade_km": None, "valor_km": None, "consultar": True, **extra_endereco,
     }
 
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, tipo_evento: str = "residencial") -> list[dict]:
@@ -6427,7 +6529,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
         categoria = str(produto.vitrine_categoria or '').strip()
         fotos_publicas = [str(f.arquivo_url or '') for f in (produto.fotos or []) if str(f.arquivo_url or '').strip() and _imagem_disponivel(str(f.arquivo_url or ''))]
         preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
-        opcionais = [o for o in (produto.opcionais or []) if bool(o.ativo) and int(o.quantidade or 0) > 0]
+        opcionais = [o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True) if int(o.quantidade or 0) > 0]
         saida.append({
             'produto': produto,
             'disponiveis': max(0, int(disponiveis)),
@@ -7975,9 +8077,64 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
         "tipos_evento": _tipos_evento_empresa(db, empresa.id, somente_ativos=True),
         "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id) if produto else {},
-        "opcionais_produto": _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True) if produto else [],
+        "opcionais_catalogo": _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True),
+        "opcionais_excluidos": _ids_opcionais_excluidos(db, empresa.id, produto.id) if produto else set(),
         "salvo": request.query_params.get("salvo", ""),
     }
+
+
+@app.get("/painel/opcionais", response_class=HTMLResponse)
+def opcionais_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/opcionais.html", {
+        "request": request, "empresa": empresa,
+        "opcionais": _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=False),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.post("/painel/opcionais")
+def salvar_opcional_empresa(
+        opcional_id: str = Form(""), nome: str = Form(...), quantidade: int = Form(1),
+        valor: str = Form("0"), ativo: Optional[str] = Form(None),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    nome_limpo = " ".join((nome or "").strip().split())[:140]
+    if not nome_limpo:
+        return RedirectResponse("/painel/opcionais", status_code=303)
+    oid = int(opcional_id) if str(opcional_id or "").isdigit() else None
+    atual = db.get(OpcionalEmpresa, oid) if oid else None
+    if atual and atual.empresa_id != empresa.id:
+        raise HTTPException(404)
+    duplicado = db.query(OpcionalEmpresa).filter(
+        OpcionalEmpresa.empresa_id == empresa.id, func.lower(OpcionalEmpresa.nome) == nome_limpo.lower()
+    ).first()
+    if duplicado and (not atual or duplicado.id != atual.id):
+        return RedirectResponse("/painel/opcionais?erro=duplicado", status_code=303)
+    if not atual:
+        maior = db.query(func.max(OpcionalEmpresa.ordem)).filter(OpcionalEmpresa.empresa_id == empresa.id).scalar() or 0
+        atual = OpcionalEmpresa(empresa_id=empresa.id, ordem=int(maior)+10)
+        db.add(atual)
+    atual.nome = nome_limpo
+    atual.quantidade = max(1, int(quantidade or 1))
+    atual.valor = max(0.0, texto_para_float(valor))
+    atual.ativo = bool(ativo)
+    db.commit()
+    return RedirectResponse("/painel/opcionais", status_code=303)
+
+
+@app.post("/painel/opcional/{opcional_id}/mover")
+def mover_opcional_empresa(opcional_id: int, direcao: str = Form(...), db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    itens = _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=False)
+    ids = [o.id for o in itens]
+    if opcional_id not in ids:
+        raise HTTPException(404)
+    pos = ids.index(opcional_id)
+    alvo = pos - 1 if direcao == "cima" else pos + 1 if direcao == "baixo" else pos
+    if 0 <= alvo < len(itens) and alvo != pos:
+        itens[pos], itens[alvo] = itens[alvo], itens[pos]
+        for i, item in enumerate(itens, 1):
+            item.ordem = i * 10
+        db.commit()
+    return RedirectResponse("/painel/opcionais", status_code=303)
 
 
 @app.get("/painel/produto/novo", response_class=HTMLResponse)
@@ -8075,10 +8232,9 @@ def salvar_produto_url(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
-        opcional_id: list[str] = Form(default=[]),
-        opcional_nome: list[str] = Form(default=[]),
-        opcional_quantidade: list[str] = Form(default=[]),
-        opcional_valor: list[str] = Form(default=[]),
+        utiliza_opcionais: Optional[str] = Form(None),
+        opcional_catalogo_id: list[str] = Form(default=[]),
+        opcional_utiliza: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -8097,7 +8253,7 @@ def salvar_produto_url(
         vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem,
         preco_por_tipo_evento=preco_por_tipo_evento, preco_evento_tipo_id=preco_evento_tipo_id,
         preco_evento_modo=preco_evento_modo, preco_evento_valor=preco_evento_valor,
-        opcional_id=opcional_id, opcional_nome=opcional_nome, opcional_quantidade=opcional_quantidade, opcional_valor=opcional_valor,
+        utiliza_opcionais=utiliza_opcionais, opcional_catalogo_id=opcional_catalogo_id, opcional_utiliza=opcional_utiliza,
         fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
@@ -8118,10 +8274,9 @@ def salvar_produto(
         preco_evento_tipo_id: list[str] = Form(default=[]),
         preco_evento_modo: list[str] = Form(default=[]),
         preco_evento_valor: list[str] = Form(default=[]),
-        opcional_id: list[str] = Form(default=[]),
-        opcional_nome: list[str] = Form(default=[]),
-        opcional_quantidade: list[str] = Form(default=[]),
-        opcional_valor: list[str] = Form(default=[]),
+        utiliza_opcionais: Optional[str] = Form(None),
+        opcional_catalogo_id: list[str] = Form(default=[]),
+        opcional_utiliza: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -8188,7 +8343,7 @@ def salvar_produto(
         db, empresa.id, produto, preco_evento_tipo_id, preco_evento_modo, preco_evento_valor
     )
     _salvar_opcionais_produto(
-        db, empresa.id, produto, opcional_id, opcional_nome, opcional_quantidade, opcional_valor
+        db, empresa.id, produto, bool(utiliza_opcionais), opcional_catalogo_id, opcional_utiliza
     )
 
     fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
@@ -8257,6 +8412,7 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         vitrine_ativo=origem.vitrine_ativo, vitrine_resumo=origem.vitrine_resumo,
         vitrine_categoria=origem.vitrine_categoria, vitrine_ordem=origem.vitrine_ordem,
         preco_por_tipo_evento=bool(getattr(origem, "preco_por_tipo_evento", False)),
+        utiliza_opcionais=bool(getattr(origem, "utiliza_opcionais", False)),
     )
     db.add(novo)
     db.flush()
@@ -8265,11 +8421,8 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
             empresa_id=empresa.id, produto_id=novo.id, tipo_evento_id=preco_evento.tipo_evento_id,
             modo=preco_evento.modo, valor=preco_evento.valor,
         ))
-    for opcional in _opcionais_produto(db, empresa.id, origem.id, somente_ativos=False):
-        db.add(ProdutoOpcional(
-            empresa_id=empresa.id, produto_id=novo.id, nome=opcional.nome, quantidade=opcional.quantidade,
-            valor=opcional.valor, ativo=opcional.ativo, ordem=opcional.ordem,
-        ))
+    for oid in _ids_opcionais_excluidos(db, empresa.id, origem.id):
+        db.add(ProdutoOpcionalExclusao(empresa_id=empresa.id, produto_id=novo.id, opcional_id=oid))
     for vinculo in db.query(ProdutoServicoRecurso).filter_by(
         empresa_id=empresa.id, produto_id=origem.id
     ).all():
