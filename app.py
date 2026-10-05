@@ -3788,7 +3788,7 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
 
 
 def _garantir_colunas_v113_criticas() -> None:
-    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.119.
+    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.122.
 
     É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
@@ -3800,6 +3800,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_primeira_valor FLOAT DEFAULT 100",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_link_direto_token VARCHAR(64)",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS catalogo_musicas_url VARCHAR(500)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
@@ -3826,6 +3827,12 @@ def _garantir_colunas_v113_criticas() -> None:
                     )
                 """))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_empresas_vitrine_link_direto_token ON empresas (vitrine_link_direto_token)"))
+                conn.execute(text("""
+                    UPDATE empresas
+                    SET catalogo_musicas_url = 'https://karaokerj.com.br/catalogo'
+                    WHERE (catalogo_musicas_url IS NULL OR btrim(catalogo_musicas_url) = '')
+                      AND (lower(slug) IN ('karaokerj', 'karaoke-rj') OR lower(nome) IN ('karaokê rj', 'karaoke rj'))
+                """))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_empresa_id ON bloqueios_data (empresa_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_inicio ON bloqueios_data (data_inicio)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_fim ON bloqueios_data (data_fim)"))
@@ -3855,7 +3862,7 @@ def _garantir_colunas_v113_criticas() -> None:
         garantir_colunas_novas()
         VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
     except Exception:
-        logger.exception("Falha ao garantir colunas críticas da v1.0.119")
+        logger.exception("Falha ao garantir colunas críticas da v1.0.122")
         raise
 
 
