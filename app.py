@@ -3603,8 +3603,96 @@ def _startup_manutencao_habilitada() -> bool:
     return str(os.getenv("CONNECT_RUN_STARTUP_MAINTENANCE", "0") or "0").strip().lower() in {"1", "true", "yes", "sim", "on"}
 
 
+def _migrar_precos_karaokerj_v106_uma_vez() -> None:
+    """Migra apenas uma vez os preços atuais da Karaokê RJ.
+
+    Regra solicitada: preço atual vira Residencial; preço normal recebe + R$ 200;
+    Empresa passa a usar o preço normal. A chave em app_migrations impede repetição.
+    """
+    chave = "20261005_karaokerj_preco_residencial_v106"
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                chave VARCHAR(160) PRIMARY KEY,
+                aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        db.commit()
+        if db.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave}).first():
+            return
+
+        empresa = db.query(Empresa).filter(
+            or_(
+                func.lower(Empresa.slug).in_(["karaokerj", "karaoke-rj"]),
+                func.lower(Empresa.nome).in_(["karaokê rj", "karaoke rj"]),
+            )
+        ).first()
+        if not empresa:
+            return
+
+        existentes = {
+            str(t.nome or "").strip().lower(): t
+            for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa.id).all()
+        }
+        tipos = {}
+        for idx, chave_tipo in enumerate(("residencial", "empresa"), start=1):
+            nome = TIPOS_EVENTO_VITRINE[chave_tipo]
+            tipo = existentes.get(chave_tipo)
+            if not tipo:
+                tipo = TipoEventoEmpresa(empresa_id=empresa.id, nome=nome, ordem=idx * 10, ativo=True)
+                db.add(tipo)
+                db.flush()
+            tipo.ativo = True
+            tipo.ordem = idx * 10
+            tipos[chave_tipo] = tipo
+
+        tipos["residencial"].descricao = "Preços em promoção."
+        tipos["empresa"].descricao = "Valores diferenciados com emissão de NFS-e."
+
+        produtos = db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+        for produto in produtos:
+            valor_atual = max(float(produto.valor_base or 0), 0.0)
+            produto.valor_base = round(valor_atual + 200.0, 2)
+            produto.preco_por_tipo_evento = True
+
+            residencial = db.query(ProdutoPrecoEvento).filter_by(
+                empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["residencial"].id
+            ).first()
+            if not residencial:
+                residencial = ProdutoPrecoEvento(
+                    empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["residencial"].id
+                )
+                db.add(residencial)
+            residencial.modo = "especifico"
+            residencial.valor = round(valor_atual, 2)
+
+            empresarial = db.query(ProdutoPrecoEvento).filter_by(
+                empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["empresa"].id
+            ).first()
+            if not empresarial:
+                empresarial = ProdutoPrecoEvento(
+                    empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipos["empresa"].id
+                )
+                db.add(empresarial)
+            empresarial.modo = "normal"
+            empresarial.valor = None
+
+        db.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave})
+        db.commit()
+        logger.info("Migração v1.0.106 aplicada: preços Karaokê RJ convertidos para normal + Residencial promocional.")
+    except Exception:
+        db.rollback()
+        logger.exception("Falha na migração única de preços v1.0.106")
+    finally:
+        db.close()
+
+
 @app.on_event("startup")
 def startup():
+    # Migração de dados pequena e versionada: executa uma única vez e depois vira apenas uma checagem por chave.
+    _migrar_precos_karaokerj_v106_uma_vez()
+
     # Produção: as migrações já foram executadas. Não bloquear a abertura da porta
     # do Render com inspeções/migrações de banco a cada deploy. Para uma manutenção
     # excepcional, definir CONNECT_RUN_STARTUP_MAINTENANCE=1 temporariamente.
@@ -5812,9 +5900,13 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
 
 
 TIPOS_EVENTO_PADRAO = (
-    ("Residencial", "Evento residencial. O item pode usar preço normal, preço fixo ou ficar sob consulta."),
-    ("Empresa", "Evento empresarial. O item pode usar preço normal, preço fixo ou ficar sob consulta."),
+    ("Residencial", None),
+    ("Empresa", None),
 )
+TIPOS_EVENTO_DESCRICOES_LEGADAS = {
+    "residencial": "Evento residencial. O item pode usar preço normal, preço fixo ou ficar sob consulta.",
+    "empresa": "Evento empresarial. O item pode usar preço normal, preço fixo ou ficar sob consulta.",
+}
 TIPOS_EVENTO_VITRINE = {"residencial": "Residencial", "empresa": "Empresa"}
 
 
@@ -5839,11 +5931,11 @@ def _garantir_tipos_evento_padrao(db: Session, empresa: Empresa) -> None:
             if int(atual.ordem or 0) != idx * 10:
                 atual.ordem = idx * 10
                 mudou = True
-            if not atual.descricao:
+            if descricao and not atual.descricao:
                 atual.descricao = descricao
                 mudou = True
         else:
-            db.add(TipoEventoEmpresa(empresa_id=empresa.id, nome=nome, descricao=descricao, ordem=idx * 10, ativo=True))
+            db.add(TipoEventoEmpresa(empresa_id=empresa.id, nome=nome, descricao=descricao or None, ordem=idx * 10, ativo=True))
             mudou = True
     if mudou:
         db.commit()
@@ -5858,6 +5950,40 @@ def _tipos_evento_empresa(db: Session, empresa_id: int, somente_ativos: bool = T
     if somente_ativos:
         q = q.filter(TipoEventoEmpresa.ativo == True)
     return q.order_by(TipoEventoEmpresa.ordem.asc(), TipoEventoEmpresa.nome.asc()).all()
+
+
+def _mensagens_tipos_evento_empresa(db: Session, empresa_id: int) -> dict[str, str]:
+    """Mensagens públicas configuradas no cadastro da empresa para cada tipo de evento."""
+    resultado = {"residencial": "", "empresa": ""}
+    for tipo in _tipos_evento_empresa(db, empresa_id, somente_ativos=False):
+        chave = str(tipo.nome or "").strip().lower()
+        if chave not in resultado:
+            continue
+        mensagem = str(tipo.descricao or "").strip()
+        if mensagem == TIPOS_EVENTO_DESCRICOES_LEGADAS.get(chave, ""):
+            mensagem = ""
+        resultado[chave] = mensagem
+    return resultado
+
+
+def _salvar_mensagens_tipos_evento_empresa(db: Session, empresa_id: int, residencial: str, empresarial: str) -> None:
+    mensagens = {
+        "residencial": (residencial or "").strip()[:240],
+        "empresa": (empresarial or "").strip()[:240],
+    }
+    existentes = {
+        str(t.nome or "").strip().lower(): t
+        for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa_id).all()
+    }
+    for idx, chave in enumerate(("residencial", "empresa"), start=1):
+        nome = TIPOS_EVENTO_VITRINE[chave]
+        tipo = existentes.get(chave)
+        if not tipo:
+            tipo = TipoEventoEmpresa(empresa_id=empresa_id, nome=nome, ordem=idx * 10, ativo=True)
+            db.add(tipo)
+        tipo.descricao = mensagens[chave] or None
+        tipo.ativo = True
+        tipo.ordem = idx * 10
 
 
 def _mapa_precos_evento_produto(db: Session, empresa_id: int, produto_id: int | None) -> dict[int, dict]:
@@ -5881,23 +6007,24 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
     tipo_chave = _normalizar_tipo_evento_vitrine(tipo_evento)
     valor_normal = max(float(produto.valor_base or 0), 0.0)
     if not bool(getattr(produto, "preco_por_tipo_evento", False)):
-        return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+        return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
     tipo_nome = TIPOS_EVENTO_VITRINE[tipo_chave]
     tipo = db.query(TipoEventoEmpresa).filter(
         TipoEventoEmpresa.empresa_id == empresa.id,
         func.lower(TipoEventoEmpresa.nome) == tipo_nome.casefold(),
     ).first()
     if not tipo:
-        return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+        return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
     cfg = db.query(ProdutoPrecoEvento).filter_by(
         empresa_id=empresa.id, produto_id=produto.id, tipo_evento_id=tipo.id
     ).first()
     modo = str(getattr(cfg, "modo", "normal") or "normal").lower() if cfg else "normal"
     if modo == "consulta":
-        return {"modo": "consulta", "valor": None, "sob_consulta": True}
+        return {"modo": "consulta", "valor": None, "valor_normal": valor_normal, "sob_consulta": True, "promocao": False}
     if modo == "especifico":
-        return {"modo": "especifico", "valor": max(float(getattr(cfg, "valor", 0) or 0), 0.0), "sob_consulta": False}
-    return {"modo": "normal", "valor": valor_normal, "sob_consulta": False}
+        valor_especifico = max(float(getattr(cfg, "valor", 0) or 0), 0.0)
+        return {"modo": "especifico", "valor": valor_especifico, "valor_normal": valor_normal, "sob_consulta": False, "promocao": valor_especifico < (valor_normal - 0.009)}
+    return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
 
 
 def _opcionais_catalogo_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[OpcionalEmpresa]:
@@ -6564,6 +6691,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             'categoria_cadastrada': (categoria.casefold() in categorias_cadastradas) if categoria else False,
             'preco': preco.get('valor'),
             'preco_modo': preco.get('modo'),
+            'preco_normal': preco.get('valor_normal'),
+            'promocao': bool(preco.get('promocao')),
             'sob_consulta': bool(preco.get('sob_consulta')),
             'opcionais': opcionais,
         })
@@ -7445,11 +7574,13 @@ def alterar_senha_salvar(
 
 @app.get("/painel/empresa", response_class=HTMLResponse)
 def cadastro_empresa_guiado(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    _garantir_tipos_evento_padrao(db, empresa)
     return templates.TemplateResponse("admin/empresa_guiada.html", {
         "request": request,
         "empresa": empresa,
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
         "salvo": request.query_params.get("salvo", ""),
+        "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
     })
 
 
@@ -7465,6 +7596,8 @@ async def salvar_cadastro_empresa_guiado(
         exige_sinal: Optional[str] = Form(None),
         suporte_inicio: str = Form(""),
         suporte_fim: str = Form(""),
+        mensagem_tipo_residencial: str = Form(""),
+        mensagem_tipo_empresa: str = Form(""),
         frete_tipo: str = Form("consultar"),
         frete_valor_fixo: str = Form("0"),
         frete_valor_km: str = Form("0"),
@@ -7494,6 +7627,7 @@ async def salvar_cadastro_empresa_guiado(
     empresa.exige_sinal = bool(exige_sinal)
     empresa.suporte_inicio = (suporte_inicio or "").strip() or empresa.suporte_inicio or "09:00"
     empresa.suporte_fim = (suporte_fim or "").strip() or empresa.suporte_fim or "20:00"
+    _salvar_mensagens_tipos_evento_empresa(db, empresa.id, mensagem_tipo_residencial, mensagem_tipo_empresa)
 
     tipo_frete = (frete_tipo or "consultar").strip().lower()
     if tipo_frete not in {"consultar", "fixo", "km"}:
@@ -15099,6 +15233,7 @@ def portal_empresa(slug: str, request: Request, db: Session = Depends(get_db)):
         "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
+        "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
     })
 
 
