@@ -6484,6 +6484,9 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         "itens": itens,
         "duracao_maxima_minutos": max(60, duracao_maxima or 240),
         "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
+        "hora_inicio": item.hora_inicio,
+        "hora_inicio_texto": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
+        "retirada_mesmo_dia": bool(getattr(item, "retirada_obrigatoria", False)),
         "horas_adicionais": max(0, int(getattr(item, "horas_adicionais", 0) or 0)),
         "valor_horas_adicionais": round(horas_valor, 2),
         "cortesia_retirada": bool(getattr(item, "cortesia_retirada", False)),
@@ -6499,7 +6502,8 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
             "logradouro": str(item.local or ""), "bairro": str(item.bairro or ""),
             "cidade": str(item.local_cidade or ""), "estado": str(item.local_estado or ""),
         },
-        "total": round(float(item.valor or 0), 2),
+        # Base para a tela de pré-contrato; as horas extras são somadas pelo controle da tela.
+        "total": round(max(float(item.valor or 0) - horas_valor, 0), 2),
         "total_sob_consulta": possui_sob_consulta,
     }
 
@@ -6566,13 +6570,33 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
         + "Pré-reserva criada pela vitrine. WhatsApp informado para contato sobre a solicitação e envio do cadastro da locação.\n"
         + texto_autorizacao
     )
+    inicio_pedido = pedido.get("hora_inicio")
+    if isinstance(inicio_pedido, str):
+        try:
+            inicio_pedido = datetime.strptime(inicio_pedido, "%H:%M").time()
+        except Exception:
+            inicio_pedido = None
+    inicio_pedido = inicio_pedido if isinstance(inicio_pedido, time) else time(0, 0)
+    duracao_base = max(60, int(pedido.get("duracao_maxima_minutos") or 240))
+    retirada_mesmo_dia = bool(pedido.get("retirada_mesmo_dia")) if bool(getattr(empresa, "retirada_cortesia_proximo_dia", False)) else True
+    horas_adicionais = max(0, int(pedido.get("horas_adicionais") or 0))
+    if bool(getattr(empresa, "retirada_cortesia_proximo_dia", False)) and not retirada_mesmo_dia:
+        horas_adicionais = 0
+    valor_horas_adicionais = _valor_horas_adicionais_empresa(empresa, horas_adicionais)
+    fim_pedido = somar_minutos(inicio_pedido, duracao_base + horas_adicionais * 60)
+    cortesia_retirada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False) and not retirada_mesmo_dia)
     item = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=pedido["data_evento"],
-        hora_inicio=time(0, 0), hora_fim=None, status="vitrine_pre_reserva",
+        hora_inicio=inicio_pedido, hora_fim=fim_pedido, status="vitrine_pre_reserva",
         bairro=str(frete.get("bairro") or "")[:120], local=str(frete.get("logradouro") or "")[:200],
         local_numero=str(frete.get("numero") or "")[:30], local_cidade=str(frete.get("cidade") or "")[:120],
         local_estado=str(frete.get("estado") or "")[:40], local_cep=str(frete.get("cep") or "")[:20],
-        observacoes=obs,
+        observacoes=obs, duracao_contratada_minutos=duracao_base,
+        horas_adicionais=horas_adicionais, valor_horas_adicionais=valor_horas_adicionais,
+        cortesia_retirada=cortesia_retirada,
+        retirada_obrigatoria=retirada_mesmo_dia,
+        retirada_data=(pedido["data_evento"] if retirada_mesmo_dia else None),
+        retirada_hora=(fim_pedido if retirada_mesmo_dia else None),
     )
     db.add(item)
     db.flush()
@@ -6600,7 +6624,10 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
     item.produto_id = produto_principal.id if produto_principal else None
     item.contrato_id = contrato_padrao_id
     cupom = pedido.get("cupom")
-    _aplicar_composicao_comercial(item, float(pedido.get("subtotal") or 0), float(frete.get("valor") or 0), cupom)
+    _aplicar_composicao_comercial(
+        item, float(pedido.get("subtotal") or 0), float(frete.get("valor") or 0), cupom,
+        valor_horas_adicionais=valor_horas_adicionais,
+    )
     return item
 
 
@@ -6621,8 +6648,18 @@ def _resumo_lokafest_solicitacao(item: Solicitacao, empresa: Empresa) -> str:
     linhas = [
         f"Cliente veio pela vitrine da {empresa.nome}.",
         f"Data: {item.data_evento.strftime('%d/%m/%Y') if item.data_evento else 'a definir'}",
-        "Itens negociados:",
     ]
+    if item.hora_inicio:
+        linhas.append(f"Horário de início: {item.hora_inicio.strftime('%H:%M')}")
+    if getattr(item, "duracao_contratada_minutos", None):
+        duracao_txt = _rotulo_duracao_minutos(int(item.duracao_contratada_minutos or 0))
+        extras = max(0, int(getattr(item, "horas_adicionais", 0) or 0))
+        linhas.append(f"Contrato: {duracao_txt}" + (f" + {extras}h adicional(is)" if extras else ""))
+    if bool(getattr(item, "cortesia_retirada", False)):
+        linhas.append("Retirada: próximo dia como cortesia.")
+    elif bool(getattr(item, "retirada_obrigatoria", False)) and item.retirada_hora:
+        linhas.append(f"Retirada no mesmo dia: {item.retirada_hora.strftime('%H:%M')}")
+    linhas.append("Itens negociados:")
     for ri in item.itens or []:
         linhas.append(f"- {max(1, int(ri.quantidade or 1))}x {ri.nome} — R$ {float(ri.valor_total or 0):.2f}".replace('.', ','))
         ops = _opcionais_descricao_reserva(ri.descricao)
@@ -6631,6 +6668,7 @@ def _resumo_lokafest_solicitacao(item: Solicitacao, empresa: Empresa) -> str:
     linhas.extend([
         f"Itens + opcionais: R$ {float(item.valor_equipamentos or 0):.2f}".replace('.', ','),
         (f"Desconto {item.cupom_codigo or ''}: - R$ {float(item.valor_desconto or 0):.2f}".replace('.', ',') if float(item.valor_desconto or 0) > 0 else ""),
+        (f"Horas adicionais: R$ {float(getattr(item, 'valor_horas_adicionais', 0) or 0):.2f}".replace('.', ',') if float(getattr(item, 'valor_horas_adicionais', 0) or 0) > 0 else ""),
         f"Deslocamento: R$ {float(item.valor_frete or 0):.2f}".replace('.', ','),
         f"Total apresentado ao cliente: R$ {float(item.valor or 0):.2f}".replace('.', ','),
         f"Local informado: {endereco_rota_solicitacao(item) or item.bairro or 'a confirmar'}",
@@ -7339,6 +7377,20 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     cupom = _cupom_valido(db, empresa.id, cupom_codigo) if (_empresa_modulo_ativo(empresa, 'cupons') and cupom_codigo) else None
     desconto = round(total * (float(cupom.percentual or 0) / 100.0), 2) if cupom else 0.0
     frete_consulta = bool(frete_bruto.get("consultar"))
+    hora_inicio_texto = str(bruto.get("hora_inicio") or "").strip()
+    try:
+        hora_inicio_obj = datetime.strptime(hora_inicio_texto, "%H:%M").time() if hora_inicio_texto else None
+    except Exception:
+        hora_inicio_obj = None
+        hora_inicio_texto = ""
+    retirada_mesmo_dia = bool(bruto.get("retirada_mesmo_dia")) if bool(getattr(empresa, "retirada_cortesia_proximo_dia", False)) else True
+    try:
+        horas_adicionais = max(0, min(24, int(bruto.get("horas_adicionais") or 0)))
+    except Exception:
+        horas_adicionais = 0
+    if bool(getattr(empresa, "retirada_cortesia_proximo_dia", False)) and not retirada_mesmo_dia:
+        horas_adicionais = 0
+    valor_horas_adicionais = _valor_horas_adicionais_empresa(empresa, horas_adicionais)
     return {
         "data_evento": data_obj,
         "tipo_evento": tipo_evento,
@@ -7346,6 +7398,11 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         "itens": itens,
         "duracao_maxima_minutos": max(60, duracao_maxima or 240),
         "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
+        "hora_inicio": hora_inicio_obj, "hora_inicio_texto": hora_inicio_texto,
+        "retirada_mesmo_dia": retirada_mesmo_dia,
+        "horas_adicionais": horas_adicionais,
+        "valor_horas_adicionais": round(valor_horas_adicionais, 2),
+        "cortesia_retirada": bool(getattr(empresa, "retirada_cortesia_proximo_dia", False) and not retirada_mesmo_dia),
         "subtotal": round(total, 2),
         "cupom": cupom,
         "cupom_codigo": cupom.codigo if cupom else "",
@@ -7367,6 +7424,8 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
             "estado": str(frete_bruto.get("estado") or ""),
             "endereco_formatado": str(frete_bruto.get("endereco_formatado") or ""),
         },
+        # No pré-contrato, `total` é a base sem horas extras; o JS soma as horas escolhidas
+        # para permitir que o cliente revise a retirada sem duplicar o valor.
         "total": round(max(total - desconto, 0) + frete_valor, 2),
         "total_sob_consulta": bool(possui_sob_consulta or frete_consulta),
     }
@@ -16169,6 +16228,7 @@ def vitrine_publica_reservar(
         opcional_id: list[str] = Form(default=[]),
         opcional_quantidade: list[str] = Form(default=[]),
         cep_frete: str = Form(""), numero_frete: str = Form(""), cupom_codigo: str = Form(""),
+        hora_inicio_vitrine: str = Form(""), retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais_vitrine: int = Form(0),
         whatsapp_pre_reserva: str = Form(""), autoriza_parceiros: Optional[str] = Form(None),
         db: Session = Depends(get_db),
 ):
@@ -16208,6 +16268,32 @@ def vitrine_publica_reservar(
     if not pedido:
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
 
+    if not hora_meia_em_meia_valida(hora_inicio_vitrine):
+        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=hora", status_code=303)
+    inicio_vitrine = datetime.strptime(hora_inicio_vitrine, "%H:%M").time()
+    duracao_base_vitrine = 0
+    for reg in pedido:
+        produto = db.get(ProdutoServico, int(reg.get("produto_id") or 0))
+        if produto:
+            duracao_base_vitrine = max(duracao_base_vitrine, _duracao_vitrine_produto(db, empresa, produto, tipo_evento))
+    duracao_base_vitrine = max(60, int(duracao_base_vitrine or 240))
+    cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+    retirada_mesmo_dia_vitrine = bool(retirada_mesmo_dia) if cortesia_configurada else True
+    horas_extra_vitrine = max(0, min(24, int(horas_adicionais_vitrine or 0)))
+    if cortesia_configurada and not retirada_mesmo_dia_vitrine:
+        horas_extra_vitrine = 0
+    valor_horas_extra_vitrine = _valor_horas_adicionais_empresa(empresa, horas_extra_vitrine)
+    fim_vitrine = somar_minutos(inicio_vitrine, duracao_base_vitrine + horas_extra_vitrine * 60)
+    if retirada_mesmo_dia_vitrine:
+        limite = _hora_maxima_retirada_empresa(empresa)
+        minutos_fim = fim_vitrine.hour * 60 + fim_vitrine.minute
+        minutos_inicio = inicio_vitrine.hour * 60 + inicio_vitrine.minute
+        # somar_minutos gira após meia-noite; a soma absoluta impede aceitar retirada no dia seguinte por engano.
+        minutos_absolutos = minutos_inicio + duracao_base_vitrine + horas_extra_vitrine * 60
+        minutos_limite = limite.hour * 60 + limite.minute
+        if minutos_absolutos >= 24 * 60 or minutos_fim > minutos_limite:
+            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=retirada", status_code=303)
+
     frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
     if not frete.get("ok"):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=frete", status_code=303)
@@ -16223,6 +16309,8 @@ def vitrine_publica_reservar(
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
         "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
+        "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
         "frete": {
             "cep": frete.get("cep"), "numero": frete.get("numero"), "tipo": frete.get("tipo"),
             "valor": float(frete.get("valor") or 0), "distancia_ida_km": frete.get("distancia_ida_km"),
@@ -16899,6 +16987,9 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
             frete = pedido_vitrine.get("frete") or {}
             form = {
                 "data_evento": pedido_vitrine["data_evento"].isoformat(),
+                "hora_inicio": pedido_vitrine.get("hora_inicio_texto") or "",
+                "retirada_mesmo_dia": bool(pedido_vitrine.get("retirada_mesmo_dia")),
+                "horas_adicionais_vitrine": max(0, int(pedido_vitrine.get("horas_adicionais") or 0)),
                 "cep": frete.get("cep") or "", "numero": frete.get("numero") or "",
                 "endereco": frete.get("logradouro") or "", "bairro": frete.get("bairro") or "",
                 "cidade": frete.get("cidade") or "", "estado": frete.get("estado") or "",
@@ -16917,7 +17008,11 @@ def cadastro_pre_reserva_aprovada(slug: str, solicitacao_ref: str, request: Requ
     pedido = _pedido_vitrine_solicitacao(db, item)
     form = {
         "telefone": item.cliente.telefone or item.cliente.identificador or "" if item.cliente else "",
-        "data_evento": item.data_evento.isoformat(), "cep": item.local_cep or "", "numero": item.local_numero or "",
+        "data_evento": item.data_evento.isoformat(),
+        "hora_inicio": item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "",
+        "retirada_mesmo_dia": bool(getattr(item, "retirada_obrigatoria", False)),
+        "horas_adicionais_vitrine": max(0, int(getattr(item, "horas_adicionais", 0) or 0)),
+        "cep": item.local_cep or "", "numero": item.local_numero or "",
         "endereco": item.local or "", "bairro": item.bairro or "", "cidade": item.local_cidade or "", "estado": item.local_estado or "",
         "complemento": item.local_complemento or "", "pre_reserva_token": item.public_token,
     }
