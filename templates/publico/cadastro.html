@@ -147,11 +147,13 @@
           <div id="retiradaLimiteAviso" class="retirada-alerta" hidden>Limite de retirada no mesmo dia atingido.</div>
         </div>
       </div>
-    {% elif empresa.mostrar_mensagem_hora_fim %}
+    {% else %}
       <div id="avisoHorarioContrato" class="box aviso aviso-horario-contrato" hidden>
-        <strong>Horário padrão do contrato: <span id="horaFimCalculada">--:--</span></strong>
-        {% set mensagem_hora_legada = 'A locação padrão tem duração de 4 horas. Após esse período, o equipamento poderá permanecer no local, porém sem acesso ao suporte técnico.' %}
-        <p>{% if not empresa.mensagem_hora_fim or empresa.mensagem_hora_fim == mensagem_hora_legada %}Período padrão: {{ duracao_padrao_publica_rotulo }}. A duração final pode aumentar conforme os itens do contrato e as horas adicionais escolhidas.{% else %}{{ empresa.mensagem_hora_fim }}{% endif %}</p>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+          <div><small>Duração padrão da empresa</small><strong style="display:block;margin-top:3px">{{ duracao_padrao_publica_rotulo }}</strong></div>
+          <div><small>Término previsto</small><strong style="display:block;margin-top:3px" id="horaFimCalculada">--:--</strong></div>
+        </div>
+        <p style="margin-bottom:0">Os itens do contrato podem acrescentar tempo ao período padrão. A retirada no mesmo dia e eventuais horas adicionais são definidas no aceite, quando os itens já estiverem definidos.</p>
       </div>
     {% endif %}
     <label>Nome do local</label><input name="local_nome" value="{{ form.local_nome if form is defined else '' }}" placeholder="Ex.: Salão de festas, casa, sítio, condomínio">

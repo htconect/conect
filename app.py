@@ -8501,6 +8501,8 @@ async def salvar_cadastro_empresa_guiado(
         vitrine_botao_texto: str = Form("Adicionar ao pedido"),
         vitrine_cor_primaria: str = Form("#6D4AFF"),
         vitrine_cor_secundaria: str = Form("#EEF0FF"),
+        lokafest_ativo: Optional[str] = Form(None),
+        lokafest_url: str = Form(""),
         logo_arquivo: UploadFile | None = File(None),
         capa_arquivo: UploadFile | None = File(None),
         logo_ajustada: str = Form(""),
@@ -8555,6 +8557,8 @@ async def salvar_cadastro_empresa_guiado(
     empresa.vitrine_botao_texto = (vitrine_botao_texto or "Adicionar ao pedido").strip()[:60] or "Adicionar ao pedido"
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
     empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
+    empresa.lokafest_ativo = bool(lokafest_ativo)
+    empresa.lokafest_url = (lokafest_url or "").strip()[:300] or None
 
     # Preserva sempre o arquivo original; o recorte/zoom gera somente uma derivada.
     if logo_arquivo and logo_arquivo.filename:

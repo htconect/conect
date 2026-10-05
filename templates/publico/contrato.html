@@ -124,10 +124,10 @@
              data-demais="{{ empresa.hora_extra_demais_valor or 0 }}"
              data-total-sem-horas="{{ (comp.total - comp.horas_adicionais)|round(2) }}">
           <b>Horário e retirada</b>
-          <div class="horario-aceite-resumo">
-            <div><small>Período contratado</small><b id="duracaoAceiteTexto">{{ duracao_base_aceite_rotulo }}</b></div>
-            <div><small>Término / retirada</small><b id="terminoAceiteTexto">{{ item.hora_fim.strftime('%H:%M') if item.hora_fim else (hora_fim_base_aceite.strftime('%H:%M') if hora_fim_base_aceite else '-') }}</b></div>
-            <div><small>Horas adicionais</small><b id="valorHorasAceiteTexto">R$ {{ valor_horas_adicionais_aceite|moeda_br }}</b></div>
+          <p class="texto-discreto" style="margin:5px 0 10px">A duração abaixo já considera o padrão da empresa e qualquer tempo incluído pelos itens. A retirada no mesmo dia e as horas pagas são definidas aqui, antes do aceite.</p>
+          <div class="horario-aceite-resumo" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+            <div><small>Contrato</small><b id="duracaoAceiteTexto">{{ duracao_base_aceite_rotulo }}</b></div>
+            <div><small>Término do período contratado</small><b>{{ hora_fim_base_aceite.strftime('%H:%M') if hora_fim_base_aceite else '-' }}</b></div>
           </div>
           {% if empresa.retirada_cortesia_proximo_dia %}
             <div class="cortesia-aceite" id="cortesiaAceite"><b>Cortesia:</b> se não precisar de retirada no mesmo dia, buscamos no próximo dia para você aproveitar o equipamento por mais tempo.</div>
@@ -136,7 +136,11 @@
             <input id="retiradaMesmoDiaAceite" type="hidden" name="retirada_mesmo_dia" value="1">
           {% endif %}
           <div id="horasExtrasAceite" {% if empresa.retirada_cortesia_proximo_dia and not item.retirada_obrigatoria %}hidden{% endif %}>
-            <div class="horario-aceite-controles"><b>Adicionar horas?</b><button type="button" class="secundario" id="menosHoraAceite">−</button><strong id="qtdHorasAceite">{{ horas_adicionais_aceite }}</strong><button type="button" class="secundario" id="maisHoraAceite">+ 1 hora</button></div>
+            <div class="horario-aceite-resumo" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-top:10px">
+              <div><small>Horário da retirada</small><b id="terminoAceiteTexto">{{ item.hora_fim.strftime('%H:%M') if item.hora_fim else (hora_fim_base_aceite.strftime('%H:%M') if hora_fim_base_aceite else '-') }}</b></div>
+              <div><small>Horas adicionais</small><b id="valorHorasAceiteTexto">R$ {{ valor_horas_adicionais_aceite|moeda_br }}</b></div>
+            </div>
+            <div class="horario-aceite-controles"><b>Adicionar hora?</b><button type="button" class="secundario" id="menosHoraAceite">−</button><strong id="qtdHorasAceite">{{ horas_adicionais_aceite }}</strong><button type="button" class="secundario" id="maisHoraAceite">+ 1 hora</button></div>
             <input type="hidden" name="horas_adicionais_aceite" id="horasAdicionaisAceite" value="{{ horas_adicionais_aceite }}">
             <p class="texto-discreto" style="margin:8px 0 0">1ª hora: R$ {{ empresa.hora_extra_primeira_valor|moeda_br }} · próximas: R$ {{ empresa.hora_extra_demais_valor|moeda_br }} · limite de retirada: {{ limite_retirada_aceite.strftime('%H:%M') }}.</p>
             <p style="margin:7px 0 0"><b>Total atualizado:</b> <span id="totalAceiteTexto">R$ {{ item.valor|moeda_br }}</span></p>
