@@ -335,10 +335,43 @@ class ProdutoServico(Base):
     vitrine_resumo = Column(String(240), nullable=True)
     vitrine_categoria = Column(String(80), nullable=True)
     vitrine_ordem = Column(Integer, default=0)
+    preco_por_tipo_evento = Column(Boolean, default=False)
 
     empresa = relationship("Empresa", back_populates="produtos")
     contrato = relationship("Contrato")
     fotos = relationship("ProdutoFoto", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoFoto.ordem, ProdutoFoto.id")
+
+
+class TipoEventoEmpresa(Base):
+    __tablename__ = "tipos_evento_empresa"
+    __table_args__ = (UniqueConstraint("empresa_id", "nome", name="uq_tipo_evento_empresa_nome"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    nome = Column(String(100), nullable=False)
+    descricao = Column(String(240), nullable=True)
+    ordem = Column(Integer, nullable=False, default=0)
+    ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+
+
+class ProdutoPrecoEvento(Base):
+    __tablename__ = "produto_precos_evento"
+    __table_args__ = (UniqueConstraint("produto_id", "tipo_evento_id", name="uq_produto_preco_evento"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo_evento_id = Column(Integer, ForeignKey("tipos_evento_empresa.id", ondelete="CASCADE"), nullable=False, index=True)
+    modo = Column(String(20), nullable=False, default="normal")  # normal, especifico, consulta
+    valor = Column(Float, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+    produto = relationship("ProdutoServico")
+    tipo_evento = relationship("TipoEventoEmpresa")
 
 
 class ProdutoFoto(Base):

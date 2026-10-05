@@ -43,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, \
+from models import Agenda, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -2260,6 +2260,8 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_categoria VARCHAR(80)")
         if "vitrine_ordem" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN vitrine_ordem INTEGER DEFAULT 0")
+        if "preco_por_tipo_evento" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN preco_por_tipo_evento BOOLEAN DEFAULT false")
 
     if "produto_fotos" in tabelas:
         cols_fotos = colunas("produto_fotos")
@@ -5784,6 +5786,89 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
         db.commit()
 
 
+TIPOS_EVENTO_PADRAO = (
+    ("Festa particular", "Aniversários, festas em casa ou salão."),
+    ("Escola ou creche", "Festas escolares, formaturas e atividades infantis."),
+    ("Empresa", "Confraternizações e eventos corporativos."),
+    ("Prefeitura ou evento público", "Praças, órgãos públicos e eventos abertos ao público."),
+    ("Igreja ou comunidade", "Eventos religiosos, comunitários ou beneficentes."),
+    ("Feira ou evento de grande porte", "Feiras, exposições, festivais e eventos com grande circulação."),
+    ("Outro", "Para situações que não se encaixam nas opções anteriores."),
+)
+
+
+def _garantir_tipos_evento_padrao(db: Session, empresa: Empresa) -> None:
+    """Cria a lista inicial de tipos de evento uma única vez para a empresa.
+
+    Os registros são por empresa para permitir edição/ordenação futura sem deixar
+    regras de preço fixas no código.
+    """
+    existentes = db.query(TipoEventoEmpresa.id).filter(TipoEventoEmpresa.empresa_id == empresa.id).first()
+    if existentes:
+        return
+    for idx, (nome, descricao) in enumerate(TIPOS_EVENTO_PADRAO, start=1):
+        db.add(TipoEventoEmpresa(
+            empresa_id=empresa.id, nome=nome, descricao=descricao, ordem=idx * 10, ativo=True
+        ))
+    db.commit()
+
+
+def _tipos_evento_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[TipoEventoEmpresa]:
+    q = db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa_id)
+    if somente_ativos:
+        q = q.filter(TipoEventoEmpresa.ativo == True)
+    return q.order_by(TipoEventoEmpresa.ordem.asc(), TipoEventoEmpresa.nome.asc()).all()
+
+
+def _mapa_precos_evento_produto(db: Session, empresa_id: int, produto_id: int | None) -> dict[int, dict]:
+    if not produto_id:
+        return {}
+    linhas = db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa_id, produto_id=produto_id).all()
+    return {int(l.tipo_evento_id): {"modo": l.modo or "normal", "valor": l.valor} for l in linhas}
+
+
+def _salvar_precos_evento_produto(
+    db: Session, empresa_id: int, produto: ProdutoServico,
+    tipo_ids: list[str], modos: list[str], valores: list[str],
+) -> None:
+    tipos_validos = {t.id for t in _tipos_evento_empresa(db, empresa_id, somente_ativos=False)}
+    existentes = {
+        l.tipo_evento_id: l
+        for l in db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa_id, produto_id=produto.id).all()
+    }
+    vistos: set[int] = set()
+    for idx, bruto in enumerate(tipo_ids or []):
+        try:
+            tipo_id = int(bruto)
+        except (TypeError, ValueError):
+            continue
+        if tipo_id not in tipos_validos:
+            continue
+        vistos.add(tipo_id)
+        modo = str(modos[idx] if idx < len(modos) else "normal").strip().lower()
+        if modo not in {"normal", "especifico", "consulta"}:
+            modo = "normal"
+        valor = None
+        if modo == "especifico":
+            valor = max(0.0, texto_para_float(valores[idx] if idx < len(valores) else "0"))
+        atual = existentes.get(tipo_id)
+        if modo == "normal":
+            if atual:
+                db.delete(atual)
+            continue
+        if not atual:
+            atual = ProdutoPrecoEvento(
+                empresa_id=empresa_id, produto_id=produto.id, tipo_evento_id=tipo_id
+            )
+            db.add(atual)
+        atual.modo = modo
+        atual.valor = valor
+    # Remove configurações antigas de tipos que deixaram de ser enviados/foram excluídos.
+    for tipo_id, atual in existentes.items():
+        if tipo_id not in vistos and tipo_id not in tipos_validos:
+            db.delete(atual)
+
+
 def _url_lokafest_segura(empresa: Empresa, data_evento: date | None = None) -> str | None:
     alvo = str(getattr(empresa, "lokafest_url", "") or "").strip()
     if not alvo:
@@ -7538,7 +7623,9 @@ def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa =
     usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
     _garantir_categorias_vitrine_existentes(db, empresa)
+    _garantir_tipos_evento_padrao(db, empresa)
     categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
+    tipos_evento = _tipos_evento_empresa(db, empresa.id, somente_ativos=True)
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
@@ -7558,6 +7645,7 @@ def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa =
         "contratos": contratos,
         "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
         "categorias_vitrine": categorias_vitrine, "recursos_produto": {},
+        "tipos_evento": tipos_evento, "precos_evento": {},
     })
 
 
@@ -7570,7 +7658,9 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
     _garantir_categorias_vitrine_existentes(db, empresa)
+    _garantir_tipos_evento_padrao(db, empresa)
     categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
+    tipos_evento = _tipos_evento_empresa(db, empresa.id, somente_ativos=True)
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
     mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
@@ -7591,6 +7681,8 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
         "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
         "categorias_vitrine": categorias_vitrine,
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if usa_recursos else {},
+        "tipos_evento": tipos_evento,
+        "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id),
     })
 
 
@@ -7661,6 +7753,10 @@ def salvar_produto_url(
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        preco_por_tipo_evento: Optional[str] = Form(None),
+        preco_evento_tipo_id: list[str] = Form(default=[]),
+        preco_evento_modo: list[str] = Form(default=[]),
+        preco_evento_valor: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -7676,7 +7772,10 @@ def salvar_produto_url(
         carga_pontos=carga_pontos, volume_logistico=volume_logistico,
         permite_interno=permite_interno, permite_mala=permite_mala, permite_teto=permite_teto,
         contrato_id=contrato_id, vitrine_ativo=vitrine_ativo, vitrine_resumo=vitrine_resumo,
-        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem, fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
+        vitrine_categoria=vitrine_categoria, vitrine_ordem=vitrine_ordem,
+        preco_por_tipo_evento=preco_por_tipo_evento, preco_evento_tipo_id=preco_evento_tipo_id,
+        preco_evento_modo=preco_evento_modo, preco_evento_valor=preco_evento_valor,
+        fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
         db=db, empresa=empresa,
     )
@@ -7692,6 +7791,10 @@ def salvar_produto(
         contrato_id: str = Form(""),
         vitrine_ativo: Optional[str] = Form(None), vitrine_resumo: str = Form(""),
         vitrine_categoria: str = Form(""), vitrine_ordem: int = Form(0),
+        preco_por_tipo_evento: Optional[str] = Form(None),
+        preco_evento_tipo_id: list[str] = Form(default=[]),
+        preco_evento_modo: list[str] = Form(default=[]),
+        preco_evento_valor: list[str] = Form(default=[]),
         fotos_ajustadas_json: str = Form(""),
         foto_arquivos: list[UploadFile] = File(default=[]),
         foto_originais: list[UploadFile] = File(default=[]),
@@ -7701,6 +7804,7 @@ def salvar_produto(
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
     garantir_itens_estoque_padrao(db, empresa.id)
+    _garantir_tipos_evento_padrao(db, empresa)
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
     if produto and produto.empresa_id != empresa.id:
@@ -7735,7 +7839,11 @@ def salvar_produto(
     ).first() if categoria_nome else None
     produto.vitrine_categoria = categoria_valida.nome if categoria_valida else None
     produto.vitrine_ordem = int(vitrine_ordem or 0)
+    produto.preco_por_tipo_evento = bool(preco_por_tipo_evento)
     db.flush()
+    _salvar_precos_evento_produto(
+        db, empresa.id, produto, preco_evento_tipo_id, preco_evento_modo, preco_evento_valor
+    )
 
     fotos_existentes = db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).count()
     proxima_ordem = fotos_existentes
@@ -7801,9 +7909,15 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         permite_mala=origem.permite_mala, permite_teto=origem.permite_teto, ativo=True,
         vitrine_ativo=origem.vitrine_ativo, vitrine_resumo=origem.vitrine_resumo,
         vitrine_categoria=origem.vitrine_categoria, vitrine_ordem=origem.vitrine_ordem,
+        preco_por_tipo_evento=bool(getattr(origem, "preco_por_tipo_evento", False)),
     )
     db.add(novo)
     db.flush()
+    for preco_evento in db.query(ProdutoPrecoEvento).filter_by(empresa_id=empresa.id, produto_id=origem.id).all():
+        db.add(ProdutoPrecoEvento(
+            empresa_id=empresa.id, produto_id=novo.id, tipo_evento_id=preco_evento.tipo_evento_id,
+            modo=preco_evento.modo, valor=preco_evento.valor,
+        ))
     for vinculo in db.query(ProdutoServicoRecurso).filter_by(
         empresa_id=empresa.id, produto_id=origem.id
     ).all():

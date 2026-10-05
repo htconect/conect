@@ -2,6 +2,9 @@
 {% block head_extra %}
 <style>
 .foto-editor-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.foto-editor-overlay.ativo{display:flex}.foto-editor-card{width:min(760px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:22px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.28)}.foto-editor-canvas-wrap{background:#0f172a;border-radius:16px;overflow:hidden;display:grid;place-items:center;min-height:320px}.foto-editor-canvas-wrap canvas{display:block;width:min(100%,620px);height:auto;aspect-ratio:1/1;background:#fff}.foto-editor-controles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.foto-editor-controles label{margin:0}.foto-editor-acoes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:14px}.foto-editor-ajuda{font-size:.82rem;color:#64748b;margin:6px 0 0}.foto-prompt-box{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.foto-card-acoes{display:flex;gap:7px;flex-wrap:wrap}.foto-card-acoes form{margin:0}.foto-ajustada-badge{font-size:.78rem;color:#067647;margin-top:6px}.foto-principal-click{cursor:pointer}.
+
+.preco-evento-card{margin:16px 0;border:1px solid #b7ead2;border-radius:18px;background:#f4fff9;overflow:hidden}.preco-evento-topo{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:14px 16px}.preco-evento-topo h3{margin:0;font-size:1rem}.preco-evento-topo p{margin:3px 0 0}.preco-evento-toggle{display:flex;align-items:center;gap:9px;font-weight:800;white-space:nowrap}.preco-evento-toggle input{width:20px;height:20px;margin:0}.preco-evento-conteudo{border-top:1px solid #dcefe5;background:#fff}.preco-evento-titulo{padding:15px 16px;border-bottom:1px solid #eef2f6}.preco-evento-titulo h3{margin:0;font-size:1rem}.preco-evento-titulo p{margin:4px 0 0}.preco-evento-linha{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(190px,.65fr) minmax(170px,.55fr);gap:14px;align-items:center;padding:14px 16px;border-bottom:1px solid #edf1f5}.preco-evento-linha:last-child{border-bottom:0}.preco-evento-nome strong{display:inline-block;font-size:.92rem}.preco-evento-nome small{display:block;color:#64748b;margin-top:3px}.preco-evento-controle label,.preco-evento-valor label{margin-top:0}.preco-evento-valor .preco-evento-status{display:block;color:#64748b;font-size:.82rem;padding:9px 0}.preco-evento-valor input{margin:0}.preco-evento-desligado{padding:15px 16px;border-top:1px solid #dcefe5;color:#64748b;background:#fff}.preco-evento-conteudo[hidden],.preco-evento-desligado[hidden]{display:none!important}
+@media(max-width:760px){.preco-evento-topo{align-items:flex-start;flex-direction:column}.preco-evento-linha{grid-template-columns:1fr}.preco-evento-valor{padding-top:0}}
 @media(max-width:640px){.foto-editor-controles{grid-template-columns:1fr}.foto-editor-card{padding:14px}.foto-editor-canvas-wrap{min-height:240px}}
 </style>
 {% endblock %}
@@ -90,6 +93,54 @@
       <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
     </div>
   </div>
+
+
+
+  <section class="preco-evento-card" id="preco-por-evento">
+    <div class="preco-evento-topo">
+      <div>
+        <h3>Cobrança por tipo de evento</h3>
+        <p class="texto-discreto">Use o preço principal como padrão e altere somente as situações que precisam de outro valor.</p>
+      </div>
+      <label class="preco-evento-toggle">
+        <input id="precoPorEventoAtivo" type="checkbox" name="preco_por_tipo_evento" value="1" {% if produto and produto.preco_por_tipo_evento %}checked{% endif %}>
+        <span id="precoPorEventoTexto">{{ 'Ligada' if produto and produto.preco_por_tipo_evento else 'Desligada' }}</span>
+      </label>
+    </div>
+    <div id="precoEventoDesligado" class="preco-evento-desligado" {% if produto and produto.preco_por_tipo_evento %}hidden{% endif %}>
+      Ative para definir preço normal, preço específico ou sob consulta conforme o tipo de evento.
+    </div>
+    <div id="precoEventoConteudo" class="preco-evento-conteudo" {% if not produto or not produto.preco_por_tipo_evento %}hidden{% endif %}>
+      <div class="preco-evento-titulo">
+        <h3>3.1 · Preços por tipo de evento</h3>
+        <p class="texto-discreto">Altere apenas as situações que precisam de um valor diferente.</p>
+      </div>
+      {% for tipo in tipos_evento %}
+        {% set cfg = precos_evento.get(tipo.id, {}) %}
+        {% set modo = cfg.get('modo', 'normal') %}
+        <div class="preco-evento-linha" data-preco-evento-row>
+          <input type="hidden" name="preco_evento_tipo_id" value="{{ tipo.id }}">
+          <div class="preco-evento-nome">
+            <strong>{{ tipo.nome }}</strong>
+            {% if tipo.descricao %}<small>{{ tipo.descricao }}</small>{% endif %}
+          </div>
+          <div class="preco-evento-controle">
+            <label>Como cobrar?</label>
+            <select name="preco_evento_modo" class="preco-evento-modo">
+              <option value="normal" {% if modo == 'normal' %}selected{% endif %}>Usar preço normal</option>
+              <option value="especifico" {% if modo == 'especifico' %}selected{% endif %}>Preço específico</option>
+              <option value="consulta" {% if modo == 'consulta' %}selected{% endif %}>Sob consulta</option>
+            </select>
+          </div>
+          <div class="preco-evento-valor">
+            <label>Valor</label>
+            <input name="preco_evento_valor" class="preco-evento-input" inputmode="decimal" value="{% if modo == 'especifico' and cfg.get('valor') is not none %}{{ cfg.get('valor')|moeda_br }}{% endif %}" placeholder="Ex.: 500,00" {% if modo != 'especifico' %}hidden{% endif %}>
+            <span class="preco-evento-status" {% if modo == 'especifico' %}hidden{% endif %}>{{ 'Sob consulta' if modo == 'consulta' else 'Segue o preço principal.' }}</span>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
 
   <div class="box" id="vitrine-produto" style="margin-top:16px">
     <h3>Vitrine do cliente</h3>
@@ -222,6 +273,34 @@ document.getElementById('fotoUsar')?.addEventListener('click',async()=>{const bt
 document.querySelectorAll('.ajustar-foto-existente').forEach(b=>b.addEventListener('click',()=>abrirSrc(b.dataset.src,{produto:b.dataset.produto,foto:b.dataset.foto})));
 const promptBtn=document.getElementById('gerarPromptFotoIA');promptBtn?.addEventListener('click',async()=>{const empresa={{ empresa.nome|tojson }},telefone={{ (empresa.whatsapp_retorno or '')|tojson }},nome=(document.querySelector('input[name="nome"]')?.value||'').trim(),preco=(document.querySelector('input[name="valor_base"]')?.value||'').trim(),descricao=(document.querySelector('textarea[name="descricao"]')?.value||'').trim(),categoria=(document.querySelector('select[name="vitrine_categoria"]')?.value||'').trim();const prompt=`Você é um designer profissional especializado em capas comerciais para divulgação de produtos e serviços de locação.\n\nCrie uma imagem de capa profissional usando a foto real anexada como referência principal. Mantenha o item reconhecível, fiel ao original, valorizado e em destaque. Use também o logo da empresa anexado, se houver.\n\nDados exatos que podem aparecer na arte:\nNome da empresa: ${empresa}\nTelefone/WhatsApp: ${telefone||'não informado — não inclua se não estiver disponível'}\nNome do item: ${nome||'não informado'}\nPreço: ${preco?`R$ ${preco}`:'não informado — não invente'}\nCategoria: ${categoria||'não informada'}\nDescrição/contexto: ${descricao||'não informado — não invente características'}\n\nDireção visual:\n- item em destaque no centro;\n- arte comercial brasileira, moderna, confiável e sem poluição visual;\n- preço bem visível em selo ou card quando informado;\n- nome do item em destaque;\n- telefone/WhatsApp no rodapé somente quando informado;\n- logo no topo, sem ocupar espaço demais;\n- composição legível em celular;\n- não corte o item principal;\n- não invente medidas, idade, características, preço, telefone ou qualquer dado ausente;\n- não altere o nome da empresa nem o nome do item;\n- não use personagens protegidos, exceto se já estiverem visíveis na foto real.\n\nFormato: imagem quadrada 1:1, ideal para WhatsApp, Instagram e vitrine online.\n\nAnexe à ferramenta de IA: 1) a foto atual do item; 2) o logo da empresa; 3) este prompt.`;try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Anexe a foto atual do item e o logo no ChatGPT, Gemini ou Canva.')}catch(e){window.prompt('Copie este prompt:',prompt)}});
 })();
+
+(function(){
+  const ativo=document.getElementById('precoPorEventoAtivo');
+  const conteudo=document.getElementById('precoEventoConteudo');
+  const desligado=document.getElementById('precoEventoDesligado');
+  const texto=document.getElementById('precoPorEventoTexto');
+  function atualizarBloco(){
+    const ligado=!!ativo?.checked;
+    if(conteudo)conteudo.hidden=!ligado;
+    if(desligado)desligado.hidden=ligado;
+    if(texto)texto.textContent=ligado?'Ligada':'Desligada';
+  }
+  ativo?.addEventListener('change',atualizarBloco);
+  document.querySelectorAll('[data-preco-evento-row]').forEach(row=>{
+    const modo=row.querySelector('.preco-evento-modo');
+    const input=row.querySelector('.preco-evento-input');
+    const status=row.querySelector('.preco-evento-status');
+    function atualizarLinha(){
+      const valor=modo?.value||'normal';
+      if(input)input.hidden=valor!=='especifico';
+      if(status){status.hidden=valor==='especifico';status.textContent=valor==='consulta'?'Sob consulta':'Segue o preço principal.';}
+    }
+    modo?.addEventListener('change',atualizarLinha);
+    atualizarLinha();
+  });
+  atualizarBloco();
+})();
+
 function alternarRecursoProduto(check){
   const linha = check.closest('.linha');
   const hidden = linha.querySelector('.recurso-utiliza');
