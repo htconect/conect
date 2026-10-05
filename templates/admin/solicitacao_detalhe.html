@@ -17,9 +17,25 @@
 {% set contrato_pendente = item.status in ["aguardando_aceite", "contrato_enviado"] %}
 {% set em_credito = item.status == "aguardando_nova_data" %}
 {% set em_rascunho = item.status in ["pre_reserva", "reserva"] %}
+{% set pre_reserva_vitrine = item.status == "vitrine_pre_reserva" %}
 {% set erro = request.query_params.get("erro") %}
 
 {% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
+
+{% if pre_reserva_vitrine %}
+<section class="proxima-acao" style="border:2px solid #2563eb;background:#eff6ff">
+  <small>PRÉ-RESERVA DA VITRINE</small>
+  <b>Analise antes de confirmar</b>
+  <p>O cliente já escolheu os itens, opcionais, endereço, deslocamento e valores. Esta etapa ainda não reserva o estoque.</p>
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/pre-reserva/aprovar" style="margin:10px 0">
+    <button class="botao largura-total btn-krj-primary" type="submit"><i class="bi bi-check2-circle"></i> Aprovar e abrir cadastro</button>
+  </form>
+  {% if empresa.lokafest_ativo and empresa.lokafest_url %}
+    <a class="botao largura-total secundario" href="/painel/solicitacao/{{ item.id }}/lokafest" target="_blank"><i class="bi bi-arrow-up-right-square"></i> Preparar no LokaFest</a>
+    <p class="texto-discreto" style="margin-top:8px">O LokaFest abrirá com data, WhatsApp, local, equipamento e resumo comercial preenchidos. <b>Nada será enviado automaticamente.</b> A pessoa revisa e clica em INDICAR.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 {% if analise_estoque and analise_estoque.tem_conflito %}
 <div class="box aviso" id="alerta-estoque-contrato">
@@ -106,7 +122,9 @@
   {% endif %}
 </details>
 
-{% if em_credito %}
+{% if pre_reserva_vitrine %}
+{# A ação da pré-reserva já foi exibida acima. #}
+{% elif em_credito %}
 <section class="proxima-acao aviso-acao">
   <small>Status</small>
   <b>Contrato em crédito</b>

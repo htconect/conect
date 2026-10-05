@@ -26,5 +26,5 @@ _backup_original/
 *.log
 Thumbs.db
 
-*.sqlite
-*.sqlite3
+# Midias locais/persistentes
+data/media/
