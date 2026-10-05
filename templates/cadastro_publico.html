@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cadastre-se | LokaFest</title>
+  <meta name="theme-color" content="#6B21A8">
+  <link rel="manifest" href="/manifest.webmanifest?v=8">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=8">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/lokafest/favicon-32x32.png?v=8">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/lokafest/favicon-16x16.png?v=8">
+  <link rel="shortcut icon" href="/favicon.ico?v=8">
+  <link rel="stylesheet" href="/static/lokafest/lokafest.css">
+</head>
+<body class="lf-public-signup">
+<header class="lf-header">
+  <a href="/" class="lf-brand"><img src="/static/lokafest/logo.png" alt="LokaFest"></a>
+  <nav><a class="lf-login" href="/entrar">Entrar</a></nav>
+</header>
+
+<main class="lf-signup-wrap">
+  <section class="lf-signup-head">
+    <span>FAÇA PARTE DO LOKAFEST</span>
+    <h1>Cadastre sua empresa ou serviço</h1>
+    <p>Informe seus dados, escolha uma única zona de atuação e marque o que você oferece. Seu cadastro ficará aguardando aprovação.</p>
+  </section>
+
+  {% if request.query_params.get('erro') %}<div class="alert erro">{{ request.query_params.get('erro') }}</div>{% endif %}
+  {% if request.query_params.get('ok') %}
+  {% if request.query_params.get('nao_apto') %}
+  <div class="lf-not-eligible">
+    <strong>VOCÊ AINDA NÃO ESTÁ APTO</strong>
+    <p>{{ request.query_params.get('nao_apto') }}</p>
+    <p>Seu cadastro foi salvo, mas você não participará dos sorteios dessa categoria até regularizar a atualização exigida.</p>
+  </div>
+  {% else %}
+  <div class="lf-signup-success">
+    <strong>Cadastro enviado com sucesso!</strong>
+    <p>Seu acesso ficará disponível após a aprovação do administrador.</p>
+    <a href="/entrar" class="lf-primary">Ir para entrar</a>
+  </div>
+  {% endif %}
+  {% else %}
+  <form method="post" class="panel lf-public-form">
+    <div class="formgrid">
+      <label>Nome completo<input name="nome" required autocomplete="name"><small>Favor informar seu nome completo correto. Essa informação será exibida ao cliente final.</small></label>
+      <label>WhatsApp<input name="whatsapp" id="cad-whatsapp" data-mask="phone" required inputmode="tel" autocomplete="tel"></label><label>CPF<input name="cpf" id="cad-cpf" data-mask="cpf" required inputmode="numeric" autocomplete="off" placeholder="000.000.000-00"></label>
+      <label>Senha<input type="password" name="senha" required></label>
+      
+<div class="full lf-zone-choice">
+  <div class="lf-zone-title">
+    <strong>Área principal de atendimento</strong>
+    <small>No plano inicial gratuito você pode escolher 1 área. Futuramente outros planos poderão liberar áreas adicionais.</small>
+  </div>
+  <div class="lf-zone-radio-grid">
+    {% for z in zonas %}
+    <label class="lf-zone-radio">
+      <input type="radio" name="zona" value="{{ z }}" required>
+      <span>{{ z }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</div>
+
+    </div>
+
+    
+
+<section class="lf-krj-validation" id="krj-validation" hidden>
+  <div class="lf-krj-head">
+    <div>
+      <span class="eyebrow">VALIDAÇÃO ORGANIZA</span>
+      <h2>Carregar meus equipamentos</h2>
+      <p>Consulte seu cadastro pelo CPF ou WhatsApp. Karaokê usa regra de atualização; Fliperama exige apenas que exista ao menos 1 ativo.</p>
+    </div>
+    <button type="button" class="btn primary" id="btn-validar-krj">Carregar dados</button>
+  </div>
+
+  <div id="krj-status" class="lf-krj-status"></div>
+
+  <div id="krj-status-compacto" class="lf-krj-compact" hidden></div>
+<div id="krj-resumo" class="lf-krj-summary" hidden>
+    <div><strong id="krj-qtd-jukebox">0</strong><span>Jukebox</span></div>
+    <div><strong id="krj-qtd-portatil">0</strong><span>Portátil</span></div>
+    <div><strong id="krj-qtd-iphone">0</strong><span>iPhone</span></div>
+    <div><strong id="krj-qtd-fliperama">0</strong><span>Fliperama</span></div>
+    <div><strong id="krj-atualizacao-view">—</strong><span>Atualização</span></div>
+  </div>
+  <button type="button" class="btn ghost lf-krj-toggle" id="krj-toggle-detalhes" hidden>Ver equipamentos</button>
+<div id="krj-equipamentos-detalhes" class="lf-krj-details" hidden></div>
+
+  <input type="hidden" name="krj_validado" id="krj_validado" value="0">
+  <input type="hidden" name="krj_cliente_id" id="krj_cliente_id">
+  <input type="hidden" name="krj_jukebox_qtd" id="krj_jukebox_qtd" value="0">
+  <input type="hidden" name="krj_portatil_qtd" id="krj_portatil_qtd" value="0">
+  <input type="hidden" name="krj_iphone_qtd" id="krj_iphone_qtd" value="0">
+  <input type="hidden" name="krj_fliperama_qtd" id="krj_fliperama_qtd" value="0">
+  <input type="hidden" name="krj_atualizacao" id="krj_atualizacao">
+  <input type="hidden" name="krj_equipamentos_json" id="krj_equipamentos_json" value="[]">
+</section>
+
+<section class="lf-offers">
+  <div class="lf-offers-title">
+    <div>
+      <span class="eyebrow">O que você oferece?</span>
+      <h2>Escolha sua categoria principal</h2>
+      <p>No plano inicial gratuito, você pode escolher 1 categoria e os itens que oferece dentro dela.</p>
+    </div>
+  </div>
+
+  <div class="lf-category-list">
+    {% for c in categorias %}
+    <article class="lf-category-box">
+      <label class="lf-category-head lf-single-category">
+        <div class="lf-summary-left">
+          <span class="lf-cat-icon">🎉</span>
+          <div>
+            <strong>{{c.nome}}</strong>
+            <small>{{ itens_por_categoria.get(c.id, [])|length }} item(ns)</small>
+          </div>
+        </div>
+        <input type="radio" name="categoria_principal" value="{{c.id}}" data-cat-radio="{{c.id}}" data-cat-name="{{c.nome}}" required>
+      </label>
+
+      <div class="lf-offer-items-compact" id="pub-itens-{{c.id}}" hidden>
+        {% for i in itens_por_categoria.get(c.id, []) %}
+        <label class="lf-item-check">
+          <input type="checkbox" name="catalogo_itens" value="{{i.id}}" data-parent-cat="{{c.id}}">
+          <span>{{i.nome}}</span>
+        </label>
+        {% else %}
+        <div class="empty">Sem itens cadastrados nesta categoria.</div>
+        {% endfor %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+
+    <button class="lf-primary lf-submit-wide">Enviar cadastro</button>
+  </form>
+  {% endif %}
+</main>
+
+<script>
+function normalizarTexto(v){
+  return (v || '').trim().toLocaleLowerCase('pt-BR')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+function atualizarCategoriaSelecionada(){
+  const selecionada = document.querySelector('input[name="categoria_principal"]:checked');
+  document.querySelectorAll('.lf-offer-items-compact').forEach(box => box.hidden = true);
+
+  const krj = document.getElementById('krj-validation');
+  if(!selecionada){
+    if(krj) krj.hidden = true;
+    return;
+  }
+
+  const id = selecionada.value;
+  const box = document.getElementById('pub-itens-' + id);
+  if(box) box.hidden = false;
+
+  document.querySelectorAll('input[name="catalogo_itens"]').forEach(item => {
+    if(item.dataset.parentCat !== id) item.checked = false;
+  });
+
+  const nome = selecionada.dataset.catName || selecionada.closest('.lf-category-box')?.querySelector('.lf-summary-left strong')?.textContent || '';
+  const categoriaNorm = normalizarTexto(nome);
+  const ehKaraoke = categoriaNorm === 'karaoke';
+  const ehFliperama = categoriaNorm === 'fliperama';
+  if(krj) krj.hidden = !(ehKaraoke || ehFliperama);
+
+  // Karaokê e Fliperama usam o mesmo vínculo local com o Organiza.
+  if(ehKaraoke || ehFliperama){
+    const cpf = document.getElementById('cad-cpf')?.value || '';
+    const whatsapp = document.getElementById('cad-whatsapp')?.value || '';
+    const jaValidado = document.getElementById('krj_validado')?.value === '1';
+    if(!jaValidado && (cpf.replace(/\D/g, '').length === 11 || whatsapp.replace(/\D/g, '').length >= 10)){
+      setTimeout(() => document.getElementById('btn-validar-krj')?.click(), 50);
+    }
+  }
+}
+
+document.querySelectorAll('input[name="categoria_principal"]').forEach(radio => {
+  radio.addEventListener('change', atualizarCategoriaSelecionada);
+});
+
+// Garante o estado correto ao voltar pelo navegador ou em preenchimento automático.
+atualizarCategoriaSelecionada();
+
+document.getElementById('btn-validar-krj')?.addEventListener('click', async () => {
+  const cpf = document.getElementById('cad-cpf')?.value || '';
+  const whatsapp = document.getElementById('cad-whatsapp')?.value || '';
+  const status = document.getElementById('krj-status');
+  const resumo = document.getElementById('krj-resumo');
+
+  status.innerHTML = 'Consultando o Organiza...';
+  resumo.hidden = true;
+
+  try{
+    const r = await fetch('/api/organiza/validar-cliente?cpf=' + encodeURIComponent(cpf) + '&whatsapp=' + encodeURIComponent(whatsapp));
+    const d = await r.json();
+
+    if(!d.ok || !d.encontrado){
+      document.getElementById('krj_validado').value = '0';
+      status.innerHTML = '<div class="alert erro">' + (d.mensagem || 'Cliente não encontrado.') + '</div>';
+      return;
+    }
+
+    document.getElementById('krj_validado').value = '1';
+    document.getElementById('krj_cliente_id').value = d.cliente_id || '';
+    document.getElementById('krj_jukebox_qtd').value = d.jukebox || 0;
+    document.getElementById('krj_portatil_qtd').value = d.portatil || 0;
+    document.getElementById('krj_iphone_qtd').value = d.iphone || 0;
+    document.getElementById('krj_fliperama_qtd').value = d.fliperama || 0;
+    document.getElementById('krj_atualizacao').value = d.atualizacao || '';
+    document.getElementById('krj_equipamentos_json').value = JSON.stringify(d.detalhes || []);
+
+    document.getElementById('krj-qtd-jukebox').textContent = d.jukebox || 0;
+    document.getElementById('krj-qtd-portatil').textContent = d.portatil || 0;
+    document.getElementById('krj-qtd-iphone').textContent = d.iphone || 0;
+    document.getElementById('krj-qtd-fliperama').textContent = d.fliperama || 0;
+    document.getElementById('krj-atualizacao-view').textContent = d.atualizacao || '—';
+
+    status.innerHTML = '';
+    resumo.hidden = true;
+
+    const detalhesBox = document.getElementById('krj-equipamentos-detalhes');
+    const toggleDetalhes = document.getElementById('krj-toggle-detalhes');
+    const compacto = document.getElementById('krj-status-compacto');
+    const detalhes = d.detalhes || [];
+    const pendentes = detalhes.filter(eq => (eq.tipo || '') !== 'fliperama' && !eq.atualizado);
+    const selecionada = document.querySelector('input[name="categoria_principal"]:checked');
+    const nomeCategoria = normalizarTexto(selecionada?.dataset.catName || '');
+    const ehFliperama = nomeCategoria === 'fliperama';
+    const apto = ehFliperama ? Number(d.fliperama || 0) > 0 : Boolean(d.apto);
+    const tituloApto = ehFliperama
+      ? (apto ? '✓ Fliperama validado — APTO' : '⚠ Nenhum Fliperama ativo encontrado')
+      : (apto ? (d.tem_atualizacao_disponivel ? '✓ APTO AO SORTEIO — ATUALIZAÇÃO DISPONÍVEL' : '✓ Cliente Karaoke RJ validado — APTO') : '⚠ Cliente Karaoke RJ validado — NÃO APTO');
+
+    compacto.className = 'lf-krj-compact ' + (apto ? 'apto' : 'nao-apto');
+    compacto.innerHTML =
+      '<div><strong>' + tituloApto + '</strong>'
+      + '<span>' + (d.jukebox || 0) + ' Jukebox · ' + (d.portatil || 0) + ' Portáteis · ' + (d.iphone || 0) + ' iPhones · ' + (d.fliperama || 0) + ' Fliperama(s)' + (ehFliperama ? '' : ' · Seu catálogo ' + (d.atualizacao || '—') + ' · Mínimo do sorteio ' + (d.catalogo_obrigatorio || '—') + (d.ultima_atualizacao ? ' · Última disponível ' + d.ultima_atualizacao : '')) + '</span></div>'
+      + (apto || ehFliperama ? '' : '<b>' + pendentes.length + ' equipamento(s) precisam de atualização</b>');
+    compacto.hidden = false;
+
+    if(detalhes.length){
+      detalhesBox.innerHTML = detalhes.map(eq => {
+        const ehFlip = (eq.tipo || '') === 'fliperama';
+        const ok = ehFlip ? 'Ativo · sem atualização' : (eq.atualizado ? 'Atualizado' : 'Precisa atualizar');
+        const pacote = eq.pacote || 'Sem pacote';
+        const alvo = ehFlip ? 'Não se aplica' : (d.catalogo_obrigatorio || eq.pacote_obrigatorio || '—');
+        const nome = eq.identificacao || eq.modelo || eq.tipo || 'Equipamento';
+        const numero = eq.numero_maquina ? ' · ' + eq.numero_maquina : '';
+        return '<div class="lf-krj-equipment '+(eq.atualizado?'ok':'pending')+'">'
+          + '<strong>'+nome+numero+'</strong>'
+          + '<span>Pacote: '+pacote+' · Obrigatório: '+alvo+'</span>'
+          + '<b>'+ok+'</b>'
+          + '</div>';
+      }).join('');
+      toggleDetalhes.hidden = false;
+      toggleDetalhes.textContent = (apto ? 'Ver ' : 'Ver pendências em ') + total + ' equipamento(s)';
+      detalhesBox.hidden = apto;
+      if(!apto){
+        toggleDetalhes.textContent = 'Ocultar equipamentos';
+      }
+    }else{
+      detalhesBox.innerHTML = '';
+      detalhesBox.hidden = true;
+      toggleDetalhes.hidden = true;
+    }
+
+    // Marca automaticamente os modelos que o cliente possui.
+    document.querySelectorAll('#krj-validation ~ .lf-offers input[name="catalogo_itens"]').forEach(cb => {
+      const nome = normalizarTexto(cb.closest('.lf-item-check')?.textContent || '');
+      if(nome.includes('jukebox')) cb.checked = Number(d.jukebox || 0) > 0;
+      if(nome.includes('portatil')) cb.checked = Number(d.portatil || 0) > 0;
+      if(nome.includes('iphone')) cb.checked = Number(d.iphone || 0) > 0;
+      if(nome.includes('fliperama')) cb.checked = Number(d.fliperama || 0) > 0;
+    });
+  }catch(e){
+    document.getElementById('krj_validado').value = '0';
+    status.innerHTML = '<div class="alert erro">Não foi possível consultar o Organiza agora.</div>';
+  }
+});
+
+document.getElementById('krj-toggle-detalhes')?.addEventListener('click', () => {
+  const detalhesBox = document.getElementById('krj-equipamentos-detalhes');
+  const btn = document.getElementById('krj-toggle-detalhes');
+  detalhesBox.hidden = !detalhesBox.hidden;
+  btn.textContent = detalhesBox.hidden
+    ? 'Ver equipamentos'
+    : 'Ocultar equipamentos';
+});
+
+</script>
+<script>
+(function(){
+  function digits(v,max){ return (v || '').replace(/\D/g,'').slice(0,max); }
+  function cpf(v){ const d=digits(v,11); return d.replace(/^(\d{3})(\d)/,'$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d)/,'.$1-$2'); }
+  function phone(v){ let d=(v || '').replace(/\D/g,''); if(d.startsWith('00')) d=d.slice(2); if(d.startsWith('55') && (d.length===12 || d.length===13)) d=d.slice(2); if(d.startsWith('0') && d.length>11) d=d.slice(1); d=d.slice(0,11); if(d.length<=10) return d.replace(/^(\d{2})(\d)/,'($1) $2').replace(/(\d{4})(\d)/,'$1-$2'); return d.replace(/^(\d{2})(\d)/,'($1) $2').replace(/(\d{5})(\d)/,'$1-$2'); }
+  document.querySelectorAll('input[data-mask]').forEach(function(el){ const apply=()=>el.value=el.dataset.mask==='cpf'?cpf(el.value):phone(el.value); apply(); el.addEventListener('input',apply); });
+})();
+</script>
+</body>
+</html>

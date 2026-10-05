@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Oportunidade | LokaFest{% endblock %}
+{% block content %}
+<section class="headline">
+  <div>
+    <span class="eyebrow">OPORTUNIDADE LOKAFEST</span>
+    <h1>{{ item.nome if item else 'Karaokê' }}</h1>
+    <p>{{ ind.data_evento|data_br if ind.data_evento else 'Data a definir' }} · {{ ind.local_texto or ind.zona or 'Local a confirmar' }}</p>
+  </div>
+</section>
+
+<div class="card lf-flow-card">
+  <span class="eyebrow">DETALHES DA INDICAÇÃO</span>
+  <h2>Equipamento solicitado</h2>
+  <p><strong>{{ equipamentos_indicacao_texto(ind) }}</strong></p>
+  {% if ind.observacao %}<p><strong>Observação:</strong> {{ ind.observacao }}</p>{% endif %}
+</div>
+
+{% if request.query_params.get('erro') %}<div class="alert error">{{ request.query_params.get('erro') }}</div>{% endif %}
+{% if request.query_params.get('ok') %}<div class="alert success">{{ request.query_params.get('ok') }}</div>{% endif %}
+
+<div class="card lf-flow-card">
+  <span class="eyebrow">MEU STATUS</span>
+  {% if encerrada %}
+    <h2>Atendimento encerrado</h2>
+  {% elif aceitou %}
+    <h2>Em atendimento — indisponível para novos sorteios</h2>
+  {% else %}
+    <h2>Aguardando sua decisão — indisponível para novos sorteios</h2>
+  {% endif %}
+  <p>Este acesso é pessoal e somente funciona para o participante atualmente vinculado à indicação.</p>
+</div>
+
+{% if encerrada %}
+<div class="card lf-flow-card">
+  <span class="eyebrow">ATENDIMENTO ENCERRADO</span>
+  <h2>{{ 'Finalização com sucesso' if ind.status == 'Sucesso' else ind.status }}</h2>
+  <p>Este atendimento já foi concluído e não está mais disponível para alterações.</p>
+</div>
+{% elif not aceitou %}
+<div class="card lf-flow-card">
+  <span class="eyebrow">OLÁ, {{ responsavel.nome if responsavel else 'PARTICIPANTE' }}</span>
+  <h2>Você foi sorteado para esta indicação</h2>
+  <p>Escolha uma das opções abaixo. Enquanto não responder, você ficará impossibilitado de receber novas indicações.</p>
+  <div class="actions lf-flow-actions">
+    <form method="post" action="/oportunidade/{{ ind.pedido_token }}/aceitar">
+      <button class="btn success">Aceitar indicação</button>
+    </form>
+    <form method="post" action="/oportunidade/{{ ind.pedido_token }}/repassar" onsubmit="return confirm('Deseja realmente repassar esta indicação?');">
+      <button class="btn ghost">Repassar indicação</button>
+    </form>
+  </div>
+  <small>O contato do cliente somente será liberado depois do aceite.</small>
+</div>
+{% else %}
+<div class="card lf-flow-card">
+  <span class="eyebrow">ATENDIMENTO EM ANDAMENTO</span>
+  <h2>Você é responsável por esta indicação</h2>
+  <div class="alert warning">
+    Enquanto não finalizar este atendimento, você ficará impossibilitado de receber novas indicações.
+  </div>
+  <div class="actions lf-flow-actions">
+    <a class="btn whatsapp" target="_blank" href="/oportunidade/{{ ind.pedido_token }}/cliente">Chamar cliente pelo WhatsApp</a>
+  </div>
+</div>
+
+<div class="card lf-flow-card">
+  <span class="eyebrow">FINALIZAR ATENDIMENTO</span>
+  <h2>Qual foi o resultado?</h2>
+  <div class="lf-result-grid">
+    <form method="post" action="/oportunidade/{{ ind.pedido_token }}/finalizar" onsubmit="return confirm('Confirma que fechou este atendimento?');">
+      <input type="hidden" name="acao" value="fechei">
+      <button class="btn success full">Fechei</button>
+      <small>Finalização com sucesso.</small>
+    </form>
+
+    <form method="post" action="/oportunidade/{{ ind.pedido_token }}/repassar" onsubmit="return confirm('ATENÇÃO: a partir do repasse, não faça mais contato com o cliente. O descumprimento poderá gerar punição administrativa. Deseja continuar?');">
+      <button class="btn ghost full">Repassar</button>
+      <small>Após repassar, não faça mais contato com o cliente. Punição pode ser aplicada pelo administrador.</small>
+    </form>
+  </div>
+
+  <form method="post" action="/oportunidade/{{ ind.pedido_token }}/finalizar" class="lf-reason-form">
+    <input type="hidden" name="acao" value="cliente_nao_deseja">
+    <label>Cliente não deseja mais — informe o motivo
+      <select name="motivo" required>
+        <option value="">Selecione</option>
+        <option>Cliente desistiu</option>
+        <option>Já fechou com outra empresa</option>
+        <option>Valor fora do orçamento</option>
+        <option>Data indisponível</option>
+        <option>Não respondeu</option>
+        <option>Número inválido</option>
+        <option>Outro motivo</option>
+      </select>
+    </label>
+    <button class="btn danger">Finalizar: cliente não deseja</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

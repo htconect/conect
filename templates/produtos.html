@@ -1,0 +1,39 @@
+
+{% extends "base.html" %}
+{% block title %}Produtos e Serviços | LokaFest{% endblock %}
+{% block content %}
+<section class="headline">
+  <div><span class="eyebrow">Cadastros</span><h1>Produtos e Serviços</h1><p>Cadastre tudo que poderá ser indicado ou oferecido no LokaFest. As validações específicas serão configuradas depois.</p></div>
+</section>
+
+{% if request.query_params.get('erro') %}<div class="alert erro">{{ request.query_params.get('erro') }}</div>{% endif %}
+{% if request.query_params.get('ok') %}<div class="alert ok">{{ request.query_params.get('ok') }}</div>{% endif %}
+
+<section class="panel lf-admin-create">
+  <div><h2>Novo cadastro</h2><p>Ex.: Karaokê, Fliperama, Buffet, DJ, Fotografia.</p></div>
+  <form method="post" action="/admin/produtos" class="inlineform">
+    <input name="nome" placeholder="Nome do produto ou serviço" required maxlength="140">
+    <select name="tipo"><option value="Produto">Produto</option><option value="Serviço">Serviço</option></select>
+    <button class="btn primary">+ Adicionar</button>
+  </form>
+</section>
+
+<div class="lf-admin-grid">
+{% for i in itens %}
+<article class="lf-admin-card {{ 'is-off' if not i.ativo else '' }}">
+  <div class="lf-admin-icon">{{ '📦' if i.tipo == 'Produto' else '🛎️' }}</div>
+  <div class="lf-admin-card-head"><span class="pill">{{ i.tipo }}</span><span class="lf-status {{ 'on' if i.ativo else 'off' }}">{{ 'Ativo' if i.ativo else 'Inativo' }}</span></div>
+  <form method="post" action="/admin/produtos/{{ i.id }}/editar" class="lf-edit-form">
+    <input name="nome" value="{{ i.nome }}" required maxlength="140">
+    <select name="tipo"><option value="Produto" {{ 'selected' if i.tipo == 'Produto' else '' }}>Produto</option><option value="Serviço" {{ 'selected' if i.tipo == 'Serviço' else '' }}>Serviço</option></select>
+    <button class="btn ghost">Salvar alterações</button>
+  </form>
+  <form method="post" action="/admin/produtos/{{ i.id }}/status">
+    <button class="btn {{ 'danger-soft' if i.ativo else 'success' }}">{{ 'Desativar' if i.ativo else 'Ativar' }}</button>
+  </form>
+</article>
+{% else %}
+<div class="empty">Nenhum produto ou serviço cadastrado.</div>
+{% endfor %}
+</div>
+{% endblock %}

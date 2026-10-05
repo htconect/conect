@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Meu cadastro | LokaFest{% endblock %}
+{% block content %}
+<section class="headline">
+  <div>
+    <span class="eyebrow">MINHA CONTA</span>
+    <h1>Meu cadastro</h1>
+    <p>Consulte seus dados, equipamentos validados e altere somente as informações permitidas.</p>
+  </div>
+</section>
+
+{% if request.query_params.get('erro') %}<div class="alert erro">{{ request.query_params.get('erro') }}</div>{% endif %}
+{% if request.query_params.get('ok') %}<div class="alert ok">{{ request.query_params.get('ok') }}</div>{% endif %}
+
+<section class="panel lf-profile-panel">
+<form method="post" action="/meu-cadastro" class="stack">
+  <div class="lf-profile-grid">
+    <label>Nome completo
+      <input name="nome" value="{{ usuario.nome }}" required>
+      <small>Favor informar seu nome completo correto. Essa informação será exibida ao cliente final.</small>
+    </label>
+    <label>WhatsApp
+      <input name="whatsapp" data-mask="phone" value="{{ usuario.whatsapp|telefone_br }}" inputmode="tel" autocomplete="tel" required>
+    </label>
+    <label>CPF
+      <input name="cpf" data-mask="cpf" value="{{ usuario.cpf|cpf_br if usuario.cpf else '' }}" inputmode="numeric" required placeholder="000.000.000-00">
+    </label>
+    <label>Área principal de atendimento
+      <input value="{{ usuario.zona }}" readonly class="lf-readonly">
+      <small>Somente o administrador pode alterar sua área de atendimento.</small>
+    </label>
+    <label>Categoria
+      <input value="{{ categoria.nome if categoria else '—' }}" readonly class="lf-readonly">
+    </label>
+  </div>
+
+  <div class="lf-profile-password" style="margin-top:18px">
+    <h2>Áreas atendidas</h2>
+    <p>A área principal tem prioridade no sorteio. Nas demais, escolha <strong>Atende normalmente</strong> ou <strong>Não atende</strong>. Esta configuração pode ser alterada uma vez por mês.</p>
+    {% if pode_editar_zonas %}
+      <input type="hidden" name="salvar_zonas" value="1">
+      <div style="display:grid;gap:10px;margin-top:12px">
+        {% for z in zonas %}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;border:1px solid #dce5f2;border-radius:12px">
+          <strong>{{ z }}</strong>
+          <div style="display:flex;gap:14px;flex-wrap:wrap">
+            {% if z == usuario.zona %}
+              <label style="display:flex;align-items:center;gap:6px;margin:0;font-weight:700"><input type="radio" style="width:auto" checked disabled> 🟢 Principal</label>
+              <input type="hidden" name="zona_status_{{ loop.index0 }}" value="atende">
+            {% else %}
+              <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="radio" name="zona_status_{{ loop.index0 }}" value="atende" style="width:auto" {{ 'checked' if z not in zonas_bloqueadas else '' }} required> 🔵 Atende normalmente</label>
+              <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="radio" name="zona_status_{{ loop.index0 }}" value="nao_atende" style="width:auto" {{ 'checked' if z in zonas_bloqueadas else '' }} required> 🔴 Não atende</label>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <small style="display:block;margin-top:10px">Ao salvar, a próxima alteração pelo usuário ficará disponível no mês seguinte. O administrador pode corrigir a qualquer momento.</small>
+    {% else %}
+      <div style="display:grid;gap:8px;margin-top:10px">
+        {% for z in zonas %}
+          <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #dce5f2;border-radius:10px"><strong>{{ z }}</strong><span class="lf-catalog-pill">{{ '🟢 Principal' if z == usuario.zona else ('🔴 Não atende' if z in zonas_bloqueadas else '🔵 Atende normalmente') }}</span></div>
+        {% endfor %}
+      </div>
+      <small style="display:block;margin-top:10px">Configuração atualizada em {{ ultima_atualizacao_zonas.strftime('%d/%m/%Y') if ultima_atualizacao_zonas else '—' }}. Para corrigir antes do próximo mês, solicite ao administrador.</small>
+    {% endif %}
+  </div>
+
+  {% if categoria and categoria.nome|lower == 'karaokê' or categoria and categoria.nome|lower == 'karaoke' %}
+  <div class="lf-profile-equipment">
+    <div class="lf-profile-section-head">
+      <div><span class="eyebrow">KARAOKE RJ</span><h2>Meus equipamentos</h2></div>
+      <span class="lf-catalog-pill">Catálogo {{ usuario.krj_atualizacao or '—' }}</span>
+    </div>
+    <div class="lf-equipment-summary">
+      <div><strong>{{ usuario.krj_jukebox_qtd or 0 }}</strong><span>Jukebox</span></div>
+      <div><strong>{{ usuario.krj_portatil_qtd or 0 }}</strong><span>Portátil</span></div>
+      <div><strong>{{ usuario.krj_iphone_qtd or 0 }}</strong><span>iPhone</span></div>
+    </div>
+    <div class="lf-equipment-list">
+      {% for eq in equipamentos %}
+      <div class="lf-equipment-row">
+        <div>
+          <strong>{{ eq.get('identificacao') or eq.get('modelo') or eq.get('tipo') or 'Equipamento' }}{% if eq.get('numero_maquina') %} · {{ eq.get('numero_maquina') }}{% endif %}</strong>
+          <small>Pacote {{ eq.get('pacote') or '—' }} · Obrigatório {{ eq.get('pacote_obrigatorio') or usuario.krj_atualizacao or '—' }}</small>
+        </div>
+        <b class="{{ 'ok' if eq.get('atualizado') else 'pending' }}">{{ 'Atualizado' if eq.get('atualizado') else 'Atualização necessária' }}</b>
+      </div>
+      {% else %}
+      <div class="empty">Nenhum equipamento carregado.</div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="lf-profile-password">
+    <h2>Alterar senha</h2>
+    <p>Preencha somente quando quiser trocar sua senha.</p>
+    <label>Senha atual<input type="password" name="senha_atual" autocomplete="current-password"></label>
+    <label>Nova senha<input type="password" name="nova_senha" autocomplete="new-password"></label>
+    <label>Confirmar nova senha<input type="password" name="confirmar_senha" autocomplete="new-password"></label>
+  </div>
+  <button class="btn primary" type="submit">Salvar alterações</button>
+</form>
+</section>
+{% endblock %}

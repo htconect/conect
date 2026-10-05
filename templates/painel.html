@@ -1,0 +1,207 @@
+{% extends "base.html" %}{% block content %}
+{% if oportunidade_nova %}
+<div class="lf-winner-modal" id="lf-winner-modal" data-indicacao-id="{{ oportunidade_nova.id }}" hidden>
+  <div class="lf-confetti" aria-hidden="true">
+    {% for n in range(24) %}<i style="--n:{{n}}"></i>{% endfor %}
+  </div>
+
+  <div class="lf-winner-card">
+    <button type="button" class="lf-winner-close" id="lf-winner-close" aria-label="Fechar">×</button>
+
+    <div class="lf-winner-badge">🎉</div>
+    <span class="lf-winner-eyebrow">NOVA OPORTUNIDADE</span>
+    <h1>VOCÊ FOI SORTEADO!</h1>
+    <p class="lf-winner-lead">Uma oportunidade de <strong>{{ nome_oportunidade or 'Karaokê' }}</strong> acabou de chegar para você.</p>
+
+    <div class="lf-winner-details">
+      <div>
+        <small>Local</small>
+        <strong>{{ oportunidade_nova.local_texto or oportunidade_nova.zona or 'Local a confirmar' }}</strong>
+      </div>
+      <div>
+        <small>Data</small>
+        <strong>{{ oportunidade_nova.data_evento|data_br if oportunidade_nova.data_evento else 'A definir' }}</strong>
+      </div>
+    </div>
+
+    <div class="alert warning">
+      Esta indicação ficará vinculada a você até aceitar ou repassar. Não existe expiração automática por tempo.
+    </div>
+
+    <div class="lf-winner-actions">
+      <form method="post" action="/oportunidade/{{ oportunidade_nova.pedido_token }}/aceitar">
+        <button class="btn primary lf-winner-cta" id="lf-winner-cta">ACEITAR INDICAÇÃO</button>
+      </form>
+      <form method="post" action="/oportunidade/{{ oportunidade_nova.pedido_token }}/repassar">
+        <button class="btn ghost lf-winner-pass">REPASSAR INDICAÇÃO</button>
+      </form>
+    </div>
+    <small class="lf-winner-hint">Ao passar, o LokaFest sorteia automaticamente outro participante apto.</small>
+  </div>
+</div>
+
+<script>
+(function(){
+  const modal = document.getElementById('lf-winner-modal');
+  if(!modal) return;
+
+  const id = modal.dataset.indicacaoId;
+  const chave = 'lokafest_sorteio_visto_' + id;
+
+  // Exibe celebração somente uma vez por oportunidade neste aparelho/navegador.
+  if(!localStorage.getItem(chave)){
+    modal.hidden = false;
+    document.body.classList.add('lf-modal-open');
+
+    function tocarToqueFesta(){
+      try{
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if(!Ctx) return;
+        const ctx = new Ctx();
+        const notas = [
+          [659.25, 0.00, 0.12],
+          [783.99, 0.13, 0.12],
+          [987.77, 0.27, 0.18]
+        ];
+        notas.forEach(([freq, ini, dur]) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.0001, ctx.currentTime + ini);
+          gain.gain.exponentialRampToValueAtTime(0.16, ctx.currentTime + ini + 0.015);
+          gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + ini + dur);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + ini);
+          osc.stop(ctx.currentTime + ini + dur + 0.02);
+        });
+      }catch(e){}
+    }
+
+    // Tenta tocar imediatamente; se o navegador bloquear autoplay,
+    // toca no primeiro toque/clique do usuário.
+    tocarToqueFesta();
+    const liberarSom = () => {
+      tocarToqueFesta();
+      document.removeEventListener('pointerdown', liberarSom);
+    };
+    document.addEventListener('pointerdown', liberarSom, {once:true});
+
+    const fechar = () => {
+      localStorage.setItem(chave, '1');
+      modal.hidden = true;
+      document.body.classList.remove('lf-modal-open');
+    };
+
+    document.getElementById('lf-winner-close')?.addEventListener('click', fechar);
+    document.getElementById('lf-winner-cta')?.addEventListener('click', fechar);
+  }
+})();
+</script>
+{% endif %}
+
+
+
+{% if request.query_params.get('ok') %}
+<div class="alert successbox lf-panel-feedback"><strong>{{ request.query_params.get('ok') }}</strong></div>
+{% endif %}
+{% if request.query_params.get('erro') %}
+<div class="alert error lf-panel-feedback"><strong>{{ request.query_params.get('erro') }}</strong></div>
+{% endif %}
+
+<section class="lf-user-stage {{ etapa_usuario }}">
+  <div class="lf-user-stage-icon" aria-hidden="true">
+    {% if etapa_usuario == 'livre' %}✓{% elif etapa_usuario == 'aguardando_decisao' %}!{% elif etapa_usuario == 'em_atendimento' %}●{% else %}×{% endif %}
+  </div>
+  <div class="lf-user-stage-body">
+    <span class="eyebrow">SEU ESTÁGIO AGORA</span>
+    <h2>{{ etapa_titulo }}</h2>
+    <p>{{ etapa_descricao }}</p>
+  </div>
+  <span class="lf-user-stage-badge">{{ etapa_titulo }}</span>
+</section>
+
+{% if mensagem_sistema %}
+<section class="lf-system-message {{ 'apto' if status_sistema == 'apto' else 'nao-apto' }}">
+  <div class="lf-system-message-icon">{{ '✓' if status_sistema == 'apto' else '!' }}</div>
+  <div>
+    <span class="eyebrow">MENSAGEM DO LOKAFEST</span>
+    <h2>{{ usuario.nome }}, {{ 'você está apta' if status_sistema == 'apto' else 'atenção ao seu cadastro' }}</h2>
+    <p>{{ mensagem_sistema }}</p>
+    {% if detalhes_status %}
+      <small>{{ 'Atualização disponível para: ' if status_sistema == 'apto' else 'Pendente: ' }}{{ detalhes_status|join(', ') }}</small>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="headline"><div><span class="eyebrow">Olá, {{ usuario.nome }}</span><h1>Painel LokaFest</h1><p>Acompanhe aqui se você está livre, com uma nova indicação ou em atendimento.</p></div><a class="btn primary" href="/indicar">+ Nova indicação</a></section>
+<div class="stats"><div class="card"><small>Indicações abertas</small><strong>{{ abertas|length }}</strong></div><div class="card"><small>Aguardando sorteio</small><strong>{{ aguardando }}</strong></div><div class="card"><small>Créditos de prioridade</small><strong>{{ usuario.prioridade_creditos }}</strong></div></div>
+<div id="oportunidades-abertas"></div>
+{% if abertas %}<section><h2>Seu atendimento atual</h2>{% for i in abertas %}<article class="lead"><div><span class="pill">{{ itens[i.item_id].tipo }}</span><h3>{{ itens[i.item_id].nome }}</h3><p>{{ i.data_evento|data_br if i.data_evento else 'Data a definir' }} · {{ i.local_texto or i.zona }}</p><p><strong>Enquanto este atendimento estiver aberto, você não receberá novas indicações.</strong></p></div><div class="actions"><a class="btn primary" href="/oportunidade/{{ i.pedido_token }}">Abrir acompanhamento</a></div></article>{% endfor %}{% else %}<div class="empty">Você não possui indicação aberta no momento.</div>{% endif %}
+
+<script>
+(function lokafestRealtimePoll(){
+  const INTERVALO = 5000;
+
+  async function verificar(){
+    try{
+      const r = await fetch('/api/minha-oportunidade-atual', {
+        cache: 'no-store',
+        headers: {'Accept':'application/json'}
+      });
+      if(!r.ok) return;
+      const d = await r.json();
+      if(!d.tem) return;
+
+      const chave = 'lokafest_sorteio_visto_' + d.id;
+      const modalAtual = document.querySelector('#lf-winner-modal[data-indicacao-id="' + d.id + '"]');
+
+      // Se chegou uma oportunidade nova enquanto o usuário está com a página aberta,
+      // recarrega automaticamente uma única vez para renderizar a chamada completa.
+      if(!localStorage.getItem(chave) && !modalAtual){
+        window.location.reload();
+      }
+    }catch(e){}
+  }
+
+  setInterval(verificar, INTERVALO);
+})();
+</script>
+
+
+
+<div class="lf-conect-ad" id="lf-conect-ad" hidden>
+  <button type="button" class="lf-conect-close" id="lf-conect-close" aria-label="Fechar anúncio">×</button>
+  <div class="lf-conect-badge">CONECT.HUMIAT.COM.BR</div>
+  <strong>Organize seu negócio de locação em um só lugar</strong>
+  <p>Contratos, clientes, agenda, operação e financeiro integrados para você trabalhar com mais controle e menos retrabalho.</p>
+  <a href="https://conect.humiat.com.br" target="_blank" rel="noopener" class="btn primary">Conhecer o Conect</a>
+  <small>Uma solução HUMIAT para empresas que querem crescer com organização.</small>
+</div>
+<script>
+(function(){
+  const ad = document.getElementById('lf-conect-ad');
+  const close = document.getElementById('lf-conect-close');
+  if(!ad) return;
+
+  const chave = 'lokafest_conect_ad_ultima_exibicao';
+  const hoje = new Date().toISOString().slice(0,10);
+  const ultima = localStorage.getItem(chave);
+
+  if(ultima !== hoje){
+    setTimeout(() => {
+      ad.hidden = false;
+      localStorage.setItem(chave, hoje);
+    }, 1400);
+  }
+
+  close?.addEventListener('click', () => {
+    ad.hidden = true;
+    localStorage.setItem(chave, hoje);
+  });
+})();
+</script>
+
+{% endblock %}

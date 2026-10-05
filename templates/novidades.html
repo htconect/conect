@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Novidades · LokaFest{% endblock %}{% block content %}
+<section class="headline"><div><span class="eyebrow">Comunicação</span><h1>Novidades</h1><p>Cadastre, edite e escolha qual aviso será mostrado aos usuários.</p></div><a class="btn primary" href="/admin/novidades/nova">+ Nova novidade</a></section>
+{% if request.query_params.get('erro') %}<div class="alert erro">{{ request.query_params.get('erro') }}</div>{% endif %}{% if request.query_params.get('ok') %}<div class="alert ok">{{ request.query_params.get('ok') }}</div>{% endif %}
+<div class="lf-news-admin-grid">{% for n in novidades %}<article class="panel lf-news-admin-card"><header>
+  <meta name="theme-color" content="#6B21A8">
+  <link rel="manifest" href="/manifest.webmanifest?v=8">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=8">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/lokafest/favicon-32x32.png?v=8">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/lokafest/favicon-16x16.png?v=8">
+  <link rel="shortcut icon" href="/favicon.ico?v=8"><div><span class="badge {{ 'ok' if n.ativo else '' }}">{{ 'PUBLICADA' if n.ativo else 'RASCUNHO' }}</span><h2>{{ n.titulo }}</h2>{% if n.chamada %}<p>{{ n.chamada }}</p>{% endif %}</div></header><div class="lf-news-preview">{% for item in n.itens %}<div><strong>{{ item.titulo }}</strong><small>{{ item.descricao }}</small></div>{% endfor %}</div><footer><a class="btn ghost" href="/admin/novidades/{{n.id}}/editar">Editar</a>{% if n.ativo %}<form method="post" action="/admin/novidades/{{n.id}}/desativar"><button class="btn danger-soft">Desativar</button></form>{% else %}<form method="post" action="/admin/novidades/{{n.id}}/ativar"><button class="btn primary">Publicar agora</button></form>{% endif %}</footer></article>{% else %}<section class="panel empty"><h2>Nenhuma novidade cadastrada</h2><p>Crie o primeiro comunicado para os usuários.</p></section>{% endfor %}</div>
+{% endblock %}

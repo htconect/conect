@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Sorteios | LokaFest
+<script>
+(function () {
+  const key = 'lokafest_admin_sorteio_filtros';
+  const params = new URLSearchParams(window.location.search);
+  const hasFilters = ['busca','situacao','status','zona','item'].some(k => params.has(k) && params.get(k) !== '');
+  if (hasFilters) {
+    sessionStorage.setItem(key, window.location.pathname + window.location.search);
+  }
+  const clear = document.querySelector('.lf-draw-filter-actions a[href="/admin/sorteio"]');
+  if (clear) clear.addEventListener('click', () => sessionStorage.removeItem(key));
+})();
+</script>
+{% endblock %}
+{% block content %}
+<section class="headline lf-sorteio-head"><div><span class="eyebrow">Distribuição automática</span><h1>Sorteios</h1><p>Prioridade: área principal → áreas atendidas → decisão do administrador.</p></div></section>
+{% if request.query_params.get('ok') %}<div class="alert ok">{{request.query_params.get('ok')}}</div>{% endif %}
+{% if request.query_params.get('erro') %}<div class="alert erro">{{request.query_params.get('erro')}}</div>{% endif %}
+
+<details class="lf-sorteio-support">
+  <summary>
+    <div>
+      <span class="eyebrow">Informações auxiliares</span>
+      <strong>Resumo, distribuição e pendências</strong>
+      <small>Abra somente quando precisar consultar os números e usuários.</small>
+    </div>
+    <div class="lf-sorteio-support-counts">
+      <span>{{total_sorteios}} sorteios</span>
+      <span>{{aguardando_admin}} aguardando admin</span>
+      <span>{{nao_aptos|length}} pendências</span>
+    </div>
+  </summary>
+  <div class="lf-sorteio-support-body">
+<div class="lf-stats-grid">
+  <div class="lf-stat-card"><span>Sorteios realizados</span><strong>{{total_sorteios}}</strong></div>
+  <div class="lf-stat-card"><span>Aguardando sorteio</span><strong>{{aguardando}}</strong></div>
+  <div class="lf-stat-card"><span>Decisão do administrador</span><strong>{{aguardando_admin}}</strong></div>
+  <div class="lf-stat-card"><span>Já receberam</span><strong>{{total_vencedores}}</strong></div>
+  <div class="lf-stat-card"><span>Aptos sem receber</span><strong>{{ainda_nao_receberam|length}}</strong></div>
+</div>
+
+<section class="card lf-admin-section">
+  <div class="lf-section-title"><div><span class="eyebrow">Distribuição</span><h2>Quem já recebeu</h2></div><span class="lf-count-pill">{{distribuicao|length}}</span></div>
+  {% if distribuicao %}<div class="tablewrap lf-admin-table"><table><thead><tr><th>Zona</th><th>Funcionário</th><th>Situação</th><th>Oportunidades</th></tr></thead><tbody>
+  {% for row in distribuicao %}{% set u=row[0] %}{% set qtd=row[1] %}<tr><td data-label="Zona"><strong>{{u.zona}}</strong></td><td data-label="Funcionário">{{u.nome}}</td><td data-label="Situação"><span class="lf-status-badge {{'online' if u.online else 'offline'}}">{{'Online' if u.online else 'Offline'}}</span></td><td data-label="Oportunidades"><strong>{{qtd}}</strong></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">Nenhum usuário recebeu oportunidade ainda.</div>{% endif %}
+</section>
+
+<section class="card lf-admin-section">
+  <div class="lf-section-title"><div><span class="eyebrow">Próximos</span><h2>Aptos que ainda não receberam</h2></div><span class="lf-count-pill">{{ainda_nao_receberam|length}}</span></div>
+  {% if ainda_nao_receberam %}<div class="tablewrap lf-admin-table"><table><thead><tr><th>Zona</th><th>Funcionário</th><th>Situação</th></tr></thead><tbody>
+  {% for u in ainda_nao_receberam %}<tr><td data-label="Zona"><strong>{{u.zona}}</strong></td><td data-label="Funcionário">{{u.nome}}</td><td data-label="Situação"><span class="lf-status-badge {{'online' if u.online else 'offline'}}">{{'Online' if u.online else 'Offline'}}</span></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">Nenhum usuário apto aguardando.</div>{% endif %}
+</section>
+
+<section class="card lf-admin-section">
+  <div class="lf-section-title"><div><span class="eyebrow">Pendências</span><h2>Usuários não aptos</h2></div><span class="lf-count-pill">{{nao_aptos|length}}</span></div>
+  {% if nao_aptos %}<div class="tablewrap lf-admin-table"><table><thead><tr><th>Zona</th><th>Funcionário</th><th>Motivo</th><th>Ação</th></tr></thead><tbody>
+  {% for row in nao_aptos %}<tr><td data-label="Zona">{{row.usuario.zona}}</td><td data-label="Funcionário">{{row.usuario.nome}}</td><td data-label="Motivo"><span class="lf-reason">{{row.motivo}}</span></td><td data-label="Ação"><a class="btn ghost" href="/admin/usuarios/{{row.usuario.id}}/editar">Corrigir</a></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty">Nenhuma pendência de aptidão.</div>{% endif %}
+</section>
+
+  </div>
+</details>
+
+<section class="card lf-admin-section">
+  <div class="lf-section-title"><div><span class="eyebrow">Controle por indicação</span><h2>Indicações</h2><p>Não existe limite fixo: cada participante pode receber a indicação uma única vez por rodada. Quando não houver ninguém novo elegível, o sistema aguarda a decisão do administrador.</p></div><span class="lf-count-pill">{{indicacoes_resumo|length}}</span></div>
+
+  <form class="lf-draw-filters" method="get" action="/admin/sorteio">
+    <label class="lf-draw-search">
+      <span>Buscar</span>
+      <input type="search" name="busca" value="{{filtros.busca}}" placeholder="Nº, indicador, participante ou local">
+    </label>
+    <label>
+      <span>Situação</span>
+      <select name="situacao">
+        <option value="">Todas</option>
+        <option value="abertas" {{'selected' if filtros.situacao == 'abertas' else ''}}>Em aberto</option>
+        <option value="atendimento" {{'selected' if filtros.situacao == 'atendimento' else ''}}>Em atendimento</option>
+        <option value="admin" {{'selected' if filtros.situacao == 'admin' else ''}}>Aguardando admin</option>
+        <option value="finalizadas" {{'selected' if filtros.situacao == 'finalizadas' else ''}}>Finalizadas</option>
+      </select>
+    </label>
+    <label>
+      <span>Status</span>
+      <select name="status">
+        <option value="">Todos os status</option>
+        {% for status in status_opcoes %}<option value="{{status}}" {{'selected' if filtros.status == status else ''}}>{{status}}</option>{% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Zona</span>
+      <select name="zona">
+        <option value="">Todas as zonas</option>
+        {% for zona in zonas_opcoes %}<option value="{{zona}}" {{'selected' if filtros.zona == zona else ''}}>{{zona}}</option>{% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Oportunidade</span>
+      <select name="item">
+        <option value="">Todas</option>
+        {% for item in itens_opcoes %}<option value="{{item.id}}" {{'selected' if filtros.item == item.id|string else ''}}>{{item.nome}}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="lf-draw-filter-actions">
+      <button class="btn primary" type="submit">Filtrar</button>
+      <a class="btn ghost" href="/admin/sorteio">Limpar</a>
+    </div>
+  </form>
+
+  {% if indicacoes_resumo %}
+  <div class="lf-indication-list">
+    {% for row in indicacoes_resumo %}{% set ind=row.indicacao %}{% set t=row.ultima_tentativa %}
+    <article class="lf-indication-card">
+      <header class="lf-indication-card-head">
+        <div class="lf-indication-id"><span>Indicação</span><strong>#{{ind.id}}</strong></div>
+        <div class="lf-indication-date">{{ind.criado_em.strftime('%d/%m/%Y %H:%M') if ind.criado_em else '—'}}</div>
+        <div class="lf-indication-state"><span class="lf-status-badge neutral">{{ind.status}}</span>{% if t %}<small>Último: {{t.resultado}}</small>{% endif %}</div>
+      </header>
+
+      <div class="lf-indication-details">
+        <div class="lf-detail-item"><span>Quem indicou</span><strong>{{row.indicador.nome if row.indicador else 'Sem vínculo'}}</strong></div>
+        <div class="lf-detail-item"><span>Oportunidade</span><strong>{{row.item.nome if row.item else 'Karaokê'}}</strong></div>
+        <div class="lf-detail-item"><span>Equipamentos</span><strong>{{ equipamentos_indicacao_texto(ind) }}</strong></div>
+        <div class="lf-detail-item lf-detail-location"><span>Zona/local</span><strong>{{ind.zona}}</strong>{% if ind.local_texto %}<small>{{ind.local_texto}}</small>{% endif %}</div>
+        <div class="lf-detail-item"><span>Último participante</span><strong>{{row.ganhador.nome if row.ganhador else ('Encaminhada ao administrador' if ind.status == 'Aguardando admin' else 'Aguardando novo sorteio')}}</strong></div>
+        {% if ind.observacao %}<div class="lf-detail-item" style="grid-column:1/-1"><span>Observação</span><strong>{{ind.observacao}}</strong></div>{% endif %}
+        <div class="lf-detail-item lf-detail-attempts"><span>Tentativas</span><strong>{{row.total_tentativas}}</strong></div>
+      </div>
+
+      <footer class="lf-indication-actions">
+        <a class="btn ghost" href="/admin/sorteio/indicacoes/{{ind.id}}/historico">Ver histórico</a>
+        {% if ind.status == 'Aguardando admin' and not ind.encerrado_em %}
+        <form method="post" action="/admin/sorteio/indicacoes/{{ind.id}}/reabrir" onsubmit="return confirm('Procurar somente participantes que ainda não receberam a indicação #{{ind.id}} nesta rodada?')"><input type="hidden" name="retorno" value="{{retorno_filtros}}"><button class="btn success">Procurar próximo</button></form>
+        <form method="post" action="/admin/sorteio/indicacoes/{{ind.id}}/reiniciar" onsubmit="return confirm('Iniciar uma NOVA rodada para a indicação #{{ind.id}}? Participantes de rodadas anteriores poderão voltar a participar.')"><input type="hidden" name="retorno" value="{{retorno_filtros}}"><button class="btn warning-soft">Reiniciar sorteio</button></form>
+        {% endif %}
+        {% if ind.status == 'Em atendimento' and ind.recebido_por_id and ind.pedido_token %}
+        <a class="btn whatsapp" href="/admin/sorteio/indicacoes/{{ind.id}}/reenviar-whatsapp" target="_blank" rel="noopener">{{ 'Reenviar WhatsApp' if ind.whatsapp_encaminhado_em else 'Enviar WhatsApp' }}</a>
+        {% endif %}
+        {% if not ind.encerrado_em and ind.status not in ['Sucesso', 'Cliente não deseja', 'Finalizada pelo administrador'] %}
+        <form method="post" action="/admin/sorteio/indicacoes/{{ind.id}}/finalizar" onsubmit="return confirm('Finalizar a indicação #{{ind.id}} e impedir novos sorteios?')"><input type="hidden" name="retorno" value="{{retorno_filtros}}"><input type="hidden" name="motivo" value="Encerrada pelo administrador após tentativas sem aceite"><button class="btn warning-soft">Finalizar</button></form>
+        {% endif %}
+        <form method="post" action="/admin/sorteio/indicacoes/{{ind.id}}/excluir-teste" onsubmit="return confirm('Excluir definitivamente a indicação #{{ind.id}}, todo o histórico e retirar 1 crédito do indicador?')"><input type="hidden" name="retorno" value="{{retorno_filtros}}"><button class="btn danger-soft">Excluir</button></form>
+      </footer>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">Nenhuma indicação encontrada com os filtros selecionados.</div>{% endif %}
+</section>
+
+<script>
+(function () {
+  const key = 'lokafest_admin_sorteio_filtros';
+  const params = new URLSearchParams(window.location.search);
+  const hasFilters = ['busca','situacao','status','zona','item'].some(k => params.has(k) && params.get(k) !== '');
+  if (hasFilters) {
+    sessionStorage.setItem(key, window.location.pathname + window.location.search);
+  }
+  const clear = document.querySelector('.lf-draw-filter-actions a[href="/admin/sorteio"]');
+  if (clear) clear.addEventListener('click', () => sessionStorage.removeItem(key));
+})();
+</script>
+{% endblock %}

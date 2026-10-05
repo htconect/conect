@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Cadastro recebido | LokaFest{% endblock %}
+{% block content %}
+<section class="lf-success-wrap">
+  <div class="lf-success-card">
+    <div class="lf-success-icon">✓</div>
+    <span class="eyebrow">CADASTRO RECEBIDO</span>
+    <h1>Agora é só aguardar a aprovação</h1>
+    <p>Seus dados foram gravados com sucesso. O administrador fará a validação final antes de liberar seu acesso às oportunidades do LokaFest.</p>
+
+    <div class="lf-success-details">
+      <div><span>Nome / Empresa</span><strong>{{ nome }}</strong></div>
+      <div><span>Categoria</span><strong>{{ categoria }}</strong></div>
+      <div><span>Área</span><strong>{{ zona }}</strong></div>
+      <div><span>Catálogo</span><strong>{{ atualizacao }}</strong></div>
+    </div>
+
+    <div class="lf-success-equipment">
+      <div><strong>{{ jukebox }}</strong><span>Jukebox</span></div>
+      <div><strong>{{ portatil }}</strong><span>Portáteis</span></div>
+      <div><strong>{{ iphone }}</strong><span>iPhones</span></div>
+      <div><strong>{{ fliperama }}</strong><span>Fliperama</span></div>
+    </div>
+
+    <div class="lf-success-status">
+      <strong>Situação: Aguardando aprovação administrativa</strong>
+      <span>{% if apto %}Seus equipamentos passaram pela validação automática.{% else %}Existem validações que serão revisadas pelo administrador.{% endif %}</span>
+    </div>
+
+    <a class="btn primary" href="/entrar">Ir para o acesso</a>
+  </div>
+</section>
+{% endblock %}

@@ -1,756 +1,127 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>{{ titulo or "HUMIAT Conect" }}</title>
-  <link rel="manifest" href="/static/manifest.webmanifest?v=4">
-  <meta name="theme-color" content="#0F3D91">
-  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png?v=4">
-  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png?v=4">
-  <link rel="shortcut icon" href="/static/favicon.ico?v=4">
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v=4">
-  <link rel="stylesheet" href="/static/css/style.css?v=20261004-1091">
-  <link rel="stylesheet" href="/static/css/humiat-design-system.css?v=20261004-1091">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  {% block head_extra %}{% endblock %}
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>{% block title %}LokaFest{% endblock %}</title>
+  <meta name="theme-color" content="#141b2d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="LokaFest">
+  <link rel="manifest" href="/manifest.webmanifest?v=8">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=8">
+  <link rel="apple-touch-icon-precomposed" href="/apple-touch-icon-precomposed.png?v=8">
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/lokafest/icon-192.png?v=8">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/lokafest/favicon-32x32.png?v=8">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/lokafest/favicon-16x16.png?v=8">
+  <link rel="shortcut icon" href="/static/lokafest/favicon.ico?v=8">
+  <link rel="stylesheet" href="/static/lokafest/lokafest.css?v={{ app_version }}">
 </head>
-<body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% if request.session.get('empresa_id') %}painel-interno humiat-system-shell humiat-ui{% endif %} {% if not request.session.get('empresa_id') and not request.session.get('admin_geral') %}publico-cliente{% endif %} {% block body_class %}{% endblock %}">
-<header class="topo-app">
-  <a class="marca-app" href="{% if request.session.get('empresa_id') %}/painel{% else %}/{% endif %}">
-    {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}<img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">{% endif %}
-    <span class="marca-app-texto">
-      <span class="marca-app-nome">{{ empresa.nome if empresa is defined and empresa else "Conect" }}</span>
-      <small class="marca-app-versao">Versão do app {{ APP_VERSION }}</small>
-    </span>
-  </a>
-  {% if request.session.get('empresa_id') %}
-    <div class="usuario-topo">
-      <span>{{ request.session.get('usuario_nome') or request.session.get('usuario') or 'Usuário' }}</span>
-      <details class="menu-topo">
-        <summary aria-label="Abrir menu"><i class="bi bi-list"></i></summary>
-        <div class="menu-topo-card">
-          <a href="/painel/vitrine"><i class="bi bi-shop"></i> Vitrine pública</a>
-          <a href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i> Contratos</a>
-          <strong>Cadastros</strong>
-          <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
-          <a href="/painel/empresa"><i class="bi bi-building"></i> Empresa</a>
-          <a href="/painel/produtos"><i class="bi bi-box-seam"></i> Produtos e serviços</a>
-          <a href="/painel/categorias-vitrine"><i class="bi bi-tags"></i> Categorias da vitrine</a>
-          <a href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i> Opcionais</a>
-          {% if empresa is defined and empresa and empresa.modulo_recursos_ativo %}<a href="/painel/recursos"><i class="bi bi-boxes"></i> Recursos</a>{% endif %}
-          {% if empresa is defined and empresa and empresa.modulo_cupons_ativo %}<a href="/painel/cupons"><i class="bi bi-ticket-perforated"></i> Cupons</a>{% endif %}
-          {% if request.session.get('acesso_total') %}<a href="/painel/configuracoes"><i class="bi bi-sliders"></i> Configurações avançadas</a>{% endif %}
-          <strong>Consultas</strong>
-          <a href="/painel/relatorios"><i class="bi bi-bar-chart-line"></i> Relatórios</a>
-          <a href="/painel/marketing"><i class="bi bi-megaphone"></i> Origem e campanhas</a>
-          <a href="/painel/evolucao-financeira"><i class="bi bi-graph-up-arrow"></i> Evolução financeira</a>
-          <strong>Conta</strong>
-          <a href="/painel/perfil"><i class="bi bi-person"></i> Meu perfil</a>
-          <a href="/painel/alterar-senha"><i class="bi bi-shield-lock"></i> Senha do Humiat ID</a>
-          <button type="button" id="instalar-conect" class="menu-instalar" hidden><i class="bi bi-phone"></i> Instalar Conect</button>
-          <a class="menu-sair" href="/empresa/sair"><i class="bi bi-box-arrow-right"></i> Sair</a>
-        </div>
-      </details>
-    </div>
-  {% elif request.session.get('admin_geral') %}
-    <a class="sair-app" href="/admin/sair">Sair</a>
-  {% else %}
-    <a class="sair-app" href="/empresa/login">Entrar</a>
-  {% endif %}
-</header>
+<body class="lf-adminator">
+{% if usuario %}
+<div class="lf-shell">
+  <aside class="lf-sidebar" id="lfSidebar">
+    <a class="lf-side-brand" href="/painel" aria-label="LokaFest">
+      <span class="lf-side-brand-icon"><img src="/static/lokafest/lokafest-icon-master.png" alt=""></span>
+      <span class="lf-side-brand-copy"><strong>LokaFest</strong><small>Indicações e oportunidades</small></span>
+    </a>
 
-{% if request.session.get('empresa_id') %}
-<aside class="sidebar-adminator" aria-label="Menu principal do Conect">
-  <a class="sidebar-adminator-brand" href="/painel">
-    <span class="sidebar-adminator-logo">
-      {% if empresa is defined and empresa and (empresa.logo_url or empresa.logo_idb_url) %}
-      <img src="{{ empresa.logo_url or empresa.logo_idb_url }}" alt="{{ empresa.nome }}">
-      {% else %}
-      <img src="/static/connect-icon-master.png" alt="Conect">
+    <nav class="lf-side-nav" aria-label="Menu principal">
+      <span class="lf-side-label">Principal</span>
+      <a href="/painel" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M3.5 10.7 12 3.8l8.5 6.9v8.1a1.7 1.7 0 0 1-1.7 1.7H5.2a1.7 1.7 0 0 1-1.7-1.7z"/><path d="M9.2 20.5v-6.2h5.6v6.2"/></svg><span>Início</span></a>
+      <a href="/indicar" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Indicar</span></a>
+      <a href="/minhas" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="m12 3.8 2.45 4.96 5.47.8-3.96 3.85.94 5.45L12 16.3l-4.9 2.56.94-5.45-3.96-3.85 5.47-.8z"/></svg><span>Minhas indicações</span></a>
+      <a href="/meu-cadastro" class="lf-side-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 20c.6-4 3-6 6.5-6s5.9 2 6.5 6"/></svg><span>Meu cadastro</span></a>
+
+      {% if usuario.is_admin %}
+      <span class="lf-side-label lf-side-admin-label">Administração</span>
+      <a href="/admin/sorteio" class="lf-side-link"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1"/><circle cx="15" cy="15" r="1"/><circle cx="15" cy="9" r="1"/><circle cx="9" cy="15" r="1"/></svg><span>Sorteios</span></a>
+      <a href="/admin/novidades" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M12 3 14 8l5 .8-3.6 3.5.9 5L12 15l-4.3 2.3.9-5L5 8.8 10 8z"/></svg><span>Novidades</span></a>
+      <a href="/admin/usuarios" class="lf-side-link"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3.5 20c.5-4 2.7-6 5.5-6s5 2 5.5 6M14.3 15.2c2.8-.4 5.1 1.2 5.7 4.8"/></svg><span>Usuários</span></a>
+      <a href="/admin/empresas-parceiras" class="lf-side-link"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="7" height="7" rx="1.5"/><rect x="13.5" y="5" width="7" height="7" rx="1.5"/><path d="M4 19h16M7 15v4M17 15v4"/></svg><span>Empresas / logos</span></a>
+      <a href="/admin/validacoes" class="lf-side-link"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16.5 8.5"/></svg><span>Validações</span></a>
+      <a href="/admin/locais-pendentes" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11z"/><circle cx="12" cy="10" r="2"/></svg><span>Locais pendentes</span></a>
+      <a href="/admin/itens-pendentes" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg><span>Itens pendentes</span></a>
+      <a href="/admin/catalogo" class="lf-side-link"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="7" height="6" rx="1"/><rect x="13" y="5" width="7" height="6" rx="1"/><rect x="4" y="13" width="7" height="6" rx="1"/><rect x="13" y="13" width="7" height="6" rx="1"/></svg><span>Categorias e itens</span></a>
+      <a href="/admin/solicitacoes-catalogo" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m4 7 8 6 8-6"/></svg><span>Solicitações de itens</span></a>
+      <a href="/admin/zonas" class="lf-side-link"><svg viewBox="0 0 24 24"><path d="m4 6 5-2 6 2 5-2v14l-5 2-6-2-5 2z"/><path d="M9 4v14M15 6v14"/></svg><span>Zonas</span></a>
       {% endif %}
-    </span>
-    <span>
-      <b>Conect</b>
-      <small>{{ empresa.nome if empresa is defined and empresa else 'HUMIAT' }} · {{ APP_VERSION }}</small>
-    </span>
-  </a>
+    </nav>
 
-  <nav class="sidebar-adminator-nav">
-    <span class="sidebar-adminator-titulo">Operação</span>
-    <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
-    <a class="{% if request.url.path == '/painel/vitrine' %}ativo{% endif %}" href="/painel/vitrine"><i class="bi bi-shop"></i><span>Vitrine pública</span></a>
-    <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
-    <a class="{% if request.url.path.startswith('/painel/solicitacoes') or request.url.path.startswith('/painel/solicitacao/') or request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i><span>Contratos</span></a>
-    <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3-week"></i><span>Agenda</span></a>
-    <a class="{% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas"><i class="bi bi-truck"></i><span>Operação</span></a>
-    <a class="{% if request.url.path.startswith('/painel/financeiro') or request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/financeiro"><i class="bi bi-bank"></i><span>Financeiro</span></a>
-    {% if empresa is defined and empresa and empresa.inteligencia_ativa %}<a class="{% if request.url.path.startswith('/painel/inteligencia-logistica') %}ativo{% endif %}" href="/painel/inteligencia-logistica"><i class="bi bi-stars"></i><span>Inteligência</span></a>{% endif %}
+    <div class="lf-side-footer">
+      <a class="lf-side-user" href="/meu-cadastro">
+        <span class="lf-side-avatar">{{ (usuario.nome or 'U')[0]|upper }}</span>
+        <span class="lf-side-user-copy"><strong>{{ usuario.nome or 'Usuário' }}</strong><small>{{ 'Administrador' if usuario.is_admin else 'Usuário' }}</small></span>
+      </a>
+      <a class="lf-side-logout" href="/sair" title="Sair" aria-label="Sair"><svg viewBox="0 0 24 24"><path d="M10 5H5v14h5M13 8l4 4-4 4M17 12H9"/></svg></a>
+    </div>
+  </aside>
 
-    <span class="sidebar-adminator-titulo">Cadastros</span>
-    <a class="{% if request.url.path.startswith('/painel/contratos') %}ativo{% endif %}" href="/painel/contratos"><i class="bi bi-file-earmark-richtext"></i><span>Política / modelos</span></a>
-    <a class="{% if request.url.path.startswith('/painel/empresa') %}ativo{% endif %}" href="/painel/empresa"><i class="bi bi-building"></i><span>Empresa</span></a>
-    <a class="{% if request.url.path.startswith('/painel/produtos') or request.url.path.startswith('/painel/produto/') %}ativo{% endif %}" href="/painel/produtos"><i class="bi bi-box-seam"></i><span>Produtos e serviços</span></a>
-    <a class="{% if request.url.path.startswith('/painel/categorias-vitrine') %}ativo{% endif %}" href="/painel/categorias-vitrine"><i class="bi bi-tags"></i><span>Categorias da vitrine</span></a>
-    <a class="{% if request.url.path.startswith('/painel/opcionais') %}ativo{% endif %}" href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i><span>Opcionais</span></a>
-    {% if empresa is defined and empresa and empresa.modulo_recursos_ativo %}<a class="{% if request.url.path.startswith('/painel/recursos') %}ativo{% endif %}" href="/painel/recursos"><i class="bi bi-boxes"></i><span>Recursos</span></a>{% endif %}
-    {% if empresa is defined and empresa and empresa.modulo_cupons_ativo %}<a class="{% if request.url.path.startswith('/painel/cupons') %}ativo{% endif %}" href="/painel/cupons"><i class="bi bi-ticket-perforated"></i><span>Cupons</span></a>{% endif %}
+  <div class="lf-main">
+    <header class="lf-topbar">
+      <div class="lf-topbar-left">
+        <button type="button" class="lf-menu-toggle" id="lfMenuToggle" aria-label="Abrir menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        <div class="lf-crumbs"><span>LokaFest</span><span>/</span><strong id="lfCurrentPage">Painel</strong></div>
+      </div>
+      <div class="lf-topbar-right"><span class="lf-version-chip">v{{ app_version }}</span></div>
+    </header>
 
-    <span class="sidebar-adminator-titulo">Consultas</span>
-    <a class="{% if request.url.path.startswith('/painel/relatorios') %}ativo{% endif %}" href="/painel/relatorios"><i class="bi bi-bar-chart-line"></i><span>Relatórios</span></a>
-    <a class="{% if request.url.path.startswith('/painel/marketing') %}ativo{% endif %}" href="/painel/marketing"><i class="bi bi-megaphone"></i><span>Origem e campanhas</span></a>
-    <a class="{% if request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/evolucao-financeira"><i class="bi bi-graph-up-arrow"></i><span>Evolução financeira</span></a>
-  </nav>
-
-  <div class="sidebar-adminator-rodape">
-    <a href="/painel/perfil"><i class="bi bi-person-circle"></i><span>Meu perfil</span></a>
-    <a href="/empresa/sair"><i class="bi bi-box-arrow-right"></i><span>Sair</span></a>
-  </div>
-</aside>
+    <main class="container lf-content">
+{% else %}
+    <main class="container lf-public-content">
 {% endif %}
-
-<main class="container-app">
-  {% block conteudo %}{% endblock %}
-</main>
-
-
-<style id="orion-botoes-padrao">
-/* ORION: padrão global de botões + ícones sem duplicidade */
-.botao,
-button,
-a.botao,
-a.botao-whats,
-.botao-whats,
-.botao-whats-btn,
-.btn-filtrar,
-.btn-limpar-filtros,
-.btn-importar-topo,
-.btn-importar,
-.btn-ok,
-.btn-mover,
-.btn-secundario,
-.btn-lancar,
-.btn-perigo,
-.botao-pequeno,
-.botao-secundario,
-.botao-perigo,
-.botao-mini,
-.link-botao,
-.remover-item-texto,
-.registrar-pagamento-operacao > summary{
-  min-height:42px !important;
-  border-radius:14px !important;
-  padding:10px 15px !important;
-  border:1px solid transparent !important;
-  display:inline-flex !important;
-  align-items:center !important;
-  justify-content:center !important;
-  gap:8px !important;
-  font-size:14px !important;
-  font-weight:900 !important;
-  line-height:1.15 !important;
-  text-decoration:none !important;
-  cursor:pointer !important;
-  transition:transform .16s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease !important;
-  white-space:nowrap;
-}
-.registrar-pagamento-operacao > summary{list-style:none;width:100%!important;}
-.registrar-pagamento-operacao > summary::-webkit-details-marker{display:none;}
-.botao i, button i, .botao-whats i, .botao-whats-btn i, .botao-mini i, .botao-rota i, .btn-importar-topo i, .link-botao i, .registrar-pagamento-operacao > summary i{font-size:1.05em;line-height:1;}
-.botao:hover, button:hover, a.botao:hover, .botao-whats:hover, .btn-importar-topo:hover, .link-botao:hover, .registrar-pagamento-operacao > summary:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(15,23,42,.10);}
-button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!important;box-shadow:none!important;opacity:.55!important;cursor:not-allowed!important;}
-.btn-krj-primary, button.btn-krj-primary, .botao.btn-krj-primary, .registrar-pagamento-operacao > summary.btn-krj-primary{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important;box-shadow:0 7px 16px rgba(22,163,74,.18);}
-.btn-krj-outline, button.btn-krj-outline, .botao.btn-krj-outline, .link-botao.btn-krj-outline{background:rgba(22,163,74,.06)!important;color:#15803d!important;border-color:#86efac!important;}
-.btn-krj-info, button.btn-krj-info, .botao.btn-krj-info{background:rgba(37,99,235,.06)!important;color:#1d4ed8!important;border-color:#bfdbfe!important;}
-.btn-krj-warning, button.btn-krj-warning, .botao.btn-krj-warning{background:rgba(245,158,11,.09)!important;color:#b45309!important;border-color:#fde68a!important;}
-.btn-krj-danger, button.btn-krj-danger, .botao.btn-krj-danger, .perigo.btn-krj-danger, .botao-perigo.btn-krj-danger, .btn-perigo.btn-krj-danger{background:#ef4444!important;color:#fff!important;border-color:#ef4444!important;}
-.btn-krj-ghost, button.btn-krj-ghost, .botao.btn-krj-ghost{background:#fff!important;color:#334155!important;border-color:#cbd5e1!important;}
-.btn-krj-route, button.btn-krj-route, .botao.btn-krj-route{background:#16a34a!important;color:#fff!important;border-color:#16a34a!important;box-shadow:0 7px 16px rgba(22,163,74,.18);}
-.btn-krj-compact{min-height:34px!important;padding:7px 10px!important;font-size:12px!important;border-radius:11px!important;}
-.largura-total.btn-krj-primary, .largura-total.btn-krj-outline, .largura-total.btn-krj-info, .largura-total.btn-krj-warning, .largura-total.btn-krj-danger, .largura-total.btn-krj-ghost{width:100%!important;}
-.acoes, .linha-acoes, .acoes-lancamento{gap:9px!important;}
-@media(max-width:520px){.botao, button, a.botao, .botao-whats, .btn-filtrar, .btn-limpar-filtros, .btn-importar-topo, .registrar-pagamento-operacao > summary{min-height:44px!important;font-size:14px!important}.acoes.empilhadas .botao,.acoes.empilhadas .botao-whats,.acoes.empilhadas button,.largura-total{width:100%!important}}
-.publico-cliente .botao,
-.publico-cliente button,
-.publico-cliente a.botao,
-.publico-cliente .botao-whats{
-  max-width:100%!important;
-  white-space:normal!important;
-  overflow-wrap:anywhere;
-  word-break:normal;
-  line-height:1.2!important;
-}
-.publico-cliente .container-app{overflow-x:hidden;}
-@media(max-width:520px){
-  .publico-cliente .botao,
-  .publico-cliente button,
-  .publico-cliente a.botao,
-  .publico-cliente .botao-whats{font-size:14px!important;padding:11px 13px!important;}
-}
-</style>
-
-
-<style id="validacao-global-estilos">
-  .campo-validacao-invalido{
-    border-color:#dc2626 !important;
-    background:#fff7f7 !important;
-    box-shadow:0 0 0 3px rgba(220,38,38,.10) !important;
-    outline:none !important;
-  }
-  .mensagem-validacao-campo{
-    display:block;
-    margin:5px 2px 0;
-    color:#b91c1c;
-    font-size:12px;
-    font-weight:800;
-    line-height:1.25;
-  }
-  .aviso-validacao-global{
-    position:fixed;
-    z-index:99999;
-    left:50%;
-    top:76px;
-    transform:translateX(-50%);
-    width:min(92vw,520px);
-    box-sizing:border-box;
-    padding:11px 14px;
-    border:1px solid #fecaca;
-    border-radius:12px;
-    background:#fff1f2;
-    color:#991b1b;
-    box-shadow:0 12px 28px rgba(15,23,42,.16);
-    font-size:13px;
-    font-weight:850;
-    text-align:center;
-  }
-  @media(max-width:520px){
-    .aviso-validacao-global{top:66px;width:calc(100vw - 24px)}
-  }
-</style>
-
-<link rel="stylesheet" href="/static/css/connect-adminator.css?v=20261003-1.0.90">
-
-<script id="validacao-global-formularios">
-(function(){
-  const CLASSE_ERRO = 'campo-validacao-invalido';
-  const CLASSE_MSG = 'mensagem-validacao-campo';
-
-  function nomesDeclarados(valor){
-    return (valor || '').split(',').map(v => v.trim()).filter(Boolean);
-  }
-
-  function rotuloCampo(form, campo){
-    let label = null;
-    if(campo.id){
-      try { label = form.querySelector(`label[for="${CSS.escape(campo.id)}"]`); } catch (_) {}
-    }
-    if(!label) label = campo.closest('label');
-    if(!label){
-      const anterior = campo.previousElementSibling;
-      if(anterior && anterior.tagName === 'LABEL') label = anterior;
-    }
-    if(!label){
-      const pai = campo.closest('div, td, section');
-      if(pai) label = pai.querySelector('label');
-    }
-    const texto = (campo.dataset.fieldLabel || (label ? label.textContent : '') || campo.name || 'campo')
-      .replace(/\s*\*\s*$/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return texto || 'campo';
-  }
-
-  function valorVazio(form, campo){
-    const tipo = (campo.type || '').toLowerCase();
-    if(tipo === 'checkbox') return !campo.checked;
-    if(tipo === 'radio'){
-      if(!campo.name) return !campo.checked;
-      return !Array.from(form.elements).some(el => el.name === campo.name && el.type === 'radio' && el.checked);
-    }
-    return String(campo.value ?? '').trim() === '';
-  }
-
-  function mensagemObrigatorio(form, campo){
-    if(campo.dataset.requiredMessage) return campo.dataset.requiredMessage;
-    const rotulo = rotuloCampo(form, campo);
-    const tag = campo.tagName.toLowerCase();
-    const tipo = (campo.type || '').toLowerCase();
-    if(tag === 'select' || tipo === 'radio' || tipo === 'checkbox') return `Selecione ${rotulo.toLowerCase()} para continuar.`;
-    return `Informe ${rotulo.toLowerCase()} para continuar.`;
-  }
-
-  function mensagemInvalido(form, campo){
-    if(campo.dataset.invalidMessage) return campo.dataset.invalidMessage;
-    const rotulo = rotuloCampo(form, campo);
-    const v = campo.validity;
-    if(v && v.typeMismatch && (campo.type || '').toLowerCase() === 'email') return 'Informe um e-mail válido.';
-    if(v && v.patternMismatch) return `Verifique ${rotulo.toLowerCase()}.`;
-    if(v && v.tooShort) return `${rotulo} está incompleto.`;
-    if(v && v.tooLong) return `${rotulo} ultrapassou o tamanho permitido.`;
-    if(v && v.rangeUnderflow) return `${rotulo} está abaixo do valor permitido.`;
-    if(v && v.rangeOverflow) return `${rotulo} está acima do valor permitido.`;
-    return `Verifique ${rotulo.toLowerCase()} para continuar.`;
-  }
-
-  function removerErro(campo){
-    if(!campo) return;
-    campo.classList.remove(CLASSE_ERRO);
-    campo.removeAttribute('aria-invalid');
-    const idMsg = campo.dataset.validationMessageId;
-    if(idMsg){
-      const msg = document.getElementById(idMsg);
-      if(msg) msg.remove();
-      delete campo.dataset.validationMessageId;
-    } else {
-      const proximo = campo.nextElementSibling;
-      if(proximo && proximo.classList.contains(CLASSE_MSG)) proximo.remove();
-    }
-  }
-
-  function marcarErro(campo, mensagem){
-    removerErro(campo);
-    campo.classList.add(CLASSE_ERRO);
-    campo.setAttribute('aria-invalid', 'true');
-    const msg = document.createElement('small');
-    const id = `validacao-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
-    msg.id = id;
-    msg.className = CLASSE_MSG;
-    msg.textContent = mensagem;
-    campo.dataset.validationMessageId = id;
-    const labelEnvolvente = campo.closest('label');
-    if(labelEnvolvente && labelEnvolvente.contains(campo)) labelEnvolvente.insertAdjacentElement('afterend', msg);
-    else campo.insertAdjacentElement('afterend', msg);
-  }
-
-  function abrirContainers(campo){
-    let atual = campo.parentElement;
-    while(atual){
-      if(atual.tagName === 'DETAILS') atual.open = true;
-      atual = atual.parentElement;
-    }
-  }
-
-  let timerAviso = null;
-  function mostrarAviso(mensagem){
-    let aviso = document.getElementById('aviso-validacao-global');
-    if(!aviso){
-      aviso = document.createElement('div');
-      aviso.id = 'aviso-validacao-global';
-      aviso.className = 'aviso-validacao-global';
-      aviso.setAttribute('role','alert');
-      document.body.appendChild(aviso);
-    }
-    aviso.textContent = mensagem;
-    aviso.hidden = false;
-    clearTimeout(timerAviso);
-    timerAviso = setTimeout(() => { aviso.hidden = true; }, 4200);
-  }
-
-  function camposParaValidar(form, submitter){
-    const obrigatoriosPorFuncao = new Set([
-      ...nomesDeclarados(form.dataset.requiredFields),
-      ...nomesDeclarados(submitter && submitter.dataset ? submitter.dataset.requiredFields : '')
-    ]);
-    const lista = [];
-    Array.from(form.elements || []).forEach(campo => {
-      if(!campo || !campo.tagName || campo.disabled) return;
-      const tag = campo.tagName.toLowerCase();
-      if(!['input','select','textarea'].includes(tag)) return;
-      const tipo = (campo.type || '').toLowerCase();
-      if(['hidden','submit','button','reset','image'].includes(tipo)) return;
-      const funcional = campo.dataset.requiredFunctional === '1' || (campo.name && obrigatoriosPorFuncao.has(campo.name));
-      const validarNativo = campo.willValidate && ((campo.required || String(campo.value || '').trim() !== '') || funcional);
-      if(funcional || validarNativo) lista.push({campo, funcional});
-    });
-    return lista;
-  }
-
-  function validarFormulario(form, submitter){
-    if(!form || form.dataset.skipGlobalValidation === '1') return true;
-    if(submitter && submitter.formNoValidate) return true;
-
-    Array.from(form.querySelectorAll('.' + CLASSE_ERRO)).forEach(removerErro);
-    let primeiroErro = null;
-    let primeiraMensagem = '';
-    const radiosProcessados = new Set();
-
-    camposParaValidar(form, submitter).forEach(item => {
-      const campo = item.campo;
-      const tipo = (campo.type || '').toLowerCase();
-      if(tipo === 'radio' && campo.name){
-        if(radiosProcessados.has(campo.name)) return;
-        radiosProcessados.add(campo.name);
-      }
-
-      const obrigatorio = campo.required || item.funcional;
-      let mensagem = '';
-      if(obrigatorio && valorVazio(form, campo)){
-        mensagem = mensagemObrigatorio(form, campo);
-      } else if(campo.willValidate && !campo.checkValidity()){
-        mensagem = mensagemInvalido(form, campo);
-      }
-
-      if(mensagem){
-        marcarErro(campo, mensagem);
-        if(!primeiroErro){
-          primeiroErro = campo;
-          primeiraMensagem = mensagem;
-        }
-      }
-    });
-
-    if(!primeiroErro) return true;
-    abrirContainers(primeiroErro);
-    mostrarAviso(primeiraMensagem || 'Revise o campo destacado para continuar.');
-    if(window.fecharCarregando) window.fecharCarregando();
-    setTimeout(() => {
-      try { primeiroErro.scrollIntoView({behavior:'smooth', block:'center'}); } catch (_) {}
-      try { primeiroErro.focus({preventScroll:true}); } catch (_) { try { primeiroErro.focus(); } catch(__){} }
-    }, 60);
-    return false;
-  }
-
-  window.validarFormularioGlobal = validarFormulario;
-
-  // Desativa a bolha nativa do navegador para usar uma mensagem visual única no sistema.
-  function prepararFormulario(form){
-    if(form && form.dataset.nativeValidation !== '1') form.noValidate = true;
-  }
-  document.querySelectorAll('form').forEach(prepararFormulario);
-
-  // Mantém a validação global também em formulários inseridos dinamicamente.
-  const observadorFormularios = new MutationObserver(function(mudancas){
-    mudancas.forEach(function(mudanca){
-      mudanca.addedNodes.forEach(function(no){
-        if(!(no instanceof Element)) return;
-        if(no.matches && no.matches('form')) prepararFormulario(no);
-        if(no.querySelectorAll) no.querySelectorAll('form').forEach(prepararFormulario);
-      });
-    });
-  });
-  observadorFormularios.observe(document.documentElement, {childList:true, subtree:true});
-
-  document.addEventListener('submit', function(e){
-    const form = e.target;
-    if(!(form instanceof HTMLFormElement)) return;
-    if(!validarFormulario(form, e.submitter || null)){
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
-  }, true);
-
-  // Também pode ser usado por links/botões que executam uma função sem submeter o formulário:
-  // data-validate-form="id-do-form" data-required-fields="campo1,campo2".
-  document.addEventListener('click', function(e){
-    const acao = e.target.closest('[data-validate-form]');
-    if(!acao) return;
-    const idForm = acao.dataset.validateForm;
-    const form = idForm ? document.getElementById(idForm) : acao.closest('form');
-    if(form && !validarFormulario(form, acao)){
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
-  }, true);
-
-  document.addEventListener('input', function(e){
-    const campo = e.target;
-    if(campo && campo.classList && campo.classList.contains(CLASSE_ERRO)) removerErro(campo);
-  }, true);
-  document.addEventListener('change', function(e){
-    const campo = e.target;
-    if(campo && campo.classList && campo.classList.contains(CLASSE_ERRO)) removerErro(campo);
-  }, true);
-})();
-</script>
-
-
-<div id="app-loading" class="app-loading" aria-live="polite" aria-hidden="true">
-  <div class="app-loading-card">
-    <div class="app-loading-spinner"></div>
-    <strong id="app-loading-title">Carregando informações</strong>
-    <span id="app-loading-text">Organizando suas informações...</span>
-    <div class="app-loading-bar"><i></i></div>
+      {% block content %}{% endblock %}
+    </main>
+{% if usuario %}
+    <footer class="lf-admin-footer"><strong>LokaFest</strong><span>v{{ app_version }} · Plataforma HUMIAT</span></footer>
   </div>
 </div>
-
-
-{% if request.session.get('empresa_id') %}
-<nav class="nav-inferior nav-fluxo" aria-label="Navegação principal">
-  <a class="nav-item {% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel">
-    <i class="bi bi-house"></i><span>Início</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade">
-    <i class="bi bi-calendar3"></i><span>Disponibilidade</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda">
-    <i class="bi bi-calendar3-week"></i><span>Agenda</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas">
-    <i class="bi bi-truck"></i><span>Operação</span>
-  </a>
-  <a class="nav-item {% if request.url.path.startswith('/painel/financeiro') or request.url.path.startswith('/painel/evolucao-financeira') %}ativo{% endif %}" href="/painel/financeiro">
-    <i class="bi bi-bank"></i><span>Financeiro</span>
-  </a>
-  {% if empresa is defined and empresa and empresa.inteligencia_ativa %}<a class="nav-item {% if request.url.path.startswith('/painel/inteligencia-logistica') %}ativo{% endif %}" href="/painel/inteligencia-logistica">
-    <i class="bi bi-stars"></i><span>Inteligência</span>
-  </a>{% endif %}
-</nav>
+<div class="lf-drawer-backdrop" id="lfDrawerBackdrop"></div>
 {% endif %}
 
+{% if usuario %}
+{% set novidade = novidade_ativa() %}
+{% if novidade %}
+<div class="lf-news-backdrop" id="lfNewsModal" data-news-id="{{ novidade.id }}" hidden>
+  <section class="lf-news-modal" role="dialog" aria-modal="true" aria-labelledby="lfNewsTitle">
+    <div class="lf-news-icon" aria-hidden="true">✨</div>
+    <span class="eyebrow">NOVIDADES LOKAFEST</span>
+    <h2 id="lfNewsTitle">{{ novidade.titulo }}</h2>
+    {% if novidade.chamada %}<p class="lf-news-call">{{ novidade.chamada }}</p>{% endif %}
+    <div class="lf-news-list">
+      {% for item in novidade.itens %}
+      <article><strong>{{ item.titulo }}</strong>{% if item.descricao %}<p>{{ item.descricao }}</p>{% endif %}</article>
+      {% endfor %}
+    </div>
+    <button type="button" class="btn primary full" id="lfNewsDismiss">Não visualizar mais</button>
+  </section>
+</div>
+{% endif %}
+{% endif %}
 <script>
-(function () {
-  function aplicarMascaraMoeda(input) {
-    input.addEventListener("input", function () {
-      const permiteNegativo = this.dataset.allowNegative === "1";
-      const negativo = permiteNegativo && (/^\s*-/.test(this.value) || this.value.indexOf("-") >= 0);
-      let digitos = this.value.replace(/\D/g, "");
-      if (!digitos) {
-        this.value = negativo ? "-" : "";
-        return;
-      }
-      let numero = (parseInt(digitos, 10) / 100).toFixed(2);
-      let valor = numero.replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-      this.value = negativo ? "-" + valor : valor;
-    });
-  }
-
-  document.querySelectorAll('input[name="valor"], input[name="sinal"], input[name="valor_unitario"], input[name="valor_pago"], input[data-mascara="moeda"]').forEach(aplicarMascaraMoeda);
-})();
-</script>
-
-<script>
-(function () {
-  const overlay = document.getElementById("app-loading");
-  const titulo = document.getElementById("app-loading-title");
-  const texto = document.getElementById("app-loading-text");
-  let timer = null;
-
-  function mostrarCarregando(tituloMsg, textoMsg) {
-    if (!overlay) return;
-    if (titulo && tituloMsg) titulo.textContent = tituloMsg;
-    if (texto && textoMsg) texto.textContent = textoMsg;
-    clearTimeout(timer);
-    timer = setTimeout(function () {
-      overlay.classList.add("ativo");
-      overlay.setAttribute("aria-hidden", "false");
-    }, 450);
-  }
-
-  window.mostrarCarregando = mostrarCarregando;
-  window.fecharCarregando = function(){
-    clearTimeout(timer);
-    if(!overlay) return;
-    overlay.classList.remove("ativo");
-    overlay.setAttribute("aria-hidden", "true");
-  };
-
-  function linkInternoValido(link) {
-    if (!link || link.target === "_blank" || link.hasAttribute("download")) return false;
-    if (link.dataset.noLoading === "1") return false;
-    const href = link.getAttribute("href") || "";
-    if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) return false;
-    try {
-      const url = new URL(href, window.location.href);
-      return url.origin === window.location.origin;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  document.addEventListener("submit", function (e) {
-    const form = e.target;
-    if (!form || form.dataset.noLoading === "1") return;
-    const msg = form.dataset.loadingText || "Atualizando informações...";
-    mostrarCarregando(form.dataset.loadingTitle || "Processando solicitação", msg);
-
-    // Usa exatamente o botão que disparou o submit. Quando o botão possui
-    // name/value (ex.: direcao=cima/baixo), preserva esse valor em um hidden
-    // antes de desabilitá-lo. Sem isso o navegador remove o submitter do POST
-    // e o FastAPI responde 422 por campo obrigatório ausente.
-    const botao = (e.submitter && e.submitter.tagName === "BUTTON")
-      ? e.submitter
-      : form.querySelector('button[type="submit"], button:not([type])');
-    if (botao) {
-      if (botao.name) {
-        const preservado = document.createElement("input");
-        preservado.type = "hidden";
-        preservado.name = botao.name;
-        preservado.value = botao.value || "";
-        preservado.dataset.submitterPreservado = "1";
-        form.appendChild(preservado);
-      }
-      botao.dataset.textoOriginal = botao.textContent;
-      botao.textContent = "Aguarde...";
-      botao.disabled = true;
-    }
-  }, true);
-
-  document.addEventListener("click", function (e) {
-    const link = e.target.closest("a");
-    if (!linkInternoValido(link)) return;
-    mostrarCarregando(link.dataset.loadingTitle || "Abrindo tela", link.dataset.loadingText || "Carregando informações atualizadas.");
-  }, true);
-
-  document.querySelectorAll("select[onchange*='submit']").forEach(function (select) {
-    select.addEventListener("change", function () {
-      mostrarCarregando("CONECT", "Atualizando informações...");
-    });
-  });
-
-  window.addEventListener("pageshow", function () {
-    if (!overlay) return;
-    clearTimeout(timer);
-    overlay.classList.remove("ativo");
-    overlay.setAttribute("aria-hidden", "true");
-    document.querySelectorAll("button[disabled][data-texto-original]").forEach(function (botao) {
-      botao.disabled = false;
-      botao.textContent = botao.dataset.textoOriginal;
-      delete botao.dataset.textoOriginal;
-    });
-  });
-})();
-</script>
-
-
-
-<script id="orion-pwa">
-(function () {
-  let eventoInstalacao = null;
-  const botao = document.getElementById("instalar-conect");
-  const emModoApp = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-  const ehIOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
-
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", function () {
-      navigator.serviceWorker.register("/static/service-worker.js").catch(function () {});
-    });
-  }
-
-  if (!botao || emModoApp) return;
-
-  window.addEventListener("beforeinstallprompt", function (evento) {
-    evento.preventDefault();
-    eventoInstalacao = evento;
-    botao.hidden = false;
-  });
-
-  if (ehIOS) botao.hidden = false;
-
-  botao.addEventListener("click", async function () {
-    if (eventoInstalacao) {
-      eventoInstalacao.prompt();
-      await eventoInstalacao.userChoice;
-      eventoInstalacao = null;
-      botao.hidden = true;
-      return;
-    }
-
-    if (ehIOS) {
-      alert("Toque em Compartilhar e depois em Adicionar à Tela de Início.");
-      return;
-    }
-
-    alert("Abra o menu do navegador e toque em Instalar app.");
-  });
-
-  window.addEventListener("appinstalled", function () {
-    botao.hidden = true;
-    eventoInstalacao = null;
-  });
-})();
-</script>
-
-<script id="conect-fechar-aba">
 (function(){
-  window.conectFecharAba = function(avisoId){
-    const aviso = avisoId ? document.getElementById(avisoId) : null;
-    try { window.close(); } catch (_) {}
-    window.setTimeout(function(){
-      if (!window.closed && aviso) aviso.hidden = false;
-    }, 350);
-  };
+  function digits(v,max){ return (v || '').replace(/\D/g,'').slice(0,max); }
+  function cpf(v){ const d=digits(v,11); return d.replace(/^(\d{3})(\d)/,'$1.$2').replace(/^(\d{3})\.(\d{3})(\d)/,'$1.$2.$3').replace(/\.(\d{3})(\d)/,'.$1-$2'); }
+  function phone(v){ let d=(v || '').replace(/\D/g,''); if(d.startsWith('00')) d=d.slice(2); if(d.startsWith('55') && (d.length===12 || d.length===13)) d=d.slice(2); if(d.startsWith('0') && d.length>11) d=d.slice(1); d=d.slice(0,11); if(d.length<=10) return d.replace(/^(\d{2})(\d)/,'($1) $2').replace(/(\d{4})(\d)/,'$1-$2'); return d.replace(/^(\d{2})(\d)/,'($1) $2').replace(/(\d{5})(\d)/,'$1-$2'); }
+  function apply(el){ el.value = el.dataset.mask==='cpf' ? cpf(el.value) : phone(el.value); }
+  document.querySelectorAll('input[data-mask="cpf"],input[data-mask="phone"],input[name*="whatsapp" i],input[name*="telefone" i],input[name*="celular" i]').forEach(function(el){ if(!el.dataset.mask) el.dataset.mask='phone'; el.inputMode='numeric'; apply(el); el.addEventListener('input',function(){apply(el)}); });
 })();
-</script>
-
-<script id="orion-botoes-icones">
 (function(){
-  const regras = [
-    [/pré-contrato|pre-contrato|compartilh|whatsapp|whats/i, 'bi-whatsapp', 'btn-krj-primary'],
-    [/^sinal\b|^valor total\b|^valor do contrato\b|^saldo restante\b/i, 'bi-cash-coin', 'btn-krj-outline'],
-    [/registrar pagamento|pagamento|pagar|registrar$/i, 'bi-cash-stack', 'btn-krj-primary'],
-    [/iniciar rota|rota/i, 'bi-play-circle-fill', 'btn-krj-route'],
-    [/previsão|previsao/i, 'bi-whatsapp', 'btn-krj-primary'],
-    [/a caminho/i, 'bi-whatsapp', 'btn-krj-primary'],
-    [/entrar/i, 'bi-box-arrow-in-right', 'btn-krj-primary'],
-    [/^fechar$|encerrar/i, 'bi-x-lg', 'btn-krj-ghost'],
-    [/agora não|agora nao/i, 'bi-clock-history', 'btn-krj-ghost'],
-    [/deixar para o responsável|deixar para o responsavel/i, 'bi-person-check', 'btn-krj-ghost'],
-    [/sim,? prosseguir|prosseguir|continuar/i, 'bi-arrow-right-circle', 'btn-krj-primary'],
-    [/tentar novamente/i, 'bi-arrow-clockwise', 'btn-krj-outline'],
-    [/voltar/i, 'bi-arrow-left-circle', 'btn-krj-ghost'],
-    [/enviar reserva|enviar contrato/i, 'bi-send', 'btn-krj-primary'],
-    [/salvar|criar|confirmar|aceitar|ativar|finalizar|ok$|^ok$/i, 'bi-check-circle', 'btn-krj-primary'],
-    [/editar|alterar|desv\.*/i, 'bi-pencil-square', 'btn-krj-outline'],
-    [/buscar|pesquisar|filtrar|carregar/i, 'bi-search', 'btn-krj-outline'],
-    [/atualizar|limpar|recarregar/i, 'bi-arrow-clockwise', 'btn-krj-outline'],
-    [/iniciar contrato|adicionar|novo|manual|crédito|credito|lançar/i, 'bi-plus-circle', 'btn-krj-outline'],
-    [/ver cláusulas|ver clausulas|cláusulas|clausulas/i, 'bi-file-earmark-text', 'btn-krj-info'],
-    [/ver contrato|visualizar/i, 'bi-eye', 'btn-krj-info'],
-    [/aceite/i, 'bi-file-earmark-check', 'btn-krj-info'],
-    [/pdf|gerar pdf|política|politica|modelo|imprimir/i, 'bi-file-earmark-pdf', 'btn-krj-info'],
-    [/importar|exportar|download|upload/i, 'bi-cloud-arrow-up', 'btn-krj-info'],
-    [/copiar pix|copiar/i, 'bi-clipboard-check', 'btn-krj-outline'],
-    [/duplicar|reenviar|usar como base/i, 'bi-files', 'btn-krj-warning'],
-    [/cancelar|cancelada/i, 'bi-x-circle', 'btn-krj-danger'],
-    [/excluir|remover/i, 'bi-trash3', 'btn-krj-danger'],
-    [/sair/i, 'bi-box-arrow-right', 'btn-krj-danger'],
-    [/subir|↑/i, 'bi-arrow-up', 'btn-krj-ghost'],
-    [/descer|↓/i, 'bi-arrow-down', 'btn-krj-ghost']
-  ];
-  const emojiRx = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu;
-  function textoDo(el){return (el.innerText || el.textContent || el.getAttribute('title') || '').replace(emojiRx,'').replace(/\s+/g,' ').trim();}
-  function limparIconesAntigos(el){
-    el.querySelectorAll('svg').forEach(svg => svg.remove());
-    Array.from(el.childNodes).forEach(n => {
-      if(n.nodeType === Node.TEXT_NODE){
-        n.nodeValue = n.nodeValue.replace(emojiRx,'').replace(/^\s*[·•-]?\s*/, '');
-      }
-    });
+  const modal = document.getElementById('lfNewsModal'); const dismiss = document.getElementById('lfNewsDismiss'); if (!modal || !dismiss) return;
+  const storageKey = 'lokafest_news_' + (modal.dataset.newsId || '0') + '_user_{{ usuario.id if usuario else 0 }}';
+  try { if (localStorage.getItem(storageKey) !== 'dismissed') { modal.hidden = false; document.body.classList.add('lf-news-open'); } } catch (error) { modal.hidden = false; document.body.classList.add('lf-news-open'); }
+  dismiss.addEventListener('click', function(){ try { localStorage.setItem(storageKey, 'dismissed'); } catch (error) {} modal.hidden = true; document.body.classList.remove('lf-news-open'); });
+})();
+(function(){
+  const body=document.body, side=document.getElementById('lfSidebar'), btn=document.getElementById('lfMenuToggle'), back=document.getElementById('lfDrawerBackdrop');
+  if(btn && side && back){
+    const open=()=>body.classList.add('lf-drawer-open'); const close=()=>body.classList.remove('lf-drawer-open');
+    btn.addEventListener('click',open); back.addEventListener('click',close); document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
   }
-  function decorar(el){
-    if(!el || el.dataset.iconizado === '1') return;
-    if(el.closest('.nav-inferior') || el.closest('.menu-topo-card')) return;
-    const textoInicial = textoDo(el);
-    if(!textoInicial && !el.getAttribute('title')) return;
-    let regra = regras.find(([rx]) => rx.test(textoInicial) || rx.test(el.getAttribute('title') || ''));
-    if(!regra) regra = ['','','btn-krj-ghost'];
-    const classeAtual = el.className || '';
-    if(/botao-rota/i.test(classeAtual)) regra = ['', 'bi-play-circle-fill', 'btn-krj-route'];
-    if(/whats/i.test(classeAtual) && /whats|whatsapp|pré-contrato|pre-contrato|compartilh|a caminho/i.test(textoInicial)) regra = ['', 'bi-whatsapp', 'btn-krj-primary'];
-    if(/perigo|danger|btn-perigo|botao-perigo/i.test(classeAtual)){
-      if(/cancel/i.test(textoInicial)) regra = ['', 'bi-x-circle', 'btn-krj-danger'];
-      else if(/sair/i.test(textoInicial)) regra = ['', 'bi-box-arrow-right', 'btn-krj-danger'];
-      else regra = ['', 'bi-trash3', 'btn-krj-danger'];
-    }
-    limparIconesAntigos(el);
-    el.classList.add(regra[2]);
-    if(textoInicial.length <= 3 || /btn-ok|btn-mover|remover-item/.test(classeAtual)) el.classList.add('btn-krj-compact');
-    if(regra[1] && !el.querySelector('i.bi')){
-      const i=document.createElement('i');
-      i.className='bi '+regra[1];
-      i.setAttribute('aria-hidden','true');
-      el.prepend(i);
-    }
-    el.dataset.iconizado='1';
-  }
-  function aplicar(){
-    document.querySelectorAll('button, a.botao, a.botao-whats, .botao-whats, .botao-whats-btn, .botao-rota, label.btn-importar-topo, a.btn-limpar-filtros, .link-botao, .registrar-pagamento-operacao > summary').forEach(decorar);
-  }
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', aplicar); else aplicar();
+  const path=location.pathname.replace(/\/$/,'') || '/';
+  document.querySelectorAll('.lf-side-link').forEach(a=>{ const href=(a.getAttribute('href')||'').replace(/\/$/,''); if(href && (path===href || (href.startsWith('/admin/') && path.startsWith(href)))) a.classList.add('is-active'); });
+  const title=document.querySelector('.lf-content h1, .lf-content .headline h1, .lf-content h2'); const current=document.getElementById('lfCurrentPage'); if(title && current) current.textContent=title.textContent.trim();
 })();
 </script>
-
-{% block scripts_extra %}{% endblock %}
-
 </body>
 </html>

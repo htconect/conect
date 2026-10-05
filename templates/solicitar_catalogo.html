@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Solicitar novo item | LokaFest{% endblock %}{% block content %}
+<section class="headline"><div><span class="eyebrow">Ajude o LokaFest a crescer</span><h1>Solicitar nova categoria ou item</h1><p>Não encontrou o que oferece? Envie uma sugestão para aprovação.</p></div></section>
+{% if request.query_params.get('ok') %}<div class="alert ok">Solicitação enviada. Ela ficará pendente até a aprovação do administrador.</div>{% endif %}
+<section class="panel"><form method="post" class="formgrid"><label>Categoria existente ou sugerida<select name="categoria_sugerida" required>{% for c in categorias %}<option>{{c.nome}}</option>{% endfor %}<option value="Nova categoria">Nova categoria</option></select></label><label>Item que deseja incluir<input name="item_sugerido" placeholder="Ex.: Mini roda-gigante infantil" required></label><label class="full">Observação<textarea name="observacao" rows="4" placeholder="Explique rapidamente o produto ou serviço, se necessário."></textarea></label><div class="full"><button class="btn primary">Enviar para aprovação</button></div></form></section>
+{% endblock %}

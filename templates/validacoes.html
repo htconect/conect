@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Validações | LokaFest{% endblock %}
+{% block content %}
+<section class="headline">
+  <div>
+    <span class="eyebrow">ADMINISTRAÇÃO</span>
+    <h1>Validações</h1>
+    <p>Defina a versão mínima que torna o usuário apto para participar do sorteio.</p>
+  </div>
+</section>
+
+{% if request.query_params.get('ok') %}<div class="alert ok">{{request.query_params.get('ok')}}</div>{% endif %}
+{% if request.query_params.get('erro') %}<div class="alert erro">{{request.query_params.get('erro')}}</div>{% endif %}
+
+<section class="panel">
+  <h2>{{ 'Editar regra' if regra_edicao else 'Nova regra' }}</h2>
+  <form method="post"
+        action="{{ '/admin/validacoes/' ~ regra_edicao.id ~ '/editar' if regra_edicao else '/admin/validacoes' }}"
+        class="formgrid">
+
+    <label>Nome da regra
+      <input name="nome"
+             value="{{ regra_edicao.nome if regra_edicao else '' }}"
+             placeholder="Ex.: Catálogo obrigatório Karaokê"
+             required>
+    </label>
+
+    <label>Tipo
+      <select name="tipo">
+        <option value="catalogo_obrigatorio"
+          {% if not regra_edicao or regra_edicao.tipo == 'catalogo_obrigatorio' %}selected{% endif %}>
+          Catálogo obrigatório
+        </option>
+      </select>
+    </label>
+
+    <label>Categoria
+      <select name="categoria_id" required>
+        {% for c in categorias %}
+        <option value="{{c.id}}"
+          {% if regra_edicao and regra_edicao.categoria_id == c.id %}selected{% endif %}>
+          {{c.nome}}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label>Catálogo mínimo obrigatório
+      <input name="valor_obrigatorio"
+             value="{{ regra_edicao.valor_obrigatorio if regra_edicao else '' }}"
+             placeholder="Ex.: 2025.2"
+             pattern="\d{4}\.\d+"
+             title="Use o formato AAAA.N, por exemplo 2025.2"
+             required>
+      <small>O usuário fica apto quando pelo menos um equipamento estiver nesta versão ou acima.</small>
+    </label>
+
+    <label class="full">Mensagem quando não estiver apto
+      <textarea name="mensagem_bloqueio"
+                rows="4"
+                placeholder="Você ainda não está apto. Atualize pelo menos um equipamento para o catálogo obrigatório.">{{ regra_edicao.mensagem_bloqueio if regra_edicao else 'Você ainda não está apto para receber indicações. Atualize pelo menos um equipamento para o catálogo obrigatório.' }}</textarea>
+    </label>
+
+    <div class="full" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn primary">{{ 'Salvar alterações' if regra_edicao else 'Criar regra' }}</button>
+      {% if regra_edicao %}
+      <a class="btn secondary" href="/admin/validacoes">Cancelar</a>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Regras cadastradas</h2>
+  {% for r in regras %}
+  <article class="lead">
+    <div>
+      <span class="pill">{{ 'Ativa' if r.ativo else 'Inativa' }}</span>
+      <h3>{{r.nome}}</h3>
+      <p><strong>Categoria:</strong> {{ categorias_map[r.categoria_id].nome if categorias_map.get(r.categoria_id) else '—' }}</p>
+      <p><strong>Catálogo mínimo obrigatório:</strong> {{r.valor_obrigatorio or '—'}}</p>
+      {% if r.mensagem_bloqueio %}<p>{{r.mensagem_bloqueio}}</p>{% endif %}
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <a class="btn secondary" href="/admin/validacoes/{{r.id}}/editar">Editar</a>
+      <form method="post" action="/admin/validacoes/{{r.id}}/toggle">
+        <button class="btn {{ 'danger-soft' if r.ativo else 'success' }}">{{ 'Desativar' if r.ativo else 'Ativar' }}</button>
+      </form>
+    </div>
+  </article>
+  {% else %}
+  <div class="empty">Nenhuma regra cadastrada.</div>
+  {% endfor %}
+</section>
+{% endblock %}

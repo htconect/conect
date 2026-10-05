@@ -1,56 +1,7 @@
 services:
   - type: web
-    name: humiat-conect
+    name: lokafest
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --no-server-header
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY
-        generateValue: true
-      - key: CONECT_LOCAL_LOGIN_ENABLED
-        value: "false"
-      - key: CONECT_SECURE_COOKIES
-        value: "true"
-      - key: CONECT_SECURITY_HEADERS
-        value: "true"
-      - key: CONECT_LEGACY_PUBLIC_CONTRACT_IDS
-        value: "false"
-      - key: CONECT_API_DOCS
-        value: "false"
-
-      # Mesmo segredo do Humiat/Organiza. Configure o valor no Render.
-      - key: HUMIAT_SSO_SECRET
-        sync: false
-      - key: HUMIAT_SSO_VALIDATE_URL
-        value: https://www.humiat.com.br/api/humiat/sso/validar
-      - key: HUMIAT_LOGIN_URL
-        value: https://www.humiat.com.br/entrar
-      - key: HUMIAT_USER_VALIDATE_URL
-        value: https://www.humiat.com.br/api/humiat/integracoes/usuario/validar
-
-      - key: INFINITEPAY_HANDLE
-        value: karaokerj
-      - key: INFINITEPAY_TIMEOUT_SECONDS
-        value: "15"
-
-
-      - key: PERFORMANCE_MONITORING
-        value: "true"
-      - key: PERFORMANCE_DETAIL
-        value: slow
-      - key: PERFORMANCE_ROUTES
-        value: /painel
-      - key: PERFORMANCE_SLOW_REQUEST_MS
-        value: "500"
-      - key: PERFORMANCE_SLOW_SQL_MS
-        value: "300"
-
-      # Google Agenda: credenciais OAuth 2.0 do aplicativo Web no Google Cloud.
-      - key: GOOGLE_CALENDAR_CLIENT_ID
-        sync: false
-      - key: GOOGLE_CALENDAR_CLIENT_SECRET
-        sync: false
-      - key: GOOGLE_CALENDAR_REDIRECT_URI
-        sync: false
+    startCommand: python -m uvicorn app:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true

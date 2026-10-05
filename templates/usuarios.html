@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Usuários | LokaFest{% endblock %}
+{% block content %}
+<section class="headline">
+  <div><span class="eyebrow">Administração</span><h1>Usuários</h1><p>Veja rapidamente o perfil, o catálogo e a situação de cada usuário.</p></div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+    <button type="button" class="btn ghost" id="lfRefreshOrganizaAll">Carregar dados de todos</button>
+    <a class="btn primary" href="/admin/usuarios/novo">+ Novo usuário</a>
+  </div>
+</section>
+<div id="lfRefreshOrganizaStatus" class="notice" style="display:none;margin-bottom:16px"></div>
+<div class="tablewrap lf-admin-table lf-users-table">
+<table>
+  <thead><tr><th>Zona</th><th>Usuário</th><th>Catálogo</th><th>Perfil e aptidão</th><th>Status</th><th>Ações</th></tr></thead>
+  <tbody>
+  {% for row in linhas %}{% set u=row.usuario %}
+  <tr data-usuario-id="{{u.id}}">
+    <td data-label="Zona"><strong>{{u.zona}}</strong></td>
+    <td data-label="Usuário">
+      <strong>{{u.nome}}</strong>
+      <small>CPF: {{u.cpf|cpf_br}}</small>
+      <small>WhatsApp: {{u.whatsapp|telefone_br}}</small>
+      <span class="lf-status-badge {{'ok' if u.humiat_user_id else 'danger'}}" title="Lido somente do banco do LokaFest; sem consulta externa">Humiat ID: {{'Sim' if u.humiat_user_id else 'Não'}}</span>
+    </td>
+    <td data-label="Catálogo">
+      <div class="lf-catalog-pair"><span>Atual</span><strong class="lf-catalog-status">{{u.krj_atualizacao or 'Não validado'}}</strong></div>
+      <div class="lf-catalog-pair"><span>Disponível</span><strong class="lf-catalog-latest">{{row.ultima or '—'}}</strong></div>
+    </td>
+    <td data-label="Perfil e aptidão">
+      {% if u.grupo_locadores %}<span class="lf-status-badge locador">Grupo de locadores</span>{% else %}<span class="lf-status-badge neutral">Fora do grupo</span>{% endif %}
+      <div class="lf-apto-line"><span class="lf-status-badge {{'ok' if row.apto else 'danger'}}">Karaokê: {{'Apto' if row.apto else 'Não apto'}}</span></div>
+      <div class="lf-apto-line"><span class="lf-status-badge {{'ok' if row.apto_fliperama else 'danger'}}">Fliperama: {{ row.qtd_fliperama }}</span></div>
+    </td>
+    <td data-label="Status"><span class="lf-status-badge {{'online' if u.online else 'offline'}}">{{'Online' if u.online else 'Offline'}}</span><small class="lf-approval">{{'Aprovado' if u.aprovado else 'Pendente'}}</small></td>
+    <td data-label="Ações"><div class="lf-row-actions">{% if not u.aprovado %}<form method="post" action="/admin/usuarios/{{u.id}}/aprovar"><button class="btn success">Aprovar</button></form>{% endif %}<a class="btn ghost" href="/admin/usuarios/{{u.id}}/editar">Editar</a></div></td>
+  </tr>
+  {% else %}<tr><td colspan="6"><div class="empty">Nenhum usuário cadastrado.</div></td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<script>
+(function(){
+  const button = document.getElementById('lfRefreshOrganizaAll');
+  const status = document.getElementById('lfRefreshOrganizaStatus');
+  if (!button || !status) return;
+
+  const ids = Array.from(document.querySelectorAll('tr[data-usuario-id]'))
+    .map(row => row.dataset.usuarioId)
+    .filter(Boolean);
+
+  function mostrar(texto, classe){
+    status.textContent = texto;
+    status.className = 'notice ' + (classe || '');
+    status.style.display = 'block';
+  }
+
+  button.addEventListener('click', async function(){
+    if (!ids.length) return;
+    if (!window.confirm('Carregar novamente os dados do Organiza para todos os usuários?')) return;
+
+    button.disabled = true;
+    const original = button.textContent;
+    let feitos = 0, encontrados = 0, naoEncontrados = 0, erros = 0;
+    let cursor = 0;
+    mostrar('Aguarde, carregando dados... 0/' + ids.length, '');
+
+    async function worker(){
+      while (true){
+        const pos = cursor++;
+        if (pos >= ids.length) return;
+        const id = ids[pos];
+        try {
+          const resp = await fetch('/admin/usuarios/' + encodeURIComponent(id) + '/atualizar-organiza', {
+            method: 'POST',
+            headers: {'Accept': 'application/json'}
+          });
+          const data = await resp.json();
+          if (!resp.ok || !data.ok) erros++;
+          else if (data.encontrado) encontrados++;
+          else naoEncontrados++;
+        } catch (e) {
+          erros++;
+        } finally {
+          feitos++;
+          button.textContent = 'Carregando ' + feitos + '/' + ids.length;
+          mostrar('Aguarde, carregando dados... ' + feitos + '/' + ids.length, '');
+        }
+      }
+    }
+
+    await Promise.all([worker(), worker(), worker()]);
+    button.textContent = original;
+    button.disabled = false;
+
+    if (erros) {
+      mostrar('Concluído: ' + encontrados + ' encontrado(s), ' + naoEncontrados + ' sem vínculo atual e ' + erros + ' erro(s). A página será atualizada.', 'warning');
+    } else {
+      mostrar('Concluído: ' + encontrados + ' encontrado(s) e ' + naoEncontrados + ' sem vínculo atual. Atualizando a lista...', 'success');
+    }
+    window.setTimeout(function(){ window.location.reload(); }, 900);
+  });
+})();
+</script>
+{% endblock %}

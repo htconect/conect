@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Solicite um orçamento' if modo_publico else 'Nova indicação' }} | LokaFest{% endblock %}
+
+{% block content %}
+{% set pf = prefill if prefill is defined else {} %}
+<section class="panel narrow lf-indicar-fast lf-request-card">
+  <span class="eyebrow">{{ 'SOLICITE SEU ORÇAMENTO' if modo_publico else 'NOVA OPORTUNIDADE' }}</span>
+  <h1>{{ 'O que você precisa para sua festa?' if modo_publico else 'Nova indicação' }}</h1>
+  <p>{{ 'Escolha uma categoria ou item, informe o local e seu WhatsApp.' if modo_publico else 'Escolha uma categoria ou item. A data pode ficar em branco.' }}</p>
+
+  {% if request.query_params.get('erro') %}
+  <div class="alert erro">{{ request.query_params.get('erro') }}</div>
+  {% endif %}
+
+  {% if request.query_params.get('ok') %}
+  <div class="lf-signup-success">
+    <strong>Solicitação enviada!</strong>
+    <p>Seu pedido foi registrado com sucesso.</p>
+    <a href="/" class="lf-primary">Voltar ao LokaFest</a>
+  </div>
+  {% else %}
+
+  <form method="post" action="{{ '/solicitar' if modo_publico else '/indicar' }}" id="form-indicacao" class="form lf-indicar-form">{% if indicador_token %}<input type="hidden" name="indicador_token" value="{{ indicador_token }}">{% endif %}
+
+    <div class="lf-form-field">
+      <label for="whatsapp"><span>WhatsApp para contato</span></label>
+      <small>Copie o número diretamente da conversa do WhatsApp e cole aqui para evitar erros de digitação.</small>
+      <input id="whatsapp" name="whatsapp" inputmode="tel" placeholder="+55 21 99999-9999" value="{{ pf.get('whatsapp', '') }}" required autocomplete="tel" autofocus>
+    </div>
+
+    <div class="lf-item-picker lf-form-field">
+      <div class="lf-field-head">
+        <span>Tipo da indicação</span>
+        <small>Karaokê é o padrão. Você pode marcar os dois.</small>
+      </div>
+      <div class="lf-equipment-choice-grid">
+        <label class="lf-equipment-choice">
+          <input type="checkbox" name="tipos_servico" value="karaoke" id="tipo-servico-karaoke" {% if 'karaoke' in pf.get('tipos_servico', []) or not pf.get('tipos_servico') %}checked{% endif %}>
+          <strong>Karaokê</strong>
+        </label>
+        <label class="lf-equipment-choice">
+          <input type="checkbox" name="tipos_servico" value="fliperama" id="tipo-servico-fliperama" {% if 'fliperama' in pf.get('tipos_servico', []) %}checked{% endif %}>
+          <strong>Fliperama</strong>
+        </label>
+      </div>
+      <small class="lf-field-help">Se marcar Karaokê + Fliperama, o sorteio procura somente quem possui os dois.</small>
+    </div>
+
+    <div class="lf-item-picker lf-form-field" id="bloco-equipamentos-karaoke">
+      <div class="lf-field-head">
+        <span>Equipamentos</span>
+        <small>Marque os tipos que atendem esta indicação</small>
+      </div>
+      <div class="lf-equipment-choice-grid">
+        <label class="lf-equipment-choice">
+          <input type="checkbox" name="equipamentos" value="portatil" {% if 'portatil' in pf.get('equipamentos', []) or not pf.get('equipamentos') %}checked{% endif %}>
+          <strong>Portátil</strong>
+        </label>
+        <label class="lf-equipment-choice">
+          <input type="checkbox" name="equipamentos" value="jukebox" {% if 'jukebox' in pf.get('equipamentos', []) or not pf.get('equipamentos') %}checked{% endif %}>
+          <strong>Jukebox</strong>
+        </label>
+        <label class="lf-equipment-choice">
+          <input type="checkbox" name="equipamentos" value="iphone" {% if 'iphone' in pf.get('equipamentos', []) or not pf.get('equipamentos') %}checked{% endif %}>
+          <strong>iPhone</strong>
+        </label>
+      </div>
+      <small class="lf-field-help">Esta seleção vale somente para Karaokê. Fliperama não possui outra restrição: basta ter ao menos 1 ativo no Organiza.</small>
+    </div>
+
+    <div class="lf-form-field">
+      <div class="lf-field-head">
+        <span>Quando?</span>
+        <small>Opcional</small>
+      </div>
+      <input id="data_evento" type="date" name="data_evento" value="{{ pf.get('data_evento', '') }}">
+    </div>
+
+    <div class="lf-form-field">
+      <div class="lf-field-head">
+        <span>Observação</span>
+        <small>Opcional</small>
+      </div>
+      <textarea id="observacao" name="observacao" rows="4" maxlength="1000" placeholder="Ex.: cliente prefere equipamento compacto, festa em apartamento, acesso por escada...">{{ pf.get('observacao', '') }}</textarea>
+    </div>
+
+    <div class="lf-local-search lf-form-field">
+      <div class="lf-field-head">
+        <span>Onde será?</span>
+        <small>No momento atendemos somente o Estado do Rio de Janeiro</small>
+      </div>
+      <div class="lf-search-row">
+        <input id="busca-local" value="{{ pf.get('localidade_nome', '') }}{% if pf.get('municipio_nome') %} — {{ pf.get('municipio_nome') }}/{{ pf.get('uf', 'RJ') }}{% endif %}" placeholder="Ex.: Campo Grande, Santa Cruz da Serra..." autocomplete="off">
+        <button type="button" class="btn ghost" id="btn-buscar-local">Buscar</button>
+      </div>
+
+      <div id="resultados-local" class="lf-location-results"></div>
+      <div id="local-escolhido" class="lf-selected-location" hidden></div>
+    </div>
+
+    <input type="hidden" name="localidade_nome" id="localidade_nome" value="{{ pf.get('localidade_nome', '') }}">
+    <input type="hidden" name="municipio_nome" id="municipio_nome" value="{{ pf.get('municipio_nome', '') }}">
+    <input type="hidden" name="uf" id="uf" value="{{ pf.get('uf', '') }}">
+    <input type="hidden" name="estado_nome" id="estado_nome" value="{{ pf.get('estado_nome', '') }}">
+    <input type="hidden" name="localidade_tipo" id="localidade_tipo" value="{{ pf.get('localidade_tipo', '') }}">
+    <input type="hidden" name="osm_id" id="osm_id">
+    <input type="hidden" name="lat" id="lat">
+    <input type="hidden" name="lon" id="lon">
+
+    <button class="btn primary full">{{ 'SOLICITAR ORÇAMENTO' if modo_publico else 'INDICAR' }}</button>
+  </form>
+  {% endif %}
+</section>
+
+<script>
+const busca = document.getElementById('busca-local');
+const btn = document.getElementById('btn-buscar-local');
+const resultados = document.getElementById('resultados-local');
+const escolhido = document.getElementById('local-escolhido');
+{% if pf.get('localidade_nome') %}
+if(escolhido){ escolhido.hidden=false; escolhido.textContent='{{ pf.get("localidade_nome", "")|e }}{% if pf.get("municipio_nome") %} — {{ pf.get("municipio_nome", "")|e }}/{{ pf.get("uf", "RJ")|e }}{% endif %}'; }
+{% endif %}
+
+async function buscarLocal(){
+  const q = busca.value.trim();
+
+  if(q.length < 3){
+    resultados.innerHTML = '<small>Digite pelo menos 3 letras.</small>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Buscando...';
+  resultados.innerHTML = '';
+
+  try{
+    const r = await fetch('/api/localidades/buscar?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    const lista = d.resultados || [];
+
+    if(lista.length){
+      lista.forEach(x => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'lf-location-option';
+        b.textContent = x.label;
+        b.onclick = () => selecionarLocal(x);
+        resultados.appendChild(b);
+      });
+      return;
+    }
+
+    // Se o serviço externo estiver indisponível, não bloqueia o usuário.
+    if(d.servico_indisponivel && d.fallback){
+      resultados.innerHTML = '';
+      const aviso = document.createElement('div');
+      aviso.className = 'lf-location-fallback';
+      aviso.innerHTML =
+        '<strong>Não conseguimos validar o bairro agora.</strong>'
+        + '<span>Você pode continuar com <b>' + d.fallback.label + '</b>. '
+        + 'O local ficará aguardando classificação no administrativo.</span>';
+
+      const usar = document.createElement('button');
+      usar.type = 'button';
+      usar.className = 'btn primary';
+      usar.textContent = 'Usar este local';
+      usar.onclick = () => selecionarLocal(d.fallback);
+
+      aviso.appendChild(usar);
+      resultados.appendChild(aviso);
+      return;
+    }
+
+    // Mesmo quando o serviço responde sem encontrar, permite usar o texto informado.
+    const fallback = {
+      nome: q.replace(/\b\w/g, c => c.toUpperCase()),
+      municipio: 'Rio de Janeiro',
+      uf: 'RJ',
+      estado: 'Rio de Janeiro',
+      tipo: 'informado',
+      osm_id: '',
+      lat: '',
+      lon: '',
+      label: q.replace(/\b\w/g, c => c.toUpperCase()) + ' — Rio de Janeiro/RJ'
+    };
+
+    resultados.innerHTML = '';
+    const aviso = document.createElement('div');
+    aviso.className = 'lf-location-fallback';
+    aviso.innerHTML =
+      '<strong>Local não localizado automaticamente.</strong>'
+      + '<span>Você pode continuar com <b>' + fallback.label + '</b>. '
+      + 'O administrador poderá classificar depois.</span>';
+
+    const usar = document.createElement('button');
+    usar.type = 'button';
+    usar.className = 'btn ghost';
+    usar.textContent = 'Usar este local';
+    usar.onclick = () => selecionarLocal(fallback);
+
+    aviso.appendChild(usar);
+    resultados.appendChild(aviso);
+
+  }catch(e){
+    // Falha total de rede: oferece contingência local.
+    const fallback = {
+      nome: q.replace(/\b\w/g, c => c.toUpperCase()),
+      municipio: 'Rio de Janeiro',
+      uf: 'RJ',
+      estado: 'Rio de Janeiro',
+      tipo: 'informado',
+      osm_id: '',
+      lat: '',
+      lon: '',
+      label: q.replace(/\b\w/g, c => c.toUpperCase()) + ' — Rio de Janeiro/RJ'
+    };
+
+    resultados.innerHTML = '';
+    const aviso = document.createElement('div');
+    aviso.className = 'lf-location-fallback';
+    aviso.innerHTML =
+      '<strong>Serviço de localização temporariamente indisponível.</strong>'
+      + '<span>A indicação não será bloqueada. Use <b>' + fallback.label + '</b> '
+      + 'e classifique depois no administrativo.</span>';
+
+    const usar = document.createElement('button');
+    usar.type = 'button';
+    usar.className = 'btn primary';
+    usar.textContent = 'Continuar com este local';
+    usar.onclick = () => selecionarLocal(fallback);
+
+    aviso.appendChild(usar);
+    resultados.appendChild(aviso);
+
+  }finally{
+    btn.disabled = false;
+    btn.textContent = 'Buscar';
+  }
+}
+
+function selecionarLocal(x){
+  document.getElementById('localidade_nome').value = x.nome || '';
+  document.getElementById('municipio_nome').value = x.municipio || '';
+  document.getElementById('uf').value = x.uf || '';
+  document.getElementById('estado_nome').value = x.estado || '';
+  document.getElementById('localidade_tipo').value = x.tipo || 'bairro';
+  document.getElementById('osm_id').value = x.osm_id || '';
+  document.getElementById('lat').value = x.lat || '';
+  document.getElementById('lon').value = x.lon || '';
+  escolhido.textContent = '📍 ' + x.label;
+  escolhido.hidden = false;
+  resultados.innerHTML = '';
+  busca.value = x.label;
+}
+
+btn.onclick = buscarLocal;
+busca.addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); buscarLocal(); }
+});
+
+function atualizarTiposServico(){
+  const karaoke = document.getElementById('tipo-servico-karaoke')?.checked;
+  const bloco = document.getElementById('bloco-equipamentos-karaoke');
+  if(bloco) bloco.hidden = !karaoke;
+}
+
+document.querySelectorAll('input[name="tipos_servico"]').forEach(el => {
+  el.addEventListener('change', atualizarTiposServico);
+});
+atualizarTiposServico();
+
+document.getElementById('form-indicacao')?.addEventListener('submit', e=>{
+  const tiposMarcados = document.querySelectorAll('input[name="tipos_servico"]:checked');
+  if(!tiposMarcados.length){
+    e.preventDefault();
+    alert('Selecione Karaokê, Fliperama ou os dois.');
+    return;
+  }
+  const karaokeMarcado = document.getElementById('tipo-servico-karaoke')?.checked;
+  const equipamentosMarcados = document.querySelectorAll('input[name="equipamentos"]:checked');
+  if(karaokeMarcado && !equipamentosMarcados.length){
+    e.preventDefault();
+    alert('Para Karaokê, selecione pelo menos um equipamento.');
+    return;
+  }
+  if(!document.getElementById('localidade_nome').value){
+    e.preventDefault();
+    alert('Busque e selecione um bairro/local do Rio de Janeiro.');
+  }
+});
+
+</script>
+{% endblock %}
