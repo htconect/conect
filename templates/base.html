@@ -32,6 +32,7 @@
         <div class="menu-topo-card">
           <a href="/painel/vitrine"><i class="bi bi-shop"></i> Vitrine pública</a>
           <a href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i> Contratos</a>
+          {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('buscar_cliente') %}<a href="/painel/clientes"><i class="bi bi-search"></i> Buscar cliente</a>{% endif %}
           <strong>Cadastros</strong>
           <a href="/painel/contratos"><i class="bi bi-file-earmark-text"></i> Política / modelos</a>
           <a href="/painel/empresa"><i class="bi bi-building"></i> Empresa</a>
@@ -81,6 +82,7 @@
     <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
     <a class="{% if request.url.path == '/painel/vitrine' %}ativo{% endif %}" href="/painel/vitrine"><i class="bi bi-shop"></i><span>Vitrine pública</span></a>
     <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
+    {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('buscar_cliente') %}<a class="{% if request.url.path.startswith('/painel/clientes') or request.url.path.startswith('/painel/cliente/') %}ativo{% endif %}" href="/painel/clientes"><i class="bi bi-search"></i><span>Buscar cliente</span></a>{% endif %}
     <a class="{% if request.url.path.startswith('/painel/solicitacoes') or request.url.path.startswith('/painel/solicitacao/') or request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i><span>Contratos</span></a>
     <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3-week"></i><span>Agenda</span></a>
     <a class="{% if request.url.path.startswith('/painel/reservas') %}ativo{% endif %}" href="/painel/reservas"><i class="bi bi-truck"></i><span>Operação</span></a>

@@ -43,7 +43,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
+from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, VitrineOportunidade, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -52,6 +52,8 @@ from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em
 
 from fastapi.templating import Jinja2Templates
 from PIL import Image, ImageOps, ImageFilter
+
+LOKAFEST_PUBLIC_URL = os.getenv("LOKAFEST_PUBLIC_URL", "https://lokafest.com.br/indicar").strip() or "https://lokafest.com.br/indicar"
 
 class ControleAcessoMiddleware:
     """Bloqueia a entrada nos módulos sem esconder cards, alertas ou pendências."""
@@ -314,6 +316,25 @@ def _remover_imagem_local(url: str) -> None:
     except Exception:
         pass
 
+def observacoes_visiveis(texto: str | None) -> str:
+    """Oculta metadados técnicos antigos da vitrine sem apagar observações do usuário."""
+    saida = []
+    for linha in str(texto or "").splitlines():
+        limpa = linha.strip()
+        if not limpa:
+            continue
+        if limpa.startswith("[VITRINE_"):
+            continue
+        if limpa.startswith("Pré-reserva criada pela vitrine."):
+            continue
+        if limpa.startswith("Cliente autorizou no carrinho"):
+            continue
+        if limpa.startswith("Cliente não autorizou indicação a parceiros"):
+            continue
+        saida.append(linha)
+    return "\n".join(saida).strip()
+
+
 app = FastAPI(
     title=APP_NOME, version=APP_VERSION,
     docs_url="/docs" if API_DOCS_ENABLED else None,
@@ -335,6 +356,7 @@ templates.env.globals["APP_VERSION"] = APP_VERSION
 templates.env.globals["LOCAL_LOGIN_ENABLED"] = LOCAL_LOGIN_ENABLED
 templates.env.globals["HUMIAT_SSO_ATIVO"] = not LOCAL_LOGIN_ENABLED
 templates.env.globals["imagem_disponivel"] = _imagem_disponivel
+templates.env.globals["observacoes_visiveis"] = observacoes_visiveis
 
 
 @app.get("/midia/{midia_id}")
@@ -3760,7 +3782,7 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
 
 
 def _garantir_colunas_v113_criticas() -> None:
-    """Adiciona apenas as colunas indispensáveis até a v1.0.116.
+    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.118.
 
     É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
@@ -3799,11 +3821,33 @@ def _garantir_colunas_v113_criticas() -> None:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_empresa_id ON bloqueios_data (empresa_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_inicio ON bloqueios_data (data_inicio)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bloqueios_data_data_fim ON bloqueios_data (data_fim)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS vitrine_oportunidades (
+                        id SERIAL PRIMARY KEY,
+                        empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+                        public_token VARCHAR(64) NOT NULL UNIQUE,
+                        data_evento DATE NOT NULL,
+                        tipo_evento VARCHAR(30) NOT NULL DEFAULT 'residencial',
+                        whatsapp VARCHAR(30) NOT NULL,
+                        pedido_json TEXT NOT NULL,
+                        autoriza_parceiros BOOLEAN NOT NULL DEFAULT false,
+                        status VARCHAR(20) NOT NULL DEFAULT 'pendente',
+                        solicitacao_id INTEGER REFERENCES solicitacoes(id),
+                        indicado_em TIMESTAMP,
+                        convertido_em TIMESTAMP,
+                        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_empresa_id ON vitrine_oportunidades (empresa_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_data_evento ON vitrine_oportunidades (data_evento)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_status ON vitrine_oportunidades (status)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_solicitacao_id ON vitrine_oportunidades (solicitacao_id)"))
             return
         # Desenvolvimento/SQLite: reutiliza a rotina compatível já existente.
         garantir_colunas_novas()
+        VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
     except Exception:
-        logger.exception("Falha ao garantir colunas críticas da v1.0.116")
+        logger.exception("Falha ao garantir colunas críticas da v1.0.118")
         raise
 
 
@@ -3963,11 +4007,50 @@ def _iniciar_migracao_duracoes_v116_em_background() -> None:
     threading.Thread(target=_migrar_duracoes_empresa_v116_uma_vez, name="connect-migracao-duracoes-v116", daemon=True).start()
 
 
+def _migrar_lokafest_karaokerj_v118_uma_vez() -> None:
+    """Deixa a integração padrão do LokaFest pronta para a Karaokê RJ."""
+    chave = "20261005_karaokerj_lokafest_v118"
+    db = SessionLocal()
+    try:
+        db.execute(text("""
+            CREATE TABLE IF NOT EXISTS app_migrations (
+                chave VARCHAR(160) PRIMARY KEY,
+                aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        db.commit()
+        if db.execute(text("SELECT chave FROM app_migrations WHERE chave = :chave"), {"chave": chave}).first():
+            return
+        empresa = db.query(Empresa).filter(
+            or_(
+                func.lower(Empresa.slug).in_(["karaokerj", "karaoke-rj"]),
+                func.lower(Empresa.nome).in_(["karaokê rj", "karaoke rj"]),
+            )
+        ).first()
+        if not empresa:
+            return
+        empresa.lokafest_ativo = True
+        empresa.lokafest_url = LOKAFEST_PUBLIC_URL
+        db.execute(text("INSERT INTO app_migrations (chave) VALUES (:chave)"), {"chave": chave})
+        db.commit()
+        logger.info("Migração v1.0.118 aplicada: LokaFest configurado para a Karaokê RJ.")
+    except Exception:
+        db.rollback()
+        logger.exception("Falha na migração única do LokaFest v1.0.118")
+    finally:
+        db.close()
+
+
+def _iniciar_migracao_lokafest_v118_em_background() -> None:
+    threading.Thread(target=_migrar_lokafest_karaokerj_v118_uma_vez, name="connect-migracao-lokafest-v118", daemon=True).start()
+
+
 @app.on_event("startup")
 def startup():
     # Migração estrutural mínima: somente colunas novas desta versão.
     _garantir_colunas_v113_criticas()
     _iniciar_migracao_duracoes_v116_em_background()
+    _iniciar_migracao_lokafest_v118_em_background()
 
     # Nunca bloquear o bind da porta do Render por causa de uma migração de dados.
     # A migração é idempotente e roda em background; app_migrations impede repetição.
@@ -4763,6 +4846,7 @@ def admin_criar_empresa(
         raise HTTPException(400, "Já existe uma empresa com este slug.")
 
     sistemas = _normalizar_sistemas_humiat(sistema_humiat)
+    lokafest_habilitado = bool(lokafest_ativo) or "LOKAFEST" in sistemas
     fluxo = (vitrine_fluxo or "direto").strip().lower()
     if fluxo not in {"direto", "aprovacao"}:
         fluxo = "direto"
@@ -4800,8 +4884,8 @@ def admin_criar_empresa(
         modulo_recursos_ativo=bool(modulo_recursos_ativo),
         modulo_cupons_ativo=bool(modulo_cupons_ativo),
         inteligencia_ativa=bool(inteligencia_ativa),
-        lokafest_ativo=bool(lokafest_ativo) or "LOKAFEST" in sistemas,
-        lokafest_url=lokafest_url.strip()[:300] or None,
+        lokafest_ativo=lokafest_habilitado,
+        lokafest_url=(lokafest_url.strip()[:300] or (LOKAFEST_PUBLIC_URL if lokafest_habilitado else None)),
         frete_tipo=tipo_frete,
         frete_valor_fixo=max(texto_para_float(frete_valor_fixo), 0),
         frete_valor_km=max(texto_para_float(frete_valor_km), 0),
@@ -4992,7 +5076,7 @@ def admin_salvar_empresa(
     empresa.modulo_cupons_ativo = bool(modulo_cupons_ativo)
     empresa.inteligencia_ativa = bool(inteligencia_ativa)
     empresa.lokafest_ativo = bool(lokafest_ativo) or "LOKAFEST" in sistemas
-    empresa.lokafest_url = lokafest_url.strip()[:300] or None
+    empresa.lokafest_url = lokafest_url.strip()[:300] or (LOKAFEST_PUBLIC_URL if empresa.lokafest_ativo else empresa.lokafest_url)
 
     empresa.frete_tipo = tipo_frete
     empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
@@ -6144,6 +6228,8 @@ def _atualizar_metadados_humiat_empresa(empresa: Empresa, empresa_h: dict | None
     sistemas = _normalizar_sistemas_humiat(sistemas_brutos)
     empresa.humiat_sistemas_json = json.dumps(sistemas, ensure_ascii=False)
     empresa.lokafest_ativo = bool(getattr(empresa, "lokafest_ativo", False) or "LOKAFEST" in sistemas)
+    if empresa.lokafest_ativo and not str(getattr(empresa, "lokafest_url", "") or "").strip():
+        empresa.lokafest_url = LOKAFEST_PUBLIC_URL
 
 
 def _categorias_vitrine_empresa(db: Session, empresa_id: int, somente_ativas: bool = True) -> list[VitrineCategoria]:
@@ -6852,6 +6938,249 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
         valor_horas_adicionais=valor_horas_adicionais,
     )
     return item
+
+
+
+
+def _snapshot_pedido_vitrine(pedido: dict) -> dict:
+    """Congela o pedido comercial da vitrine sem criar Cliente ou Solicitação."""
+    data_evento = pedido.get("data_evento")
+    if isinstance(data_evento, (datetime, date)):
+        data_evento = data_evento.isoformat()
+    hora_inicio = pedido.get("hora_inicio_texto") or pedido.get("hora_inicio") or ""
+    if isinstance(hora_inicio, time):
+        hora_inicio = hora_inicio.strftime("%H:%M")
+    itens = []
+    for reg in pedido.get("itens") or []:
+        produto = reg.get("produto")
+        itens.append({
+            "produto_id": int(reg.get("produto_id") or getattr(produto, "id", 0) or 0),
+            "nome": str(reg.get("nome") or getattr(produto, "nome", "Item")),
+            "quantidade": max(1, int(reg.get("quantidade") or 1)),
+            "valor_unitario": round(float(reg.get("valor_unitario") or 0), 2),
+            "valor_total": round(float(reg.get("valor_total") or 0), 2),
+            "valor_base_total": round(float(reg.get("valor_base_total") or 0), 2),
+            "sob_consulta": bool(reg.get("sob_consulta")),
+            "duracao_minutos": max(60, int(reg.get("duracao_minutos") or pedido.get("duracao_maxima_minutos") or 240)),
+            "opcionais": [
+                {
+                    "id": int(o.get("id") or 0),
+                    "nome": str(o.get("nome") or "Opcional"),
+                    "quantidade": max(1, int(o.get("quantidade") or 1)),
+                    "valor_unitario": round(float(o.get("valor_unitario") or 0), 2),
+                    "valor_total": round(float(o.get("valor_total") or 0), 2),
+                }
+                for o in (reg.get("opcionais") or [])
+            ],
+        })
+    frete = pedido.get("frete") if isinstance(pedido.get("frete"), dict) else {}
+    return {
+        "data_evento": str(data_evento or ""),
+        "tipo_evento": _normalizar_tipo_evento_vitrine(str(pedido.get("tipo_evento") or "residencial")),
+        "hora_inicio": str(hora_inicio or ""),
+        "retirada_mesmo_dia": bool(pedido.get("retirada_mesmo_dia")),
+        "horas_adicionais": max(0, int(pedido.get("horas_adicionais") or 0)),
+        "valor_horas_adicionais": round(float(pedido.get("valor_horas_adicionais") or 0), 2),
+        "cortesia_retirada": bool(pedido.get("cortesia_retirada")),
+        "duracao_maxima_minutos": max(60, int(pedido.get("duracao_maxima_minutos") or 240)),
+        "subtotal": round(float(pedido.get("subtotal") or 0), 2),
+        "cupom_codigo": str(pedido.get("cupom_codigo") or ""),
+        "cupom_percentual": round(float(pedido.get("cupom_percentual") or 0), 4),
+        "desconto": round(float(pedido.get("desconto") or 0), 2),
+        "possui_sob_consulta": bool(pedido.get("possui_sob_consulta")),
+        "total_sob_consulta": bool(pedido.get("total_sob_consulta")),
+        "frete": {
+            "cep": str(frete.get("cep") or ""), "numero": str(frete.get("numero") or ""),
+            "tipo": str(frete.get("tipo") or "consultar"), "valor": round(float(frete.get("valor") or 0), 2),
+            "distancia_ida_km": frete.get("distancia_ida_km"), "quantidade_km": frete.get("quantidade_km"),
+            "valor_km": frete.get("valor_km"), "consultar": bool(frete.get("consultar")),
+            "logradouro": str(frete.get("logradouro") or ""), "bairro": str(frete.get("bairro") or ""),
+            "cidade": str(frete.get("cidade") or ""), "estado": str(frete.get("estado") or ""),
+            "endereco_formatado": str(frete.get("endereco_formatado") or ""),
+        },
+        "itens": itens,
+    }
+
+
+def _criar_oportunidade_vitrine(db: Session, empresa: Empresa, pedido: dict, whatsapp: str, autorizou_parceiros: bool) -> VitrineOportunidade:
+    snap = _snapshot_pedido_vitrine(pedido)
+    data_obj = datetime.strptime(snap["data_evento"], "%Y-%m-%d").date()
+    oportunidade = VitrineOportunidade(
+        empresa_id=empresa.id,
+        data_evento=data_obj,
+        tipo_evento=snap["tipo_evento"],
+        whatsapp=limpar_identificador(whatsapp),
+        pedido_json=json.dumps(snap, ensure_ascii=False, separators=(",", ":")),
+        autoriza_parceiros=bool(autorizou_parceiros),
+        status="pendente",
+    )
+    db.add(oportunidade)
+    db.flush()
+    return oportunidade
+
+
+def _snapshot_oportunidade(oportunidade: VitrineOportunidade) -> dict:
+    try:
+        snap = json.loads(str(oportunidade.pedido_json or "{}"))
+        return snap if isinstance(snap, dict) else {}
+    except Exception:
+        return {}
+
+
+def _composicao_oportunidade(oportunidade: VitrineOportunidade) -> dict:
+    snap = _snapshot_oportunidade(oportunidade)
+    equipamentos = round(float(snap.get("subtotal") or 0), 2)
+    desconto = round(float(snap.get("desconto") or 0), 2)
+    horas = round(float(snap.get("valor_horas_adicionais") or 0), 2)
+    frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+    frete_valor = round(float(frete.get("valor") or 0), 2)
+    total = round(max(equipamentos - desconto, 0) + horas + frete_valor, 2)
+    return {
+        "equipamentos": equipamentos, "desconto": desconto,
+        "cupom_codigo": str(snap.get("cupom_codigo") or ""),
+        "horas_adicionais": horas, "frete": frete_valor, "total": total,
+    }
+
+
+def _pedido_oportunidade_para_contexto(db: Session, empresa: Empresa, oportunidade: VitrineOportunidade) -> dict:
+    """Reconstrói o snapshot aceito sem recalcular os preços exibidos ao cliente."""
+    snap = _snapshot_oportunidade(oportunidade)
+    data_obj = oportunidade.data_evento
+    try:
+        hora_inicio = datetime.strptime(str(snap.get("hora_inicio") or ""), "%H:%M").time()
+    except Exception:
+        hora_inicio = time(0, 0)
+    itens = []
+    for reg in snap.get("itens") or []:
+        produto = db.get(ProdutoServico, int(reg.get("produto_id") or 0))
+        if not produto or produto.empresa_id != empresa.id:
+            continue
+        itens.append({
+            "produto": produto, "produto_id": produto.id, "nome": str(reg.get("nome") or produto.nome),
+            "quantidade": max(1, int(reg.get("quantidade") or 1)),
+            "valor_unitario": float(reg.get("valor_unitario") or 0),
+            "valor_total": float(reg.get("valor_total") or 0),
+            "valor_base_total": float(reg.get("valor_base_total") or 0),
+            "opcionais": list(reg.get("opcionais") or []), "sob_consulta": bool(reg.get("sob_consulta")),
+            "duracao_minutos": max(60, int(reg.get("duracao_minutos") or snap.get("duracao_maxima_minutos") or 240)),
+        })
+    if not itens:
+        raise ValueError("Os itens desta oportunidade não estão mais disponíveis no Connect.")
+    cupom = None
+    codigo = _normalizar_codigo_cupom(str(snap.get("cupom_codigo") or ""))
+    if codigo:
+        cupom = db.query(Cupom).filter(Cupom.empresa_id == empresa.id, func.upper(Cupom.codigo) == codigo).first()
+    frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+    return {
+        "data_evento": data_obj,
+        "tipo_evento": _normalizar_tipo_evento_vitrine(str(snap.get("tipo_evento") or oportunidade.tipo_evento or "residencial")),
+        "tipo_evento_nome": TIPOS_EVENTO_VITRINE.get(str(snap.get("tipo_evento") or "residencial"), "Residencial"),
+        "whatsapp": oportunidade.whatsapp,
+        "itens": itens,
+        "duracao_maxima_minutos": max(60, int(snap.get("duracao_maxima_minutos") or 240)),
+        "hora_inicio": hora_inicio, "hora_inicio_texto": hora_inicio.strftime("%H:%M"),
+        "retirada_mesmo_dia": bool(snap.get("retirada_mesmo_dia")),
+        "horas_adicionais": max(0, int(snap.get("horas_adicionais") or 0)),
+        "valor_horas_adicionais": round(float(snap.get("valor_horas_adicionais") or 0), 2),
+        "cortesia_retirada": bool(snap.get("cortesia_retirada")),
+        "subtotal": round(float(snap.get("subtotal") or 0), 2),
+        "cupom": cupom, "cupom_codigo": codigo,
+        "cupom_percentual": round(float(snap.get("cupom_percentual") or 0), 4),
+        "desconto": round(float(snap.get("desconto") or 0), 2),
+        "possui_sob_consulta": bool(snap.get("possui_sob_consulta")),
+        "frete": frete,
+        "total": round(max(float(snap.get("subtotal") or 0) - float(snap.get("desconto") or 0), 0) + float(frete.get("valor") or 0), 2),
+        "total_sob_consulta": bool(snap.get("total_sob_consulta")),
+    }
+
+
+def _resumo_lokafest_oportunidade(oportunidade: VitrineOportunidade, empresa: Empresa) -> str:
+    snap = _snapshot_oportunidade(oportunidade)
+    comp = _composicao_oportunidade(oportunidade)
+    linhas = [
+        f"Cliente veio pela vitrine da {empresa.nome}.",
+        f"Data: {oportunidade.data_evento.strftime('%d/%m/%Y') if oportunidade.data_evento else 'a definir'}",
+    ]
+    if snap.get("hora_inicio"):
+        linhas.append(f"Horário de início: {snap.get('hora_inicio')}")
+    duracao = max(60, int(snap.get("duracao_maxima_minutos") or 240))
+    extras = max(0, int(snap.get("horas_adicionais") or 0))
+    linhas.append(f"Contrato: {_rotulo_duracao_minutos(duracao)}" + (f" + {extras}h adicional(is)" if extras else ""))
+    if bool(snap.get("cortesia_retirada")):
+        linhas.append("Retirada: próximo dia como cortesia.")
+    elif bool(snap.get("retirada_mesmo_dia")):
+        try:
+            inicio = datetime.strptime(str(snap.get("hora_inicio") or "00:00"), "%H:%M").time()
+            fim = somar_minutos(inicio, duracao + extras * 60)
+            linhas.append(f"Retirada no mesmo dia: {fim.strftime('%H:%M')}")
+        except Exception:
+            linhas.append("Retirada no mesmo dia.")
+    linhas.append("Itens negociados:")
+    for reg in snap.get("itens") or []:
+        linhas.append(f"- {max(1, int(reg.get('quantidade') or 1))}x {reg.get('nome') or 'Item'} — R$ {float(reg.get('valor_total') or 0):.2f}".replace('.', ','))
+        for op in reg.get("opcionais") or []:
+            linhas.append(f"  + {max(1, int(op.get('quantidade') or 1))}x {op.get('nome') or 'Opcional'} — R$ {float(op.get('valor_total') or 0):.2f}".replace('.', ','))
+    frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+    endereco = str(frete.get("endereco_formatado") or "").strip()
+    if not endereco:
+        endereco = " · ".join(x for x in [str(frete.get("logradouro") or "").strip(), str(frete.get("numero") or "").strip(), str(frete.get("bairro") or "").strip()] if x)
+    linhas.extend([
+        f"Itens + opcionais: R$ {comp['equipamentos']:.2f}".replace('.', ','),
+        (f"Desconto {snap.get('cupom_codigo') or ''}: - R$ {comp['desconto']:.2f}".replace('.', ',') if comp['desconto'] > 0 else ""),
+        (f"Horas adicionais: R$ {comp['horas_adicionais']:.2f}".replace('.', ',') if comp['horas_adicionais'] > 0 else ""),
+        f"Deslocamento: R$ {comp['frete']:.2f}".replace('.', ','),
+        f"Total apresentado ao cliente: R$ {comp['total']:.2f}".replace('.', ','),
+        f"Local informado: {endereco or frete.get('bairro') or 'a confirmar'}",
+        "Valores acima são o contexto comercial da empresa de origem. A empresa indicada pode manter ou negociar novas condições com o cliente.",
+    ])
+    return "\n".join(x for x in linhas if x)[:1200]
+
+
+def _url_lokafest_oportunidade(empresa: Empresa, oportunidade: VitrineOportunidade) -> str | None:
+    alvo = str(getattr(empresa, "lokafest_url", "") or "").strip()
+    if not alvo:
+        return None
+    try:
+        parsed = urlparse(alvo)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
+        path = parsed.path if parsed.path not in {"", "/"} else "/indicar"
+        snap = _snapshot_oportunidade(oportunidade)
+        tipos, equipamentos = [], []
+        for reg in snap.get("itens") or []:
+            tipo = _tipo_equipamento_lokafest(str(reg.get("nome") or ""))
+            if tipo == "fliperama":
+                if "fliperama" not in tipos: tipos.append("fliperama")
+            else:
+                if "karaoke" not in tipos: tipos.append("karaoke")
+                if tipo and tipo not in equipamentos: equipamentos.append(tipo)
+        if not tipos:
+            tipos = ["karaoke"]
+        if "karaoke" in tipos and not equipamentos:
+            equipamentos = ["portatil", "jukebox", "iphone"]
+        frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+        pares = list(parse_qsl(parsed.query, keep_blank_values=True))
+        pares.extend([
+            ("origem", "connect"), ("empresa", str(empresa.slug or empresa.nome or "")),
+            ("data_evento", oportunidade.data_evento.isoformat() if oportunidade.data_evento else ""),
+            ("whatsapp", str(oportunidade.whatsapp or "")),
+            ("localidade_nome", str(frete.get("bairro") or frete.get("logradouro") or "")),
+            ("municipio_nome", str(frete.get("cidade") or "Rio de Janeiro")),
+            ("uf", str(frete.get("estado") or "RJ")),
+            ("estado_nome", str(frete.get("estado") or "Rio de Janeiro")),
+            ("localidade_tipo", "bairro"), ("observacao", _resumo_lokafest_oportunidade(oportunidade, empresa)),
+        ])
+        for t in tipos: pares.append(("tipos_servico", t))
+        for eq in equipamentos: pares.append(("equipamentos", eq))
+        return urlunparse((parsed.scheme, parsed.netloc, path, parsed.params, urlencode(pares), parsed.fragment))
+    except Exception:
+        logger.exception("Falha ao montar LokaFest para oportunidade %s", getattr(oportunidade, "id", "?"))
+        return None
+
+def _normalizar_texto(valor: str) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor or ""))
+    texto = "".join(ch for ch in texto if not unicodedata.combining(ch))
+    return " ".join(texto.casefold().split())
 
 
 def _tipo_equipamento_lokafest(nome: str) -> str | None:
@@ -8558,7 +8887,7 @@ async def salvar_cadastro_empresa_guiado(
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
     empresa.vitrine_cor_secundaria = _cor_hex_vitrine(vitrine_cor_secundaria, "#EEF0FF")
     empresa.lokafest_ativo = bool(lokafest_ativo)
-    empresa.lokafest_url = (lokafest_url or "").strip()[:300] or None
+    empresa.lokafest_url = (lokafest_url or "").strip()[:300] or (LOKAFEST_PUBLIC_URL if empresa.lokafest_ativo else empresa.lokafest_url)
 
     # Preserva sempre o arquivo original; o recorte/zoom gera somente uma derivada.
     if logo_arquivo and logo_arquivo.filename:
@@ -8761,11 +9090,140 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias}
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
     produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
+    oportunidades_db = (
+        db.query(VitrineOportunidade)
+        .filter(VitrineOportunidade.empresa_id == empresa.id, VitrineOportunidade.status == "pendente")
+        .order_by(VitrineOportunidade.criado_em.desc(), VitrineOportunidade.id.desc())
+        .limit(50)
+        .all()
+    )
+    oportunidades = []
+    for op in oportunidades_db:
+        snap = _snapshot_oportunidade(op)
+        frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+        oportunidades.append({
+            "registro": op, "snapshot": snap, "composicao": _composicao_oportunidade(op),
+            "itens_nomes": ", ".join(str(x.get("nome") or "Item") for x in (snap.get("itens") or [])) or "Itens do pedido",
+            "hora_inicio": str(snap.get("hora_inicio") or ""),
+            "bairro": str(frete.get("bairro") or ""),
+        })
     return templates.TemplateResponse("admin/vitrine.html", {
         "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
+        "oportunidades": oportunidades,
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
         "salvo": request.query_params.get("salvo", ""),
+        "erro": request.query_params.get("erro", ""),
     })
+
+
+def _url_whatsapp_autorizacao_oportunidade(empresa: Empresa, oportunidade: VitrineOportunidade) -> str | None:
+    telefone = limpar_identificador(oportunidade.whatsapp or "")
+    if not celular_brasileiro_valido(telefone):
+        return None
+    numero = telefone if telefone.startswith("55") else "55" + telefone
+    texto = (
+        f"Olá! Aqui é da {empresa.nome}. Recebemos sua solicitação para {oportunidade.data_evento.strftime('%d/%m/%Y')}. "
+        "Caso não consigamos atender, você autoriza compartilhar os dados desta solicitação com empresas parceiras do LokaFest para tentar encontrar atendimento?"
+    )
+    return f"https://wa.me/{numero}?text={quote(texto)}"
+
+
+@app.post("/painel/vitrine/oportunidade/{oportunidade_id}/atender")
+def atender_oportunidade_vitrine(
+        oportunidade_id: int, request: Request, db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    oportunidade = db.query(VitrineOportunidade).filter_by(
+        id=oportunidade_id, empresa_id=empresa.id, status="pendente"
+    ).first()
+    if not oportunidade:
+        raise HTTPException(404)
+    try:
+        pedido = _pedido_oportunidade_para_contexto(db, empresa, oportunidade)
+        solicitacao = _criar_pre_reserva_vitrine(
+            db, empresa, pedido, oportunidade.whatsapp, autorizou_parceiros=False
+        )
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(f"/painel/vitrine?erro={quote(str(exc))}", status_code=303)
+    # O contrato nasce somente aqui, quando a empresa decidiu atender.
+    solicitacao.status = "vitrine_aprovada"
+    solicitacao.aprovado_em = agora_utc()
+    # Preserva exatamente a composição que o cliente viu antes da análise.
+    snap = _snapshot_oportunidade(oportunidade)
+    subtotal_snap = round(float(snap.get("subtotal") or 0), 2)
+    desconto_snap = round(float(snap.get("desconto") or 0), 2)
+    horas_snap = round(float(snap.get("valor_horas_adicionais") or 0), 2)
+    frete_snap = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+    frete_valor_snap = round(float(frete_snap.get("valor") or 0), 2)
+    solicitacao.valor_equipamentos = subtotal_snap
+    solicitacao.cupom_codigo = str(snap.get("cupom_codigo") or "") or None
+    solicitacao.cupom_percentual = float(snap.get("cupom_percentual") or 0)
+    solicitacao.valor_desconto = desconto_snap
+    solicitacao.valor_horas_adicionais = horas_snap
+    solicitacao.valor_frete = frete_valor_snap
+    solicitacao.valor = round(max(subtotal_snap - desconto_snap, 0) + horas_snap + frete_valor_snap, 2)
+    # Marcadores técnicos serviam ao fluxo antigo; não devem poluir o contrato.
+    solicitacao.observacoes = ""
+    oportunidade.status = "convertida"
+    oportunidade.solicitacao = solicitacao
+    oportunidade.convertido_em = agora_utc()
+    db.commit()
+    db.refresh(solicitacao)
+    alvo = _url_whatsapp_cadastro_pre_reserva(request, db, empresa, solicitacao)
+    if not alvo:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao.id}?erro=Pedido convertido, mas o WhatsApp do cliente não é válido.",
+            status_code=303,
+        )
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.get("/painel/vitrine/oportunidade/{oportunidade_id}/lokafest")
+def indicar_oportunidade_lokafest(
+        oportunidade_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    oportunidade = db.query(VitrineOportunidade).filter_by(
+        id=oportunidade_id, empresa_id=empresa.id, status="pendente"
+    ).first()
+    if not oportunidade:
+        raise HTTPException(404)
+    if not getattr(empresa, "lokafest_ativo", False) or not getattr(empresa, "lokafest_url", None):
+        return RedirectResponse("/painel/vitrine?erro=LokaFest não está configurado.", status_code=303)
+    if not oportunidade.autoriza_parceiros:
+        return RedirectResponse("/painel/vitrine?erro=O cliente ainda não autorizou a indicação para parceiros.", status_code=303)
+    alvo = _url_lokafest_oportunidade(empresa, oportunidade)
+    if not alvo:
+        return RedirectResponse("/painel/vitrine?erro=Não foi possível preparar o LokaFest.", status_code=303)
+    oportunidade.indicado_em = agora_utc()
+    db.commit()
+    # Apenas abre o formulário preenchido. A pessoa revisa e clica em INDICAR no LokaFest.
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.get("/painel/vitrine/oportunidade/{oportunidade_id}/solicitar-autorizacao")
+def solicitar_autorizacao_oportunidade_lokafest(
+        oportunidade_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    oportunidade = db.query(VitrineOportunidade).filter_by(
+        id=oportunidade_id, empresa_id=empresa.id, status="pendente"
+    ).first()
+    if not oportunidade:
+        raise HTTPException(404)
+    alvo = _url_whatsapp_autorizacao_oportunidade(empresa, oportunidade)
+    if not alvo:
+        return RedirectResponse("/painel/vitrine?erro=WhatsApp inválido para solicitar autorização.", status_code=303)
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.post("/painel/vitrine/oportunidade/{oportunidade_id}/autorizar")
+def registrar_autorizacao_oportunidade_lokafest(
+        oportunidade_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    oportunidade = db.query(VitrineOportunidade).filter_by(
+        id=oportunidade_id, empresa_id=empresa.id, status="pendente"
+    ).first()
+    if not oportunidade:
+        raise HTTPException(404)
+    oportunidade.autoriza_parceiros = True
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=autorizacao", status_code=303)
 
 
 @app.post("/painel/vitrine/fluxo")
@@ -10386,7 +10844,7 @@ def _url_whatsapp_cadastro_pre_reserva(request: Request, db: Session, empresa: E
     )
     data_txt = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else "a data informada"
     texto = (
-        f"Olá! Sua pré-reserva com a {empresa.nome} para {data_txt} foi aprovada. "
+        f"Olá! Vamos atender sua solicitação com a {empresa.nome} para {data_txt}. "
         "Para continuar, complete os dados da locação no link abaixo. "
         "Os itens, valores, deslocamento e endereço informado na vitrine já estarão preenchidos; você poderá revisar os dados antes de continuar.\n\n"
         f"{link}"
@@ -16776,20 +17234,20 @@ def vitrine_publica_reservar(
     }
 
     fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
-    # Pré-reserva é deliberadamente um pedido para análise: ainda não ocupa estoque.
-    # A pessoa da empresa decide depois entre Aprovar ou Preparar no LokaFest.
+    # Pré-reserva é uma etapa ANTERIOR ao contrato. Não cria Cliente, Solicitação,
+    # rascunho nem reserva de estoque. A empresa decide na Vitrine entre atender
+    # (quando então o contrato nasce) ou abrir a indicação no LokaFest.
     if fluxo == "aprovacao":
-        whatsapp_pre = whatsapp_pedido
         pedido_ctx = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
-        solicitacao = _criar_pre_reserva_vitrine(
-            db, empresa, pedido_ctx, whatsapp_pre, autorizou_parceiros=bool(autoriza_parceiros)
+        oportunidade = _criar_oportunidade_vitrine(
+            db, empresa, pedido_ctx, whatsapp_pedido, autorizou_parceiros=bool(autoriza_parceiros)
         )
         db.commit()
-        db.refresh(solicitacao)
+        db.refresh(oportunidade)
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
-        return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
+        return RedirectResponse(f"/e/{slug}/pedido-vitrine/{oportunidade.public_token}", status_code=303)
 
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
@@ -17850,6 +18308,21 @@ def salvar_pre_cadastro(
         f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato",
         status_code=303,
     )
+
+
+@app.get("/e/{slug}/pedido-vitrine/{token}", response_class=HTMLResponse)
+def pedido_vitrine_oportunidade_recebido(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    oportunidade = db.query(VitrineOportunidade).filter_by(public_token=token, empresa_id=empresa.id).first() if empresa else None
+    if not empresa or not oportunidade:
+        raise HTTPException(404)
+    snap = _snapshot_oportunidade(oportunidade)
+    frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
+    return templates.TemplateResponse("publico/pedido_recebido.html", {
+        "request": request, "empresa": empresa, "item": {"id": oportunidade.id},
+        "composicao": _composicao_oportunidade(oportunidade),
+        "frete_sob_consulta": bool(frete.get("consultar")),
+    })
 
 
 @app.get("/e/{slug}/pedido/{solicitacao_id}", response_class=HTMLResponse)

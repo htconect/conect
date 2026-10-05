@@ -218,7 +218,7 @@
     {% if item.local_responsavel_nome or item.local_responsavel_telefone %}
       <p><small>Responsável no local</small><b>{{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</b></p>
     {% endif %}
-    {% set observacao_reserva = item.observacoes or item.cliente.observacoes %}
+    {% set observacao_reserva = observacoes_visiveis(item.observacoes) or item.cliente.observacoes %}
     {% if observacao_reserva %}<p class="observacao-destaque"><small>Observações</small><b>{{ observacao_reserva }}</b></p>{% endif %}
   </div>
 </section>
@@ -383,7 +383,7 @@
     </div>
 
     <label>Observações do contrato</label>
-    <textarea name="observacoes" placeholder="Opcional">{{ item.observacoes or '' }}</textarea>
+    <textarea name="observacoes" placeholder="Opcional">{{ observacoes_visiveis(item.observacoes) }}</textarea>
     <input type="hidden" name="valor" value="{{ comp.equipamentos|moeda_br }}">
     <input type="hidden" name="sinal" value="{{ item.sinal|moeda_br }}">
 

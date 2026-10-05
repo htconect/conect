@@ -119,9 +119,9 @@
           <label>Como o cliente continua depois do carrinho?</label>
           <select name="vitrine_fluxo">
             <option value="direto" {% if (empresa.vitrine_fluxo or 'direto') == 'direto' %}selected{% endif %}>Reserva direta — abrir o cadastro da locação</option>
-            <option value="aprovacao" {% if empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Pré-reserva — a empresa analisa antes de confirmar</option>
+            <option value="aprovacao" {% if empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Pedido para análise — decidir atender ou indicar</option>
           </select>
-          <p class="texto-ajuda"><b>Pré-reserva:</b> o cliente envia o carrinho e o WhatsApp; você decide se aprova ou prepara a indicação no LokaFest. <b>Reserva direta:</b> o formulário da locação abre imediatamente com os dados da vitrine já preenchidos.</p>
+          <p class="texto-ajuda"><b>Pedido para análise:</b> o cliente envia o carrinho e o WhatsApp sem criar contrato ou rascunho; você decide se atende ou abre a indicação no LokaFest. <b>Reserva direta:</b> o formulário da locação abre imediatamente com os dados da vitrine já preenchidos.</p>
         </div>
         <div class="empresa-grade" style="margin-top:12px">
           <div>
@@ -144,12 +144,11 @@
     <section class="empresa-bloco" id="integracoes">
       <div class="empresa-bloco-cab"><i class="bi bi-diagram-3"></i><div><h2>Integrações</h2><p>Ative somente os serviços usados pela empresa.</p></div></div>
       <div class="empresa-bloco-corpo">
-        <div class="status-online {% if empresa.lokafest_ativo %}ativo{% endif %}" style="margin-bottom:14px"><span class="bolinha"></span><div><b>LokaFest: {{ 'Ativo' if empresa.lokafest_ativo else 'Não ativado' }}</b><small>Usado para preparar indicações quando a empresa não puder atender uma pré-reserva.</small></div></div>
+        <div class="status-online {% if empresa.lokafest_ativo %}ativo{% endif %}" style="margin-bottom:14px"><span class="bolinha"></span><div><b>LokaFest: {{ 'Ativo' if empresa.lokafest_ativo else 'Não ativado' }}</b><small>Usado para indicar pedidos da vitrine quando a empresa não puder atender.</small></div></div>
         <label class="check"><input type="checkbox" name="lokafest_ativo" id="lokafestAtivoGuiado" value="1" {% if empresa.lokafest_ativo %}checked{% endif %}> Utilizo o LokaFest para indicações</label>
         <div id="lokafestCamposGuiado" style="margin-top:12px" {% if not empresa.lokafest_ativo %}hidden{% endif %}>
-          <label>Link público do LokaFest</label>
-          <input name="lokafest_url" value="{{ empresa.lokafest_url or '' }}" placeholder="https://...">
-          <p class="texto-ajuda">É o endereço que o Connect abrirá já com os dados da oportunidade preenchidos. Não há envio automático: a pessoa confere e finaliza a indicação no LokaFest.</p>
+          <input type="hidden" name="lokafest_url" value="{{ empresa.lokafest_url or '' }}">
+          <div class="status-online ativo"><span class="bolinha"></span><div><b>Conexão pronta</b><small>O Connect abre automaticamente o formulário de indicação do LokaFest já preenchido. Você revisa e clica em INDICAR no próprio LokaFest.</small></div></div>
         </div>
       </div>
     </section>

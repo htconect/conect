@@ -65,8 +65,8 @@ class Empresa(Base):
     modulo_cupons_ativo = Column(Boolean, default=False)
     inteligencia_ativa = Column(Boolean, default=False)
 
-    # Fluxo da vitrine: direto = contrato público; aprovacao = pedido em rascunho
-    # aguardando o responsável; lokafest = encaminha ao LokaFest configurado.
+    # Fluxo da vitrine: direto = cadastro da locação; aprovacao = oportunidade
+    # anterior ao contrato, para a empresa decidir entre atender ou indicar no LokaFest.
     vitrine_fluxo = Column(String(20), default="direto")
     lokafest_ativo = Column(Boolean, default=False)
     lokafest_url = Column(String(300), nullable=True)
@@ -316,6 +316,33 @@ class VitrineCategoria(Base):
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     empresa = relationship("Empresa")
+
+
+class VitrineOportunidade(Base):
+    """Pedido da vitrine antes de virar contrato/reserva.
+
+    Esta entidade não ocupa estoque, não aparece em Contratos/Operação e não cria
+    Cliente. Ela existe apenas para a empresa decidir entre atender ou indicar
+    pelo LokaFest.
+    """
+    __tablename__ = "vitrine_oportunidades"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    public_token = Column(String(64), nullable=False, unique=True, index=True, default=lambda: secrets.token_urlsafe(24))
+    data_evento = Column(Date, nullable=False, index=True)
+    tipo_evento = Column(String(30), nullable=False, default="residencial")
+    whatsapp = Column(String(30), nullable=False)
+    pedido_json = Column(Text, nullable=False)
+    autoriza_parceiros = Column(Boolean, nullable=False, default=False)
+    status = Column(String(20), nullable=False, default="pendente", index=True)  # pendente, convertida, indicada, cancelada
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id"), nullable=True, index=True)
+    indicado_em = Column(DateTime, nullable=True)
+    convertido_em = Column(DateTime, nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    empresa = relationship("Empresa")
+    solicitacao = relationship("Solicitacao", foreign_keys=[solicitacao_id])
 
 
 class ProdutoServico(Base):

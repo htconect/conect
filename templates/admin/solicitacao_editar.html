@@ -44,7 +44,7 @@
   {% endif %}
 
   <label>Observações internas</label>
-  <textarea name="observacoes">{{ item.observacoes or '' }}</textarea>
+  <textarea name="observacoes">{{ observacoes_visiveis(item.observacoes) }}</textarea>
 
   <button type="submit">Salvar status</button>
 </form>
