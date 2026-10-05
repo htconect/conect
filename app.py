@@ -6235,7 +6235,38 @@ def _vitrine_autorizou_parceiros(item: Solicitacao) -> bool:
     return "[VITRINE_AUTORIZA_PARCEIROS=1]" in str(item.observacoes or "")
 
 
-def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, whatsapp: str) -> Solicitacao:
+def _vitrine_autorizacao_parceiros_origem(item: Solicitacao) -> str:
+    obs = str(item.observacoes or "")
+    marcador = "[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM="
+    if marcador not in obs:
+        return ""
+    trecho = obs.split(marcador, 1)[1].split("]", 1)[0].strip().lower()
+    return trecho
+
+
+def _vitrine_marcar_autorizacao_parceiros(item: Solicitacao, origem: str = "whatsapp", usuario: str = "") -> None:
+    """Registra a autorização sem transformar o pedido ou enviar nada ao LokaFest.
+
+    O aceite no carrinho e a autorização posterior por WhatsApp usam marcadores no
+    histórico da própria solicitação para evitar uma migração de banco só para este
+    controle operacional.
+    """
+    obs = str(item.observacoes or "")
+    obs = obs.replace("[VITRINE_AUTORIZA_PARCEIROS=0]", "[VITRINE_AUTORIZA_PARCEIROS=1]")
+    if "[VITRINE_AUTORIZA_PARCEIROS=1]" not in obs:
+        obs = "[VITRINE_AUTORIZA_PARCEIROS=1]\n" + obs
+    # Mantém somente a origem mais recente da autorização.
+    linhas = [ln for ln in obs.splitlines() if not ln.startswith("[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM=") and not ln.startswith("[VITRINE_AUTORIZACAO_PARCEIROS_EM=") and not ln.startswith("[VITRINE_AUTORIZACAO_PARCEIROS_POR=")]
+    cab = [
+        f"[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM={(origem or 'whatsapp')[:30]}]",
+        f"[VITRINE_AUTORIZACAO_PARCEIROS_EM={agora_utc().isoformat()}]",
+    ]
+    if usuario:
+        cab.append(f"[VITRINE_AUTORIZACAO_PARCEIROS_POR={str(usuario)[:120]}]")
+    item.observacoes = "\n".join(cab + linhas).strip()
+
+
+def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, whatsapp: str, autorizou_parceiros: bool = False) -> Solicitacao:
     cliente = db.query(Cliente).filter(
         Cliente.empresa_id == empresa.id,
         or_(Cliente.telefone == whatsapp, Cliente.identificador == whatsapp),
@@ -6248,11 +6279,18 @@ def _criar_pre_reserva_vitrine(db: Session, empresa: Empresa, pedido: dict, what
         cliente.telefone = whatsapp
 
     frete = pedido.get("frete") or {}
+    autorizacao = "1" if autorizou_parceiros else "0"
+    texto_autorizacao = (
+        "Cliente autorizou no carrinho o encaminhamento da solicitação a empresas parceiras."
+        if autorizou_parceiros
+        else "Cliente não autorizou indicação a parceiros no carrinho. O WhatsApp continua autorizado para o atendimento da pré-reserva e envio do cadastro da locação."
+    )
     obs = (
         f"[VITRINE_TIPO_EVENTO={pedido.get('tipo_evento', 'residencial')}]\n"
-        "[VITRINE_AUTORIZA_PARCEIROS=1]\n"
-        "Pré-reserva criada pela vitrine. Cliente autorizou contato pelo WhatsApp e, se necessário, "
-        "o encaminhamento da solicitação a uma empresa parceira."
+        f"[VITRINE_AUTORIZA_PARCEIROS={autorizacao}]\n"
+        + ("[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM=carrinho]\n" if autorizou_parceiros else "")
+        + "Pré-reserva criada pela vitrine. WhatsApp informado para contato sobre a solicitação e envio do cadastro da locação.\n"
+        + texto_autorizacao
     )
     item = Solicitacao(
         empresa_id=empresa.id, cliente_id=cliente.id, data_evento=pedido["data_evento"],
@@ -8123,6 +8161,17 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     })
 
 
+@app.post("/painel/vitrine/fluxo")
+def salvar_fluxo_vitrine(
+        vitrine_fluxo: str = Form("direto"), db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    fluxo = (vitrine_fluxo or "direto").strip().lower()
+    empresa.vitrine_fluxo = fluxo if fluxo in {"direto", "aprovacao"} else "direto"
+    db.commit()
+    empresa_cache_invalidar(empresa.id)
+    return RedirectResponse("/painel/vitrine?salvo=fluxo", status_code=303)
+
+
 @app.get("/painel/categorias-vitrine", response_class=HTMLResponse)
 def categorias_vitrine_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     _garantir_categorias_vitrine_existentes(db, empresa)
@@ -8212,6 +8261,7 @@ def status_categoria_vitrine(
 def salvar_painel_vitrine(
         request: Request,
         vitrine_ativa: Optional[str] = Form(None),
+        vitrine_fluxo: str = Form("direto"),
         vitrine_titulo: str = Form(""),
         vitrine_subtitulo: str = Form(""),
         vitrine_cor_primaria: str = Form("#6D4AFF"),
@@ -8220,6 +8270,8 @@ def salvar_painel_vitrine(
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
     empresa.vitrine_ativa = bool(vitrine_ativa)
+    fluxo = (vitrine_fluxo or "direto").strip().lower()
+    empresa.vitrine_fluxo = fluxo if fluxo in {"direto", "aprovacao"} else "direto"
     empresa.vitrine_titulo = (vitrine_titulo or "").strip()[:160] or None
     empresa.vitrine_subtitulo = (vitrine_subtitulo or "").strip()[:240] or None
     empresa.vitrine_cor_primaria = _cor_hex_vitrine(vitrine_cor_primaria, "#6D4AFF")
@@ -9699,15 +9751,118 @@ def restaurar_recursos_solicitacao(
     )
 
 
+def _url_whatsapp_cadastro_pre_reserva(request: Request, db: Session, empresa: Empresa, item: Solicitacao) -> str | None:
+    telefone = _limpar_tel_whatsapp(
+        (item.cliente.telefone or item.cliente.identificador) if item.cliente else ""
+    )
+    if not telefone:
+        return None
+    link = _link_absoluto(
+        request, "cadastro_pre_reserva_aprovada",
+        slug=empresa.slug, solicitacao_ref=_ref_publica(db, item),
+    )
+    data_txt = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else "a data informada"
+    texto = (
+        f"Olá! Sua pré-reserva com a {empresa.nome} para {data_txt} foi aprovada. "
+        "Para continuar, complete os dados da locação no link abaixo. "
+        "Os itens, valores, deslocamento e endereço informado na vitrine já estarão preenchidos; você poderá revisar os dados antes de continuar.\n\n"
+        f"{link}"
+    )
+    return f"https://wa.me/{telefone}?text={quote(texto)}"
+
+
+def _url_whatsapp_solicitar_autorizacao_lokafest(empresa: Empresa, item: Solicitacao) -> str | None:
+    telefone = _limpar_tel_whatsapp(
+        (item.cliente.telefone or item.cliente.identificador) if item.cliente else ""
+    )
+    if not telefone:
+        return None
+    data_txt = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else "a data informada"
+    texto = (
+        f"Olá! Sobre sua solicitação com a {empresa.nome} para {data_txt}: "
+        "caso não consigamos atender sua região ou a data do evento, podemos encaminhar "
+        "seu nome, WhatsApp e o resumo da locação para empresas parceiras que possam atender você? "
+        "Se estiver de acordo, responda SIM a esta mensagem."
+    )
+    return f"https://wa.me/{telefone}?text={quote(texto)}"
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/pre-reserva/aprovar")
-def aprovar_pre_reserva_vitrine(solicitacao_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    item = db.query(Solicitacao).options(selectinload(Solicitacao.itens)).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+def aprovar_pre_reserva_vitrine(
+        solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    item = db.query(Solicitacao).options(
+        joinedload(Solicitacao.cliente), selectinload(Solicitacao.itens)
+    ).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
     if not item or item.status != "vitrine_pre_reserva":
         raise HTTPException(404)
     item.status = "vitrine_aprovada"
     item.aprovado_em = agora_utc()
     db.commit()
-    return RedirectResponse(f"/e/{empresa.slug}/pre-reserva/{_ref_publica(db, item)}/cadastro", status_code=303)
+    alvo = _url_whatsapp_cadastro_pre_reserva(request, db, empresa, item)
+    if not alvo:
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Pré-reserva aprovada, mas o cliente não possui WhatsApp válido para receber o cadastro.",
+            status_code=303,
+        )
+    # Aprovar não preenche o contrato no lugar do cliente: apenas libera o mesmo
+    # cadastro usado pela reserva direta e abre o WhatsApp para envio manual.
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.get("/painel/solicitacao/{solicitacao_id}/pre-reserva/cadastro-whatsapp")
+def reenviar_cadastro_pre_reserva_whatsapp(
+        solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente)).filter_by(
+        id=solicitacao_id, empresa_id=empresa.id
+    ).first()
+    if not item or item.status != "vitrine_aprovada":
+        raise HTTPException(404)
+    alvo = _url_whatsapp_cadastro_pre_reserva(request, db, empresa, item)
+    if not alvo:
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Cliente sem WhatsApp válido para receber o cadastro.",
+            status_code=303,
+        )
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.get("/painel/solicitacao/{solicitacao_id}/pre-reserva/solicitar-autorizacao-lokafest")
+def solicitar_autorizacao_lokafest(
+        solicitacao_id: int, db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente)).filter_by(
+        id=solicitacao_id, empresa_id=empresa.id
+    ).first()
+    if not item or item.status != "vitrine_pre_reserva":
+        raise HTTPException(404)
+    alvo = _url_whatsapp_solicitar_autorizacao_lokafest(empresa, item)
+    if not alvo:
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Cliente sem WhatsApp válido para solicitar autorização.",
+            status_code=303,
+        )
+    return RedirectResponse(alvo, status_code=303)
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/pre-reserva/autorizar-lokafest")
+def registrar_autorizacao_lokafest(
+        solicitacao_id: int, request: Request, db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)):
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item or item.status != "vitrine_pre_reserva":
+        raise HTTPException(404)
+    usuario = (
+        request.session.get("usuario_nome")
+        or request.session.get("usuario_sistema")
+        or request.session.get("usuario")
+        or empresa.usuario_admin
+        or "Responsável"
+    )
+    _vitrine_marcar_autorizacao_parceiros(item, origem="whatsapp", usuario=str(usuario))
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{item.id}", status_code=303)
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/lokafest")
@@ -9790,6 +9945,7 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "analise_estoque": analise_estoque,
                                        "recursos_contrato": analise_estoque.get("recursos", []),
                                        "recursos_por_produto_view": recursos_por_produto_view,
+                                       "vitrine_autorizou_parceiros": _vitrine_autorizou_parceiros,
                                        "cupons_ativos": cupons_ativos})
 
 
@@ -15779,12 +15935,12 @@ def vitrine_publica_reservar(
         whatsapp_pre = limpar_identificador(whatsapp_pre_reserva)
         if not celular_brasileiro_valido(whatsapp_pre_reserva):
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=whatsapp", status_code=303)
-        if not autoriza_parceiros:
-            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=autorizacao", status_code=303)
         pedido_ctx = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
-        solicitacao = _criar_pre_reserva_vitrine(db, empresa, pedido_ctx, whatsapp_pre)
+        solicitacao = _criar_pre_reserva_vitrine(
+            db, empresa, pedido_ctx, whatsapp_pre, autorizou_parceiros=bool(autoriza_parceiros)
+        )
         db.commit()
         db.refresh(solicitacao)
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)

@@ -21,6 +21,22 @@
     <div class="vitrine-kpi"><small>Frete / deslocamento</small><strong>{% if empresa.frete_tipo == 'fixo' %}Fixo{% elif empresa.frete_tipo == 'km' %}Por KM{% else %}Sob consulta{% endif %}</strong></div>
   </div>
 
+  <section class="painel-card" style="margin-bottom:16px">
+    <header><div><h2>Fluxo da vitrine</h2><p>Escolha o que acontece depois que o cliente conclui o carrinho.</p></div></header>
+    <div class="painel-corpo">
+      <form method="post" action="/painel/vitrine/fluxo" style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end">
+        <label><b>Como o cliente continua?</b>
+          <select name="vitrine_fluxo" style="width:100%;margin-top:7px">
+            <option value="direto" {% if (empresa.vitrine_fluxo or 'direto') == 'direto' %}selected{% endif %}>Reserva direta — abrir cadastro da locação</option>
+            <option value="aprovacao" {% if empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Pré-reserva — aguardar aprovação da empresa</option>
+          </select>
+        </label>
+        <button class="botao" type="submit"><i class="bi bi-check2"></i> Salvar fluxo</button>
+      </form>
+      <p class="texto-discreto" style="margin:10px 0 0"><b>Reserva direta:</b> o mesmo cadastro da locação abre imediatamente com os dados do carrinho preenchidos. <b>Pré-reserva:</b> o cliente informa WhatsApp obrigatório, você analisa e, ao aceitar, o Connect abre o WhatsApp com o link desse mesmo cadastro. O contrato criado manualmente, sem passar pela vitrine, continua funcionando exatamente como hoje.</p>
+    </div>
+  </section>
+
   <div class="vitrine-grade">
     <section class="painel-card">
       <header><div><h2>Produtos e serviços</h2><p>O que está ativo aparece para o cliente quando houver disponibilidade.</p></div><a class="botao" href="/painel/produtos"><i class="bi bi-plus-lg"></i> Gerenciar</a></header>
