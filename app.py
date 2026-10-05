@@ -87,7 +87,7 @@ class ControleAcessoMiddleware:
         if path == "/painel/relatorios" or path.startswith("/painel/relatorios/") or path == "/painel/marketing" or path.startswith("/painel/marketing/"):
             return "relatorios"
         prefixos_cadastro = (
-            "/painel/empresa", "/painel/configuracoes", "/painel/vitrine", "/painel/produtos", "/painel/produto/", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
+            "/painel/empresa", "/painel/configuracoes", "/painel/vitrine", "/painel/categorias-vitrine", "/painel/produtos", "/painel/produto/", "/painel/recursos", "/painel/itens-estoque", "/painel/cupons", "/painel/cupom/",
             "/painel/contratos", "/painel/contrato/", "/painel/disponibilidade"
         )
         if any(path == p or path.startswith(p) for p in prefixos_cadastro):
@@ -5753,9 +5753,9 @@ def _categorias_vitrine_empresa(db: Session, empresa_id: int, somente_ativas: bo
 
 
 def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> None:
-    """Importa categorias já escritas nos produtos e cria a base inicial da KRJ uma vez.
+    """Importa categorias já escritas nos produtos sem criar categorias fixas no código.
 
-    Empresas novas continuam vazias: nenhuma categoria de karaokê é padrão global.
+    Empresas novas começam vazias e configuram seu próprio cadastro de categorias.
     """
     existentes = {
         str(nome or "").strip().casefold()
@@ -5778,10 +5778,6 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
             db.add(VitrineCategoria(empresa_id=empresa.id, nome=nome[:80], ordem=ordem, ativa=True))
             existentes.add(nome.casefold())
             mudou = True
-    if not existentes and (empresa.slug or "").strip().lower() in {"karaokerj", "karaoke-rj"}:
-        for idx, nome in enumerate(("Karaokê", "Jogos", "Combos"), start=1):
-            db.add(VitrineCategoria(empresa_id=empresa.id, nome=nome, ordem=idx * 10, ativa=True))
-        mudou = True
     if mudou:
         db.commit()
 
@@ -7465,6 +7461,15 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     })
 
 
+@app.get("/painel/categorias-vitrine", response_class=HTMLResponse)
+def categorias_vitrine_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
+    return templates.TemplateResponse("admin/vitrine_categorias.html", {
+        "request": request, "empresa": empresa, "categorias": categorias,
+    })
+
+
 @app.post("/painel/vitrine/categorias")
 def salvar_categoria_vitrine(
         categoria_id: str = Form(""), nome: str = Form(...), ordem: int = Form(0),
@@ -7493,7 +7498,7 @@ def salvar_categoria_vitrine(
             ProdutoServico.empresa_id == empresa.id, func.lower(ProdutoServico.vitrine_categoria) == nome_anterior.lower()
         ).update({ProdutoServico.vitrine_categoria: nome_limpo}, synchronize_session=False)
     db.commit()
-    return RedirectResponse("/painel/vitrine?salvo=categoria", status_code=303)
+    return RedirectResponse("/painel/categorias-vitrine", status_code=303)
 
 
 @app.post("/painel/vitrine/categoria/{categoria_id}/status")
@@ -7504,7 +7509,7 @@ def status_categoria_vitrine(
         raise HTTPException(404)
     categoria.ativa = not bool(categoria.ativa)
     db.commit()
-    return RedirectResponse("/painel/vitrine?salvo=categoria", status_code=303)
+    return RedirectResponse("/painel/categorias-vitrine", status_code=303)
 
 
 @app.post("/painel/vitrine")
@@ -7559,7 +7564,7 @@ def definir_capa_produto(produto_id: int, foto_id: int, db: Session = Depends(ge
     db.query(ProdutoFoto).filter_by(empresa_id=empresa.id, produto_id=produto.id).update({ProdutoFoto.capa: False}, synchronize_session=False)
     foto.capa = True
     db.commit()
-    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+    return RedirectResponse(f"/painel/produto/{produto.id}#fotos", status_code=303)
 
 
 @app.post("/painel/produto/{produto_id}/foto/{foto_id}/ajustar")
@@ -7593,7 +7598,7 @@ def ajustar_foto_produto(
         _remover_midia_banco(db, thumb_antiga)
         _remover_imagem_local(thumb_antiga)
     db.commit()
-    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+    return RedirectResponse(f"/painel/produto/{produto.id}#fotos", status_code=303)
 
 
 @app.post("/painel/produto/{produto_id}/foto/{foto_id}/excluir")
@@ -7615,38 +7620,43 @@ def excluir_foto_produto(produto_id: int, foto_id: int, db: Session = Depends(ge
             _remover_midia_banco(db, url)
             _remover_imagem_local(url)
     db.commit()
-    return RedirectResponse(f"/painel/produto/{produto.id}#vitrine-produto", status_code=303)
+    return RedirectResponse(f"/painel/produto/{produto.id}#fotos", status_code=303)
 
 
 @app.get("/painel/produtos", response_class=HTMLResponse)
 def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
+    ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias_vitrine}
+    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
+    produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
+    return templates.TemplateResponse("admin/produtos.html", {
+        "request": request, "empresa": empresa, "produtos": produtos,
+        "categorias_vitrine": categorias_vitrine, "usa_recursos": usa_recursos,
+    })
+
+
+def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, produto: ProdutoServico | None):
+    usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
     _garantir_categorias_vitrine_existentes(db, empresa)
     _garantir_tipos_evento_padrao(db, empresa)
-    categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
-    tipos_evento = _tipos_evento_empresa(db, empresa.id, somente_ativos=True)
-    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
-    contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
-    itens_por_id = {item.id: item for item in itens_estoque}
-    for p in produtos:
-        resumo = []
-        for item_id, qtd in mapa.get(p.id, {}).items():
-            recurso = itens_por_id.get(item_id)
-            if recurso:
-                resumo.append(f"{recurso.nome} x{qtd}")
-        p.recursos_estoque_resumo = resumo
-    return templates.TemplateResponse("admin/produtos.html", {
-        "request": request,
-        "empresa": empresa,
-        "produtos": produtos,
-        "produto": None,
-        "contratos": contratos,
+    return {
+        "request": request, "empresa": empresa, "produto": produto,
+        "contratos": db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all(),
         "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
-        "categorias_vitrine": categorias_vitrine, "recursos_produto": {},
-        "tipos_evento": tipos_evento, "precos_evento": {},
-    })
+        "categorias_vitrine": _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True),
+        "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
+        "tipos_evento": _tipos_evento_empresa(db, empresa.id, somente_ativos=True),
+        "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id) if produto else {},
+        "salvo": request.query_params.get("salvo", ""),
+    }
+
+
+@app.get("/painel/produto/novo", response_class=HTMLResponse)
+def produto_novo(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    return templates.TemplateResponse("admin/produto_form.html", _contexto_form_produto(request, db, empresa, None))
 
 
 @app.get("/painel/produto/{produto_id}", response_class=HTMLResponse)
@@ -7655,34 +7665,16 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     produto = db.get(ProdutoServico, produto_id)
     if not produto or produto.empresa_id != empresa.id:
         raise HTTPException(404)
-    usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
-    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
-    _garantir_categorias_vitrine_existentes(db, empresa)
-    _garantir_tipos_evento_padrao(db, empresa)
-    categorias_vitrine = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True)
-    tipos_evento = _tipos_evento_empresa(db, empresa.id, somente_ativos=True)
-    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).order_by(ProdutoServico.nome).all()
-    contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
-    mapa = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
-    itens_por_id = {item.id: item for item in itens_estoque}
-    for p in produtos:
-        resumo = []
-        for item_id, qtd in mapa.get(p.id, {}).items():
-            recurso = itens_por_id.get(item_id)
-            if recurso:
-                resumo.append(f"{recurso.nome} x{qtd}")
-        p.recursos_estoque_resumo = resumo
-    return templates.TemplateResponse("admin/produtos.html", {
-        "request": request,
-        "empresa": empresa,
-        "produtos": produtos,
-        "produto": produto,
-        "contratos": contratos,
-        "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
-        "categorias_vitrine": categorias_vitrine,
-        "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if usa_recursos else {},
-        "tipos_evento": tipos_evento,
-        "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id),
+    return templates.TemplateResponse("admin/produto_form.html", _contexto_form_produto(request, db, empresa, produto))
+
+
+@app.get("/painel/recursos", response_class=HTMLResponse)
+def recursos_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
+    return templates.TemplateResponse("admin/recursos.html", {
+        "request": request, "empresa": empresa, "itens_estoque": itens_estoque,
     })
 
 
@@ -7709,7 +7701,7 @@ def salvar_itens_estoque(
             qtd = 0
         recurso.quantidade_estoque = max(0, qtd)
     db.commit()
-    return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
+    return RedirectResponse("/painel/recursos", status_code=303)
 
 
 @app.post("/painel/itens-estoque/novo")
@@ -7723,7 +7715,7 @@ def novo_item_estoque(
         raise HTTPException(404)
     nome_limpo = " ".join((nome or "").strip().split())
     if not nome_limpo:
-        return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
+        return RedirectResponse("/painel/recursos", status_code=303)
     existente = db.query(ItemProdutoServicoEstoque).filter(
         ItemProdutoServicoEstoque.empresa_id == empresa.id,
         func.lower(ItemProdutoServicoEstoque.nome) == nome_limpo.lower(),
@@ -7739,7 +7731,7 @@ def novo_item_estoque(
             ativo=True,
         ))
     db.commit()
-    return RedirectResponse("/painel/produtos#estoque-recursos", status_code=303)
+    return RedirectResponse("/painel/recursos", status_code=303)
 
 
 @app.post("/painel/produto/{produto_id_url}")
@@ -7892,7 +7884,8 @@ def salvar_produto(
             db, empresa.id, produto, recurso_item_id, recurso_utiliza, recurso_quantidade
         )
     db.commit()
-    return RedirectResponse("/painel/produtos", status_code=303)
+    db.refresh(produto)
+    return RedirectResponse(f"/painel/produto/{produto.id}?salvo=1", status_code=303)
 
 
 @app.get("/painel/produto/{produto_id}/copiar")

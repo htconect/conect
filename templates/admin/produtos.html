@@ -1,312 +1,42 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <style>
-.foto-editor-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.foto-editor-overlay.ativo{display:flex}.foto-editor-card{width:min(760px,96vw);max-height:94vh;overflow:auto;background:#fff;border-radius:22px;padding:18px;box-shadow:0 24px 80px rgba(0,0,0,.28)}.foto-editor-canvas-wrap{background:#0f172a;border-radius:16px;overflow:hidden;display:grid;place-items:center;min-height:320px}.foto-editor-canvas-wrap canvas{display:block;width:min(100%,620px);height:auto;aspect-ratio:1/1;background:#fff}.foto-editor-controles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.foto-editor-controles label{margin:0}.foto-editor-acoes{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-top:14px}.foto-editor-ajuda{font-size:.82rem;color:#64748b;margin:6px 0 0}.foto-prompt-box{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.foto-card-acoes{display:flex;gap:7px;flex-wrap:wrap}.foto-card-acoes form{margin:0}.foto-ajustada-badge{font-size:.78rem;color:#067647;margin-top:6px}.foto-principal-click{cursor:pointer}.
-
-.preco-evento-card{margin:16px 0;border:1px solid #b7ead2;border-radius:18px;background:#f4fff9;overflow:hidden}.preco-evento-topo{display:flex;justify-content:space-between;gap:18px;align-items:center;padding:14px 16px}.preco-evento-topo h3{margin:0;font-size:1rem}.preco-evento-topo p{margin:3px 0 0}.preco-evento-toggle{display:flex;align-items:center;gap:9px;font-weight:800;white-space:nowrap}.preco-evento-toggle input{width:20px;height:20px;margin:0}.preco-evento-conteudo{border-top:1px solid #dcefe5;background:#fff}.preco-evento-titulo{padding:15px 16px;border-bottom:1px solid #eef2f6}.preco-evento-titulo h3{margin:0;font-size:1rem}.preco-evento-titulo p{margin:4px 0 0}.preco-evento-linha{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(190px,.65fr) minmax(170px,.55fr);gap:14px;align-items:center;padding:14px 16px;border-bottom:1px solid #edf1f5}.preco-evento-linha:last-child{border-bottom:0}.preco-evento-nome strong{display:inline-block;font-size:.92rem}.preco-evento-nome small{display:block;color:#64748b;margin-top:3px}.preco-evento-controle label,.preco-evento-valor label{margin-top:0}.preco-evento-valor .preco-evento-status{display:block;color:#64748b;font-size:.82rem;padding:9px 0}.preco-evento-valor input{margin:0}.preco-evento-desligado{padding:15px 16px;border-top:1px solid #dcefe5;color:#64748b;background:#fff}.preco-evento-conteudo[hidden],.preco-evento-desligado[hidden]{display:none!important}
-@media(max-width:760px){.preco-evento-topo{align-items:flex-start;flex-direction:column}.preco-evento-linha{grid-template-columns:1fr}.preco-evento-valor{padding-top:0}}
-@media(max-width:640px){.foto-editor-controles{grid-template-columns:1fr}.foto-editor-card{padding:14px}.foto-editor-canvas-wrap{min-height:240px}}
+.produtos-wrap{max-width:1160px;margin:0 auto}.produtos-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:24px 26px;border-radius:24px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.produtos-hero h1{margin:0 0 5px;color:#fff}.produtos-hero p{margin:0;color:#dbeafe}.produtos-acoes{display:flex;gap:8px;flex-wrap:wrap}.produtos-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.produto-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px}.produto-kpi small{color:#64748b}.produto-kpi strong{display:block;font-size:1.35rem;margin-top:4px}.produto-lista{display:grid;gap:12px}.produto-linha{display:grid;grid-template-columns:86px minmax(0,1fr) auto;gap:14px;align-items:center;background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:12px}.produto-linha img,.produto-sem-foto{width:86px;height:72px;object-fit:cover;border-radius:14px;background:#f1f5f9;display:grid;place-items:center;color:#94a3b8}.produto-linha h3{margin:0 0 4px}.produto-meta{display:flex;gap:8px;flex-wrap:wrap;color:#64748b;font-size:12px}.produto-tag{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;background:#ecfdf3;color:#067647;font-weight:800;font-size:11px}.produto-tag.inativo{background:#f1f5f9;color:#64748b}.produto-botoes{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.vazio{background:#fff;border:1px dashed #cbd5e1;border-radius:20px;padding:34px;text-align:center;color:#64748b}
+@media(max-width:760px){.produtos-hero{align-items:flex-start;flex-direction:column}.produtos-cards{grid-template-columns:1fr}.produto-linha{grid-template-columns:72px minmax(0,1fr)}.produto-linha img,.produto-sem-foto{width:72px;height:64px}.produto-botoes{grid-column:1/-1;justify-content:stretch}.produto-botoes a{flex:1}.produtos-acoes{width:100%}.produtos-acoes a{flex:1}}
 </style>
 {% endblock %}
 {% block conteudo %}
-<p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
-<h1>Produtos e serviços</h1>
-<p class="texto-discreto">Cadastre produtos e serviços, organize por categoria e escolha a ordem em que cada item aparece na vitrine.</p>
-
-{% if usa_recursos %}
-<div class="box" id="estoque-recursos">
-  <h2>Itens do Produto/Serviço</h2>
-  <p class="texto-discreto">Estoque compartilhado entre os produtos. Os itens padrão foram criados com quantidade 0 para você informar o estoque real de cada empresa.</p>
-  <form method="post" action="/painel/itens-estoque/salvar">
-    <div class="grid">
-      {% for item in itens_estoque %}
-      <div class="card" style="padding:14px">
-        <input type="hidden" name="item_id" value="{{ item.id }}">
-        <label>{{ item.nome }}</label>
-        <input name="quantidade_estoque" type="number" min="0" value="{{ item.quantidade_estoque or 0 }}" aria-label="Quantidade em estoque de {{ item.nome }}">
-        <small class="texto-discreto">Quantidade total em estoque</small>
-      </div>
-      {% endfor %}
-    </div>
-    <button class="largura-total" type="submit">Salvar quantidades de estoque</button>
-  </form>
-
-  <details class="accordion interno" style="margin-top:12px">
-    <summary>+ Adicionar outro item de estoque</summary>
-    <form method="post" action="/painel/itens-estoque/novo" class="form-mobile-simples">
-      <label>Nome do item</label>
-      <input name="nome" required placeholder="Ex.: Cabo HDMI">
-      <label>Quantidade em estoque</label>
-      <input name="quantidade_estoque" type="number" min="0" value="0">
-      <button type="submit">Adicionar item</button>
-    </form>
-  </details>
-</div>
-{% endif %}
-
-<div class="box">
-<form method="post" enctype="multipart/form-data">
-  {% if produto %}
-  <input type="hidden" name="produto_id" value="{{ produto.id }}">
-  {% endif %}
-  <h2>{% if produto %}Editar produto/serviço{% else %}Novo produto/serviço{% endif %}</h2>
-  <label>Nome</label><input name="nome" value="{{ produto.nome if produto else '' }}" required>
-  <label>Descrição / itens inclusos</label><textarea name="descricao">{{ produto.descricao if produto else '' }}</textarea>
-  <label>Contrato padrão deste item</label>
-  <select name="contrato_id">
-    <option value="">Sem contrato padrão</option>
-    {% for c in contratos %}
-      <option value="{{ c.id }}" {% if produto and produto.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>
-    {% endfor %}
-  </select>
-  <div class="linha">
-    <div>
-      <label>Quantidade disponível</label>
-      <input name="quantidade_disponivel" type="number" min="0" value="{{ produto.quantidade_disponivel if produto else 1 }}">
-    </div>
-    <div>
-      <label>Duração padrão</label>
-      <select name="duracao_minutos">
-        {% set duracao = produto.duracao_minutos if produto else 240 %}
-        <option value="60" {% if duracao == 60 %}selected{% endif %}>1 hora</option>
-        <option value="120" {% if duracao == 120 %}selected{% endif %}>2 horas</option>
-        <option value="180" {% if duracao == 180 %}selected{% endif %}>3 horas</option>
-        <option value="240" {% if duracao == 240 %}selected{% endif %}>4 horas</option>
-        <option value="300" {% if duracao == 300 %}selected{% endif %}>5 horas</option>
-        <option value="360" {% if duracao == 360 %}selected{% endif %}>6 horas</option>
-        <option value="480" {% if duracao == 480 %}selected{% endif %}>8 horas</option>
-      </select>
-    </div>
-  </div>
-  <div class="linha">
-    <div>
-      <label>Prazo padrão para retirada</label>
-      {% set prazo = produto.prazo_retirada_dias if produto else 1 %}
-      <select name="prazo_retirada_dias">
-        <option value="0" {% if prazo == 0 %}selected{% endif %}>Mesmo dia</option>
-        <option value="1" {% if prazo == 1 %}selected{% endif %}>1 dia</option>
-        <option value="2" {% if prazo == 2 %}selected{% endif %}>2 dias</option>
-        <option value="3" {% if prazo == 3 %}selected{% endif %}>3 dias</option>
-      </select>
-    </div>
-    <div>
-      <label>Valor base</label><input name="valor_base" value="{{ produto.valor_base if produto else 0 }}">
-    </div>
-  </div>
-
-
-
-  <section class="preco-evento-card" id="preco-por-evento">
-    <div class="preco-evento-topo">
-      <div>
-        <h3>Cobrança por tipo de evento</h3>
-        <p class="texto-discreto">Use o preço principal como padrão e altere somente as situações que precisam de outro valor.</p>
-      </div>
-      <label class="preco-evento-toggle">
-        <input id="precoPorEventoAtivo" type="checkbox" name="preco_por_tipo_evento" value="1" {% if produto and produto.preco_por_tipo_evento %}checked{% endif %}>
-        <span id="precoPorEventoTexto">{{ 'Ligada' if produto and produto.preco_por_tipo_evento else 'Desligada' }}</span>
-      </label>
-    </div>
-    <div id="precoEventoDesligado" class="preco-evento-desligado" {% if produto and produto.preco_por_tipo_evento %}hidden{% endif %}>
-      Ative para definir preço normal, preço específico ou sob consulta conforme o tipo de evento.
-    </div>
-    <div id="precoEventoConteudo" class="preco-evento-conteudo" {% if not produto or not produto.preco_por_tipo_evento %}hidden{% endif %}>
-      <div class="preco-evento-titulo">
-        <h3>3.1 · Preços por tipo de evento</h3>
-        <p class="texto-discreto">Altere apenas as situações que precisam de um valor diferente.</p>
-      </div>
-      {% for tipo in tipos_evento %}
-        {% set cfg = precos_evento.get(tipo.id, {}) %}
-        {% set modo = cfg.get('modo', 'normal') %}
-        <div class="preco-evento-linha" data-preco-evento-row>
-          <input type="hidden" name="preco_evento_tipo_id" value="{{ tipo.id }}">
-          <div class="preco-evento-nome">
-            <strong>{{ tipo.nome }}</strong>
-            {% if tipo.descricao %}<small>{{ tipo.descricao }}</small>{% endif %}
-          </div>
-          <div class="preco-evento-controle">
-            <label>Como cobrar?</label>
-            <select name="preco_evento_modo" class="preco-evento-modo">
-              <option value="normal" {% if modo == 'normal' %}selected{% endif %}>Usar preço normal</option>
-              <option value="especifico" {% if modo == 'especifico' %}selected{% endif %}>Preço específico</option>
-              <option value="consulta" {% if modo == 'consulta' %}selected{% endif %}>Sob consulta</option>
-            </select>
-          </div>
-          <div class="preco-evento-valor">
-            <label>Valor</label>
-            <input name="preco_evento_valor" class="preco-evento-input" inputmode="decimal" value="{% if modo == 'especifico' and cfg.get('valor') is not none %}{{ cfg.get('valor')|moeda_br }}{% endif %}" placeholder="Ex.: 500,00" {% if modo != 'especifico' %}hidden{% endif %}>
-            <span class="preco-evento-status" {% if modo == 'especifico' %}hidden{% endif %}>{{ 'Sob consulta' if modo == 'consulta' else 'Segue o preço principal.' }}</span>
-          </div>
-        </div>
-      {% endfor %}
+<div class="produtos-wrap">
+  <section class="produtos-hero">
+    <div><small>CATÁLOGO</small><h1>Produtos e serviços</h1><p>Organize os itens da empresa sem misturar cadastros auxiliares nesta tela.</p></div>
+    <div class="produtos-acoes">
+      <a class="botao btn-krj-ghost" href="/painel/categorias-vitrine"><i class="bi bi-tags"></i> Categorias</a>
+      {% if usa_recursos %}<a class="botao btn-krj-ghost" href="/painel/recursos"><i class="bi bi-boxes"></i> Recursos</a>{% endif %}
+      <a class="botao" href="/painel/produto/novo"><i class="bi bi-plus-lg"></i> Novo item</a>
     </div>
   </section>
 
-  <div class="box" id="vitrine-produto" style="margin-top:16px">
-    <h3>Vitrine do cliente</h3>
-    <p class="texto-discreto">A parte visual deste item. O cliente escolhe por foto e poucos cliques.</p>
-    <label class="check"><input type="checkbox" name="vitrine_ativo" value="1" {% if not produto or produto.vitrine_ativo is not sameas false %}checked{% endif %}> Mostrar na vitrine pública</label>
-    <div class="linha">
-      <div><label>Categoria</label><select name="vitrine_categoria"><option value="">Sem categoria</option>{% for c in categorias_vitrine %}<option value="{{ c.nome }}" {% if produto and produto.vitrine_categoria == c.nome %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}</select><small class="texto-discreto"><a href="/painel/vitrine">Gerenciar categorias da vitrine</a></small></div>
-      <div><label>Ordem</label><input name="vitrine_ordem" type="number" value="{{ produto.vitrine_ordem if produto else 0 }}"></div>
-    </div>
-    <label>Resumo curto</label>
-    <input name="vitrine_resumo" maxlength="240" value="{{ produto.vitrine_resumo if produto else '' }}" placeholder="Ex.: Completo para festas e eventos">
-    <label>Fotos</label>
-    <input id="fotoArquivos" name="foto_originais" type="file" accept="image/*,.jfif,.jpe" multiple hidden>
-    <input id="fotoAjustadas" name="foto_arquivos" type="file" accept="image/jpeg" multiple hidden>
-    <input id="fotosAjustadasJson" name="fotos_ajustadas_json" type="hidden" value="">
-    <button type="button" class="botao-secundario largura-total" onclick="document.getElementById('fotoArquivos').click()"><i class="bi bi-images"></i> Escolher fotos</button>
-    <small id="fotoArquivosStatus" class="texto-discreto">Ao escolher, o Connect abre o ajuste de zoom e recorte. JPG, JPEG, JFIF, PNG e WebP.</small>
-    <div class="foto-prompt-box"><button type="button" class="secundario" id="gerarPromptFotoIA"><i class="bi bi-stars"></i> Gerar prompt para IA</button></div>
-    <small class="texto-discreto">O prompt usa os dados deste item e orienta a IA a preservar a foto real, o preço, o nome e a identidade da empresa.</small>
+  <div class="produtos-cards">
+    <div class="produto-kpi"><small>Total cadastrado</small><strong>{{ produtos|length }}</strong></div>
+    <div class="produto-kpi"><small>Na vitrine</small><strong>{{ produtos|selectattr('vitrine_ativo')|list|length }}</strong></div>
+    <div class="produto-kpi"><small>Categorias ativas</small><strong>{{ categorias_vitrine|length }}</strong></div>
   </div>
 
-  {% if usa_recursos %}
-  <div class="box" style="margin-top:16px">
-    <h3>Recursos que este produto utiliza</h3>
-    <p class="texto-discreto">Marque somente o que normalmente acompanha 1 unidade deste produto e informe quantas unidades são consumidas.</p>
-    {% for item in itens_estoque %}
-      {% set qtd_recurso = recursos_produto.get(item.id, 0) %}
-      <div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:8px 0">
+  <div class="produto-lista">
+    {% for p in produtos %}
+      {% set capa = (p.fotos|selectattr('capa')|list|first) or (p.fotos|list|first) %}
+      <article class="produto-linha">
+        {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-sem-foto"><i class="bi bi-image"></i></div>{% endif %}
         <div>
-          <input type="hidden" name="recurso_item_id" value="{{ item.id }}">
-          <input type="hidden" name="recurso_utiliza" value="{{ 1 if qtd_recurso else 0 }}" class="recurso-utiliza">
-          <label class="check" style="margin:0">
-            <input type="checkbox" {% if qtd_recurso %}checked{% endif %} onchange="alternarRecursoProduto(this)">
-            {{ item.nome }}
-          </label>
-          <small class="texto-discreto">Estoque atual: {{ item.quantidade_estoque or 0 }}</small>
+          <h3>{{ p.nome }}</h3>
+          <div class="produto-meta"><span>{{ p.vitrine_categoria or 'Sem categoria' }}</span><span>Ordem {{ p.vitrine_ordem or 0 }}</span><span>R$ {{ p.valor_base|moeda_br }}</span><span>{{ p.quantidade_disponivel or 0 }} un.</span></div>
+          <div style="margin-top:7px"><span class="produto-tag {% if not p.vitrine_ativo %}inativo{% endif %}">{{ 'Na vitrine' if p.vitrine_ativo else 'Fora da vitrine' }}</span></div>
         </div>
-        <div>
-          <label>Qtd. por unidade</label>
-          <input class="recurso-quantidade" name="recurso_quantidade" type="number" min="1" value="{{ qtd_recurso if qtd_recurso else 1 }}">
-        </div>
-      </div>
+        <div class="produto-botoes"><a class="botao-secundario" href="/painel/produto/{{ p.id }}"><i class="bi bi-pencil"></i> Editar</a><a class="botao-secundario" href="/painel/produto/{{ p.id }}/copiar"><i class="bi bi-copy"></i> Copiar</a></div>
+      </article>
+    {% else %}
+      <div class="vazio"><i class="bi bi-box-seam" style="font-size:34px"></i><h3>Nenhum item cadastrado</h3><p>Comece pelo primeiro produto ou serviço.</p><a class="botao" href="/painel/produto/novo">Cadastrar primeiro item</a></div>
     {% endfor %}
   </div>
-  {% endif %}
-
-  <input type="hidden" name="volume_logistico" value="1">
-  <input type="hidden" name="carga_pontos" value="1">
-  <button>{% if produto %}Atualizar{% else %}Salvar{% endif %}</button>
-</form>
 </div>
-
-{% if produto %}
-<div class="box">
-  <h2>Fotos da vitrine</h2>
-  {% if produto.fotos %}
-  <div class="grid">
-    {% for foto in produto.fotos %}
-    <div class="card" style="padding:10px">
-      {% if imagem_disponivel(foto.arquivo_url) %}
-      <img src="{{ foto.miniatura_url if foto.miniatura_url and imagem_disponivel(foto.miniatura_url) else foto.arquivo_url }}" alt="{{ produto.nome }}" title="Clique para carregar outra foto" onclick="document.getElementById('fotoArquivos').click()" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:12px;cursor:pointer">
-      {% else %}
-      <div onclick="document.getElementById('fotoArquivos').click()" title="Imagem ausente — clique para reenviar" style="width:100%;aspect-ratio:1/1;border-radius:12px;cursor:pointer;display:grid;place-items:center;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;text-align:center;padding:12px"><div><i class="bi bi-image" style="font-size:30px"></i><br><b>Imagem ausente</b><br><small>O cadastro existe, mas o arquivo não está mais no servidor. Clique para reenviar.</small></div></div>
-      {% endif %}
-      <p style="margin:8px 0"><b>{% if foto.capa %}Foto principal{% else %}Foto {{ loop.index }}{% endif %}</b>{% if foto.original_url %}<br><small class="texto-discreto">Original preservado</small>{% endif %}</p>
-      <div class="foto-card-acoes">
-        {% if imagem_disponivel(foto.arquivo_url) %}<button type="button" class="secundario ajustar-foto-existente" data-src="{{ foto.original_url if foto.original_url and imagem_disponivel(foto.original_url) else foto.arquivo_url }}" data-produto="{{ produto.id }}" data-foto="{{ foto.id }}"><i class="bi bi-crop"></i> Ajustar</button>{% endif %}
-        {% if not foto.capa %}<form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/capa"><button type="submit" class="secundario">Usar como principal</button></form>{% endif %}
-        <form method="post" action="/painel/produto/{{ produto.id }}/foto/{{ foto.id }}/excluir"><button type="submit" class="secundario">Excluir</button></form>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% else %}<p class="texto-discreto">Ainda não há fotos. Use “Fotos” acima e salve o item.</p>{% endif %}
-</div>
-{% endif %}
-
-<div class="grid">
-{% for p in produtos %}
-<div class="card">
-  {% set capa = (p.fotos|selectattr('capa')|list|first) if (p.fotos|selectattr('capa')|list) else (p.fotos[0] if p.fotos else none) %}
-  {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:12px;margin-bottom:10px">{% elif p.fotos %}<div style="aspect-ratio:16/9;border-radius:12px;margin-bottom:10px;background:#f8fafc;border:1px dashed #cbd5e1;display:grid;place-items:center;color:#64748b"><span><i class="bi bi-image"></i> Imagem ausente — reenviar</span></div>{% endif %}
-  <h3>{{ p.nome }}</h3>
-  <p>{{ p.descricao }}</p>
-  <p>Valor base: R$ {{ "%.2f"|format(p.valor_base or 0) }}</p>
-  <p>Duração: {{ (p.duracao_minutos or 240) }} minutos</p>
-  <p>Quantidade do produto: {{ p.quantidade_disponivel or 0 }}</p>
-  <p>Retirada padrão: {{ p.prazo_retirada_dias or 0 }} dia(s)</p>
-  <p>Contrato: {{ p.contrato.nome if p.contrato else "Não definido" }}</p>
-  {% if usa_recursos %}{% if p.recursos_estoque_resumo %}<p><b>Recursos:</b> {{ p.recursos_estoque_resumo|join(' · ') }}</p>{% else %}<p class="texto-discreto">Sem recursos de estoque vinculados.</p>{% endif %}{% endif %}
-  <a href="/painel/produto/{{ p.id }}">Editar</a> · <a href="/painel/produto/{{ p.id }}/copiar">Copiar</a>
-</div>
-{% endfor %}
-</div>
-
-<div class="foto-editor-overlay" id="fotoEditor" aria-hidden="true">
-  <div class="foto-editor-card">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
-      <div><h2 style="margin:0">Ajustar foto</h2><p class="foto-editor-ajuda">Arraste os controles para enquadrar. A foto final fica quadrada para manter a vitrine padronizada.</p></div>
-      <button type="button" class="secundario" id="fecharFotoEditor">Fechar</button>
-    </div>
-    <div class="foto-editor-canvas-wrap"><canvas id="fotoEditorCanvas" width="1200" height="1200"></canvas></div>
-    <div class="foto-editor-controles">
-      <label>Zoom <input id="fotoZoom" type="range" min="1" max="3" step="0.01" value="1"></label>
-      <label>Horizontal <input id="fotoX" type="range" min="-100" max="100" step="1" value="0"></label>
-      <label>Vertical <input id="fotoY" type="range" min="-100" max="100" step="1" value="0"></label>
-      <div><label>Rotação</label><div style="display:flex;gap:8px"><button type="button" class="secundario" id="fotoGirarEsq">↶ 90°</button><button type="button" class="secundario" id="fotoGirarDir">↷ 90°</button></div></div>
-    </div>
-    <div class="foto-editor-acoes"><button type="button" class="secundario" id="fotoCancelar">Cancelar</button><button type="button" id="fotoUsar"><i class="bi bi-check2"></i> Usar esta foto</button></div>
-  </div>
-</div>
-
-<script>
-(function(){
-const input=document.getElementById('fotoArquivos'), adjustedInput=document.getElementById('fotoAjustadas'), hidden=document.getElementById('fotosAjustadasJson'), status=document.getElementById('fotoArquivosStatus');
-const modal=document.getElementById('fotoEditor'), canvas=document.getElementById('fotoEditorCanvas'), ctx=canvas?.getContext('2d'), zoom=document.getElementById('fotoZoom'), px=document.getElementById('fotoX'), py=document.getElementById('fotoY');
-let imagem=null, rot=0, fila=[], ajustadasFiles=[], originaisUsados=[], arquivoAtual=null, modoExistente=null;
-function render(){if(!imagem||!ctx)return;const w=1200,h=1200;canvas.width=w;canvas.height=h;ctx.clearRect(0,0,w,h);ctx.fillStyle='#fff';ctx.fillRect(0,0,w,h);const ang=(rot%360)*Math.PI/180,troca=Math.abs(rot%180)===90,iw=troca?imagem.height:imagem.width,ih=troca?imagem.width:imagem.height,escalaBase=Math.max(w/iw,h/ih),escala=escalaBase*(Number(zoom.value)||1),dx=(Number(px.value)||0)/100*w*.45,dy=(Number(py.value)||0)/100*h*.45;ctx.save();ctx.translate(w/2+dx,h/2+dy);ctx.rotate(ang);ctx.drawImage(imagem,-imagem.width*escala/2,-imagem.height*escala/2,imagem.width*escala,imagem.height*escala);ctx.restore();}
-function abrirSrc(src,existente=null){modoExistente=existente;rot=0;zoom.value='1';px.value='0';py.value='0';imagem=new Image();imagem.onload=()=>{render();modal.classList.add('ativo');modal.setAttribute('aria-hidden','false')};imagem.onerror=()=>{alert('Não conseguimos abrir esta imagem para ajuste.')};imagem.src=src;}
-function abrirArquivo(file){arquivoAtual=file;const r=new FileReader();r.onload=()=>abrirSrc(r.result,null);r.readAsDataURL(file)}
-function fechar(){modal.classList.remove('ativo');modal.setAttribute('aria-hidden','true')}
-function aplicarArquivosAjustados(){const dtA=new DataTransfer(),dtO=new DataTransfer();ajustadasFiles.forEach(f=>dtA.items.add(f));originaisUsados.forEach(f=>dtO.items.add(f));if(adjustedInput)adjustedInput.files=dtA.files;if(input)input.files=dtO.files;if(hidden)hidden.value='';if(status)status.textContent=ajustadasFiles.length+(ajustadasFiles.length===1?' foto ajustada. O original será preservado ao salvar.':' fotos ajustadas. Os originais serão preservados ao salvar.');}
-function proxima(){if(fila.length){abrirArquivo(fila.shift())}else{fechar();aplicarArquivosAjustados();}}
-input?.addEventListener('change',function(){fila=[...(this.files||[])];ajustadasFiles=[];originaisUsados=[];arquivoAtual=null;if(!fila.length)return;proxima();});
-[zoom,px,py].forEach(el=>el?.addEventListener('input',render));
-document.getElementById('fotoGirarEsq')?.addEventListener('click',()=>{rot-=90;render()});document.getElementById('fotoGirarDir')?.addEventListener('click',()=>{rot+=90;render()});
-document.getElementById('fecharFotoEditor')?.addEventListener('click',()=>{fila=[];fechar();if(ajustadasFiles.length)aplicarArquivosAjustados()});document.getElementById('fotoCancelar')?.addEventListener('click',()=>{if(modoExistente){fechar()}else{proxima()}});
-function canvasBlob(){return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Não foi possível gerar a foto ajustada.')),'image/jpeg',.86))}
-document.getElementById('fotoUsar')?.addEventListener('click',async()=>{const btn=document.getElementById('fotoUsar');btn.disabled=true;try{const blob=await canvasBlob();if(modoExistente){const fd=new FormData();fd.append('foto_arquivo',blob,'foto-ajustada.jpg');const resp=await fetch(`/painel/produto/${modoExistente.produto}/foto/${modoExistente.foto}/ajustar`,{method:'POST',body:fd});if(!resp.ok)throw new Error('Não foi possível salvar o ajuste.');location.reload()}else{ajustadasFiles.push(new File([blob],`foto-ajustada-${ajustadasFiles.length+1}.jpg`,{type:'image/jpeg'}));if(arquivoAtual)originaisUsados.push(arquivoAtual);arquivoAtual=null;proxima()}}catch(e){alert(e.message||'Não foi possível ajustar a foto.')}finally{btn.disabled=false}});
-document.querySelectorAll('.ajustar-foto-existente').forEach(b=>b.addEventListener('click',()=>abrirSrc(b.dataset.src,{produto:b.dataset.produto,foto:b.dataset.foto})));
-const promptBtn=document.getElementById('gerarPromptFotoIA');promptBtn?.addEventListener('click',async()=>{const empresa={{ empresa.nome|tojson }},telefone={{ (empresa.whatsapp_retorno or '')|tojson }},nome=(document.querySelector('input[name="nome"]')?.value||'').trim(),preco=(document.querySelector('input[name="valor_base"]')?.value||'').trim(),descricao=(document.querySelector('textarea[name="descricao"]')?.value||'').trim(),categoria=(document.querySelector('select[name="vitrine_categoria"]')?.value||'').trim();const prompt=`Você é um designer profissional especializado em capas comerciais para divulgação de produtos e serviços de locação.\n\nCrie uma imagem de capa profissional usando a foto real anexada como referência principal. Mantenha o item reconhecível, fiel ao original, valorizado e em destaque. Use também o logo da empresa anexado, se houver.\n\nDados exatos que podem aparecer na arte:\nNome da empresa: ${empresa}\nTelefone/WhatsApp: ${telefone||'não informado — não inclua se não estiver disponível'}\nNome do item: ${nome||'não informado'}\nPreço: ${preco?`R$ ${preco}`:'não informado — não invente'}\nCategoria: ${categoria||'não informada'}\nDescrição/contexto: ${descricao||'não informado — não invente características'}\n\nDireção visual:\n- item em destaque no centro;\n- arte comercial brasileira, moderna, confiável e sem poluição visual;\n- preço bem visível em selo ou card quando informado;\n- nome do item em destaque;\n- telefone/WhatsApp no rodapé somente quando informado;\n- logo no topo, sem ocupar espaço demais;\n- composição legível em celular;\n- não corte o item principal;\n- não invente medidas, idade, características, preço, telefone ou qualquer dado ausente;\n- não altere o nome da empresa nem o nome do item;\n- não use personagens protegidos, exceto se já estiverem visíveis na foto real.\n\nFormato: imagem quadrada 1:1, ideal para WhatsApp, Instagram e vitrine online.\n\nAnexe à ferramenta de IA: 1) a foto atual do item; 2) o logo da empresa; 3) este prompt.`;try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Anexe a foto atual do item e o logo no ChatGPT, Gemini ou Canva.')}catch(e){window.prompt('Copie este prompt:',prompt)}});
-})();
-
-(function(){
-  const ativo=document.getElementById('precoPorEventoAtivo');
-  const conteudo=document.getElementById('precoEventoConteudo');
-  const desligado=document.getElementById('precoEventoDesligado');
-  const texto=document.getElementById('precoPorEventoTexto');
-  function atualizarBloco(){
-    const ligado=!!ativo?.checked;
-    if(conteudo)conteudo.hidden=!ligado;
-    if(desligado)desligado.hidden=ligado;
-    if(texto)texto.textContent=ligado?'Ligada':'Desligada';
-  }
-  ativo?.addEventListener('change',atualizarBloco);
-  document.querySelectorAll('[data-preco-evento-row]').forEach(row=>{
-    const modo=row.querySelector('.preco-evento-modo');
-    const input=row.querySelector('.preco-evento-input');
-    const status=row.querySelector('.preco-evento-status');
-    function atualizarLinha(){
-      const valor=modo?.value||'normal';
-      if(input)input.hidden=valor!=='especifico';
-      if(status){status.hidden=valor==='especifico';status.textContent=valor==='consulta'?'Sob consulta':'Segue o preço principal.';}
-    }
-    modo?.addEventListener('change',atualizarLinha);
-    atualizarLinha();
-  });
-  atualizarBloco();
-})();
-
-function alternarRecursoProduto(check){
-  const linha = check.closest('.linha');
-  const hidden = linha.querySelector('.recurso-utiliza');
-  const qtd = linha.querySelector('.recurso-quantidade');
-  hidden.value = check.checked ? '1' : '0';
-  if(check.checked && (!qtd.value || Number(qtd.value) < 1)) qtd.value = '1';
-}
-</script>
 {% endblock %}
