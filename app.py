@@ -7395,6 +7395,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         "data_evento": data_obj,
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
+        "whatsapp": str(bruto.get("whatsapp") or "").strip(),
         "itens": itens,
         "duracao_maxima_minutos": max(60, duracao_maxima or 240),
         "duracao_rotulo": _rotulo_duracao_minutos(max(60, duracao_maxima or 240)),
@@ -16159,7 +16160,10 @@ def portal_empresa_identificar(slug: str, request: Request, db: Session = Depend
 
 
 @app.get("/e/{slug}/vitrine", response_class=HTMLResponse)
-def vitrine_publica(slug: str, request: Request, data_evento: str = "", tipo_evento: str = "residencial", db: Session = Depends(get_db)):
+def vitrine_publica(
+    slug: str, request: Request, data_evento: str = "", tipo_evento: str = "residencial",
+    whatsapp: str = "", cep: str = "", numero: str = "", db: Session = Depends(get_db),
+):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
@@ -16178,12 +16182,28 @@ def vitrine_publica(slug: str, request: Request, data_evento: str = "", tipo_eve
     categorias = [c.nome for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True) if c.nome.casefold() in nomes_presentes]
     if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
         categorias.append("Outros")
+
+    # WhatsApp e endereço são opcionais para navegar no catálogo. Quando vierem
+    # preenchidos, o deslocamento já nasce calculado; para adicionar ao pedido,
+    # a vitrine exige os três dados e um cálculo válido.
+    whatsapp_inicial = str(whatsapp or "").strip()[:40]
+    cep_inicial = _cep_limpo(cep or "")
+    numero_inicial = str(numero or "").strip()[:30]
+    frete_inicial = None
+    if len(cep_inicial) == 8 and numero_inicial:
+        calculado = _calcular_frete_vitrine(empresa, cep_inicial, numero_inicial)
+        if calculado.get("ok"):
+            frete_inicial = calculado
+
     return templates.TemplateResponse("publico/vitrine.html", {
         "request": request, "empresa": empresa, "data_evento": data_obj, "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
         "fluxo_vitrine": str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
+        "hoje": date.today().isoformat(),
+        "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
+        "frete_inicial": frete_inicial,
     })
 
 
@@ -16294,9 +16314,21 @@ def vitrine_publica_reservar(
         if minutos_absolutos >= 24 * 60 or minutos_fim > minutos_limite:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=retirada", status_code=303)
 
+    whatsapp_pedido = limpar_identificador(whatsapp_pre_reserva)
+    if not celular_brasileiro_valido(whatsapp_pre_reserva):
+        params = urlencode({
+            "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "erro": "whatsapp",
+            "whatsapp": whatsapp_pre_reserva or "", "cep": cep_frete or "", "numero": numero_frete or "",
+        })
+        return RedirectResponse(f"/e/{slug}/vitrine?{params}", status_code=303)
+
     frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
     if not frete.get("ok"):
-        return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=frete", status_code=303)
+        params = urlencode({
+            "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "erro": "frete",
+            "whatsapp": whatsapp_pre_reserva or "", "cep": cep_frete or "", "numero": numero_frete or "",
+        })
+        return RedirectResponse(f"/e/{slug}/vitrine?{params}", status_code=303)
 
     codigo = _normalizar_codigo_cupom(cupom_codigo)
     cupom = None
@@ -16309,6 +16341,7 @@ def vitrine_publica_reservar(
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
         "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "whatsapp": whatsapp_pedido,
         "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
         "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
         "frete": {
@@ -16328,9 +16361,7 @@ def vitrine_publica_reservar(
     # Pré-reserva é deliberadamente um pedido para análise: ainda não ocupa estoque.
     # A pessoa da empresa decide depois entre Aprovar ou Preparar no LokaFest.
     if fluxo == "aprovacao":
-        whatsapp_pre = limpar_identificador(whatsapp_pre_reserva)
-        if not celular_brasileiro_valido(whatsapp_pre_reserva):
-            return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=whatsapp", status_code=303)
+        whatsapp_pre = whatsapp_pedido
         pedido_ctx = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
@@ -16986,6 +17017,7 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
         if form is None:
             frete = pedido_vitrine.get("frete") or {}
             form = {
+                "telefone": pedido_vitrine.get("whatsapp") or "",
                 "data_evento": pedido_vitrine["data_evento"].isoformat(),
                 "hora_inicio": pedido_vitrine.get("hora_inicio_texto") or "",
                 "retirada_mesmo_dia": bool(pedido_vitrine.get("retirada_mesmo_dia")),
