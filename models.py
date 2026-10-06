@@ -63,6 +63,7 @@ class Empresa(Base):
     # somente o que realmente fizer sentido para a operação.
     modulo_equipes_ativo = Column(Boolean, default=False)
     modulo_recursos_ativo = Column(Boolean, default=False)
+    modulo_opcionais_ativo = Column(Boolean, default=False)
     modulo_cupons_ativo = Column(Boolean, default=False)
     inteligencia_ativa = Column(Boolean, default=False)
 
@@ -407,11 +408,15 @@ class OpcionalEmpresa(Base):
     nome = Column(String(140), nullable=False)
     quantidade = Column(Integer, nullable=False, default=1)
     valor = Column(Float, nullable=False, default=0)
+    # Vínculo comercial -> estoque. O opcional continua existindo mesmo sem estoque;
+    # quando a empresa controla recursos, esta unidade extra também consome o item vinculado.
+    item_estoque_id = Column(Integer, ForeignKey("itens_produto_servico_estoque.id", ondelete="SET NULL"), nullable=True, index=True)
     ativo = Column(Boolean, nullable=False, default=True)
     ordem = Column(Integer, nullable=False, default=0)
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     empresa = relationship("Empresa")
+    item_estoque = relationship("ItemProdutoServicoEstoque")
 
 
 class ProdutoOpcionalExclusao(Base):
@@ -533,6 +538,31 @@ class SolicitacaoRecurso(Base):
     atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class SolicitacaoOpcional(Base):
+    """Snapshot dos opcionais cobrados no contrato.
+
+    É separado de ReservaItem porque opcional é composição comercial, enquanto recurso
+    é consumo físico. ``item_estoque_id`` congela o vínculo opcional -> recurso no momento
+    da inclusão para não alterar contratos antigos se o cadastro mudar depois.
+    """
+    __tablename__ = "solicitacoes_opcionais"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id", ondelete="CASCADE"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="SET NULL"), nullable=True, index=True)
+    opcional_id = Column(Integer, ForeignKey("opcionais_empresa.id", ondelete="SET NULL"), nullable=True, index=True)
+    item_estoque_id = Column(Integer, ForeignKey("itens_produto_servico_estoque.id", ondelete="SET NULL"), nullable=True, index=True)
+    nome = Column(String(140), nullable=False)
+    quantidade = Column(Integer, nullable=False, default=1)
+    valor_unitario = Column(Float, nullable=False, default=0)
+    valor_total = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    opcional = relationship("OpcionalEmpresa")
+    item_estoque = relationship("ItemProdutoServicoEstoque")
+
+
 class Solicitacao(Base):
     __tablename__ = "solicitacoes"
 
@@ -575,7 +605,11 @@ class Solicitacao(Base):
     valor_equipamentos = Column(Float, default=0)
     cupom_codigo = Column(String(60), nullable=True)
     cupom_percentual = Column(Float, default=0)
+    # ``valor_desconto`` continua sendo o desconto total por compatibilidade.
+    # Os dois campos abaixo preservam a origem para novos contratos sem reinterpretar o legado.
     valor_desconto = Column(Float, default=0)
+    valor_desconto_cupom = Column(Float, default=0)
+    valor_desconto_manual = Column(Float, default=0)
     valor_frete = Column(Float, default=0)
     # Snapshot da duração/horas extras do contrato. A duração base vem da empresa/tipo
     # de evento; cada item pode apenas acrescentar tempo à regra da empresa.
@@ -619,6 +653,7 @@ class Solicitacao(Base):
     contrato = relationship("Contrato")
     empresa_transferida = relationship("Empresa", foreign_keys=[empresa_transferida_id])
     itens = relationship("ReservaItem", back_populates="solicitacao", cascade="all, delete-orphan")
+    opcionais_contrato = relationship("SolicitacaoOpcional", cascade="all, delete-orphan", order_by="SolicitacaoOpcional.id")
     aprovado_em = Column(DateTime, nullable=True)
     contrato_enviado_em = Column(DateTime, nullable=True)
     # Auditoria do fluxo público de WhatsApp. O clique indica apenas que o cliente

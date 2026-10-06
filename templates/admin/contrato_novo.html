@@ -133,6 +133,11 @@
       {% for p in produtos %}{% set dp = duracoes_produtos_evento.get(p.id, {}) %}<option value="{{ p.id }}" data-contrato-id="{{ p.contrato_id or '' }}" data-valor-base="{{ p.valor_base or 0 }}" data-dur-res="{{ dp.get('residencial', empresa.duracao_padrao_minutos or 240) }}" data-dur-emp="{{ dp.get('empresa', empresa.duracao_padrao_minutos or 240) }}" {% if form.produto_id == p.id|string %}selected{% endif %}>{{ p.nome }}</option>{% endfor %}
     </select>
     <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
+    {% if usa_opcionais %}<div id="opcionaisNovoContrato" class="box" style="margin-top:10px" hidden>
+      <h3 style="margin-top:0">Opcionais do contrato</h3>
+      <p class="texto-discreto">O valor do opcional fica separado do equipamento. Se houver recurso vinculado e a empresa controlar estoque, ele também aumenta a quantidade consumida.</p>
+      <div id="listaOpcionaisNovoContrato"></div>
+    </div>{% endif %}
     <div id="recursosNovoContrato" class="box" style="margin-top:10px" hidden>
       <h3 style="margin-top:0">Recursos desta locação</h3>
       <p class="texto-discreto">Ajuste agora as quantidades antes de salvar o contrato.</p>
@@ -147,24 +152,29 @@
 
   <section class="secao-form etapa-manual">
     <h2>6. Valores e pagamento</h2>
-    <p class="texto-discreto">O cupom desconta somente o equipamento. O frete é somado depois do desconto.</p>
+    <p class="texto-discreto">Cupom e desconto manual incidem sobre equipamento + opcionais. O frete é somado depois.</p>
     <label>Valor do equipamento</label>
     <input id="valorEquipamentoManual" name="valor" value="{{ form.valor or '0,00' }}" inputmode="decimal">
     <label>Cupom</label>
     <select id="cupomManual" name="cupom_codigo">
-      <option value="" data-percentual="0">Sem cupom</option>
+      <option value="" data-tipo="percentual" data-valor="0">Sem cupom</option>
       {% set codigos_ativos = cupons_ativos|map(attribute='codigo')|list %}
       {% if form.cupom_codigo and form.cupom_codigo not in codigos_ativos %}
-        <option value="{{ form.cupom_codigo }}" data-percentual="{{ item.cupom_percentual if item is defined and item else 0 }}" selected>{{ form.cupom_codigo }} (salvo no contrato)</option>
+        {% set cupom_salvo_bruto = (item.cupom_percentual or 0) if item is defined and item else 0 %}
+        <option value="{{ form.cupom_codigo }}" data-tipo="{{ 'fixo' if cupom_salvo_bruto < 0 else 'percentual' }}" data-valor="{{ -cupom_salvo_bruto if cupom_salvo_bruto < 0 else cupom_salvo_bruto }}" selected>{{ form.cupom_codigo }} (salvo no contrato)</option>
       {% endif %}
       {% for c in cupons_ativos %}
-        <option value="{{ c.codigo }}" data-percentual="{{ c.percentual or 0 }}" {% if form.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ c.percentual|moeda_br }}%{% if c.valido_ate %} · até {{ c.valido_ate.strftime('%d/%m/%Y') }}{% endif %}</option>
+        <option value="{{ c.codigo }}" data-tipo="{{ cupom_tipo(c) }}" data-valor="{{ cupom_valor_configurado(c) }}" {% if form.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ rotulo_desconto_cupom(cupom_tipo(c), cupom_valor_configurado(c)) }}{% if validade_efetiva_cupom(c) %} · fechar até {{ validade_efetiva_cupom(c).strftime('%d/%m/%Y') }}{% endif %}</option>
       {% endfor %}
     </select>
+    <label>Desconto manual (R$)</label>
+    <input id="descontoManualContrato" name="desconto_manual" data-mascara="moeda" value="{{ form.desconto_manual or '0,00' }}" inputmode="decimal">
+    <small class="texto-discreto">Campo interno. A vitrine pública continua aceitando somente cupom.</small>
     <label>Frete</label>
     <input id="freteManual" name="frete" data-mascara="moeda" value="{{ form.frete or '0,00' }}" inputmode="decimal">
     <div class="resumo-financeiro-mobile" style="margin:12px 0">
       <div><small>Equipamento</small><b id="manualEquipResumo">R$ 0,00</b></div>
+      <div><small>Opcionais</small><b id="manualOpcResumo">R$ 0,00</b></div>
       <div><small>Desconto</small><b id="manualDescResumo">- R$ 0,00</b></div>
       <div><small>Frete</small><b id="manualFreteResumo">R$ 0,00</b></div>
       <div><small>Horas adicionais</small><b id="manualHorasResumo">R$ 0,00</b></div>
@@ -178,16 +188,35 @@
 </form>
 <script>
 const RECURSOS_POR_PRODUTO = {{ recursos_por_produto_view|default({})|tojson }};
-const RECURSOS_ATUAIS_CONTRATO = {{ recursos_atuais_view|default({})|tojson }};
+let RECURSOS_ATUAIS_CONTRATO = {{ recursos_atuais_view|default({})|tojson }};
+const OPCIONAIS_POR_PRODUTO = {{ opcionais_por_produto_view|default({})|tojson }};
+const OPCIONAIS_CONTRATO_ATUAIS = {{ opcionais_contrato_view|default([])|tojson }};
 const PRODUTO_INICIAL_CONTRATO = String({{ (form.produto_id if form.produto_id is defined else '')|tojson }});
 const SOLICITACAO_ATUAL_ID = {{ item.id if modo_edicao and item is defined and item else 0 }};
+function qtdOpcionaisNovoContrato(){
+  const mapa={};
+  document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>mapa[String(inp.dataset.opcionalId||'')]=Math.max(0,parseInt(inp.value||'0',10)||0));
+  OPCIONAIS_CONTRATO_ATUAIS.forEach(o=>{const id=String(o.opcional_id||'');if(id && !(id in mapa)) mapa[id]=Math.max(0,parseInt(o.quantidade||0,10)||0)});
+  return mapa;
+}
+function atualizarOpcionaisNovoContrato(){
+  const produto=document.querySelector('select[name="produto_id"]'); const box=document.getElementById('opcionaisNovoContrato'); const lista=document.getElementById('listaOpcionaisNovoContrato');
+  if(!produto||!box||!lista)return; const pid=String(produto.value||''); const ops=OPCIONAIS_POR_PRODUTO[pid]||[];
+  if(!ops.length){box.hidden=true;lista.innerHTML='';recalcularValoresContratoManual();return;}
+  const atuais=qtdOpcionaisNovoContrato(); box.hidden=false;
+  lista.innerHTML=ops.map(o=>{const qtd=Math.min(Math.max(0,atuais[String(o.id)]||0),Math.max(1,parseInt(o.quantidade_maxima||1,10)||1));const estoque=o.recurso_nome?`<small class="texto-discreto" style="display:block">Estoque: +1 ${o.recurso_nome} por unidade</small>`:'';return `<div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0"><div><b>${o.nome}</b><small class="texto-discreto" style="display:block">R$ ${formatarMoedaContrato(o.valor)} por unidade</small>${estoque}<input type="hidden" name="opcional_produto_id" value="${pid}"><input type="hidden" name="opcional_id" value="${o.id}"></div><div><label>Qtd. opcional</label><input name="opcional_quantidade" type="number" min="0" max="${Math.max(1,parseInt(o.quantidade_maxima||1,10)||1)}" value="${qtd}" data-opcional-id="${o.id}" data-valor="${o.valor}" data-recurso-id="${o.item_estoque_id||''}"></div></div>`}).join('');
+}
+function totalOpcionaisNovoContrato(){let t=0;document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>t+=Math.max(0,parseInt(inp.value||'0',10)||0)*(parseFloat(inp.dataset.valor||'0')||0));return t;}
 function atualizarRecursosNovoContrato(){
   const produto=document.querySelector('select[name="produto_id"]');
   const box=document.getElementById('recursosNovoContrato');
   const lista=document.getElementById('listaRecursosNovoContrato');
   if(!produto || !box || !lista) return;
   const produtoId=String(produto.value||'');
-  const recursos=RECURSOS_POR_PRODUTO[produtoId]||[];
+  const mapa={};
+  (RECURSOS_POR_PRODUTO[produtoId]||[]).forEach(r=>{mapa[String(r.id)]={id:r.id,nome:r.nome,quantidade:Number(r.quantidade||0)}});
+  document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>{const rid=String(inp.dataset.recursoId||'');const qtd=Math.max(0,parseInt(inp.value||'0',10)||0);if(!rid||!qtd)return;const op=(OPCIONAIS_POR_PRODUTO[produtoId]||[]).find(x=>String(x.id)===String(inp.dataset.opcionalId||''));if(!mapa[rid])mapa[rid]={id:Number(rid),nome:op?.recurso_nome||'Recurso opcional',quantidade:0};mapa[rid].quantidade+=qtd;});
+  const recursos=Object.values(mapa).filter(r=>r.quantidade>0);
   if(!recursos.length){ box.hidden=true; lista.innerHTML=''; return; }
   box.hidden=false;
   lista.innerHTML=recursos.map(r=>{
@@ -226,15 +255,23 @@ function valorHorasContratoManual(){
 }
 function recalcularValoresContratoManual(){
   const equip = moedaNumeroContrato(document.getElementById('valorEquipamentoManual')?.value || '0');
+  const opcionais = totalOpcionaisNovoContrato();
+  const base = equip + opcionais;
   const cupom = document.getElementById('cupomManual');
-  const pct = parseFloat(cupom?.options[cupom.selectedIndex]?.dataset.percentual || '0') || 0;
-  const desconto = equip * pct / 100;
+  const optCupom = cupom?.options[cupom.selectedIndex];
+  const tipoCupom = optCupom?.dataset.tipo || 'percentual';
+  const valorCupom = parseFloat(optCupom?.dataset.valor || '0') || 0;
+  const descontoCupom = tipoCupom === 'fixo' ? Math.min(base, valorCupom) : Math.min(base, base * valorCupom / 100);
+  const descontoManualBruto = moedaNumeroContrato(document.getElementById('descontoManualContrato')?.value || '0');
+  const descontoManual = Math.min(Math.max(descontoManualBruto,0), Math.max(base-descontoCupom,0));
+  const desconto = descontoCupom + descontoManual;
   const frete = moedaNumeroContrato(document.getElementById('freteManual')?.value || '0');
   const horas = valorHorasContratoManual();
-  const total = Math.max(equip - desconto + frete + horas, 0);
-  const vals = {manualEquipResumo:equip,manualDescResumo:desconto,manualFreteResumo:frete,manualHorasResumo:horas,manualTotalResumo:total};
+  const total = Math.max(base - desconto + frete + horas, 0);
+  const vals = {manualEquipResumo:equip,manualOpcResumo:opcionais,manualDescResumo:desconto,manualFreteResumo:frete,manualHorasResumo:horas,manualTotalResumo:total};
   Object.entries(vals).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.textContent=(id==='manualDescResumo'?'- R$ ':'R$ ')+formatarMoedaContrato(v);});
 }
+
 function atualizarHorarioContratoManual(){
   const box=document.getElementById('horarioManualBox'); if(!box) return;
   const inicioEl=document.querySelector('input[name="hora_inicio"]');
@@ -313,8 +350,9 @@ async function buscarCEP(){
   }catch(e){ alert('Não foi possível buscar o CEP agora.'); }
 }
 document.addEventListener('change', function(ev){
-  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); atualizarHorarioContratoManual(); }
+  if(ev.target?.name === 'produto_id'){ aplicarContratoPadrao(ev.target); aplicarValorBaseContrato(ev.target); atualizarOpcionaisNovoContrato(); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); atualizarHorarioContratoManual(); }
   if(ev.target?.name === 'cupom_codigo') recalcularValoresContratoManual();
+  if(ev.target?.name === 'opcional_quantidade'){const rid=String(ev.target.dataset.recursoId||'');if(rid)delete RECURSOS_ATUAIS_CONTRATO[rid];atualizarRecursosNovoContrato();recalcularValoresContratoManual();}
   if(ev.target?.name === 'tipo_evento_comercial' || ev.target?.name === 'hora_inicio') atualizarHorarioContratoManual();
   if(ev.target?.id === 'retiradaMesmoDiaManual'){ if(!ev.target.checked){const h=document.getElementById('horasAdicionaisManual');if(h)h.value='0';} atualizarHorarioContratoManual(); }
   if(ev.target?.name === 'modo_criacao') alternarEtapas();
@@ -395,12 +433,12 @@ async function consultarClientePorTelefone(){
 document.getElementById('menosHoraManual')?.addEventListener('click',()=>{const h=document.getElementById('horasAdicionaisManual');if(h)h.value=String(Math.max(0,(parseInt(h.value||'0',10)||0)-1));atualizarHorarioContratoManual();});
 document.getElementById('maisHoraManual')?.addEventListener('click',()=>{const h=document.getElementById('horasAdicionaisManual');if(h)h.value=String((parseInt(h.value||'0',10)||0)+1);atualizarHorarioContratoManual();});
 document.addEventListener('input', function(ev){
-  if(ev.target?.id === 'valorEquipamentoManual' || ev.target?.id === 'freteManual') recalcularValoresContratoManual();
+  if(ev.target?.id === 'valorEquipamentoManual' || ev.target?.id === 'freteManual' || ev.target?.id === 'descontoManualContrato' || ev.target?.name === 'opcional_quantidade') recalcularValoresContratoManual();
   if(ev.target?.name === 'hora_inicio') atualizarHorarioContratoManual();
 });
 
 document.addEventListener('DOMContentLoaded', function(){
-  const produto=document.querySelector('select[name="produto_id"]'); if(produto){ aplicarContratoPadrao(produto); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
+  const produto=document.querySelector('select[name="produto_id"]'); if(produto){ aplicarContratoPadrao(produto); atualizarOpcionaisNovoContrato(); atualizarRecursosNovoContrato(); consultarEstoqueProduto(); }
   alternarTipoTelefone(); alternarEtapas(); consultarEstoqueProduto(); atualizarHorarioContratoManual(); recalcularValoresContratoManual();
   const tel=document.getElementById('telefoneCliente');
   if(tel){

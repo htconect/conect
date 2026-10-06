@@ -76,6 +76,7 @@
             {% endfor %}
           </div>
         </section>
+        {% if usa_opcionais %}
         <section class="opcionais-box" id="opcionais-item">
           <div class="opcionais-topo"><div><h3>Opcionais</h3><p class="texto-ajuda" style="margin:4px 0 0">O cadastro fica em uma tela única. Aqui você só informa se este item usa opcionais e pode retirar os que não se aplicam.</p></div><a class="botao-secundario" href="/painel/opcionais"><i class="bi bi-sliders"></i> Gerenciar opcionais</a></div>
           <label class="preco-evento-toggle" style="justify-content:flex-start;margin:8px 0 12px"><input id="utilizaOpcionais" type="checkbox" name="utiliza_opcionais" value="1" {% if produto and produto.utiliza_opcionais %}checked{% endif %}><span>Este produto/serviço utiliza opcionais</span></label>
@@ -83,6 +84,7 @@
             {% for opcional in opcionais_catalogo %}<div class="opcional-catalogo-linha"><div><strong>{{ opcional.nome }}</strong><small>Até {{ opcional.quantidade }} · R$ {{ opcional.valor|moeda_br }} cada</small><input type="hidden" name="opcional_catalogo_id" value="{{ opcional.id }}"></div><label class="opcional-uso-toggle"><input type="hidden" name="opcional_utiliza" value="{{ 0 if opcional.id in opcionais_excluidos else 1 }}" class="opcional-utiliza-hidden"><input type="checkbox" class="opcional-utiliza-check" {% if opcional.id not in opcionais_excluidos %}checked{% endif %}> Usar</label></div>{% else %}<p class="opcional-vazio">Nenhum opcional cadastrado. <a href="/painel/opcionais">Cadastrar opcionais</a>.</p>{% endfor %}
           </div>
         </section>
+        {% endif %}
       </div>
     </section>
 

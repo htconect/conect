@@ -2,7 +2,7 @@
 {% block conteudo %}
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Cupons</h1>
-<p class="texto-discreto">Cadastre cupons por empresa. O desconto é aplicado somente sobre o valor dos equipamentos; o frete é somado depois.</p>
+<p class="texto-discreto">Cadastre cupons por empresa. O desconto é aplicado somente sobre o valor dos equipamentos; o frete é somado depois. A validade considera a data em que o contrato/pedido é fechado, não a data do evento.</p>
 
 <div class="box">
   <form method="post" action="{% if cupom %}/painel/cupom/{{ cupom.id }}{% else %}/painel/cupons{% endif %}" class="form-mobile-simples">
@@ -12,15 +12,25 @@
     <input name="codigo" value="{{ cupom.codigo if cupom else '' }}" placeholder="Ex.: KARAOKE10" required style="text-transform:uppercase">
     <label>Descrição</label>
     <input name="descricao" value="{{ cupom.descricao if cupom else '' }}" placeholder="Ex.: campanha de setembro">
+    {% set tipo_atual = cupom_tipo(cupom) if cupom else 'percentual' %}
+    {% set valor_atual = cupom_valor_configurado(cupom) if cupom else 10 %}
     <div class="linha">
       <div>
-        <label>Desconto (%)</label>
-        <input name="percentual" inputmode="decimal" value="{{ cupom.percentual|moeda_br if cupom else '10,00' }}" required>
+        <label>Tipo de desconto</label>
+        <select name="tipo_desconto" id="tipoDescontoCupom">
+          <option value="percentual" {% if tipo_atual == 'percentual' %}selected{% endif %}>Percentual (%)</option>
+          <option value="fixo" {% if tipo_atual == 'fixo' %}selected{% endif %}>Valor fixo (R$)</option>
+        </select>
       </div>
       <div>
-        <label>Válido até</label>
-        <input type="date" name="valido_ate" value="{{ cupom.valido_ate.isoformat() if cupom and cupom.valido_ate else '' }}">
+        <label id="labelValorCupom">{% if tipo_atual == 'fixo' %}Valor do desconto (R$){% else %}Desconto (%){% endif %}</label>
+        <input name="valor_desconto" id="valorDescontoCupom" inputmode="decimal" value="{{ valor_atual|moeda_br }}" required>
       </div>
+    </div>
+    <div>
+      <label>Válido para contratos fechados até</label>
+      <input type="date" name="valido_ate" value="{{ validade_efetiva_cupom(cupom).isoformat() if cupom and validade_efetiva_cupom(cupom) else '2026-10-31' }}">
+      <small class="texto-discreto">Ex.: evento de Natal em dezembro continua com o desconto se o contrato for fechado dentro desta data.</small>
     </div>
     <label class="check"><input type="checkbox" name="ativo" value="1" {% if not cupom or cupom.ativo %}checked{% endif %}> Cupom ativo</label>
     <button type="submit">{% if cupom %}Atualizar cupom{% else %}Cadastrar cupom{% endif %}</button>
@@ -31,9 +41,9 @@
 {% for c in cupons %}
   <div class="card">
     <h3>{{ c.codigo }}</h3>
-    <p><b>{{ c.percentual|moeda_br }}% de desconto</b></p>
+    <p><b>{% if cupom_tipo(c) == 'fixo' %}R$ {{ cupom_valor_configurado(c)|moeda_br }} de desconto{% else %}{{ cupom_valor_configurado(c)|moeda_br }}% de desconto{% endif %}</b></p>
     {% if c.descricao %}<p>{{ c.descricao }}</p>{% endif %}
-    <p>Validade: <b>{{ c.valido_ate.strftime('%d/%m/%Y') if c.valido_ate else 'Sem data final' }}</b></p>
+    <p>Validade: <b>{{ validade_efetiva_cupom(c).strftime('%d/%m/%Y') if validade_efetiva_cupom(c) else 'Sem data final' }}</b></p>
     <p>Status: <b>{{ 'Ativo' if c.ativo else 'Inativo' }}</b></p>
     <a href="/painel/cupom/{{ c.id }}">Editar</a>
   </div>
@@ -41,4 +51,16 @@
   <div class="card"><p>Nenhum cupom cadastrado.</p></div>
 {% endfor %}
 </div>
+<script>
+(function(){
+  const tipo=document.getElementById('tipoDescontoCupom');
+  const label=document.getElementById('labelValorCupom');
+  function atualizar(){
+    if(!tipo||!label)return;
+    label.textContent=tipo.value==='fixo'?'Valor do desconto (R$)':'Desconto (%)';
+  }
+  tipo?.addEventListener('change',atualizar);
+  atualizar();
+})();
+</script>
 {% endblock %}

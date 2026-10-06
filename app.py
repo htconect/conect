@@ -45,7 +45,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, VitrineOportunidade, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, EvolucaoFinanceiraHistorico, PausaOperacional
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, SolicitacaoOpcional, EvolucaoFinanceiraHistorico, PausaOperacional
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -800,32 +800,90 @@ def resumo_financeiro(itens):
     return {"qtd": len(itens), "total": total, "recebido": recebido, "falta": falta}
 
 
-def composicao_valores_contrato(item: Solicitacao) -> dict:
-    """Retorna a composição comercial preservando contratos legados.
+def _normalizar_tipo_desconto_cupom(valor: str | None) -> str:
+    return "fixo" if str(valor or "").strip().lower() == "fixo" else "percentual"
 
-    O desconto incide somente sobre equipamentos. Horas adicionais e frete são
-    somados depois do desconto. ``item.valor`` continua sendo o total líquido final.
+
+def _cupom_tipo(cupom: Cupom | None) -> str:
+    if not cupom:
+        return "percentual"
+    return "fixo" if float(getattr(cupom, "percentual", 0) or 0) < 0 else "percentual"
+
+
+def _cupom_valor_configurado(cupom: Cupom | None) -> float:
+    if not cupom:
+        return 0.0
+    return abs(float(getattr(cupom, "percentual", 0) or 0))
+
+
+def _calcular_desconto_cupom(subtotal: float, cupom: Cupom | None) -> float:
+    subtotal = max(float(subtotal or 0), 0.0)
+    if not cupom or subtotal <= 0:
+        return 0.0
+    tipo = _cupom_tipo(cupom)
+    valor = _cupom_valor_configurado(cupom)
+    if valor <= 0:
+        return 0.0
+    if tipo == "fixo":
+        return round(min(subtotal, valor), 2)
+    return round(min(subtotal, subtotal * min(valor, 100.0) / 100.0), 2)
+
+
+def _rotulo_desconto_cupom(tipo: str, valor: float) -> str:
+    if _normalizar_tipo_desconto_cupom(tipo) == "fixo":
+        return f"R$ {moeda_br(valor)}"
+    return f"{moeda_br(valor)}%"
+
+
+def composicao_valores_contrato(item: Solicitacao) -> dict:
+    """Composição comercial sem reinterpretar contratos já fechados.
+
+    ``valor_desconto`` permanece como total por compatibilidade. Nos contratos da
+    1.0.126 em diante a origem fica separada em cupom e desconto manual. Para o
+    legado, quando esses snapshots ainda não existem, o total salvo é preservado.
     """
-    desconto = max(float(getattr(item, "valor_desconto", 0) or 0), 0.0)
+    desconto_total = max(float(getattr(item, "valor_desconto", 0) or 0), 0.0)
+    desconto_cupom = max(float(getattr(item, "valor_desconto_cupom", 0) or 0), 0.0)
+    desconto_manual = max(float(getattr(item, "valor_desconto_manual", 0) or 0), 0.0)
+    cupom_codigo = str(getattr(item, "cupom_codigo", "") or "").strip().upper()
+    # Compatibilidade: contratos antigos tinham apenas valor_desconto.
+    if desconto_cupom <= 0.009 and desconto_manual <= 0.009 and desconto_total > 0.009:
+        if cupom_codigo:
+            desconto_cupom = desconto_total
+        else:
+            desconto_manual = desconto_total
+
     frete = max(float(getattr(item, "valor_frete", 0) or 0), 0.0)
     horas_adicionais_valor = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
     equipamentos = max(float(getattr(item, "valor_equipamentos", 0) or 0), 0.0)
     if equipamentos <= 0.009:
         itens = list(getattr(item, "itens", None) or [])
         subtotal_itens = sum(max(float(getattr(it, "valor_total", 0) or 0), 0.0) for it in itens)
-        if subtotal_itens > 0.009:
-            equipamentos = subtotal_itens
+        opcionais = list(getattr(item, "opcionais_contrato", None) or [])
+        subtotal_opcionais = sum(max(float(getattr(op, "valor_total", 0) or 0), 0.0) for op in opcionais)
+        if subtotal_itens + subtotal_opcionais > 0.009:
+            equipamentos = subtotal_itens + subtotal_opcionais
         else:
-            equipamentos = max(float(getattr(item, "valor", 0) or 0) + desconto - frete, 0.0)
+            equipamentos = max(float(getattr(item, "valor", 0) or 0) + desconto_total - frete - horas_adicionais_valor, 0.0)
     total = max(float(getattr(item, "valor", 0) or 0), 0.0)
-    calculado = max(equipamentos - desconto + horas_adicionais_valor + frete, 0.0)
+    calculado = max(equipamentos - desconto_total + horas_adicionais_valor + frete, 0.0)
     if total <= 0.009 and calculado > 0.009:
         total = calculado
+    cupom_bruto = float(getattr(item, "cupom_percentual", 0) or 0)
+    tipo = "fixo" if cupom_bruto < 0 else "percentual"
+    valor_cupom = abs(cupom_bruto)
+    subtotal_opcionais = sum(max(float(getattr(op, "valor_total", 0) or 0), 0.0) for op in (getattr(item, "opcionais_contrato", None) or []))
     return {
         "equipamentos": round(equipamentos, 2),
-        "cupom_codigo": str(getattr(item, "cupom_codigo", "") or "").strip().upper(),
-        "cupom_percentual": max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0),
-        "desconto": round(desconto, 2),
+        "opcionais": round(subtotal_opcionais, 2),
+        "cupom_codigo": cupom_codigo,
+        "cupom_percentual": valor_cupom if tipo == "percentual" else 0.0,
+        "cupom_tipo": tipo,
+        "cupom_valor": round(valor_cupom, 2),
+        "cupom_rotulo": _rotulo_desconto_cupom(tipo, valor_cupom) if valor_cupom > 0 else "",
+        "desconto_cupom": round(desconto_cupom, 2),
+        "desconto_manual": round(desconto_manual, 2),
+        "desconto": round(desconto_total, 2),
         "horas_adicionais": round(horas_adicionais_valor, 2),
         "frete": round(frete, 2),
         "total": round(total, 2),
@@ -833,13 +891,28 @@ def composicao_valores_contrato(item: Solicitacao) -> dict:
 
 
 templates.env.globals["composicao_valores_contrato"] = composicao_valores_contrato
+templates.env.globals["rotulo_desconto_cupom"] = _rotulo_desconto_cupom
+templates.env.globals["cupom_tipo"] = _cupom_tipo
+templates.env.globals["cupom_valor_configurado"] = _cupom_valor_configurado
 
 
 def _normalizar_codigo_cupom(valor: str) -> str:
     return re.sub(r"[^A-Z0-9_-]", "", str(valor or "").strip().upper())[:60]
 
 
-def _cupom_valido(db: Session, empresa_id: int, codigo: str, referencia: date | None = None) -> Cupom | None:
+def _validade_efetiva_cupom(cupom: Cupom | None) -> date | None:
+    if not cupom:
+        return None
+    # Campanha vigente da Karaokê RJ: KARAOKE10 pode ser fechado até 31/10/2026.
+    if _normalizar_codigo_cupom(getattr(cupom, "codigo", "") or "") == "KARAOKE10":
+        return date(2026, 10, 31)
+    return getattr(cupom, "valido_ate", None)
+
+
+templates.env.globals["validade_efetiva_cupom"] = _validade_efetiva_cupom
+
+
+def _cupom_valido(db: Session, empresa_id: int, codigo: str) -> Cupom | None:
     codigo_limpo = _normalizar_codigo_cupom(codigo)
     if not codigo_limpo:
         return None
@@ -850,55 +923,65 @@ def _cupom_valido(db: Session, empresa_id: int, codigo: str, referencia: date | 
     ).first()
     if not cupom:
         return None
-    referencia = referencia or datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()
-    if cupom.valido_ate and referencia > cupom.valido_ate:
+    # A validade é a data em que o contrato/pedido é fechado, nunca a data do evento.
+    data_fechamento = datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()
+    valido_ate_efetivo = _validade_efetiva_cupom(cupom)
+    if valido_ate_efetivo and data_fechamento > valido_ate_efetivo:
         return None
-    if float(cupom.percentual or 0) <= 0:
+    if _cupom_valor_configurado(cupom) <= 0:
         return None
     return cupom
 
 
 def _cupons_ativos_empresa(db: Session, empresa_id: int) -> list[Cupom]:
-    return db.query(Cupom).filter(
-        Cupom.empresa_id == empresa_id,
-        Cupom.ativo == True,
-        or_(Cupom.valido_ate == None, Cupom.valido_ate >= datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()),
+    hoje = datetime.now(timezone.utc).astimezone(FUSO_EMPRESA).date()
+    itens = db.query(Cupom).filter(
+        Cupom.empresa_id == empresa_id, Cupom.ativo == True
     ).order_by(Cupom.codigo).all()
+    return [c for c in itens if not _validade_efetiva_cupom(c) or hoje <= _validade_efetiva_cupom(c)]
 
 
 def _cupom_valido_ou_snapshot(db: Session, empresa_id: int, codigo: str, item: Solicitacao | None = None) -> Cupom | None:
     """Valida cupom novo, mas preserva a condição já aplicada ao contrato.
 
-    Assim um contrato fechado durante a campanha continua com o mesmo percentual
-    mesmo que o evento seja meses depois ou o cadastro do cupom expire/inative.
+    Um contrato fechado dentro da campanha mantém o desconto, mesmo quando o
+    evento ocorre depois da validade ou o cadastro do cupom é alterado/inativado.
     """
     codigo_limpo = _normalizar_codigo_cupom(codigo)
     if not codigo_limpo:
         return None
     if item:
         codigo_salvo = _normalizar_codigo_cupom(getattr(item, "cupom_codigo", "") or "")
-        percentual_salvo = max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0)
-        if codigo_salvo == codigo_limpo and percentual_salvo > 0:
-            return Cupom(codigo=codigo_salvo, percentual=percentual_salvo, ativo=True)
+        desconto_salvo = float(getattr(item, "cupom_percentual", 0) or 0)
+        if codigo_salvo == codigo_limpo and abs(desconto_salvo) > 0:
+            return Cupom(codigo=codigo_salvo, percentual=desconto_salvo, ativo=True)
     return _cupom_valido(db, empresa_id, codigo_limpo)
 
 
 def _aplicar_composicao_comercial(
         item: Solicitacao, valor_equipamentos: float, frete: float, cupom: Cupom | None,
-        valor_horas_adicionais: float | None = None) -> None:
+        valor_horas_adicionais: float | None = None, desconto_manual: float | None = None) -> None:
     subtotal = max(float(valor_equipamentos or 0), 0.0)
     valor_frete = max(float(frete or 0), 0.0)
     if valor_horas_adicionais is None:
         valor_horas = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
     else:
         valor_horas = max(float(valor_horas_adicionais or 0), 0.0)
-    percentual = max(float(cupom.percentual or 0), 0.0) if cupom else 0.0
-    desconto = round(subtotal * percentual / 100.0, 2) if percentual > 0 else 0.0
-    total = round(max(subtotal - desconto + valor_horas + valor_frete, 0.0), 2)
+    desconto_cupom = _calcular_desconto_cupom(subtotal, cupom)
+    if desconto_manual is None:
+        desconto_manual_bruto = max(float(getattr(item, "valor_desconto_manual", 0) or 0), 0.0)
+    else:
+        desconto_manual_bruto = max(float(desconto_manual or 0), 0.0)
+    # O desconto manual entra depois do cupom e nunca deixa o subtotal negativo.
+    desconto_manual_efetivo = min(desconto_manual_bruto, max(subtotal - desconto_cupom, 0.0))
+    desconto_total = round(min(subtotal, desconto_cupom + desconto_manual_efetivo), 2)
+    total = round(max(subtotal - desconto_total + valor_horas + valor_frete, 0.0), 2)
     item.valor_equipamentos = round(subtotal, 2)
     item.cupom_codigo = cupom.codigo.upper() if cupom else None
-    item.cupom_percentual = percentual
-    item.valor_desconto = desconto
+    item.cupom_percentual = float(getattr(cupom, "percentual", 0) or 0) if cupom else 0.0
+    item.valor_desconto_cupom = round(desconto_cupom, 2)
+    item.valor_desconto_manual = round(desconto_manual_efetivo, 2)
+    item.valor_desconto = desconto_total
     item.valor_frete = round(valor_frete, 2)
     item.valor_horas_adicionais = round(valor_horas, 2)
     item.valor = total
@@ -1121,24 +1204,38 @@ def corrigir_valores_teste(db: Session):
 
 
 def recalcular_valores_reservas(db: Session):
-    """Recalcula a composição comercial a partir dos itens sem apagar cupom/frete."""
+    """Recalcula somente rascunhos. Contratos históricos ficam congelados.
+
+    A 1.0.126 introduz opcionais separados e desconto manual. Nenhuma rotina de
+    startup pode reinterpretar contratos já enviados, aceitos, pagos ou concluídos.
+    """
     alterou = False
-    for item in db.query(Solicitacao).all():
+    for item in db.query(Solicitacao).filter(Solicitacao.status.in_(["pre_reserva", "reserva"])).all():
         total_itens = round(sum(float(linha.valor_total or 0) for linha in item.itens), 2)
-        if total_itens <= 0:
+        total_opcionais = round(sum(float(op.valor_total or 0) for op in (getattr(item, "opcionais_contrato", None) or [])), 2)
+        subtotal = round(total_itens + total_opcionais, 2)
+        if subtotal <= 0:
             continue
-        percentual = max(float(getattr(item, "cupom_percentual", 0) or 0), 0.0)
+        cupom_bruto = float(getattr(item, "cupom_percentual", 0) or 0)
+        cupom_snapshot = Cupom(
+            codigo=str(getattr(item, "cupom_codigo", "") or ""), ativo=True, percentual=cupom_bruto
+        ) if abs(cupom_bruto) > 0 else None
         frete = max(float(getattr(item, "valor_frete", 0) or 0), 0.0)
-        desconto = round(total_itens * percentual / 100.0, 2) if percentual > 0 else 0.0
-        total_final = round(max(total_itens - desconto + frete, 0.0), 2)
+        horas = max(float(getattr(item, "valor_horas_adicionais", 0) or 0), 0.0)
+        desconto_cupom = _calcular_desconto_cupom(subtotal, cupom_snapshot)
+        desconto_manual = min(max(float(getattr(item, "valor_desconto_manual", 0) or 0), 0.0), max(subtotal - desconto_cupom, 0.0))
+        desconto = round(min(subtotal, desconto_cupom + desconto_manual), 2)
+        total_final = round(max(subtotal - desconto + horas + frete, 0.0), 2)
         antes = (
             round(float(getattr(item, "valor_equipamentos", 0) or 0), 2),
             round(float(getattr(item, "valor_desconto", 0) or 0), 2),
             round(float(item.valor or 0), 2),
         )
-        depois = (total_itens, desconto, total_final)
+        depois = (subtotal, desconto, total_final)
         if antes != depois:
-            item.valor_equipamentos = total_itens
+            item.valor_equipamentos = subtotal
+            item.valor_desconto_cupom = round(desconto_cupom, 2)
+            item.valor_desconto_manual = round(desconto_manual, 2)
             item.valor_desconto = desconto
             item.valor = total_final
             # Valor pago não pode ficar maior que o total da reserva.
@@ -1843,7 +1940,7 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     comp = composicao_valores_contrato(item)
     add(linhas, "Equipamentos", f"R$ {moeda_br(comp['equipamentos'])}")
     if comp["cupom_codigo"] and comp["desconto"] > 0:
-        add(linhas, "Cupom", f"{comp['cupom_codigo']} ({moeda_br(comp['cupom_percentual'])}%)")
+        add(linhas, "Cupom", f"{comp['cupom_codigo']} ({comp['cupom_rotulo']})")
         add(linhas, "Desconto", f"- R$ {moeda_br(comp['desconto'])}")
     add(linhas, "Frete", f"R$ {moeda_br(comp['frete'])}")
     add(linhas, "Valor total", f"R$ {moeda_br(comp['total'])}")
@@ -1899,7 +1996,7 @@ def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva)
         "",
         "*💰 Financeiro*",
         f"*Equipamentos:* R$ {moeda_br(comp['equipamentos'])}",
-        *([f"*Cupom:* {comp['cupom_codigo']} ({moeda_br(comp['cupom_percentual'])}%)",
+        *([f"*Cupom:* {comp['cupom_codigo']} ({comp['cupom_rotulo']})",
            f"*Desconto:* - R$ {moeda_br(comp['desconto'])}"]
           if comp['cupom_codigo'] and comp['desconto'] > 0 else []),
         *([f"*Horas adicionais:* R$ {moeda_br(comp['horas_adicionais'])}"] if comp['horas_adicionais'] > 0 else []),
@@ -2172,6 +2269,7 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_cep_origem VARCHAR(20)")
     nova_col_modulo_equipes = False
     nova_col_modulo_recursos = False
+    nova_col_modulo_opcionais = False
     nova_col_modulo_cupons = False
     nova_col_inteligencia = False
     if "frete_multiplicador_km" not in cols_emp:
@@ -2182,6 +2280,9 @@ def garantir_colunas_novas():
     if "modulo_recursos_ativo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN modulo_recursos_ativo BOOLEAN DEFAULT false")
         nova_col_modulo_recursos = True
+    if "modulo_opcionais_ativo" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN modulo_opcionais_ativo BOOLEAN DEFAULT false")
+        nova_col_modulo_opcionais = True
     if "modulo_cupons_ativo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN modulo_cupons_ativo BOOLEAN DEFAULT false")
         nova_col_modulo_cupons = True
@@ -2374,6 +2475,10 @@ def garantir_colunas_novas():
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN cupom_percentual FLOAT DEFAULT 0")
         if "valor_desconto" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_desconto FLOAT DEFAULT 0")
+        if "valor_desconto_cupom" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_desconto_cupom FLOAT DEFAULT 0")
+        if "valor_desconto_manual" not in cols_sol:
+            comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_desconto_manual FLOAT DEFAULT 0")
         if "valor_frete" not in cols_sol:
             comandos.append("ALTER TABLE solicitacoes ADD COLUMN valor_frete FLOAT DEFAULT 0")
         if "campanha_organiza_id" not in cols_sol:
@@ -2870,6 +2975,37 @@ def garantir_colunas_novas():
         """)
         comandos.append("CREATE INDEX IF NOT EXISTS ix_vitrine_categorias_empresa_id ON vitrine_categorias (empresa_id)")
 
+    if "opcionais_empresa" in tabelas:
+        cols_opc = colunas("opcionais_empresa")
+        if "item_estoque_id" not in cols_opc:
+            comandos.append("ALTER TABLE opcionais_empresa ADD COLUMN item_estoque_id INTEGER")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_opcionais_empresa_item_estoque_id ON opcionais_empresa (item_estoque_id)")
+
+    if "solicitacoes_opcionais" not in tabelas:
+        comandos.append("""
+        CREATE TABLE solicitacoes_opcionais (
+            id INTEGER PRIMARY KEY,
+            empresa_id INTEGER NOT NULL,
+            solicitacao_id INTEGER NOT NULL,
+            produto_id INTEGER,
+            opcional_id INTEGER,
+            item_estoque_id INTEGER,
+            nome VARCHAR(140) NOT NULL,
+            quantidade INTEGER DEFAULT 1 NOT NULL,
+            valor_unitario FLOAT DEFAULT 0 NOT NULL,
+            valor_total FLOAT DEFAULT 0 NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            FOREIGN KEY(empresa_id) REFERENCES empresas (id),
+            FOREIGN KEY(solicitacao_id) REFERENCES solicitacoes (id) ON DELETE CASCADE,
+            FOREIGN KEY(produto_id) REFERENCES produtos_servicos (id) ON DELETE SET NULL,
+            FOREIGN KEY(opcional_id) REFERENCES opcionais_empresa (id) ON DELETE SET NULL,
+            FOREIGN KEY(item_estoque_id) REFERENCES itens_produto_servico_estoque (id) ON DELETE SET NULL
+        )
+        """)
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_empresa_id ON solicitacoes_opcionais (empresa_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_solicitacao_id ON solicitacoes_opcionais (solicitacao_id)")
+        comandos.append("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_item_estoque_id ON solicitacoes_opcionais (item_estoque_id)")
+
     # Índices de performance para as telas de Painel/Agenda/Operação.
     # São idempotentes e ajudam principalmente quando o PostgreSQL está remoto.
     if "solicitacoes" in tabelas:
@@ -2939,6 +3075,14 @@ def garantir_colunas_novas():
             conn.execute(text("UPDATE empresas SET modulo_equipes_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM equipes)"))
         if nova_col_modulo_recursos and "produtos_servicos_recursos" in tabelas:
             conn.execute(text("UPDATE empresas SET modulo_recursos_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM produtos_servicos_recursos)"))
+        if nova_col_modulo_opcionais:
+            fontes = []
+            if "opcionais_empresa" in tabelas:
+                fontes.append("SELECT DISTINCT empresa_id FROM opcionais_empresa")
+            if "produtos_servicos" in tabelas:
+                fontes.append("SELECT DISTINCT empresa_id FROM produtos_servicos WHERE utiliza_opcionais = true")
+            if fontes:
+                conn.execute(text("UPDATE empresas SET modulo_opcionais_ativo = true WHERE id IN (" + " UNION ".join(fontes) + ")"))
         if nova_col_modulo_cupons and "cupons" in tabelas:
             conn.execute(text("UPDATE empresas SET modulo_cupons_ativo = true WHERE id IN (SELECT DISTINCT empresa_id FROM cupons)"))
         if nova_col_inteligencia and "rotas_inteligentes" in tabelas:
@@ -3800,6 +3944,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_primeira_valor FLOAT DEFAULT 100",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_link_direto_token VARCHAR(64)",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS modulo_opcionais_ativo BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS catalogo_musicas_url VARCHAR(500)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
@@ -3808,6 +3953,9 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS duracao_contratada_minutos INTEGER",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS valor_horas_adicionais FLOAT DEFAULT 0 NOT NULL",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS valor_desconto_cupom FLOAT DEFAULT 0",
+        "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS valor_desconto_manual FLOAT DEFAULT 0",
+        "ALTER TABLE opcionais_empresa ADD COLUMN IF NOT EXISTS item_estoque_id INTEGER REFERENCES itens_produto_servico_estoque(id) ON DELETE SET NULL",
         "ALTER TABLE solicitacoes ADD COLUMN IF NOT EXISTS cortesia_retirada BOOLEAN DEFAULT false NOT NULL",
     ]
     try:
@@ -3857,10 +4005,48 @@ def _garantir_colunas_v113_criticas() -> None:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_data_evento ON vitrine_oportunidades (data_evento)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_status ON vitrine_oportunidades (status)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_vitrine_oportunidades_solicitacao_id ON vitrine_oportunidades (solicitacao_id)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS solicitacoes_opcionais (
+                        id SERIAL PRIMARY KEY,
+                        empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+                        solicitacao_id INTEGER NOT NULL REFERENCES solicitacoes(id) ON DELETE CASCADE,
+                        produto_id INTEGER REFERENCES produtos_servicos(id) ON DELETE SET NULL,
+                        opcional_id INTEGER REFERENCES opcionais_empresa(id) ON DELETE SET NULL,
+                        item_estoque_id INTEGER REFERENCES itens_produto_servico_estoque(id) ON DELETE SET NULL,
+                        nome VARCHAR(140) NOT NULL,
+                        quantidade INTEGER NOT NULL DEFAULT 1,
+                        valor_unitario FLOAT NOT NULL DEFAULT 0,
+                        valor_total FLOAT NOT NULL DEFAULT 0,
+                        criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_empresa_id ON solicitacoes_opcionais (empresa_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_solicitacao_id ON solicitacoes_opcionais (solicitacao_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_item_estoque_id ON solicitacoes_opcionais (item_estoque_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_opcionais_empresa_item_estoque_id ON opcionais_empresa (item_estoque_id)"))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS app_migrations (
+                        chave VARCHAR(160) PRIMARY KEY,
+                        aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """))
+                primeira_ativacao_opcionais = conn.execute(text("""
+                    INSERT INTO app_migrations (chave) VALUES ('20261006_modulo_opcionais_v126')
+                    ON CONFLICT (chave) DO NOTHING
+                    RETURNING chave
+                """)).scalar()
+                if primeira_ativacao_opcionais:
+                    conn.execute(text("""
+                        UPDATE empresas
+                           SET modulo_opcionais_ativo = true
+                         WHERE id IN (SELECT DISTINCT empresa_id FROM opcionais_empresa)
+                            OR id IN (SELECT DISTINCT empresa_id FROM produtos_servicos WHERE utiliza_opcionais = true)
+                    """))
             return
         # Desenvolvimento/SQLite: reutiliza a rotina compatível já existente.
         garantir_colunas_novas()
         VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
+        SolicitacaoOpcional.__table__.create(bind=engine, checkfirst=True)
     except Exception:
         logger.exception("Falha ao garantir colunas críticas da v1.0.122")
         raise
@@ -4106,8 +4292,11 @@ def startup():
                     db.add(Cupom(
                         empresa_id=emp.id, codigo="KARAOKE10",
                         descricao="10% de desconto no valor dos equipamentos. Frete não recebe desconto.",
-                        percentual=10.0, valido_ate=date(2026, 9, 30), ativo=True,
+                        percentual=10.0, valido_ate=date(2026, 10, 31), ativo=True,
                     ))
+                    db.commit()
+                elif cupom_k10.valido_ate != date(2026, 10, 31):
+                    cupom_k10.valido_ate = date(2026, 10, 31)
                     db.commit()
             if emp.infinitepay_ativa:
                 _infinitepay_seed_taxas(db, emp.id)
@@ -4821,6 +5010,7 @@ def admin_criar_empresa(
         google_calendar_duracao_operacao_min: int = Form(30),
         modulo_equipes_ativo: Optional[str] = Form(None),
         modulo_recursos_ativo: Optional[str] = Form(None),
+        modulo_opcionais_ativo: Optional[str] = Form(None),
         modulo_cupons_ativo: Optional[str] = Form(None),
         inteligencia_ativa: Optional[str] = Form(None),
         lokafest_ativo: Optional[str] = Form(None),
@@ -4899,6 +5089,7 @@ def admin_criar_empresa(
         google_calendar_duracao_operacao_min=max(int(google_calendar_duracao_operacao_min or 30), 5),
         modulo_equipes_ativo=bool(modulo_equipes_ativo),
         modulo_recursos_ativo=bool(modulo_recursos_ativo),
+        modulo_opcionais_ativo=bool(modulo_opcionais_ativo),
         modulo_cupons_ativo=bool(modulo_cupons_ativo),
         inteligencia_ativa=bool(inteligencia_ativa),
         lokafest_ativo=lokafest_habilitado,
@@ -5011,6 +5202,7 @@ def admin_salvar_empresa(
         google_calendar_duracao_operacao_min: int = Form(30),
         modulo_equipes_ativo: Optional[str] = Form(None),
         modulo_recursos_ativo: Optional[str] = Form(None),
+        modulo_opcionais_ativo: Optional[str] = Form(None),
         modulo_cupons_ativo: Optional[str] = Form(None),
         inteligencia_ativa: Optional[str] = Form(None),
         lokafest_ativo: Optional[str] = Form(None),
@@ -5090,6 +5282,7 @@ def admin_salvar_empresa(
 
     empresa.modulo_equipes_ativo = bool(modulo_equipes_ativo)
     empresa.modulo_recursos_ativo = bool(modulo_recursos_ativo)
+    empresa.modulo_opcionais_ativo = bool(modulo_opcionais_ativo)
     empresa.modulo_cupons_ativo = bool(modulo_cupons_ativo)
     empresa.inteligencia_ativa = bool(inteligencia_ativa)
     empresa.lokafest_ativo = bool(lokafest_ativo) or "LOKAFEST" in sistemas
@@ -5718,6 +5911,11 @@ def _recursos_atuais_view(db: Session, item: Solicitacao | None) -> dict:
 
 
 def _requisitos_solicitacao_padrao(item: Solicitacao, mapa_produtos: dict[int, dict[int, int]]) -> dict[int, int]:
+    """Recursos físicos: base dos produtos + opcionais vinculados ao estoque.
+
+    O opcional é uma cobrança separada; só entra aqui quando possui um recurso
+    vinculado. Assim 1 TV inclusa no Just Dance + 1 TV opcional = 2 TVs no estoque.
+    """
     requisitos: dict[int, int] = {}
     for ri in list(getattr(item, "itens", []) or []):
         if not ri.produto_id:
@@ -5725,6 +5923,13 @@ def _requisitos_solicitacao_padrao(item: Solicitacao, mapa_produtos: dict[int, d
         qtd_produto = max(1, int(ri.quantidade or 1))
         for item_estoque_id, qtd_por_unidade in mapa_produtos.get(int(ri.produto_id), {}).items():
             requisitos[item_estoque_id] = requisitos.get(item_estoque_id, 0) + (qtd_produto * qtd_por_unidade)
+    for op in list(getattr(item, "opcionais_contrato", []) or []):
+        rid = getattr(op, "item_estoque_id", None)
+        if not rid:
+            continue
+        qtd = max(0, int(getattr(op, "quantidade", 0) or 0))
+        if qtd:
+            requisitos[int(rid)] = requisitos.get(int(rid), 0) + qtd
     return requisitos
 
 
@@ -5751,7 +5956,7 @@ def _requisitos_solicitacao_efetivos(
 def _reservas_ativas_na_data(db: Session, empresa_id: int, data_consulta: date, excluir_solicitacao_id: int | None = None):
     q = (
         db.query(Solicitacao)
-        .options(selectinload(Solicitacao.itens))
+        .options(selectinload(Solicitacao.itens), selectinload(Solicitacao.opcionais_contrato))
         .filter(Solicitacao.empresa_id == empresa_id)
         .filter(Solicitacao.data_evento == data_consulta)
         .filter(~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)))
@@ -6188,6 +6393,7 @@ def _empresa_modulo_ativo(empresa: Empresa, modulo: str) -> bool:
     mapa = {
         "equipes": "modulo_equipes_ativo",
         "recursos": "modulo_recursos_ativo",
+        "opcionais": "modulo_opcionais_ativo",
         "cupons": "modulo_cupons_ativo",
         "inteligencia": "inteligencia_ativa",
     }
@@ -6497,6 +6703,25 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
     return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
 
 
+def _precos_contrato_produtos(db: Session, empresa: Empresa, produtos: list[ProdutoServico]) -> dict[str, dict[str, float | None]]:
+    """Mapa enxuto de preços Residencial/Empresa usado pelo contrato interno.
+
+    Reaproveita exatamente a mesma regra comercial da vitrine, sem duplicar preços.
+    ``None`` indica "sob consulta" e deixa o valor unitário para preenchimento manual.
+    """
+    resultado: dict[str, dict[str, float | None]] = {}
+    for produto in produtos:
+        por_tipo: dict[str, float | None] = {}
+        for tipo_evento in TIPOS_EVENTO_VITRINE:
+            preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
+            if preco.get("sob_consulta"):
+                por_tipo[tipo_evento] = None
+            else:
+                por_tipo[tipo_evento] = round(float(preco.get("valor") or 0), 2)
+        resultado[str(produto.id)] = por_tipo
+    return resultado
+
+
 def _duracao_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServico, tipo_evento: str) -> int:
     """Duração contratada: regra da empresa/tipo + eventual acréscimo do item."""
     base = _duracao_base_empresa_tipo(db, empresa, tipo_evento)
@@ -6600,6 +6825,91 @@ def _opcionais_produto(db: Session, empresa_id: int, produto_id: int, somente_at
         return []
     excluidos = _ids_opcionais_excluidos(db, empresa_id, produto_id)
     return [o for o in _opcionais_catalogo_empresa(db, empresa_id, somente_ativos) if o.id not in excluidos]
+
+
+def _mapa_opcionais_produtos_view(db: Session, empresa: Empresa, produtos: list[ProdutoServico] | None = None) -> dict:
+    """Catálogo comercial por produto para contrato manual/vitrine.
+
+    O vínculo com recurso é apenas metadado operacional; se recursos estiverem
+    desligados, o opcional continua cobrando normalmente e o estoque é ignorado.
+    """
+    if not _empresa_modulo_ativo(empresa, "opcionais"):
+        return {}
+    produtos = produtos if produtos is not None else db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).all()
+    itens_estoque = {int(r.id): r for r in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+    saida = {}
+    for produto in produtos:
+        regs = []
+        for opc in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True):
+            rid = int(opc.item_estoque_id) if getattr(opc, "item_estoque_id", None) else None
+            regs.append({
+                "id": int(opc.id), "nome": str(opc.nome or "Opcional"),
+                "quantidade_maxima": max(1, int(opc.quantidade or 1)),
+                "valor": round(max(float(opc.valor or 0), 0.0), 2),
+                "item_estoque_id": rid,
+                "recurso_nome": str(itens_estoque[rid].nome) if rid in itens_estoque else "",
+            })
+        saida[str(produto.id)] = regs
+    return saida
+
+
+def _opcionais_contrato_view(item: Solicitacao | None) -> list[dict]:
+    if not item:
+        return []
+    return [{
+        "id": int(op.id),
+        "opcional_id": int(op.opcional_id) if op.opcional_id else None,
+        "produto_id": int(op.produto_id) if op.produto_id else None,
+        "item_estoque_id": int(op.item_estoque_id) if op.item_estoque_id else None,
+        "nome": str(op.nome or "Opcional"),
+        "quantidade": max(0, int(op.quantidade or 0)),
+        "valor_unitario": round(max(float(op.valor_unitario or 0), 0.0), 2),
+        "valor_total": round(max(float(op.valor_total or 0), 0.0), 2),
+    } for op in (getattr(item, "opcionais_contrato", None) or [])]
+
+
+def _salvar_opcionais_contrato(db: Session, empresa: Empresa, item: Solicitacao, registros: list[dict]) -> float:
+    """Substitui opcionais do contrato e devolve o subtotal cobrado.
+
+    É chamada apenas em criação/edição explícita. Não existe migração automática de
+    contratos históricos, justamente para preservar os valores antigos.
+    """
+    db.query(SolicitacaoOpcional).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
+    total = 0.0
+    for reg in registros or []:
+        try:
+            oid = int(reg.get("opcional_id") or reg.get("id") or 0)
+            qtd = max(0, int(reg.get("quantidade") or 0))
+            pid = int(reg.get("produto_id") or 0) or None
+        except (TypeError, ValueError):
+            continue
+        if oid <= 0 or qtd <= 0:
+            continue
+        opc = db.get(OpcionalEmpresa, oid)
+        if not opc or opc.empresa_id != empresa.id or not opc.ativo:
+            continue
+        if pid:
+            permitidos = {int(o.id) for o in _opcionais_produto(db, empresa.id, pid, somente_ativos=True)}
+            if oid not in permitidos:
+                continue
+        qtd = min(qtd, max(1, int(opc.quantidade or 1)))
+        valor_unit = max(float(reg.get("valor_unitario") if reg.get("valor_unitario") is not None else opc.valor or 0), 0.0)
+        valor_total = round(valor_unit * qtd, 2)
+        total += valor_total
+        db.add(SolicitacaoOpcional(
+            empresa_id=empresa.id, solicitacao_id=item.id, produto_id=pid, opcional_id=opc.id,
+            item_estoque_id=(int(opc.item_estoque_id) if (_empresa_modulo_ativo(empresa, "recursos") and getattr(opc, "item_estoque_id", None)) else None),
+            nome=str(opc.nome or "Opcional")[:140], quantidade=qtd,
+            valor_unitario=round(valor_unit, 2), valor_total=valor_total,
+        ))
+    db.flush()
+    # A relationship pode ter sido carregada antes do DELETE/INSERT; expira para que
+    # cálculos de estoque posteriores enxerguem exatamente os novos opcionais.
+    try:
+        db.expire(item, ["opcionais_contrato"])
+    except Exception:
+        pass
+    return round(total, 2)
 
 
 def _salvar_opcionais_produto(
@@ -6793,6 +7103,10 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
     tipo_salvo = str(getattr(item, "tipo_evento_comercial", "") or "").strip().lower()
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_salvo if tipo_salvo in TIPOS_EVENTO_VITRINE else (m_tipo.group(1) if m_tipo else "residencial"))
     empresa = db.get(Empresa, item.empresa_id)
+    opcionais_por_produto: dict[int, list] = {}
+    for op in list(getattr(item, "opcionais_contrato", None) or []):
+        if op.produto_id:
+            opcionais_por_produto.setdefault(int(op.produto_id), []).append(op)
     itens = []
     subtotal = 0.0
     possui_sob_consulta = False
@@ -6800,7 +7114,18 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
     for ri in item.itens or []:
         produto = db.get(ProdutoServico, ri.produto_id) if ri.produto_id else None
         sob = "Preço do item: sob consulta." in str(ri.descricao or "")
-        total_ri = max(float(ri.valor_total or 0), 0.0)
+        total_base = max(float(ri.valor_total or 0), 0.0)
+        op_rows = opcionais_por_produto.get(int(ri.produto_id or 0), [])
+        if op_rows:
+            op_view = [{
+                "id": op.opcional_id or op.id, "nome": op.nome, "quantidade": max(1, int(op.quantidade or 1)),
+                "valor_unitario": max(float(op.valor_unitario or 0), 0.0), "valor_total": max(float(op.valor_total or 0), 0.0),
+            } for op in op_rows]
+        else:
+            # Compatibilidade visual dos pedidos antigos, que gravavam opcionais na descrição.
+            op_view = _opcionais_descricao_reserva(ri.descricao)
+        total_op = sum(max(float(o.get("valor_total") or 0), 0.0) for o in op_view)
+        total_ri = round(total_base + total_op, 2)
         subtotal += total_ri
         possui_sob_consulta = possui_sob_consulta or sob
         duracao_item = (
@@ -6811,7 +7136,7 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         itens.append({
             "produto": produto, "produto_id": ri.produto_id, "nome": ri.nome,
             "quantidade": max(1, int(ri.quantidade or 1)), "valor_unitario": float(ri.valor_unitario or 0),
-            "valor_total": total_ri, "opcionais": _opcionais_descricao_reserva(ri.descricao),
+            "valor_total": total_ri, "valor_base_total": total_base, "opcionais": op_view,
             "sob_consulta": sob, "foto": _foto_capa_produto(produto) if produto else "",
             "duracao_minutos": duracao_item, "duracao_rotulo": _rotulo_duracao_minutos(duracao_item),
         })
@@ -6838,6 +7163,8 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
         "cupom": None,
         "cupom_codigo": str(item.cupom_codigo or ""),
         "cupom_percentual": float(item.cupom_percentual or 0),
+        "cupom_tipo": "fixo" if float(item.cupom_percentual or 0) < 0 else "percentual",
+        "cupom_valor": abs(float(item.cupom_percentual or 0)),
         "desconto": round(desconto, 2),
         "possui_sob_consulta": possui_sob_consulta,
         "frete": {
@@ -6846,7 +7173,6 @@ def _pedido_vitrine_solicitacao(db: Session, item: Solicitacao) -> dict:
             "logradouro": str(item.local or ""), "bairro": str(item.bairro or ""),
             "cidade": str(item.local_cidade or ""), "estado": str(item.local_estado or ""),
         },
-        # Base para a tela de pré-contrato; as horas extras são somadas pelo controle da tela.
         "total": round(max(float(item.valor or 0) - horas_valor, 0), 2),
         "total_sob_consulta": possui_sob_consulta,
     }
@@ -6992,27 +7318,30 @@ def _criar_pre_reserva_vitrine(
     db.flush()
     produto_principal = None
     contrato_padrao_id = None
+    opcionais_contrato = []
     for reg in pedido.get("itens") or []:
         produto = reg.get("produto")
         descricao = str(getattr(produto, "descricao", "") or "").strip()
-        opcionais = reg.get("opcionais") or []
-        if opcionais:
-            linhas = [f"{o['quantidade']}x {o['nome']} — R$ {o['valor_total']:.2f}".replace('.', ',') for o in opcionais]
-            descricao = (descricao + "\n\nOpcionais: " + "; ".join(linhas)).strip()
         if reg.get("sob_consulta"):
             descricao = (descricao + "\n\nPreço do item: sob consulta.").strip()
+        qtd_produto = max(1, int(reg.get("quantidade") or 1))
+        valor_base_total = max(float(reg.get("valor_base_total") or 0), 0)
+        valor_unit_base = round(valor_base_total / qtd_produto, 2) if qtd_produto else 0.0
         db.add(ReservaItem(
             empresa_id=empresa.id, solicitacao_id=item.id, produto_id=getattr(produto, "id", None),
             nome=str(reg.get("nome") or getattr(produto, "nome", "Item")), descricao=descricao,
-            quantidade=max(1, int(reg.get("quantidade") or 1)),
-            valor_unitario=max(float(reg.get("valor_unitario") or 0), 0), valor_total=max(float(reg.get("valor_total") or 0), 0),
+            quantidade=qtd_produto, valor_unitario=valor_unit_base, valor_total=valor_base_total,
         ))
+        for opc in (reg.get("opcionais") or []):
+            opcionais_contrato.append({"produto_id": getattr(produto, "id", None), "opcional_id": opc.get("id"), "quantidade": opc.get("quantidade"), "valor_unitario": opc.get("valor_unitario")})
         if produto_principal is None and produto:
             produto_principal = produto
         if contrato_padrao_id is None and produto and produto.contrato_id:
             contrato_padrao_id = produto.contrato_id
     item.produto_id = produto_principal.id if produto_principal else None
     item.contrato_id = contrato_padrao_id
+    if _empresa_modulo_ativo(empresa, "opcionais"):
+        _salvar_opcionais_contrato(db, empresa, item, opcionais_contrato)
     cupom = pedido.get("cupom")
     _aplicar_composicao_comercial(
         item, float(pedido.get("subtotal") or 0), float(frete.get("valor") or 0), cupom,
@@ -7057,6 +7386,7 @@ def _snapshot_pedido_vitrine(pedido: dict) -> dict:
     frete = pedido.get("frete") if isinstance(pedido.get("frete"), dict) else {}
     return {
         "data_evento": str(data_evento or ""),
+        "modo_direto": bool(pedido.get("modo_direto")),
         "tipo_evento": _normalizar_tipo_evento_vitrine(str(pedido.get("tipo_evento") or "residencial")),
         "hora_inicio": str(hora_inicio or ""),
         "retirada_mesmo_dia": bool(pedido.get("retirada_mesmo_dia")),
@@ -7067,6 +7397,8 @@ def _snapshot_pedido_vitrine(pedido: dict) -> dict:
         "subtotal": round(float(pedido.get("subtotal") or 0), 2),
         "cupom_codigo": str(pedido.get("cupom_codigo") or ""),
         "cupom_percentual": round(float(pedido.get("cupom_percentual") or 0), 4),
+        "cupom_tipo": str(pedido.get("cupom_tipo") or ("fixo" if float(pedido.get("cupom_percentual") or 0) < 0 else "percentual")),
+        "cupom_valor": round(float(pedido.get("cupom_valor") or abs(float(pedido.get("cupom_percentual") or 0))), 4),
         "desconto": round(float(pedido.get("desconto") or 0), 2),
         "possui_sob_consulta": bool(pedido.get("possui_sob_consulta")),
         "total_sob_consulta": bool(pedido.get("total_sob_consulta")),
@@ -7167,6 +7499,8 @@ def _pedido_oportunidade_para_contexto(db: Session, empresa: Empresa, oportunida
         "subtotal": round(float(snap.get("subtotal") or 0), 2),
         "cupom": cupom, "cupom_codigo": codigo,
         "cupom_percentual": round(float(snap.get("cupom_percentual") or 0), 4),
+        "cupom_tipo": str(snap.get("cupom_tipo") or ("fixo" if float(snap.get("cupom_percentual") or 0) < 0 else "percentual")),
+        "cupom_valor": round(float(snap.get("cupom_valor") or abs(float(snap.get("cupom_percentual") or 0))), 4),
         "desconto": round(float(snap.get("desconto") or 0), 2),
         "possui_sob_consulta": bool(snap.get("possui_sob_consulta")),
         "frete": frete,
@@ -8050,7 +8384,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         valor_base_total = round(valor_unitario * quantidade, 2)
         opcionais_escolhidos = []
         total_opcionais = 0.0
-        mapa_opcionais = {o.id: o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True)}
+        mapa_opcionais = ({o.id: o for o in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True)} if _empresa_modulo_ativo(empresa, "opcionais") else {})
         for oreg in reg.get("opcionais") or []:
             try:
                 oid = int(oreg.get("opcional_id"))
@@ -8084,7 +8418,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     frete_valor = max(float(frete_bruto.get("valor") or 0), 0.0)
     cupom_codigo = _normalizar_codigo_cupom(str(bruto.get("cupom_codigo") or ""))
     cupom = _cupom_valido(db, empresa.id, cupom_codigo) if (_empresa_modulo_ativo(empresa, 'cupons') and cupom_codigo) else None
-    desconto = round(total * (float(cupom.percentual or 0) / 100.0), 2) if cupom else 0.0
+    desconto = _calcular_desconto_cupom(total, cupom)
     frete_consulta = bool(frete_bruto.get("consultar"))
     hora_inicio_texto = str(bruto.get("hora_inicio") or "").strip()
     try:
@@ -8102,6 +8436,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     valor_horas_adicionais = _valor_horas_adicionais_empresa(empresa, horas_adicionais)
     return {
         "data_evento": data_obj,
+        "modo_direto": bool(bruto.get("modo_direto")),
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
         "whatsapp": str(bruto.get("whatsapp") or "").strip(),
@@ -8117,6 +8452,8 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         "cupom": cupom,
         "cupom_codigo": cupom.codigo if cupom else "",
         "cupom_percentual": float(cupom.percentual or 0) if cupom else 0.0,
+        "cupom_tipo": _cupom_tipo(cupom) if cupom else "percentual",
+        "cupom_valor": _cupom_valor_configurado(cupom) if cupom else 0.0,
         "desconto": desconto,
         "possui_sob_consulta": possui_sob_consulta,
         "frete": {
@@ -9203,7 +9540,9 @@ def cupom_editar(cupom_id: int, request: Request, db: Session = Depends(get_db),
 def salvar_cupom(
         cupom_id: int | None = None,
         cupom_id_form: str = Form("", alias="cupom_id"),
-        codigo: str = Form(...), descricao: str = Form(""), percentual: str = Form("0"),
+        codigo: str = Form(...), descricao: str = Form(""),
+        tipo_desconto: str = Form("percentual"), valor_desconto: str = Form("0"),
+        percentual: str = Form(""),
         valido_ate: str = Form(""), ativo: Optional[str] = Form(None),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
@@ -9212,9 +9551,13 @@ def salvar_cupom(
     codigo_limpo = _normalizar_codigo_cupom(codigo)
     if not codigo_limpo:
         raise HTTPException(400, "Informe um código de cupom válido.")
-    percentual_float = max(0.0, min(texto_para_float(percentual), 100.0))
-    if percentual_float <= 0:
-        raise HTTPException(400, "O percentual do cupom deve ser maior que zero.")
+    tipo_desconto = _normalizar_tipo_desconto_cupom(tipo_desconto)
+    valor_bruto = valor_desconto if str(valor_desconto or "").strip() else percentual
+    desconto_float = max(0.0, texto_para_float(valor_bruto))
+    if tipo_desconto == "percentual":
+        desconto_float = min(desconto_float, 100.0)
+    if desconto_float <= 0:
+        raise HTTPException(400, "O valor do desconto deve ser maior que zero.")
     cupom_id_final = cupom_id or (int(cupom_id_form) if cupom_id_form and cupom_id_form.isdigit() else None)
     cupom = db.get(Cupom, cupom_id_final) if cupom_id_final else None
     if cupom and cupom.empresa_id != empresa.id:
@@ -9229,7 +9572,8 @@ def salvar_cupom(
         db.add(cupom)
     cupom.codigo = codigo_limpo
     cupom.descricao = descricao.strip()
-    cupom.percentual = percentual_float
+    # Compatibilidade sem migração: valor positivo = percentual; negativo = R$ fixo.
+    cupom.percentual = desconto_float if tipo_desconto == "percentual" else -desconto_float
     cupom.valido_ate = datetime.strptime(valido_ate, "%Y-%m-%d").date() if valido_ate else None
     cupom.ativo = bool(ativo)
     db.commit()
@@ -9906,15 +10250,16 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
     _garantir_categorias_vitrine_existentes(db, empresa)
     _garantir_tipos_evento_padrao(db, empresa)
+    usa_opcionais = _empresa_modulo_ativo(empresa, "opcionais")
     return {
         "request": request, "empresa": empresa, "produto": produto,
         "contratos": db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all(),
-        "itens_estoque": itens_estoque, "usa_recursos": usa_recursos,
+        "itens_estoque": itens_estoque, "usa_recursos": usa_recursos, "usa_opcionais": usa_opcionais,
         "categorias_vitrine": _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True),
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
         "tipos_evento": _tipos_evento_empresa(db, empresa.id, somente_ativos=True),
         "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id) if produto else {},
-        "opcionais_catalogo": _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True),
+        "opcionais_catalogo": (_opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True) if usa_opcionais else []),
         "opcionais_excluidos": _ids_opcionais_excluidos(db, empresa.id, produto.id) if produto else set(),
         "salvo": request.query_params.get("salvo", ""),
     }
@@ -9922,9 +10267,14 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
 
 @app.get("/painel/opcionais", response_class=HTMLResponse)
 def opcionais_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "opcionais"):
+        raise HTTPException(404)
+    usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
+    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
     return templates.TemplateResponse("admin/opcionais.html", {
         "request": request, "empresa": empresa,
         "opcionais": _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=False),
+        "usa_recursos": usa_recursos, "itens_estoque": itens_estoque,
         "erro": request.query_params.get("erro", ""),
         "salvo": request.query_params.get("salvo", ""),
     })
@@ -9933,7 +10283,7 @@ def opcionais_painel(request: Request, db: Session = Depends(get_db), empresa: E
 @app.post("/painel/opcionais")
 def salvar_opcional_empresa(
         opcional_id: str = Form(""), nome: str = Form(...), quantidade: int = Form(1),
-        valor: str = Form("0"), ativo: Optional[str] = Form(None),
+        valor: str = Form("0"), item_estoque_id: str = Form(""), ativo: Optional[str] = Form(None),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     nome_limpo = " ".join((nome or "").strip().split())[:140]
     if not nome_limpo:
@@ -9954,6 +10304,9 @@ def salvar_opcional_empresa(
     atual.nome = nome_limpo
     atual.quantidade = max(1, int(quantidade or 1))
     atual.valor = max(0.0, texto_para_float(valor))
+    rid = int(item_estoque_id) if str(item_estoque_id or "").isdigit() else None
+    recurso = db.get(ItemProdutoServicoEstoque, rid) if rid else None
+    atual.item_estoque_id = rid if (_empresa_modulo_ativo(empresa, "recursos") and recurso and recurso.empresa_id == empresa.id) else None
     atual.ativo = bool(ativo)
     db.commit()
     return RedirectResponse("/painel/opcionais", status_code=303)
@@ -10023,6 +10376,10 @@ async def salvar_opcionais_empresa_todos(
             quantidade = 1
         opcional.quantidade = max(1, quantidade)
         opcional.valor = max(0.0, texto_para_float(str(form.get(f"valor_{oid}") or "0")))
+        rid_txt = str(form.get(f"recurso_{oid}") or "").strip()
+        rid = int(rid_txt) if rid_txt.isdigit() else None
+        recurso = db.get(ItemProdutoServicoEstoque, rid) if rid else None
+        opcional.item_estoque_id = rid if (_empresa_modulo_ativo(empresa, "recursos") and recurso and recurso.empresa_id == empresa.id) else None
         opcional.ativo = f"ativo_{oid}" in form
 
     if novo_nome:
@@ -10030,8 +10387,12 @@ async def salvar_opcionais_empresa_todos(
             nova_quantidade = int(str(form.get("nova_quantidade") or "1").strip())
         except (TypeError, ValueError):
             nova_quantidade = 1
+        novo_rid_txt = str(form.get("novo_recurso") or "").strip()
+        novo_rid = int(novo_rid_txt) if novo_rid_txt.isdigit() else None
+        novo_recurso = db.get(ItemProdutoServicoEstoque, novo_rid) if novo_rid else None
         novo = OpcionalEmpresa(
             empresa_id=empresa.id,
+            item_estoque_id=(novo_rid if (_empresa_modulo_ativo(empresa, "recursos") and novo_recurso and novo_recurso.empresa_id == empresa.id) else None),
             nome=novo_nome,
             quantidade=max(1, nova_quantidade),
             valor=max(0.0, texto_para_float(str(form.get("novo_valor") or "0"))),
@@ -11444,6 +11805,7 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
         joinedload(Solicitacao.empresa_transferida),
         joinedload(Solicitacao.agenda),
         selectinload(Solicitacao.itens),
+        selectinload(Solicitacao.opcionais_contrato),
         selectinload(Solicitacao.pagamentos),
     ).filter(
         Solicitacao.id == solicitacao_id,
@@ -11498,6 +11860,10 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "analise_estoque": analise_estoque,
                                        "recursos_contrato": analise_estoque.get("recursos", []),
                                        "recursos_por_produto_view": recursos_por_produto_view,
+                                       "usa_opcionais": _empresa_modulo_ativo(empresa, "opcionais"),
+                                       "opcionais_por_produto_view": _mapa_opcionais_produtos_view(db, empresa, produtos),
+                                       "opcionais_contrato_view": _opcionais_contrato_view(item),
+                                       "precos_produtos_contrato": _precos_contrato_produtos(db, empresa, produtos),
                                        "vitrine_autorizou_parceiros": _vitrine_autorizou_parceiros,
                                        "cupons_ativos": cupons_ativos})
 
@@ -11962,6 +12328,7 @@ def salvar_edicao_solicitacao(
         acesso_local: str = Form(""),
         valor: str = Form("0"),
         cupom_codigo: str = Form(""),
+        desconto_manual: str = Form("0"),
         frete: str = Form("0"),
         sinal: str = Form("0"),
         status: str = Form(""),
@@ -12202,8 +12569,10 @@ async def preparar_contrato(
         bairro: str = Form(""),
         local: str = Form(""),
         acesso_local: str = Form(""),
+        tipo_evento_comercial: str = Form("residencial"),
         valor: str = Form("0"),
         cupom_codigo: str = Form(""),
+        desconto_manual: str = Form("0"),
         frete: str = Form("0"),
         sinal: str = Form("0"),
         observacoes: str = Form(""),
@@ -12225,6 +12594,8 @@ async def preparar_contrato(
     item.bairro = bairro
     item.local = local
     item.acesso_local = acesso_local
+    tipo_evento_atual = _normalizar_tipo_evento_vitrine(tipo_evento_comercial)
+    item.tipo_evento_comercial = tipo_evento_atual
 
     form = await request.form()
     produto_ids = form.getlist("produto_id")
@@ -12233,6 +12604,9 @@ async def preparar_contrato(
     recurso_preview_ids = form.getlist("recurso_preview_id")
     recurso_preview_ativos = form.getlist("recurso_preview_ativo")
     recurso_preview_quantidades = form.getlist("recurso_preview_quantidade")
+    opcional_produto_ids = form.getlist("opcional_produto_id")
+    opcional_ids = form.getlist("opcional_id")
+    opcional_quantidades = form.getlist("opcional_quantidade")
 
     assinatura_anterior = sorted(
         (int(ri.produto_id), max(1, int(ri.quantidade or 1)))
@@ -12249,7 +12623,6 @@ async def preparar_contrato(
     # pode devolver a coleção antiga (ou vazia), zerando o valor total do contrato.
     # Mantemos o total a partir dos novos itens que estão sendo gravados agora.
     total_itens_novos = 0.0
-    tipo_evento_atual = _tipo_evento_solicitacao(item)
     duracao_contrato_itens = _duracao_base_empresa_tipo(db, empresa, tipo_evento_atual)
     for idx, produto_id in enumerate(produto_ids):
         if not produto_id:
@@ -12281,6 +12654,21 @@ async def preparar_contrato(
             _duracao_vitrine_produto(db, empresa, produto, tipo_evento_atual),
         )
 
+    registros_opcionais = []
+    if _empresa_modulo_ativo(empresa, "opcionais"):
+        for idx, oid in enumerate(opcional_ids):
+            try:
+                qtd_op = max(0, int(opcional_quantidades[idx] if idx < len(opcional_quantidades) else 0))
+                pid_op = int(opcional_produto_ids[idx] if idx < len(opcional_produto_ids) else 0) or None
+                oid_int = int(oid)
+            except (TypeError, ValueError):
+                continue
+            if qtd_op > 0:
+                registros_opcionais.append({"produto_id": pid_op, "opcional_id": oid_int, "quantidade": qtd_op})
+        total_opcionais_novos = _salvar_opcionais_contrato(db, empresa, item, registros_opcionais)
+    else:
+        total_opcionais_novos = sum(max(float(op.valor_total or 0), 0.0) for op in (getattr(item, "opcionais_contrato", None) or []))
+
     # Os recursos agora são editáveis antes de salvar os equipamentos. Se o navegador
     # enviou o preview, gravamos os ajustes junto com esta mesma operação.
     if recurso_preview_ids:
@@ -12288,6 +12676,8 @@ async def preparar_contrato(
         recursos_validos = set()
         for pid, _qtd in assinatura_nova:
             recursos_validos.update(mapa_recursos.get(int(pid), {}).keys())
+        if _empresa_modulo_ativo(empresa, "recursos"):
+            recursos_validos.update(int(op.item_estoque_id) for op in (getattr(item, "opcionais_contrato", None) or []) if op.item_estoque_id)
         db.query(SolicitacaoRecurso).filter_by(
             empresa_id=empresa.id, solicitacao_id=item.id
         ).delete(synchronize_session=False)
@@ -12317,14 +12707,15 @@ async def preparar_contrato(
     item.contrato_id = int(contrato_id) if contrato_id else contrato_padrao_id
     db.flush()
     valor_manual = texto_para_float(valor)
-    subtotal_equipamentos = round(total_itens_novos, 2) if total_itens_novos > 0 else valor_manual
+    subtotal_base = round(total_itens_novos, 2) if total_itens_novos > 0 else valor_manual
+    subtotal_equipamentos = round(subtotal_base + total_opcionais_novos, 2)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
     cupom = _cupom_valido_ou_snapshot(db, empresa.id, codigo_cupom, item) if codigo_cupom else None
     if codigo_cupom and not cupom:
         db.rollback()
         erro = quote("Cupom inválido, inativo ou fora da validade.")
         return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={erro}", status_code=303)
-    _aplicar_composicao_comercial(item, subtotal_equipamentos, texto_para_float(frete), cupom)
+    _aplicar_composicao_comercial(item, subtotal_equipamentos, texto_para_float(frete), cupom, desconto_manual=texto_para_float(desconto_manual))
     _atualizar_resultado_campanha_karaoke10(item, item.cliente)
     item.sinal = texto_para_float(sinal)
     item.observacoes = observacoes
@@ -12551,6 +12942,9 @@ def contrato_novo_form(request: Request, busca: str = "", db: Session = Depends(
         "contratos": contratos,
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
+        "usa_opcionais": _empresa_modulo_ativo(empresa, "opcionais"),
+        "opcionais_por_produto_view": _mapa_opcionais_produtos_view(db, empresa, produtos),
+        "opcionais_contrato_view": [],
         "erro": "",
         "form": form
     })
@@ -12720,6 +13114,9 @@ def contrato_novo_salvar(
         recurso_preview_id: list[str] = Form(default=[]),
         recurso_preview_ativo: list[str] = Form(default=[]),
         recurso_preview_quantidade: list[str] = Form(default=[]),
+        opcional_produto_id: list[str] = Form(default=[]),
+        opcional_id: list[str] = Form(default=[]),
+        opcional_quantidade: list[str] = Form(default=[]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -12740,7 +13137,7 @@ def contrato_novo_salvar(
         "retirada_mesmo_dia": "1" if retirada_mesmo_dia else "",
         "horas_adicionais_manual": max(0, int(horas_adicionais_manual or 0)),
         "retirada_obrigatoria": retirada_obrigatoria, "retirada_data": retirada_data,
-        "retirada_hora": retirada_hora, "valor": valor, "cupom_codigo": cupom_codigo, "frete": frete, "sinal": sinal,
+        "retirada_hora": retirada_hora, "valor": valor, "cupom_codigo": cupom_codigo, "desconto_manual": desconto_manual, "frete": frete, "sinal": sinal,
         "local_nome": local_nome, "local": local, "acesso_local": acesso_local,
         "local_responsavel_nome": local_responsavel_nome,
         "local_responsavel_telefone": local_responsavel_telefone,
@@ -12757,6 +13154,9 @@ def contrato_novo_salvar(
             "contratos": contratos,
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
+            "usa_opcionais": _empresa_modulo_ativo(empresa, "opcionais"),
+            "opcionais_por_produto_view": _mapa_opcionais_produtos_view(db, empresa, produtos),
+            "opcionais_contrato_view": [],
             "erro": mensagem,
             "form": form
         }, status_code=400)
@@ -12886,7 +13286,7 @@ def contrato_novo_salvar(
     retirada_hora_obj = fim_calculado if retirada_obrigatoria_bool else None
     valor_equipamentos_float = texto_para_float(valor)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
-    cupom = _cupom_valido(db, empresa.id, codigo_cupom, referencia=data_evento_obj) if codigo_cupom else None
+    cupom = _cupom_valido(db, empresa.id, codigo_cupom) if codigo_cupom else None
     if codigo_cupom and not cupom:
         return render_erro("Cupom inválido, inativo ou fora da validade.")
     frete_float = texto_para_float(frete)
@@ -12935,7 +13335,7 @@ def contrato_novo_salvar(
     if item.retirada_obrigatoria and not item.retirada_hora:
         item.retirada_hora = item.hora_fim or item.hora_inicio
 
-    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual)
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual, desconto_manual=texto_para_float(desconto_manual))
     _atualizar_resultado_campanha_karaoke10(item, cliente)
     db.add(item)
     db.flush()
@@ -12952,8 +13352,26 @@ def contrato_novo_salvar(
             valor_total=valor_equipamentos_float
         ))
 
+    registros_opcionais = []
+    if _empresa_modulo_ativo(empresa, "opcionais"):
+        for idx_op, oid in enumerate(opcional_id):
+            try:
+                qtd_op = max(0, int(opcional_quantidade[idx_op] if idx_op < len(opcional_quantidade) else 0))
+                pid_op = int(opcional_produto_id[idx_op] if idx_op < len(opcional_produto_id) else (produto.id if produto else 0)) or None
+                oid_int = int(oid)
+            except (TypeError, ValueError):
+                continue
+            if qtd_op > 0:
+                registros_opcionais.append({"produto_id": pid_op, "opcional_id": oid_int, "quantidade": qtd_op})
+    total_opcionais = _salvar_opcionais_contrato(db, empresa, item, registros_opcionais) if _empresa_modulo_ativo(empresa, "opcionais") else 0.0
+    _aplicar_composicao_comercial(
+        item, round(valor_equipamentos_float + total_opcionais, 2), frete_float, cupom, valor_horas_manual,
+        desconto_manual=texto_para_float(desconto_manual)
+    )
+
     if produto and recurso_preview_id:
         recursos_validos = set(_mapa_recursos_produtos(db, empresa.id).get(int(produto.id), {}).keys())
+        recursos_validos.update(int(op.item_estoque_id) for op in (getattr(item, "opcionais_contrato", None) or []) if op.item_estoque_id)
         for idx, bruto_id in enumerate(recurso_preview_id):
             try:
                 rid = int(bruto_id)
@@ -13021,8 +13439,9 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
         "retirada_hora": item.retirada_hora.strftime("%H:%M") if item.retirada_hora else (item.hora_fim.strftime("%H:%M") if item.hora_fim else ""),
         "produto_id": str(item.produto_id or ""),
         "contrato_id": str(item.contrato_id or ""),
-        "valor": moeda_br(composicao_valores_contrato(item)["equipamentos"]),
+        "valor": moeda_br(max(composicao_valores_contrato(item)["equipamentos"] - composicao_valores_contrato(item)["opcionais"], 0)),
         "cupom_codigo": getattr(item, "cupom_codigo", "") or "",
+        "desconto_manual": moeda_br(composicao_valores_contrato(item)["desconto_manual"]),
         "frete": moeda_br(getattr(item, "valor_frete", 0) or 0),
         "sinal": moeda_br(item.sinal or 0),
         "local_nome": item.local_nome or "",
@@ -13059,6 +13478,9 @@ def editar_solicitacao_completa(
         "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
         "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
         "recursos_atuais_view": _recursos_atuais_view(db, item),
+        "usa_opcionais": _empresa_modulo_ativo(empresa, "opcionais"),
+        "opcionais_por_produto_view": _mapa_opcionais_produtos_view(db, empresa, produtos),
+        "opcionais_contrato_view": _opcionais_contrato_view(item),
         "erro": "",
         "form": form_solicitacao_completo(item),
         "modo_edicao": True,
@@ -13095,6 +13517,7 @@ def salvar_solicitacao_completa(
         retirada_hora: str = Form(""),
         valor: str = Form("0"),
         cupom_codigo: str = Form(""),
+        desconto_manual: str = Form("0"),
         frete: str = Form("0"),
         sinal: str = Form("0"),
         local_nome: str = Form(""),
@@ -13106,6 +13529,9 @@ def salvar_solicitacao_completa(
         recurso_preview_id: list[str] = Form(default=[]),
         recurso_preview_ativo: list[str] = Form(default=[]),
         recurso_preview_quantidade: list[str] = Form(default=[]),
+        opcional_produto_id: list[str] = Form(default=[]),
+        opcional_id: list[str] = Form(default=[]),
+        opcional_quantidade: list[str] = Form(default=[]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
@@ -13123,7 +13549,7 @@ def salvar_solicitacao_completa(
         retirada_mesmo_dia="1" if retirada_mesmo_dia else "",
         horas_adicionais_manual=max(0, int(horas_adicionais_manual or 0)), retirada_obrigatoria=retirada_obrigatoria,
         retirada_data=retirada_data, retirada_hora=retirada_hora,
-        valor=valor, cupom_codigo=cupom_codigo, frete=frete, sinal=sinal, local_nome=local_nome, local=local,
+        valor=valor, cupom_codigo=cupom_codigo, desconto_manual=desconto_manual, frete=frete, sinal=sinal, local_nome=local_nome, local=local,
         acesso_local=acesso_local, local_responsavel_nome=local_responsavel_nome,
         local_responsavel_telefone=local_responsavel_telefone, observacoes=observacoes,
         modo_criacao="manual"
@@ -13137,6 +13563,9 @@ def salvar_solicitacao_completa(
             "cupons_ativos": _cupons_ativos_empresa(db, empresa.id),
             "recursos_por_produto_view": _recursos_por_produto_view(db, empresa.id),
             "recursos_atuais_view": _recursos_atuais_view(db, item),
+            "usa_opcionais": _empresa_modulo_ativo(empresa, "opcionais"),
+            "opcionais_por_produto_view": _mapa_opcionais_produtos_view(db, empresa, produtos),
+            "opcionais_contrato_view": _opcionais_contrato_view(item),
             "erro": mensagem, "form": form, "modo_edicao": True, "item": item
         }, status_code=400)
 
@@ -13234,7 +13663,7 @@ def salvar_solicitacao_completa(
     item.local_responsavel_telefone = limpar_identificador(
         local_responsavel_telefone) or local_responsavel_telefone.strip()
     item.acesso_local = acesso_local.strip()
-    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual)
+    _aplicar_composicao_comercial(item, valor_equipamentos_float, frete_float, cupom, valor_horas_manual, desconto_manual=texto_para_float(desconto_manual))
     _atualizar_resultado_campanha_karaoke10(item, cliente)
     item.sinal = sinal_float
     item.observacoes = observacoes.strip()
@@ -13255,8 +13684,28 @@ def salvar_solicitacao_completa(
         item_principal.valor_unitario = valor_equipamentos_float
         item_principal.valor_total = valor_equipamentos_float
 
+    registros_opcionais = []
+    if _empresa_modulo_ativo(empresa, "opcionais"):
+        for idx_op, oid in enumerate(opcional_id):
+            try:
+                qtd_op = max(0, int(opcional_quantidade[idx_op] if idx_op < len(opcional_quantidade) else 0))
+                pid_op = int(opcional_produto_id[idx_op] if idx_op < len(opcional_produto_id) else (produto.id if produto else 0)) or None
+                oid_int = int(oid)
+            except (TypeError, ValueError):
+                continue
+            if qtd_op > 0:
+                registros_opcionais.append({"produto_id": pid_op, "opcional_id": oid_int, "quantidade": qtd_op})
+        total_opcionais = _salvar_opcionais_contrato(db, empresa, item, registros_opcionais)
+    else:
+        total_opcionais = sum(max(float(op.valor_total or 0), 0.0) for op in (getattr(item, "opcionais_contrato", None) or []))
+    _aplicar_composicao_comercial(
+        item, round(valor_equipamentos_float + total_opcionais, 2), frete_float, cupom, valor_horas_manual,
+        desconto_manual=texto_para_float(desconto_manual)
+    )
+
     if produto and recurso_preview_id:
         recursos_validos = set(_mapa_recursos_produtos(db, empresa.id).get(int(produto.id), {}).keys())
+        recursos_validos.update(int(op.item_estoque_id) for op in (getattr(item, "opcionais_contrato", None) or []) if op.item_estoque_id)
         db.query(SolicitacaoRecurso).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
         for idx_recurso, bruto_id in enumerate(recurso_preview_id):
             try:
@@ -17623,15 +18072,13 @@ def vitrine_validar_cupom(
         raise HTTPException(404)
     if not _empresa_modulo_ativo(empresa, "cupons"):
         return JSONResponse({"ok": False, "erro": "Cupons não estão disponíveis nesta vitrine."}, status_code=404)
-    try:
-        referencia = datetime.strptime(data_evento, "%Y-%m-%d").date() if data_evento else None
-    except Exception:
-        referencia = None
-    cupom = _cupom_valido(db, empresa.id, codigo, referencia=referencia)
+    cupom = _cupom_valido(db, empresa.id, codigo)
     if not cupom:
         return JSONResponse({"ok": False, "erro": "Cupom inválido ou vencido."}, status_code=400)
     return {
-        "ok": True, "codigo": cupom.codigo, "percentual": round(float(cupom.percentual or 0), 2),
+        "ok": True, "codigo": cupom.codigo,
+        "tipo": _cupom_tipo(cupom), "valor": round(_cupom_valor_configurado(cupom), 2),
+        "percentual": round(_cupom_valor_configurado(cupom), 2) if _cupom_tipo(cupom) == "percentual" else 0.0,
         "descricao": cupom.descricao or "",
     }
 
@@ -17739,12 +18186,12 @@ def vitrine_publica_reservar(
     if codigo:
         if not _empresa_modulo_ativo(empresa, "cupons"):
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=cupom", status_code=303)
-        cupom = _cupom_valido(db, empresa.id, codigo, referencia=data_obj)
+        cupom = _cupom_valido(db, empresa.id, codigo)
         if not cupom:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=cupom", status_code=303)
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
-        "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "data_evento": data_obj.isoformat(), "modo_direto": bool(direto), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
         "whatsapp": whatsapp_pedido,
         "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
         "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
@@ -18776,31 +19223,31 @@ def salvar_pre_cadastro(
         total_itens = 0.0
         produto_principal = None
         contrato_padrao_id = None
+        opcionais_contrato = []
         duracao_maxima = max(60, int(duracao_base_vitrine or 240))
         possui_item_sob_consulta = bool(pedido_vitrine.get("possui_sob_consulta"))
         for reg in pedido_vitrine["itens"]:
             produto = reg["produto"]
             quantidade_item = max(1, int(reg["quantidade"] or 1))
-            valor_unitario = max(float(reg.get("valor_unitario") or 0), 0.0)
-            valor_total = max(float(reg.get("valor_total") or 0), 0.0)
-            total_itens += valor_total
+            valor_base_total = max(float(reg.get("valor_base_total") or 0), 0.0)
+            valor_unitario = round(valor_base_total / quantidade_item, 2) if quantidade_item else 0.0
+            total_itens += valor_base_total
             descricao_reserva = str(produto.descricao or "").strip()
-            opcionais = reg.get("opcionais") or []
-            if opcionais:
-                linhas_op = [f"{o['quantidade']}x {o['nome']} — R$ {o['valor_total']:.2f}".replace('.', ',') for o in opcionais]
-                descricao_reserva = (descricao_reserva + "\n\nOpcionais: " + "; ".join(linhas_op)).strip()
             if reg.get("sob_consulta"):
                 descricao_reserva = (descricao_reserva + "\n\nPreço do item: sob consulta.").strip()
             db.add(ReservaItem(
                 empresa_id=empresa.id, solicitacao_id=solicitacao.id, produto_id=produto.id,
                 nome=produto.nome, descricao=descricao_reserva, quantidade=quantidade_item,
-                valor_unitario=valor_unitario, valor_total=valor_total,
+                valor_unitario=valor_unitario, valor_total=valor_base_total,
             ))
+            for opc in (reg.get("opcionais") or []):
+                opcionais_contrato.append({"produto_id": produto.id, "opcional_id": opc.get("id"), "quantidade": opc.get("quantidade"), "valor_unitario": opc.get("valor_unitario")})
             if produto_principal is None:
                 produto_principal = produto
             if contrato_padrao_id is None and produto.contrato_id:
                 contrato_padrao_id = produto.contrato_id
 
+        total_opcionais = _salvar_opcionais_contrato(db, empresa, solicitacao, opcionais_contrato) if _empresa_modulo_ativo(empresa, "opcionais") else 0.0
         solicitacao.produto_id = produto_principal.id if produto_principal else None
         solicitacao.contrato_id = contrato_padrao_id
         solicitacao.hora_fim = fim_obj
@@ -18808,11 +19255,11 @@ def salvar_pre_cadastro(
         frete_vitrine = max(float(frete_info.get("valor") or 0), 0.0)
         cupom_vitrine = None
         if _empresa_modulo_ativo(empresa, "cupons") and pedido_vitrine.get("cupom_codigo"):
-            cupom_vitrine = _cupom_valido(db, empresa.id, pedido_vitrine.get("cupom_codigo"), referencia=data_obj)
+            cupom_vitrine = _cupom_valido(db, empresa.id, pedido_vitrine.get("cupom_codigo"))
         _aplicar_composicao_comercial(
-            solicitacao, round(total_itens, 2), frete_vitrine, cupom_vitrine, valor_horas_extra_vitrine
+            solicitacao, round(total_itens + total_opcionais, 2), frete_vitrine, cupom_vitrine, valor_horas_extra_vitrine
         )
-        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        fluxo_vitrine = "direto" if bool(pedido_vitrine.get("modo_direto")) else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar")) or possui_item_sob_consulta
         solicitacao.status = "pre_reserva" if precisa_aprovacao else ("contrato_enviado" if contrato_padrao_id else "pre_reserva")
 
@@ -18837,7 +19284,7 @@ def salvar_pre_cadastro(
             if solicitacao.contrato_id:
                 return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
             return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
-        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        fluxo_vitrine = "direto" if bool(pedido_vitrine.get("modo_direto")) else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar")) or bool(pedido_vitrine.get("possui_sob_consulta"))
         if precisa_aprovacao or solicitacao.status == "pre_reserva":
             return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
@@ -18871,6 +19318,8 @@ def pedido_vitrine_recebido(slug: str, solicitacao_id: str, request: Request, db
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id) if empresa else None
     if not empresa or not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    if item.contrato_id and not _vitrine_pendente_aprovacao(item) and (item.status or "") in {"contrato_enviado", "aguardando_aceite"}:
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
     composicao = composicao_valores_contrato(item)
     return templates.TemplateResponse("publico/pedido_recebido.html", {
         "request": request, "empresa": empresa, "item": item, "composicao": composicao,

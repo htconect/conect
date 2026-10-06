@@ -96,7 +96,7 @@
     <div class="secao-corpo">
       <p><b>Equipamentos:</b> R$ {{ comp.equipamentos|moeda_br }}</p>
       {% if comp.cupom_codigo and comp.desconto > 0 %}
-        <p><b>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_percentual|moeda_br }}%):</b> - R$ {{ comp.desconto|moeda_br }}</p>
+        <p><b>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_rotulo }}):</b> - R$ {{ comp.desconto|moeda_br }}</p>
       {% endif %}
       {% if comp.horas_adicionais > 0 %}<p><b>Horas adicionais:</b> R$ {{ comp.horas_adicionais|moeda_br }}</p>{% endif %}
       <p><b>Frete:</b> R$ {{ comp.frete|moeda_br }}</p>

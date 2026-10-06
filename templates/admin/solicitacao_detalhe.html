@@ -324,6 +324,15 @@
     <input type="hidden" name="local" value="{{ item.local or '' }}">
     <input type="hidden" name="acesso_local" value="{{ item.acesso_local or '' }}">
 
+    <div class="box" style="margin-bottom:12px">
+      <label style="margin-bottom:7px">Tabela de preço</label>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+        <label class="check" style="margin:0"><input type="radio" name="tipo_evento_comercial" value="residencial" {% if (item.tipo_evento_comercial or 'residencial') != 'empresa' %}checked{% endif %}> Residencial</label>
+        <label class="check" style="margin:0"><input type="radio" name="tipo_evento_comercial" value="empresa" {% if item.tipo_evento_comercial == 'empresa' %}checked{% endif %}> Empresa</label>
+      </div>
+      <small class="texto-discreto" style="display:block;margin-top:7px">Residencial é o padrão. Ao trocar a tabela, o Connect atualiza os valores unitários dos equipamentos selecionados conforme o cadastro do item.</small>
+    </div>
+
     <div id="itensReserva">
       {% set linhas = item.itens if item.itens else [None] %}
       {% for linha in linhas %}
@@ -350,24 +359,35 @@
 
     <button type="button" class="secundario largura-total" onclick="adicionarItem()">+ Adicionar outro item</button>
 
+    {% if usa_opcionais %}<div class="box" id="opcionaisContratoBox" style="margin-top:12px">
+      <h3 style="margin-top:0">Opcionais do contrato</h3>
+      <p class="texto-discreto">O opcional é uma cobrança separada do equipamento. Quando estiver vinculado a um recurso, também aumenta automaticamente o consumo do estoque.</p>
+      <div id="listaOpcionaisContrato"><small class="texto-discreto">Selecione os equipamentos para ver os opcionais disponíveis.</small></div>
+    </div>{% endif %}
+
     <div class="box" id="composicaoComercial" style="margin-top:12px">
       <h3 style="margin-top:0">Valores do contrato</h3>
-      <p class="texto-discreto">O desconto do cupom é aplicado somente sobre os equipamentos. O frete é somado depois do desconto.</p>
+      <p class="texto-discreto">Cupom e desconto manual são aplicados sobre equipamentos + opcionais. O frete é somado depois.</p>
       <label>Cupom</label>
       <select name="cupom_codigo" id="cupomCodigo">
-        <option value="" data-percentual="0">Sem cupom</option>
+        <option value="" data-tipo="percentual" data-valor="0">Sem cupom</option>
         {% set codigos_ativos = cupons_ativos|map(attribute='codigo')|list %}
         {% if item.cupom_codigo and item.cupom_codigo not in codigos_ativos %}
-          <option value="{{ item.cupom_codigo }}" data-percentual="{{ item.cupom_percentual or 0 }}" selected>{{ item.cupom_codigo }} — {{ item.cupom_percentual|moeda_br }}% (salvo no contrato)</option>
+          {% set cupom_salvo_bruto = item.cupom_percentual or 0 %}
+          <option value="{{ item.cupom_codigo }}" data-tipo="{{ 'fixo' if cupom_salvo_bruto < 0 else 'percentual' }}" data-valor="{{ -cupom_salvo_bruto if cupom_salvo_bruto < 0 else cupom_salvo_bruto }}" selected>{{ item.cupom_codigo }} — {{ rotulo_desconto_cupom('fixo' if cupom_salvo_bruto < 0 else 'percentual', -cupom_salvo_bruto if cupom_salvo_bruto < 0 else cupom_salvo_bruto) }} (salvo no contrato)</option>
         {% endif %}
         {% for c in cupons_ativos %}
-          <option value="{{ c.codigo }}" data-percentual="{{ c.percentual or 0 }}" {% if item.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ c.percentual|moeda_br }}%{% if c.valido_ate %} · até {{ c.valido_ate.strftime('%d/%m/%Y') }}{% endif %}</option>
+          <option value="{{ c.codigo }}" data-tipo="{{ cupom_tipo(c) }}" data-valor="{{ cupom_valor_configurado(c) }}" {% if item.cupom_codigo == c.codigo %}selected{% endif %}>{{ c.codigo }} — {{ rotulo_desconto_cupom(cupom_tipo(c), cupom_valor_configurado(c)) }}{% if validade_efetiva_cupom(c) %} · fechar até {{ validade_efetiva_cupom(c).strftime('%d/%m/%Y') }}{% endif %}</option>
         {% endfor %}
       </select>
+      <label>Desconto manual (R$)</label>
+      <input name="desconto_manual" id="descontoManual" data-mascara="moeda" inputmode="decimal" value="{{ comp.desconto_manual|moeda_br }}" placeholder="0,00">
+      <small class="texto-discreto">Uso interno. Não aparece como campo editável para o cliente na vitrine.</small>
       <label>Frete</label>
       <input name="frete" id="valorFrete" data-mascara="moeda" inputmode="decimal" value="{{ comp.frete|moeda_br }}">
       <div class="resumo-financeiro-mobile" style="margin-top:12px">
-        <div><small>Equipamentos</small><b id="resumoEquipamentos">R$ {{ comp.equipamentos|moeda_br }}</b></div>
+        <div><small>Equipamentos</small><b id="resumoEquipamentos">R$ {{ (comp.equipamentos - comp.opcionais)|moeda_br }}</b></div>
+        <div><small>Opcionais</small><b id="resumoOpcionais">R$ {{ comp.opcionais|moeda_br }}</b></div>
         <div><small>Desconto</small><b id="resumoDesconto">- R$ {{ comp.desconto|moeda_br }}</b></div>
         <div><small>Frete</small><b id="resumoFrete">R$ {{ comp.frete|moeda_br }}</b></div>
         <div><small>Total</small><b id="resumoTotalComercial">R$ {{ comp.total|moeda_br }}</b></div>
@@ -416,9 +436,10 @@
 
   <div class="box" style="margin:10px 0 14px;padding:12px">
     <div class="linha-local"><span>Equipamentos</span><b>R$ {{ comp.equipamentos|moeda_br }}</b></div>
-    {% if comp.cupom_codigo and comp.desconto > 0 %}
-      <div class="linha-local"><span>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_percentual|moeda_br }}%)</span><b>- R$ {{ comp.desconto|moeda_br }}</b></div>
+    {% if comp.cupom_codigo and comp.desconto_cupom > 0 %}
+      <div class="linha-local"><span>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_rotulo }})</span><b>- R$ {{ comp.desconto_cupom|moeda_br }}</b></div>
     {% endif %}
+    {% if comp.desconto_manual > 0 %}<div class="linha-local"><span>Desconto manual</span><b>- R$ {{ comp.desconto_manual|moeda_br }}</b></div>{% endif %}
     <div class="linha-local"><span>Frete</span><b>R$ {{ comp.frete|moeda_br }}</b></div>
   </div>
   <div class="resumo-financeiro-mobile">
@@ -649,11 +670,46 @@
 
 <script>
 const RECURSOS_POR_PRODUTO = {{ recursos_por_produto_view|tojson }};
-const RECURSOS_PREVIEW_MANUAIS = {
+const PRECOS_CONTRATO_PRODUTOS = {{ precos_produtos_contrato|tojson }};
+const OPCIONAIS_POR_PRODUTO = {{ opcionais_por_produto_view|tojson }};
+const OPCIONAIS_CONTRATO_ATUAIS = {{ opcionais_contrato_view|tojson }};
+let RECURSOS_PREVIEW_MANUAIS = {
   {% for recurso in recursos_contrato or [] %}
   "{{ recurso.id }}": {ativo: {{ 'true' if recurso.ativo_no_contrato else 'false' }}, quantidade: {{ recurso.necessario if recurso.ativo_no_contrato else 0 }}},
   {% endfor %}
 };
+function chaveOpcional(pid, oid){ return String(pid||'') + ':' + String(oid||''); }
+function quantidadesOpcionaisAtuais(){
+  const mapa={};
+  document.querySelectorAll('#listaOpcionaisContrato input[name="opcional_quantidade"]').forEach(inp=>{
+    mapa[chaveOpcional(inp.dataset.produtoId, inp.dataset.opcionalId)] = Math.max(0, parseInt(inp.value||'0',10)||0);
+  });
+  OPCIONAIS_CONTRATO_ATUAIS.forEach(o=>{ const k=chaveOpcional(o.produto_id,o.opcional_id); if(!(k in mapa)) mapa[k]=Math.max(0,parseInt(o.quantidade||0,10)||0); });
+  return mapa;
+}
+function recalcularOpcionaisContrato(){
+  const box=document.getElementById('listaOpcionaisContrato'); if(!box) return;
+  const atuais=quantidadesOpcionaisAtuais();
+  const selecionados=[];
+  document.querySelectorAll('#itensReserva select[name="produto_id"]').forEach(sel=>{ const id=String(sel.value||''); if(id && !selecionados.includes(id)) selecionados.push(id); });
+  const linhas=[];
+  selecionados.forEach(pid=>{
+    (OPCIONAIS_POR_PRODUTO[pid]||[]).forEach(o=>{
+      const k=chaveOpcional(pid,o.id), qtd=Math.min(Math.max(0, atuais[k]||0), Math.max(1,parseInt(o.quantidade_maxima||1,10)||1));
+      const recurso=o.recurso_nome ? `<small class="texto-discreto">Estoque: +1 ${o.recurso_nome} por unidade</small>` : '';
+      linhas.push(`<div class="linha opcional-contrato-linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
+        <div><b>${o.nome}</b><small class="texto-discreto" style="display:block">R$ ${moedaBRNumero(o.valor)} por unidade</small>${recurso}
+          <input type="hidden" name="opcional_produto_id" value="${pid}"><input type="hidden" name="opcional_id" value="${o.id}">
+        </div>
+        <div><label>Qtd. opcional</label><input name="opcional_quantidade" type="number" min="0" max="${Math.max(1,parseInt(o.quantidade_maxima||1,10)||1)}" value="${qtd}" data-produto-id="${pid}" data-opcional-id="${o.id}" data-valor="${o.valor}" data-recurso-id="${o.item_estoque_id||''}"></div>
+      </div>`);
+    });
+  });
+  box.innerHTML=linhas.length?linhas.join(''):'<small class="texto-discreto">Os equipamentos selecionados não possuem opcionais ativos.</small>';
+}
+function totalOpcionaisContrato(){
+  let total=0; document.querySelectorAll('#listaOpcionaisContrato input[name="opcional_quantidade"]').forEach(inp=>{ total += Math.max(0,parseInt(inp.value||'0',10)||0)*(parseFloat(inp.dataset.valor||'0')||0); }); return total;
+}
 function recalcularPreviewRecursos(){
   const totais = {};
   document.querySelectorAll('#itensReserva .item-reserva').forEach(linha => {
@@ -666,6 +722,13 @@ function recalcularPreviewRecursos(){
       if(!totais[chave]) totais[chave] = {id:r.id,nome:r.nome, quantidade:0};
       totais[chave].quantidade += (parseInt(r.quantidade || 0, 10) || 0) * qtdProduto;
     });
+  });
+  document.querySelectorAll('#listaOpcionaisContrato input[name="opcional_quantidade"]').forEach(inp=>{
+    const rid=String(inp.dataset.recursoId||''); const qtd=Math.max(0,parseInt(inp.value||'0',10)||0); if(!rid||!qtd)return;
+    let nome='Recurso opcional';
+    const pid=String(inp.dataset.produtoId||''), oid=String(inp.dataset.opcionalId||'');
+    const op=(OPCIONAIS_POR_PRODUTO[pid]||[]).find(x=>String(x.id)===oid); if(op?.recurso_nome) nome=op.recurso_nome;
+    if(!totais[rid]) totais[rid]={id:parseInt(rid,10),nome:nome,quantidade:0}; totais[rid].quantidade += qtd;
   });
   const box = document.getElementById('listaPreviewRecursos');
   if(!box) return;
@@ -732,21 +795,39 @@ function alternarRecursoContrato(check){
   const hidden = linha ? linha.querySelector('.recurso-ativo-contrato') : null;
   if(hidden) hidden.value = check.checked ? '1' : '0';
 }
-function aplicarValorBaseProduto(select){
+function tipoPrecoContrato(){
+  return document.querySelector('#formEquipamentos input[name="tipo_evento_comercial"]:checked')?.value || 'residencial';
+}
+function aplicarPrecoTabelaProduto(select, forcar=false){
   const linha = select.closest('.item-reserva');
   if(!linha) return;
   const campo = linha.querySelector('input[name="valor_unitario"]');
   if(!campo) return;
-  // Preenche o preço-base somente em item novo/zerado. Valores digitados manualmente
-  // pertencem ao contrato e não podem ser substituídos pelo cadastro do produto.
   const atual = moedaParaNumero(campo.value || '0');
-  if(atual > 0){
+  if(!forcar && atual > 0){
     recalcularResumoComercial();
     return;
   }
-  const valor = parseFloat(select.options[select.selectedIndex]?.dataset.valorBase || '0') || 0;
+  const produtoId = String(select.value || '');
+  if(!produtoId){
+    if(forcar) campo.value = '0,00';
+    recalcularResumoComercial();
+    return;
+  }
+  const tipo = tipoPrecoContrato();
+  const tabela = PRECOS_CONTRATO_PRODUTOS[produtoId] || {};
+  const valorTabela = Object.prototype.hasOwnProperty.call(tabela, tipo) ? tabela[tipo] : null;
+  if(valorTabela === null || typeof valorTabela === 'undefined'){
+    if(forcar) campo.value = '0,00';
+    recalcularResumoComercial();
+    return;
+  }
+  const valor = Number(valorTabela) || 0;
   campo.value = valor.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
   recalcularResumoComercial();
+}
+function aplicarTabelaPrecoSelecionada(){
+  document.querySelectorAll('#itensReserva select[name="produto_id"]').forEach(sel => aplicarPrecoTabelaProduto(sel, true));
 }
 function aplicarContratoPadrao(select){
   const contratoId = select.options[select.selectedIndex]?.dataset.contratoId || '';
@@ -762,19 +843,23 @@ function aplicarContratoPadrao(select){
 document.addEventListener('change', function(ev){
   if(ev.target && ev.target.name === 'produto_id'){
     aplicarContratoPadrao(ev.target);
-    aplicarValorBaseProduto(ev.target);
+    aplicarPrecoTabelaProduto(ev.target, true);
+    recalcularOpcionaisContrato();
     recalcularPreviewRecursos();
     consultarDisponibilidadeLinha(ev.target);
   }
   if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); const sel=ev.target.closest('.item-reserva')?.querySelector('select[name="produto_id"]'); if(sel) consultarDisponibilidadeLinha(sel); }
+  if(ev.target && ev.target.name === 'tipo_evento_comercial') aplicarTabelaPrecoSelecionada();
   if(ev.target && ev.target.name === 'cupom_codigo') recalcularResumoComercial();
+  if(ev.target && ev.target.name === 'opcional_quantidade'){ const rid=String(ev.target.dataset.recursoId||''); if(rid) delete RECURSOS_PREVIEW_MANUAIS[rid]; recalcularPreviewRecursos(); recalcularResumoComercial(); }
 });
 document.addEventListener('input', function(ev){
   if(ev.target && ev.target.name === 'quantidade') { recalcularPreviewRecursos(); recalcularResumoComercial(); const sel=ev.target.closest('.item-reserva')?.querySelector('select[name="produto_id"]'); if(sel) consultarDisponibilidadeLinha(sel); }
-  if(ev.target && (ev.target.name === 'valor_unitario' || ev.target.name === 'frete')) recalcularResumoComercial();
+  if(ev.target && (ev.target.name === 'valor_unitario' || ev.target.name === 'frete' || ev.target.name === 'desconto_manual' || ev.target.name === 'opcional_quantidade')) recalcularResumoComercial();
 });
 document.addEventListener('DOMContentLoaded', function(){
-  document.querySelectorAll('select[name="produto_id"]').forEach(sel => { aplicarContratoPadrao(sel); consultarDisponibilidadeLinha(sel); });
+  document.querySelectorAll('select[name="produto_id"]').forEach(sel => { aplicarContratoPadrao(sel); aplicarPrecoTabelaProduto(sel, false); consultarDisponibilidadeLinha(sel); });
+  recalcularOpcionaisContrato();
   recalcularPreviewRecursos();
   recalcularResumoComercial();
 });
@@ -791,12 +876,14 @@ function adicionarItem(){
   });
   const statusClone=clone.querySelector('.status-disponibilidade-equipamento'); if(statusClone){ statusClone.textContent=''; statusClone.style.color=''; }
   container.appendChild(clone);
+  recalcularOpcionaisContrato();
   recalcularPreviewRecursos();
   recalcularResumoComercial();
 }
 function removerItem(botao){
   const linha = botao.closest('.item-reserva');
   if(linha) linha.remove();
+  recalcularOpcionaisContrato();
   recalcularPreviewRecursos();
   recalcularResumoComercial();
 }
@@ -813,23 +900,31 @@ function moedaBRNumero(valor){
   return Number(valor || 0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function recalcularResumoComercial(){
-  let equipamentos = 0;
+  let equipamentosBase = 0;
   document.querySelectorAll('#itensReserva .item-reserva').forEach(linha => {
     const qtd = Math.max(1, parseInt(linha.querySelector('input[name="quantidade"]')?.value || '1',10) || 1);
     const unit = moedaParaNumero(linha.querySelector('input[name="valor_unitario"]')?.value || '0');
-    equipamentos += qtd * unit;
+    equipamentosBase += qtd * unit;
   });
+  const opcionais = totalOpcionaisContrato();
+  const baseDesconto = equipamentosBase + opcionais;
   const cupom = document.getElementById('cupomCodigo');
-  const percentual = parseFloat(cupom?.options[cupom.selectedIndex]?.dataset.percentual || '0') || 0;
-  const desconto = equipamentos * percentual / 100;
+  const optCupom = cupom?.options[cupom.selectedIndex];
+  const tipoCupom = optCupom?.dataset.tipo || 'percentual';
+  const valorCupom = parseFloat(optCupom?.dataset.valor || '0') || 0;
+  const descontoCupom = tipoCupom === 'fixo' ? Math.min(baseDesconto, valorCupom) : Math.min(baseDesconto, baseDesconto * valorCupom / 100);
+  const manualBruto = moedaParaNumero(document.getElementById('descontoManual')?.value || '0');
+  const descontoManual = Math.min(Math.max(manualBruto,0), Math.max(baseDesconto-descontoCupom,0));
+  const desconto = descontoCupom + descontoManual;
   const frete = moedaParaNumero(document.getElementById('valorFrete')?.value || '0');
-  const total = Math.max(equipamentos - desconto + frete, 0);
-  const mapa = {resumoEquipamentos:equipamentos,resumoDesconto:desconto,resumoFrete:frete,resumoTotalComercial:total};
+  const total = Math.max(baseDesconto - desconto + frete, 0);
+  const mapa = {resumoEquipamentos:equipamentosBase,resumoOpcionais:opcionais,resumoDesconto:desconto,resumoFrete:frete,resumoTotalComercial:total};
   Object.entries(mapa).forEach(([id,valor]) => {
     const el=document.getElementById(id); if(!el) return;
     el.textContent = (id==='resumoDesconto' ? '- R$ ' : 'R$ ') + moedaBRNumero(valor);
   });
 }
+
 document.addEventListener('submit', function(ev){
   const form = ev.target;
   const btn = form.querySelector('button[type="submit"], button:not([type])');
