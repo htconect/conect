@@ -9396,6 +9396,8 @@ def categorias_vitrine_painel(request: Request, db: Session = Depends(get_db), e
     categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
     return templates.TemplateResponse("admin/vitrine_categorias.html", {
         "request": request, "empresa": empresa, "categorias": categorias,
+        "erro": request.query_params.get("erro", ""),
+        "salvo": request.query_params.get("salvo", ""),
     })
 
 
@@ -9435,6 +9437,90 @@ def salvar_categoria_vitrine(
         ).update({ProdutoServico.vitrine_categoria: nome_limpo}, synchronize_session=False)
     db.commit()
     return RedirectResponse("/painel/categorias-vitrine", status_code=303)
+
+
+@app.post("/painel/vitrine/categorias/salvar-todas")
+async def salvar_categorias_vitrine_todas(
+        request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    _garantir_categorias_vitrine_existentes(db, empresa)
+    form = await request.form()
+    ids = []
+    for bruto in form.getlist("categoria_id"):
+        texto_id = str(bruto or "").strip()
+        if texto_id.isdigit():
+            cid = int(texto_id)
+            if cid not in ids:
+                ids.append(cid)
+
+    categorias_todas = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
+    por_id = {int(c.id): c for c in categorias_todas}
+    if any(cid not in por_id for cid in ids):
+        raise HTTPException(404)
+
+    nomes_finais: dict[int, str] = {}
+    chaves_usadas: set[str] = set()
+    for cid in ids:
+        nome_limpo = " ".join(str(form.get(f"nome_{cid}") or "").strip().split())[:80]
+        if not nome_limpo:
+            return RedirectResponse("/painel/categorias-vitrine?erro=nome", status_code=303)
+        chave = nome_limpo.casefold()
+        if chave in chaves_usadas:
+            return RedirectResponse("/painel/categorias-vitrine?erro=duplicado", status_code=303)
+        chaves_usadas.add(chave)
+        nomes_finais[cid] = nome_limpo
+
+    # Protege também contra uma categoria não enviada pelo formulário, sem apagar nem sobrescrever nada.
+    for categoria in categorias_todas:
+        if int(categoria.id) not in nomes_finais and str(categoria.nome or "").casefold() in chaves_usadas:
+            return RedirectResponse("/painel/categorias-vitrine?erro=duplicado", status_code=303)
+
+    nova_nome = " ".join(str(form.get("nova_nome") or "").strip().split())[:80]
+    chaves_omitidas = {
+        str(c.nome or "").casefold() for c in categorias_todas if int(c.id) not in nomes_finais
+    }
+    if nova_nome and nova_nome.casefold() in (chaves_usadas | chaves_omitidas):
+        return RedirectResponse("/painel/categorias-vitrine?erro=duplicado", status_code=303)
+
+    # Renomeia em duas fases. Assim até trocas de nomes entre duas categorias são seguras
+    # e os produtos continuam vinculados à categoria correta.
+    renomeadas = []
+    for cid, novo_nome in nomes_finais.items():
+        categoria = por_id[cid]
+        nome_antigo = str(categoria.nome or "")
+        if nome_antigo.casefold() == novo_nome.casefold() and nome_antigo == novo_nome:
+            continue
+        temporario = f"__tmpcat_{empresa.id}_{cid}_{uuid.uuid4().hex[:8]}"[:80]
+        db.query(ProdutoServico).filter(
+            ProdutoServico.empresa_id == empresa.id,
+            func.lower(ProdutoServico.vitrine_categoria) == nome_antigo.lower(),
+        ).update({ProdutoServico.vitrine_categoria: temporario}, synchronize_session=False)
+        categoria.nome = temporario
+        renomeadas.append((categoria, temporario, novo_nome))
+    if renomeadas:
+        db.flush()
+    for categoria, temporario, novo_nome in renomeadas:
+        categoria.nome = novo_nome
+        db.query(ProdutoServico).filter(
+            ProdutoServico.empresa_id == empresa.id,
+            ProdutoServico.vitrine_categoria == temporario,
+        ).update({ProdutoServico.vitrine_categoria: novo_nome}, synchronize_session=False)
+
+    for pos, cid in enumerate(ids, start=1):
+        categoria = por_id[cid]
+        categoria.ordem = pos * 10
+        categoria.ativa = f"ativa_{cid}" in form
+
+    if nova_nome:
+        nova = VitrineCategoria(
+            empresa_id=empresa.id,
+            nome=nova_nome,
+            ordem=(len(ids) + 1) * 10,
+            ativa="nova_ativa" in form,
+        )
+        db.add(nova)
+
+    db.commit()
+    return RedirectResponse("/painel/categorias-vitrine?salvo=1", status_code=303)
 
 
 def _normalizar_ordem_categorias_vitrine(db: Session, empresa_id: int) -> list[VitrineCategoria]:
@@ -9740,6 +9826,7 @@ def produtos(request: Request, db: Session = Depends(get_db), empresa: Empresa =
     return templates.TemplateResponse("admin/produtos.html", {
         "request": request, "empresa": empresa, "produtos": produtos,
         "categorias_vitrine": categorias_vitrine, "usa_recursos": usa_recursos,
+        "salvo": request.query_params.get("salvo", ""),
     })
 
 
@@ -9773,6 +9860,47 @@ def mover_produto_vitrine(
     return RedirectResponse("/painel/produtos", status_code=303)
 
 
+@app.post("/painel/produtos/ordem")
+async def salvar_ordem_produtos_vitrine(
+        request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    form = await request.form()
+    ids = []
+    for bruto in form.getlist("produto_id"):
+        texto_id = str(bruto or "").strip()
+        if texto_id.isdigit():
+            pid = int(texto_id)
+            if pid not in ids:
+                ids.append(pid)
+
+    produtos_empresa = db.query(ProdutoServico).filter(ProdutoServico.empresa_id == empresa.id).all()
+    por_id = {int(p.id): p for p in produtos_empresa}
+    if any(pid not in por_id for pid in ids):
+        raise HTTPException(404)
+
+    posicoes: dict[str, int] = {}
+    enviados = set()
+    for pid in ids:
+        produto = por_id[pid]
+        grupo = str(produto.vitrine_categoria or "").strip().casefold()
+        posicoes[grupo] = posicoes.get(grupo, 0) + 1
+        produto.vitrine_ordem = posicoes[grupo] * 10
+        enviados.add(pid)
+
+    # Se uma aba antiga enviar somente parte da lista, os itens restantes são mantidos no fim
+    # de sua própria categoria, em vez de perderem a ordenação existente.
+    restantes = sorted(
+        (p for p in produtos_empresa if int(p.id) not in enviados),
+        key=lambda p: (str(p.vitrine_categoria or "").strip().casefold(), int(p.vitrine_ordem or 0), str(p.nome or "").casefold()),
+    )
+    for produto in restantes:
+        grupo = str(produto.vitrine_categoria or "").strip().casefold()
+        posicoes[grupo] = posicoes.get(grupo, 0) + 1
+        produto.vitrine_ordem = posicoes[grupo] * 10
+
+    db.commit()
+    return RedirectResponse("/painel/produtos?salvo=ordem", status_code=303)
+
+
 def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, produto: ProdutoServico | None):
     usa_recursos = _empresa_modulo_ativo(empresa, "recursos")
     itens_estoque = garantir_itens_estoque_padrao(db, empresa.id) if usa_recursos else []
@@ -9798,6 +9926,7 @@ def opcionais_painel(request: Request, db: Session = Depends(get_db), empresa: E
         "request": request, "empresa": empresa,
         "opcionais": _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=False),
         "erro": request.query_params.get("erro", ""),
+        "salvo": request.query_params.get("salvo", ""),
     })
 
 
@@ -9828,6 +9957,91 @@ def salvar_opcional_empresa(
     atual.ativo = bool(ativo)
     db.commit()
     return RedirectResponse("/painel/opcionais", status_code=303)
+
+
+@app.post("/painel/opcionais/salvar-todos")
+async def salvar_opcionais_empresa_todos(
+        request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    form = await request.form()
+    ids = []
+    for bruto in form.getlist("opcional_id"):
+        texto_id = str(bruto or "").strip()
+        if texto_id.isdigit():
+            oid = int(texto_id)
+            if oid not in ids:
+                ids.append(oid)
+
+    opcionais_todos = _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=False)
+    por_id = {int(o.id): o for o in opcionais_todos}
+    if any(oid not in por_id for oid in ids):
+        raise HTTPException(404)
+
+    nomes_finais: dict[int, str] = {}
+    chaves_usadas: set[str] = set()
+    for oid in ids:
+        nome_limpo = " ".join(str(form.get(f"nome_{oid}") or "").strip().split())[:140]
+        if not nome_limpo:
+            return RedirectResponse("/painel/opcionais?erro=nome", status_code=303)
+        chave = nome_limpo.casefold()
+        if chave in chaves_usadas:
+            return RedirectResponse("/painel/opcionais?erro=duplicado", status_code=303)
+        chaves_usadas.add(chave)
+        nomes_finais[oid] = nome_limpo
+
+    for opcional in opcionais_todos:
+        if int(opcional.id) not in nomes_finais and str(opcional.nome or "").casefold() in chaves_usadas:
+            return RedirectResponse("/painel/opcionais?erro=duplicado", status_code=303)
+
+    novo_nome = " ".join(str(form.get("novo_nome") or "").strip().split())[:140]
+    chaves_omitidas = {
+        str(o.nome or "").casefold() for o in opcionais_todos if int(o.id) not in nomes_finais
+    }
+    if novo_nome and novo_nome.casefold() in (chaves_usadas | chaves_omitidas):
+        return RedirectResponse("/painel/opcionais?erro=duplicado", status_code=303)
+
+    # Evita conflito da restrição UNIQUE em trocas de nomes entre opcionais.
+    renomeados = []
+    for oid, novo in nomes_finais.items():
+        opcional = por_id[oid]
+        if str(opcional.nome or "") == novo:
+            continue
+        temporario = f"__tmpopc_{empresa.id}_{oid}_{uuid.uuid4().hex[:8]}"[:140]
+        opcional.nome = temporario
+        renomeados.append((opcional, novo))
+    if renomeados:
+        db.flush()
+    for opcional, novo in renomeados:
+        opcional.nome = novo
+
+    for pos, oid in enumerate(ids, start=1):
+        opcional = por_id[oid]
+        opcional.ordem = pos * 10
+        opcional.nome = nomes_finais[oid]
+        try:
+            quantidade = int(str(form.get(f"quantidade_{oid}") or "1").strip())
+        except (TypeError, ValueError):
+            quantidade = 1
+        opcional.quantidade = max(1, quantidade)
+        opcional.valor = max(0.0, texto_para_float(str(form.get(f"valor_{oid}") or "0")))
+        opcional.ativo = f"ativo_{oid}" in form
+
+    if novo_nome:
+        try:
+            nova_quantidade = int(str(form.get("nova_quantidade") or "1").strip())
+        except (TypeError, ValueError):
+            nova_quantidade = 1
+        novo = OpcionalEmpresa(
+            empresa_id=empresa.id,
+            nome=novo_nome,
+            quantidade=max(1, nova_quantidade),
+            valor=max(0.0, texto_para_float(str(form.get("novo_valor") or "0"))),
+            ativo="novo_ativo" in form,
+            ordem=(len(ids) + 1) * 10,
+        )
+        db.add(novo)
+
+    db.commit()
+    return RedirectResponse("/painel/opcionais?salvo=1", status_code=303)
 
 
 @app.post("/painel/opcional/{opcional_id}/mover")

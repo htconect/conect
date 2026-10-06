@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <style>
-.produtos-wrap{max-width:1160px;margin:0 auto}.produtos-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:24px 26px;border-radius:24px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.produtos-hero h1{margin:0 0 5px;color:#fff}.produtos-hero p{margin:0;color:#dbeafe}.produtos-acoes{display:flex;gap:8px;flex-wrap:wrap}.produtos-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.produto-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px}.produto-kpi small{color:#64748b}.produto-kpi strong{display:block;font-size:1.35rem;margin-top:4px}.produto-lista{display:grid;gap:12px}.produto-linha{display:grid;grid-template-columns:86px minmax(0,1fr) auto;gap:14px;align-items:center;background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:12px}.produto-linha img,.produto-sem-foto{width:86px;height:72px;object-fit:cover;border-radius:14px;background:#f1f5f9;display:grid;place-items:center;color:#94a3b8}.produto-linha h3{margin:0 0 4px}.produto-meta{display:flex;gap:8px;flex-wrap:wrap;color:#64748b;font-size:12px}.produto-tag{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;background:#ecfdf3;color:#067647;font-weight:800;font-size:11px}.produto-tag.inativo{background:#f1f5f9;color:#64748b}.produto-botoes{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.produto-ordem-acoes{display:flex;gap:6px;align-items:center}.produto-ordem-acoes form{margin:0}.produto-ordem-acoes button{min-width:42px;width:42px;padding:0}.produto-posicao{font-size:11px;color:#64748b;min-width:34px;text-align:center}.vazio{background:#fff;border:1px dashed #cbd5e1;border-radius:20px;padding:34px;text-align:center;color:#64748b}
-@media(max-width:760px){.produtos-hero{align-items:flex-start;flex-direction:column}.produtos-cards{grid-template-columns:1fr}.produto-linha{grid-template-columns:72px minmax(0,1fr)}.produto-linha img,.produto-sem-foto{width:72px;height:64px}.produto-botoes{grid-column:1/-1;justify-content:stretch}.produto-botoes a{flex:1}.produtos-acoes{width:100%}.produtos-acoes a{flex:1}}
+.produtos-wrap{max-width:1160px;margin:0 auto}.produtos-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:24px 26px;border-radius:24px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.produtos-hero h1{margin:0 0 5px;color:#fff}.produtos-hero p{margin:0;color:#dbeafe}.produtos-acoes{display:flex;gap:8px;flex-wrap:wrap}.produtos-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.produto-kpi{background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:16px}.produto-kpi small{color:#64748b}.produto-kpi strong{display:block;font-size:1.35rem;margin-top:4px}.produto-lista{display:grid;gap:12px}.produto-linha{display:grid;grid-template-columns:86px minmax(0,1fr) auto;gap:14px;align-items:center;background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:12px;transition:box-shadow .15s,transform .15s,background .15s}.produto-linha.ordenando{background:#eff6ff;box-shadow:0 14px 34px rgba(15,23,42,.16);transform:scale(1.01);z-index:5}.produto-linha img,.produto-sem-foto{width:86px;height:72px;object-fit:cover;border-radius:14px;background:#f1f5f9;display:grid;place-items:center;color:#94a3b8}.produto-linha h3{margin:0 0 4px}.produto-meta{display:flex;gap:8px;flex-wrap:wrap;color:#64748b;font-size:12px}.produto-tag{display:inline-flex;align-items:center;padding:5px 8px;border-radius:999px;background:#ecfdf3;color:#067647;font-weight:800;font-size:11px}.produto-tag.inativo{background:#f1f5f9;color:#64748b}.produto-botoes{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.produto-ordem-acoes{display:flex;gap:6px;align-items:center}.produto-ordem-acoes button{min-width:42px;width:42px;padding:0}.produto-arrastar{cursor:grab!important;touch-action:none;color:#475569}.produto-arrastar:active{cursor:grabbing!important}.produto-posicao{font-size:11px;color:#64748b;min-width:28px;text-align:center}.vazio{background:#fff;border:1px dashed #cbd5e1;border-radius:20px;padding:34px;text-align:center;color:#64748b}.ordem-info{display:flex;gap:9px;align-items:center;margin:0 0 12px;padding:11px 13px;border:1px solid #bfdbfe;background:#eff6ff;color:#1e3a8a;border-radius:14px;font-size:12px}.ordem-salvar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:13px 14px;background:#fff;border:1px solid #dbe3ee;border-radius:16px;position:sticky;bottom:12px;z-index:10;box-shadow:0 10px 28px rgba(15,23,42,.08)}.ordem-status{font-size:12px;color:#64748b;font-weight:700}.ordem-status.alterado{color:#b42318}.ordem-status.salvo{color:#067647}.produtos-aviso{padding:11px 13px;border-radius:12px;background:#ecfdf3;color:#067647;margin-bottom:12px}.ordenacao-ativa{user-select:none}
+@media(max-width:760px){.produtos-hero{align-items:flex-start;flex-direction:column}.produtos-cards{grid-template-columns:1fr}.produto-linha{grid-template-columns:72px minmax(0,1fr)}.produto-linha img,.produto-sem-foto{width:72px;height:64px}.produto-botoes{grid-column:1/-1;justify-content:stretch}.produto-botoes>a{flex:1}.produto-ordem-acoes{width:100%;justify-content:flex-start}.produtos-acoes{width:100%}.produtos-acoes a,.produtos-acoes button{flex:1}.ordem-salvar{align-items:stretch;flex-direction:column}.ordem-salvar button{width:100%}}
 </style>
 {% endblock %}
 {% block conteudo %}
@@ -23,27 +23,49 @@
     <div class="produto-kpi"><small>Categorias ativas</small><strong>{{ categorias_vitrine|length }}</strong></div>
   </div>
 
-  <div class="produto-lista">
-    {% for p in produtos %}
-      {% set capa = (p.fotos|selectattr('capa')|list|first) or (p.fotos|list|first) %}
-      <article class="produto-linha">
-        {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-sem-foto"><i class="bi bi-image"></i></div>{% endif %}
-        <div>
-          <h3>{{ p.nome }}</h3>
-          <div class="produto-meta"><span>{{ p.vitrine_categoria or 'Sem categoria' }}</span><span>R$ {{ p.valor_base|moeda_br }}</span><span>{{ p.quantidade_disponivel or 0 }} un.</span></div>
-          <div style="margin-top:7px"><span class="produto-tag {% if not p.vitrine_ativo %}inativo{% endif %}">{{ 'Na vitrine' if p.vitrine_ativo else 'Fora da vitrine' }}</span></div>
-        </div>
-        <div class="produto-botoes"><div class="produto-ordem-acoes" aria-label="Ordem do item"><form method="post" action="/painel/produto/{{ p.id }}/mover"><button type="submit" class="botao-secundario" name="direcao" value="cima" title="Subir item"><i class="bi bi-arrow-up"></i></button></form><form method="post" action="/painel/produto/{{ p.id }}/mover"><button type="submit" class="botao-secundario" name="direcao" value="baixo" title="Descer item"><i class="bi bi-arrow-down"></i></button></form></div><a class="botao-secundario" href="/painel/produto/{{ p.id }}"><i class="bi bi-pencil"></i> Editar</a><a class="botao-secundario" href="/painel/produto/{{ p.id }}/copiar"><i class="bi bi-copy"></i> Copiar</a></div>
-      </article>
-    {% else %}
-      <div class="vazio"><i class="bi bi-box-seam" style="font-size:34px"></i><h3>Nenhum item cadastrado</h3><p>Comece pelo primeiro produto ou serviço.</p><a class="botao" href="/painel/produto/novo">Cadastrar primeiro item</a></div>
-    {% endfor %}
-  </div>
+  {% if salvo == 'ordem' %}<div class="produtos-aviso"><i class="bi bi-check-circle"></i> Ordem dos produtos e serviços salva.</div>{% endif %}
+  {% if produtos %}<div class="ordem-info"><i class="bi bi-grip-vertical"></i><span>Arraste pelo ícone para ordenar no computador ou celular. A ordem dos itens é ajustada <strong>dentro da própria categoria</strong>; a ordem das categorias é controlada em “Categorias”.</span></div>{% endif %}
+
+  <form method="post" action="/painel/produtos/ordem" id="formOrdemProdutos">
+    <div class="produto-lista" id="listaProdutos" data-sortable>
+      {% for p in produtos %}
+        {% set capa = (p.fotos|selectattr('capa')|list|first) or (p.fotos|list|first) %}
+        <article class="produto-linha" data-sortable-item data-sort-group="{{ (p.vitrine_categoria or '__sem_categoria__')|lower }}">
+          <input type="hidden" name="produto_id" value="{{ p.id }}">
+          {% if capa and imagem_disponivel(capa.arquivo_url) %}<img src="{{ capa.miniatura_url if capa.miniatura_url and imagem_disponivel(capa.miniatura_url) else capa.arquivo_url }}" alt="{{ p.nome }}">{% else %}<div class="produto-sem-foto"><i class="bi bi-image"></i></div>{% endif %}
+          <div>
+            <h3>{{ p.nome }}</h3>
+            <div class="produto-meta"><span>{{ p.vitrine_categoria or 'Sem categoria' }}</span><span>R$ {{ p.valor_base|moeda_br }}</span><span>{{ p.quantidade_disponivel or 0 }} un.</span></div>
+            <div style="margin-top:7px"><span class="produto-tag {% if not p.vitrine_ativo %}inativo{% endif %}">{{ 'Na vitrine' if p.vitrine_ativo else 'Fora da vitrine' }}</span></div>
+          </div>
+          <div class="produto-botoes">
+            <div class="produto-ordem-acoes" aria-label="Ordem do item">
+              <button type="button" class="botao-secundario produto-arrastar" data-drag-handle title="Arrastar item" aria-label="Arrastar item"><i class="bi bi-grip-vertical"></i></button>
+              <button type="button" class="botao-secundario" data-move="cima" title="Subir item"><i class="bi bi-arrow-up"></i></button>
+              <button type="button" class="botao-secundario" data-move="baixo" title="Descer item"><i class="bi bi-arrow-down"></i></button>
+              <span class="produto-posicao" data-posicao></span>
+            </div>
+            <a class="botao-secundario" href="/painel/produto/{{ p.id }}"><i class="bi bi-pencil"></i> Editar</a><a class="botao-secundario" href="/painel/produto/{{ p.id }}/copiar"><i class="bi bi-copy"></i> Copiar</a>
+          </div>
+        </article>
+      {% else %}
+        <div class="vazio"><i class="bi bi-box-seam" style="font-size:34px"></i><h3>Nenhum item cadastrado</h3><p>Comece pelo primeiro produto ou serviço.</p><a class="botao" href="/painel/produto/novo">Cadastrar primeiro item</a></div>
+      {% endfor %}
+    </div>
+    {% if produtos %}<div class="ordem-salvar"><span class="ordem-status {% if salvo == 'ordem' %}salvo{% endif %}" id="statusOrdemProdutos">{% if salvo == 'ordem' %}Tudo salvo.{% else %}A ordem só muda na vitrine depois de salvar.{% endif %}</span><button type="submit"><i class="bi bi-save"></i> Salvar ordem</button></div>{% endif %}
+  </form>
 </div>
 {% endblock %}
 {% block scripts_extra %}
+<script src="/static/js/ordenacao-cadastros.js?v={{ APP_VERSION }}"></script>
 <script>
 (function(){
+ const lista=document.getElementById('listaProdutos'),form=document.getElementById('formOrdemProdutos'),status=document.getElementById('statusOrdemProdutos');
+ if(lista&&form){
+   window.HumiatSortable?.init(lista);
+   lista.addEventListener('ordenacao:alterada',()=>{if(status){status.textContent='Ordem alterada — falta salvar.';status.classList.remove('salvo');status.classList.add('alterado')}});
+   form.addEventListener('submit',()=>{if(window.mostrarCarregando)window.mostrarCarregando('Salvando ordem','Atualizando a ordem da vitrine...')});
+ }
  const btn=document.getElementById('otimizarTodasFotos');
  const kb=n=>n?`${Math.max(1,Math.round(n/1024)).toLocaleString('pt-BR')} KB`:'—';
  btn?.addEventListener('click',async function(){

@@ -1,29 +1,60 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <style>
-.cad-wrap{max-width:980px;margin:0 auto}.cad-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.cad-hero h1{margin:0;color:#fff}.cad-hero p{margin:5px 0 0;color:#dbeafe}.cad-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}.cad-linha{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;align-items:end;padding:12px 0;border-bottom:1px solid #edf1f5}.cad-linha:last-child{border-bottom:0}.cad-linha input{margin:0}.cad-status{display:flex;align-items:center;gap:7px;min-height:44px}.nova{margin-top:16px;padding-top:16px;border-top:2px solid #edf1f5}.cad-mover{display:flex;gap:6px;align-items:center}.cad-mover button{width:42px;min-width:42px;padding:0;min-height:42px}.cad-posicao{font-size:11px;color:#64748b;text-align:center;min-width:38px}
-@media(max-width:700px){.cad-hero{align-items:flex-start;flex-direction:column}.cad-linha{grid-template-columns:auto 1fr}.cad-status{align-self:end}.cad-linha>button{grid-column:1/-1;width:100%}.cad-mover{align-self:end}}
+.cad-wrap{max-width:980px;margin:0 auto}.cad-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.cad-hero h1{margin:0;color:#fff}.cad-hero p{margin:5px 0 0;color:#dbeafe}.cad-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}.cad-lista{display:grid}.cad-linha{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:end;padding:12px 0;border-bottom:1px solid #edf1f5;transition:box-shadow .15s,transform .15s,background .15s}.cad-linha:last-child{border-bottom:0}.cad-linha input{margin:0}.cad-linha.ordenando{background:#eff6ff;box-shadow:0 12px 28px rgba(15,23,42,.14);transform:scale(1.01);border-radius:14px;z-index:5}.cad-status{display:flex;align-items:center;gap:7px;min-height:44px}.nova{margin-top:16px;padding-top:16px;border-top:2px solid #edf1f5}.cad-mover{display:flex;gap:5px;align-items:center}.cad-mover button{width:40px;min-width:40px;padding:0;min-height:40px}.cad-arrastar{cursor:grab!important;touch-action:none;color:#475569}.cad-arrastar:active{cursor:grabbing!important}.cad-posicao{font-size:11px;color:#64748b;text-align:center;min-width:34px}.cad-acoes-finais{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0}.cad-status-edicao{font-size:12px;color:#64748b;font-weight:700}.cad-status-edicao.alterado{color:#b42318}.cad-status-edicao.salvo{color:#067647}.cad-aviso{padding:11px 13px;border-radius:12px;margin-bottom:12px}.cad-aviso.erro{background:#fff1f2;color:#9f1239}.cad-aviso.ok{background:#ecfdf3;color:#067647}.ordenacao-ativa{user-select:none}
+@media(max-width:700px){.cad-hero{align-items:flex-start;flex-direction:column}.cad-linha{grid-template-columns:auto 1fr}.cad-status{align-self:end}.cad-mover{align-self:end}.cad-acoes-finais{align-items:stretch;flex-direction:column}.cad-acoes-finais button{width:100%}}
 </style>
 {% endblock %}
 {% block conteudo %}
 <div class="cad-wrap">
-  <section class="cad-hero"><div><small>CADASTRO</small><h1>Categorias da vitrine</h1><p>Organize visualmente. Use as setas para subir ou descer cada categoria.</p></div><a class="botao btn-krj-ghost" href="/painel/vitrine"><i class="bi bi-shop"></i> Voltar à vitrine</a></section>
+  <section class="cad-hero"><div><small>CADASTRO</small><h1>Categorias da vitrine</h1><p>Arraste pelo ícone de movimento para ordenar. As setas continuam disponíveis como alternativa.</p></div><a class="botao btn-krj-ghost" href="/painel/vitrine"><i class="bi bi-shop"></i> Voltar à vitrine</a></section>
+  {% if erro == 'duplicado' %}<div class="cad-aviso erro">Existem categorias com o mesmo nome. Ajuste os nomes e salve novamente.</div>{% elif erro == 'nome' %}<div class="cad-aviso erro">Todas as categorias precisam ter um nome.</div>{% endif %}
+  {% if salvo %}<div class="cad-aviso ok"><i class="bi bi-check-circle"></i> Categorias salvas com sucesso.</div>{% endif %}
   <section class="cad-box">
-    {% for c in categorias %}
-    <form method="post" action="/painel/vitrine/categorias" class="cad-linha">
-      <input type="hidden" name="categoria_id" value="{{ c.id }}">
-      <div class="cad-mover" aria-label="Mover categoria"><button type="submit" class="botao-secundario" formaction="/painel/vitrine/categoria/{{ c.id }}/mover" name="direcao" value="cima" title="Subir categoria" {% if loop.first %}disabled{% endif %}><i class="bi bi-arrow-up"></i></button><button type="submit" class="botao-secundario" formaction="/painel/vitrine/categoria/{{ c.id }}/mover" name="direcao" value="baixo" title="Descer categoria" {% if loop.last %}disabled{% endif %}><i class="bi bi-arrow-down"></i></button><span class="cad-posicao">{{ loop.index }}º</span></div>
-      <div><label>Nome</label><input name="nome" value="{{ c.nome }}" required></div>
-      <label class="cad-status"><input type="checkbox" name="ativa" value="1" {% if c.ativa %}checked{% endif %}> Ativa</label>
-      <button type="submit" class="botao-secundario"><i class="bi bi-check2"></i> Salvar</button>
-    </form>
-    {% else %}<p class="texto-discreto">Nenhuma categoria cadastrada.</p>{% endfor %}
-    <form method="post" action="/painel/vitrine/categorias" class="cad-linha nova">
-      <div class="cad-mover"><span class="cad-posicao">Nova</span></div>
-      <div><label>Nova categoria</label><input name="nome" placeholder="Ex.: Karaokê, Jogos, Combos" required></div>
-      <label class="cad-status"><input type="checkbox" name="ativa" value="1" checked> Ativa</label>
-      <button type="submit"><i class="bi bi-plus-lg"></i> Adicionar</button>
+    <form method="post" action="/painel/vitrine/categorias/salvar-todas" id="formCategorias">
+      <div class="cad-lista" id="listaCategorias" data-sortable>
+        {% for c in categorias %}
+        <div class="cad-linha" data-sortable-item>
+          <input type="hidden" name="categoria_id" value="{{ c.id }}">
+          <div class="cad-mover" aria-label="Ordenar categoria">
+            <button type="button" class="botao-secundario cad-arrastar" data-drag-handle title="Arrastar categoria" aria-label="Arrastar categoria"><i class="bi bi-grip-vertical"></i></button>
+            <button type="button" class="botao-secundario" data-move="cima" title="Subir categoria"><i class="bi bi-arrow-up"></i></button>
+            <button type="button" class="botao-secundario" data-move="baixo" title="Descer categoria"><i class="bi bi-arrow-down"></i></button>
+            <span class="cad-posicao" data-posicao>{{ loop.index }}º</span>
+          </div>
+          <div><label>Nome</label><input name="nome_{{ c.id }}" value="{{ c.nome }}" required></div>
+          <label class="cad-status"><input type="checkbox" name="ativa_{{ c.id }}" value="1" {% if c.ativa %}checked{% endif %}> Ativa</label>
+        </div>
+        {% else %}<p class="texto-discreto">Nenhuma categoria cadastrada.</p>{% endfor %}
+      </div>
+
+      <div class="cad-linha nova">
+        <div class="cad-mover"><span class="cad-posicao">Nova</span></div>
+        <div><label>Nova categoria</label><input name="nova_nome" placeholder="Ex.: Karaokê, Jogos, Combos"></div>
+        <label class="cad-status"><input type="checkbox" name="nova_ativa" value="1" checked> Ativa</label>
+      </div>
+
+      <div class="cad-acoes-finais">
+        <span class="cad-status-edicao {% if salvo %}salvo{% endif %}" id="statusCategorias">{% if salvo %}Tudo salvo.{% else %}Arraste, edite ou ative/desative e salve tudo de uma vez.{% endif %}</span>
+        <button type="submit" id="salvarCategorias"><i class="bi bi-save"></i> Salvar alterações</button>
+      </div>
     </form>
   </section>
 </div>
+{% endblock %}
+{% block scripts_extra %}
+<script src="/static/js/ordenacao-cadastros.js?v={{ APP_VERSION }}"></script>
+<script>
+(function(){
+  const form=document.getElementById('formCategorias'), lista=document.getElementById('listaCategorias'), status=document.getElementById('statusCategorias');
+  if(!form||!lista) return;
+  window.HumiatSortable?.init(lista);
+  let alterado=false;
+  function marcar(){if(alterado)return;alterado=true;status.textContent='Alterações não salvas.';status.classList.remove('salvo');status.classList.add('alterado')}
+  lista.addEventListener('ordenacao:alterada',marcar);
+  form.addEventListener('input',marcar);
+  form.addEventListener('change',marcar);
+  form.addEventListener('submit',()=>{if(window.mostrarCarregando)window.mostrarCarregando('Salvando categorias','Aplicando nomes, status e nova ordem...')});
+})();
+</script>
 {% endblock %}
