@@ -5946,14 +5946,19 @@ def setup_antigo():
 
 
 def configurar_campos_empresa(db: Session, empresa_id: int):
-    campos = db.query(CampoGlobal).all()
+    campos = db.query(CampoGlobal.id, CampoGlobal.chave).all()
+    existentes = {
+        int(campo_id) for (campo_id,) in db.query(CampoEmpresa.campo_id).filter(
+            CampoEmpresa.empresa_id == empresa_id
+        ).all()
+    }
     obrigatorios = {"telefone", "nome", "bairro", "endereco", "numero", "data_evento", "hora_inicio"}
-    for ordem, campo in enumerate(campos, start=1):
-        existe = db.query(CampoEmpresa).filter_by(empresa_id=empresa_id, campo_id=campo.id).first()
-        if not existe:
-            visivel = campo.chave not in ["hora_fim"]
-            db.add(CampoEmpresa(empresa_id=empresa_id, campo_id=campo.id, ordem=ordem, visivel=visivel,
-                                obrigatorio=campo.chave in obrigatorios))
+    for ordem, (campo_id, chave) in enumerate(campos, start=1):
+        if int(campo_id) not in existentes:
+            db.add(CampoEmpresa(
+                empresa_id=empresa_id, campo_id=campo_id, ordem=ordem,
+                visivel=chave != "hora_fim", obrigatorio=chave in obrigatorios,
+            ))
     db.commit()
 
 
@@ -6806,20 +6811,42 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
 
 
 def _precos_contrato_produtos(db: Session, empresa: Empresa, produtos: list[ProdutoServico]) -> dict[str, dict[str, float | None]]:
-    """Mapa enxuto de preços Residencial/Empresa usado pelo contrato interno.
-
-    Reaproveita exatamente a mesma regra comercial da vitrine, sem duplicar preços.
-    ``None`` indica "sob consulta" e deixa o valor unitário para preenchimento manual.
-    """
+    """Preços comerciais do contrato em lote, preservando normal/especifico/consulta."""
     resultado: dict[str, dict[str, float | None]] = {}
+    if not produtos:
+        return resultado
+    com_preco_especifico = [p for p in produtos if bool(getattr(p, "preco_por_tipo_evento", False))]
+    tipos_por_nome = {}
+    configs = {}
+    if com_preco_especifico:
+        tipos_por_nome = {
+            str(t.nome or "").casefold(): int(t.id)
+            for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa.id).all()
+        }
+        ids = [int(p.id) for p in com_preco_especifico]
+        configs = {
+            (int(c.produto_id), int(c.tipo_evento_id)): c
+            for c in db.query(ProdutoPrecoEvento).filter(
+                ProdutoPrecoEvento.empresa_id == empresa.id,
+                ProdutoPrecoEvento.produto_id.in_(ids),
+            ).all()
+        }
     for produto in produtos:
+        valor_normal = max(float(produto.valor_base or 0), 0.0)
         por_tipo: dict[str, float | None] = {}
-        for tipo_evento in TIPOS_EVENTO_VITRINE:
-            preco = _preco_vitrine_produto(db, empresa, produto, tipo_evento)
-            if preco.get("sob_consulta"):
-                por_tipo[tipo_evento] = None
+        for chave, nome in TIPOS_EVENTO_VITRINE.items():
+            cfg = None
+            if bool(getattr(produto, "preco_por_tipo_evento", False)):
+                tipo_id = tipos_por_nome.get(str(nome).casefold())
+                if tipo_id is not None:
+                    cfg = configs.get((int(produto.id), tipo_id))
+            modo = str(getattr(cfg, "modo", "normal") or "normal").lower() if cfg else "normal"
+            if modo == "consulta":
+                por_tipo[chave] = None
+            elif modo == "especifico":
+                por_tipo[chave] = round(max(float(getattr(cfg, "valor", 0) or 0), 0.0), 2)
             else:
-                por_tipo[tipo_evento] = round(float(preco.get("valor") or 0), 2)
+                por_tipo[chave] = round(valor_normal, 2)
         resultado[str(produto.id)] = por_tipo
     return resultado
 
@@ -6930,27 +6957,37 @@ def _opcionais_produto(db: Session, empresa_id: int, produto_id: int, somente_at
 
 
 def _mapa_opcionais_produtos_view(db: Session, empresa: Empresa, produtos: list[ProdutoServico] | None = None) -> dict:
-    """Catálogo comercial por produto para contrato manual/vitrine.
-
-    O vínculo com recurso é apenas metadado operacional; se recursos estiverem
-    desligados, o opcional continua cobrando normalmente e o estoque é ignorado.
-    """
+    """Catálogo de opcionais por produto com consultas em lote e isolamento por empresa."""
     if not _empresa_modulo_ativo(empresa, "opcionais"):
         return {}
     produtos = produtos if produtos is not None else db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).all()
     itens_estoque = {int(r.id): r for r in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+    habilitados = [p for p in produtos if bool(getattr(p, "utiliza_opcionais", False))]
+    catalogo = _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True) if habilitados else []
+    excluidos: dict[int, set[int]] = {}
+    if habilitados:
+        for produto_id, opcional_id in db.query(
+            ProdutoOpcionalExclusao.produto_id, ProdutoOpcionalExclusao.opcional_id
+        ).filter(
+            ProdutoOpcionalExclusao.empresa_id == empresa.id,
+            ProdutoOpcionalExclusao.produto_id.in_([int(p.id) for p in habilitados]),
+        ).all():
+            excluidos.setdefault(int(produto_id), set()).add(int(opcional_id))
     saida = {}
     for produto in produtos:
         regs = []
-        for opc in _opcionais_produto(db, empresa.id, produto.id, somente_ativos=True):
-            rid = int(opc.item_estoque_id) if getattr(opc, "item_estoque_id", None) else None
-            regs.append({
-                "id": int(opc.id), "nome": str(opc.nome or "Opcional"),
-                "quantidade_maxima": max(1, int(opc.quantidade or 1)),
-                "valor": round(max(float(opc.valor or 0), 0.0), 2),
-                "item_estoque_id": rid,
-                "recurso_nome": str(itens_estoque[rid].nome) if rid in itens_estoque else "",
-            })
+        if bool(getattr(produto, "utiliza_opcionais", False)):
+            for opc in catalogo:
+                if int(opc.id) in excluidos.get(int(produto.id), set()):
+                    continue
+                rid = int(opc.item_estoque_id) if getattr(opc, "item_estoque_id", None) else None
+                regs.append({
+                    "id": int(opc.id), "nome": str(opc.nome or "Opcional"),
+                    "quantidade_maxima": max(1, int(opc.quantidade or 1)),
+                    "valor": round(max(float(opc.valor or 0), 0.0), 2),
+                    "item_estoque_id": rid,
+                    "recurso_nome": str(itens_estoque[rid].nome) if rid in itens_estoque else "",
+                })
         saida[str(produto.id)] = regs
     return saida
 
