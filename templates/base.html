@@ -38,7 +38,7 @@
           <a href="/painel/empresa"><i class="bi bi-building"></i> Empresa</a>
           <a href="/painel/produtos"><i class="bi bi-box-seam"></i> Produtos e serviços</a>
           <a href="/painel/categorias-vitrine"><i class="bi bi-tags"></i> Categorias da vitrine</a>
-          {% if empresa.modulo_opcionais_ativo %}<a href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i> Opcionais</a>{% endif %}
+          {% if empresa is defined and empresa and empresa.modulo_opcionais_ativo %}<a href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i> Opcionais</a>{% endif %}
           {% if empresa is defined and empresa and empresa.modulo_recursos_ativo %}<a href="/painel/recursos"><i class="bi bi-boxes"></i> Recursos</a>{% endif %}
           {% if empresa is defined and empresa and empresa.modulo_cupons_ativo %}<a href="/painel/cupons"><i class="bi bi-ticket-perforated"></i> Cupons</a>{% endif %}
           {% if request.session.get('acesso_total') %}<a href="/painel/configuracoes"><i class="bi bi-sliders"></i> Configurações avançadas</a>{% endif %}
@@ -94,7 +94,7 @@
     <a class="{% if request.url.path.startswith('/painel/empresa') %}ativo{% endif %}" href="/painel/empresa"><i class="bi bi-building"></i><span>Empresa</span></a>
     <a class="{% if request.url.path.startswith('/painel/produtos') or request.url.path.startswith('/painel/produto/') %}ativo{% endif %}" href="/painel/produtos"><i class="bi bi-box-seam"></i><span>Produtos e serviços</span></a>
     <a class="{% if request.url.path.startswith('/painel/categorias-vitrine') %}ativo{% endif %}" href="/painel/categorias-vitrine"><i class="bi bi-tags"></i><span>Categorias da vitrine</span></a>
-    {% if empresa.modulo_opcionais_ativo %}<a class="{% if request.url.path.startswith('/painel/opcionais') %}ativo{% endif %}" href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i><span>Opcionais</span></a>{% endif %}
+    {% if empresa is defined and empresa and empresa.modulo_opcionais_ativo %}<a class="{% if request.url.path.startswith('/painel/opcionais') %}ativo{% endif %}" href="/painel/opcionais"><i class="bi bi-ui-checks-grid"></i><span>Opcionais</span></a>{% endif %}
     {% if empresa is defined and empresa and empresa.modulo_recursos_ativo %}<a class="{% if request.url.path.startswith('/painel/recursos') %}ativo{% endif %}" href="/painel/recursos"><i class="bi bi-boxes"></i><span>Recursos</span></a>{% endif %}
     {% if empresa is defined and empresa and empresa.modulo_cupons_ativo %}<a class="{% if request.url.path.startswith('/painel/cupons') %}ativo{% endif %}" href="/painel/cupons"><i class="bi bi-ticket-perforated"></i><span>Cupons</span></a>{% endif %}
 

@@ -3932,7 +3932,7 @@ def _iniciar_migracao_precos_v106_em_background() -> None:
 
 
 def _garantir_colunas_v113_criticas() -> None:
-    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.122.
+    """Adiciona apenas as colunas/tabelas indispensáveis até a v1.0.129.
 
     É deliberadamente pequena: evita reexecutar a manutenção pesada no startup,
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
@@ -4025,6 +4025,22 @@ def _garantir_colunas_v113_criticas() -> None:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_solicitacoes_opcionais_item_estoque_id ON solicitacoes_opcionais (item_estoque_id)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS ix_opcionais_empresa_item_estoque_id ON opcionais_empresa (item_estoque_id)"))
                 conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS evolucao_vendas_historico (
+                        id SERIAL PRIMARY KEY,
+                        empresa_id INTEGER NOT NULL REFERENCES empresas(id),
+                        ano INTEGER NOT NULL,
+                        trimestre INTEGER NOT NULL,
+                        quantidade_vendas INTEGER NOT NULL DEFAULT 0,
+                        valor_total FLOAT NOT NULL DEFAULT 0,
+                        observacao VARCHAR(240),
+                        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT uq_evolucao_vendas_empresa_ano_tri UNIQUE (empresa_id, ano, trimestre)
+                    )
+                """))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_evolucao_vendas_historico_empresa_id ON evolucao_vendas_historico (empresa_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_evolucao_vendas_historico_ano ON evolucao_vendas_historico (ano)"))
+                conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS app_migrations (
                         chave VARCHAR(160) PRIMARY KEY,
                         aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -4047,8 +4063,9 @@ def _garantir_colunas_v113_criticas() -> None:
         garantir_colunas_novas()
         VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
         SolicitacaoOpcional.__table__.create(bind=engine, checkfirst=True)
+        EvolucaoVendasHistorico.__table__.create(bind=engine, checkfirst=True)
     except Exception:
-        logger.exception("Falha ao garantir colunas críticas da v1.0.122")
+        logger.exception("Falha ao garantir colunas críticas da v1.0.129")
         raise
 
 
