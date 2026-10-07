@@ -16,8 +16,14 @@
     </a>
     <a class="relatorio-card {% if not pode_financeiro %}bloqueado{% endif %}" href="/painel/evolucao-financeira">
       <div class="relatorio-icone"><i class="bi bi-graph-up-arrow"></i></div>
-      <h3>Evolução financeira</h3>
-      <p>Comparativo mensal e anual de contratos, faturamento e ticket médio.</p>
+      <h3>Evolução de aluguéis</h3>
+      <p>Comparativo mensal e anual de contratos de aluguel, faturamento e ticket médio.</p>
+      <span>{% if pode_financeiro %}Abrir relatório →{% else %}Requer acesso ao Financeiro{% endif %}</span>
+    </a>
+    <a class="relatorio-card {% if not pode_financeiro %}bloqueado{% endif %}" href="/painel/relatorios/evolucao-vendas">
+      <div class="relatorio-icone"><i class="bi bi-cart-check"></i></div>
+      <h3>Evolução de vendas</h3>
+      <p>Comparativo trimestral de vendas, faturamento, ticket médio e saldo a receber, com dados automáticos do Organiza.</p>
       <span>{% if pode_financeiro %}Abrir relatório →{% else %}Requer acesso ao Financeiro{% endif %}</span>
     </a>
     <div class="relatorio-card em-breve">

@@ -1087,6 +1087,26 @@ class EvolucaoFinanceiraHistorico(Base):
 
     empresa = relationship("Empresa")
 
+
+class EvolucaoVendasHistorico(Base):
+    """Histórico trimestral de vendas para períodos ainda não cobertos pelo Organiza."""
+    __tablename__ = "evolucao_vendas_historico"
+    __table_args__ = (
+        UniqueConstraint("empresa_id", "ano", "trimestre", name="uq_evolucao_vendas_empresa_ano_tri"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    ano = Column(Integer, nullable=False, index=True)
+    trimestre = Column(Integer, nullable=False)
+    quantidade_vendas = Column(Integer, nullable=False, default=0)
+    valor_total = Column(Float, nullable=False, default=0)
+    observacao = Column(String(240), nullable=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+    atualizado_em = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    empresa = relationship("Empresa")
+
 class ConfiguracaoRotaInteligente(Base):
     __tablename__ = "configuracoes_rota_inteligente"
     __table_args__ = (UniqueConstraint("empresa_id", name="uq_config_rota_empresa"),)

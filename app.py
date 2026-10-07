@@ -45,7 +45,7 @@ from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
 from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, VitrineOportunidade, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
-    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, SolicitacaoOpcional, EvolucaoFinanceiraHistorico, PausaOperacional
+    LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, SolicitacaoOpcional, EvolucaoFinanceiraHistorico, EvolucaoVendasHistorico, PausaOperacional
 from seed import inicializar_dados
 from utils import limpar_identificador, somar_horas, somar_minutos, hora_meia_em_meia_valida, texto_para_float, \
     cpf_valido, cnpj_valido, aplicar_variaveis_mensagem
@@ -14533,6 +14533,246 @@ def evolucao_financeira_salvar_historico(
     item.observacao = "Ajuste manual do histórico"
     db.commit()
     return RedirectResponse(f"/painel/evolucao-financeira?ano_final={max(2026, ano)}", status_code=303)
+
+
+def _chave_venda_organiza(item: LancamentoOrganiza) -> str:
+    """Agrupa parcelas/títulos do Organiza que pertencem à mesma venda.
+
+    O padrão histórico da integração usa identificadores como VENDA-1548-1,
+    em que o último bloco pode representar a parcela/título. Quando o número
+    da venda estiver na descrição, ele também é aproveitado. Se nenhum padrão
+    conhecido existir, o id_externo inteiro permanece como chave para nunca
+    juntar vendas diferentes por engano.
+    """
+    id_externo = str(getattr(item, "id_externo", "") or "").strip()
+    descricao = str(getattr(item, "descricao", "") or "").strip()
+
+    match = re.search(r"\bVENDA[-_:/ ]*(\d+)", id_externo.upper())
+    if match:
+        return f"VENDA-{match.group(1)}"
+
+    descricao_ascii = unicodedata.normalize("NFKD", descricao).encode("ascii", "ignore").decode("ascii")
+    match = re.search(r"\bVENDA(?:\s+(?:OS|N|NO))?\s*[:#-]?\s*(\d+)", descricao_ascii.upper())
+    if match:
+        return f"VENDA-{match.group(1)}"
+
+    return id_externo or f"ORGANIZA-{getattr(item, 'id', 'SEM-ID')}"
+
+
+def _agrupar_vendas_organiza(db: Session, empresa_id: int) -> tuple[list[dict], datetime | None, int]:
+    """Consolida títulos do Organiza em vendas únicas para relatórios."""
+    registros = (
+        db.query(LancamentoOrganiza)
+        .filter(
+            LancamentoOrganiza.empresa_id == empresa_id,
+            LancamentoOrganiza.tipo == "venda",
+        )
+        .order_by(LancamentoOrganiza.data_pagamento.asc(), LancamentoOrganiza.id.asc())
+        .all()
+    )
+    grupos: dict[str, dict] = {}
+    ultima_sincronizacao = None
+
+    for item in registros:
+        if not item.data_pagamento:
+            continue
+        chave = _chave_venda_organiza(item)
+        grupo = grupos.setdefault(chave, {
+            "chave": chave,
+            "data": item.data_pagamento,
+            "valor": 0.0,
+            "falta_receber": 0.0,
+            "titulos": 0,
+            "cliente": item.cliente or "",
+        })
+        if item.data_pagamento < grupo["data"]:
+            grupo["data"] = item.data_pagamento
+        grupo["valor"] += abs(float(item.valor or 0))
+        grupo["falta_receber"] += max(float(item.falta_receber or 0), 0.0)
+        grupo["titulos"] += 1
+        if not grupo["cliente"] and item.cliente:
+            grupo["cliente"] = item.cliente
+        if item.atualizado_em and (ultima_sincronizacao is None or item.atualizado_em > ultima_sincronizacao):
+            ultima_sincronizacao = item.atualizado_em
+
+    return list(grupos.values()), ultima_sincronizacao, len(registros)
+
+
+def _dados_evolucao_vendas(db: Session, empresa_id: int, anos: list[int]) -> tuple[dict, dict]:
+    dados: dict[int, dict[int, dict]] = {
+        ano: {
+            trimestre: {
+                "quantidade": 0,
+                "valor": 0.0,
+                "falta_receber": 0.0,
+                "origem": "sem_dados",
+            }
+            for trimestre in range(1, 5)
+        }
+        for ano in anos
+    }
+
+    historicos = db.query(EvolucaoVendasHistorico).filter(
+        EvolucaoVendasHistorico.empresa_id == empresa_id,
+        EvolucaoVendasHistorico.ano.in_(anos),
+    ).all()
+    for item in historicos:
+        if item.ano in dados and 1 <= int(item.trimestre or 0) <= 4:
+            dados[item.ano][item.trimestre] = {
+                "quantidade": int(item.quantidade_vendas or 0),
+                "valor": float(item.valor_total or 0),
+                "falta_receber": 0.0,
+                "origem": "historico",
+            }
+
+    vendas, ultima_sincronizacao, titulos_organiza = _agrupar_vendas_organiza(db, empresa_id)
+    automaticos: dict[tuple[int, int], dict] = {}
+    for venda in vendas:
+        data_venda = venda.get("data")
+        if not data_venda or data_venda.year not in dados:
+            continue
+        trimestre = ((int(data_venda.month) - 1) // 3) + 1
+        chave = (int(data_venda.year), int(trimestre))
+        agregado = automaticos.setdefault(chave, {"quantidade": 0, "valor": 0.0, "falta_receber": 0.0})
+        agregado["quantidade"] += 1
+        agregado["valor"] += float(venda.get("valor") or 0)
+        agregado["falta_receber"] += float(venda.get("falta_receber") or 0)
+
+    for (ano, trimestre), agregado in automaticos.items():
+        dados[ano][trimestre] = {
+            "quantidade": int(agregado["quantidade"]),
+            "valor": float(agregado["valor"]),
+            "falta_receber": float(agregado["falta_receber"]),
+            "origem": "organiza",
+        }
+
+    meta = {
+        "ultima_sincronizacao": ultima_sincronizacao,
+        "titulos_organiza": titulos_organiza,
+        "vendas_organiza": len(vendas),
+    }
+    return dados, meta
+
+
+@app.get("/painel/relatorios/evolucao-vendas", response_class=HTMLResponse)
+def evolucao_vendas(
+        request: Request,
+        ano_final: int = 0,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+
+    ano_atual = date.today().year
+    ano_final = int(ano_final or max(ano_atual, 2026))
+    ano_final = max(2026, min(ano_final, 2100))
+    anos = [ano_final - 2, ano_final - 1, ano_final]
+    dados, meta = _dados_evolucao_vendas(db, empresa.id, anos)
+
+    trimestres = [
+        {"numero": 1, "nome": "1º trimestre", "curto": "JAN/FEV/MAR"},
+        {"numero": 2, "nome": "2º trimestre", "curto": "ABR/MAI/JUN"},
+        {"numero": 3, "nome": "3º trimestre", "curto": "JUL/AGO/SET"},
+        {"numero": 4, "nome": "4º trimestre", "curto": "OUT/NOV/DEZ"},
+    ]
+    linhas = []
+    for trimestre in trimestres:
+        linhas.append({
+            **trimestre,
+            "anos": {ano: dados[ano][trimestre["numero"]] for ano in anos},
+        })
+
+    totais = {}
+    for ano in anos:
+        quantidade = sum(dados[ano][t]["quantidade"] for t in range(1, 5))
+        valor = sum(dados[ano][t]["valor"] for t in range(1, 5))
+        falta_receber = sum(dados[ano][t]["falta_receber"] for t in range(1, 5))
+        periodos_com_dados = sum(1 for t in range(1, 5) if dados[ano][t]["origem"] != "sem_dados")
+        totais[ano] = {
+            "quantidade": quantidade,
+            "valor": valor,
+            "falta_receber": falta_receber,
+            "ticket": (valor / quantidade) if quantidade else 0.0,
+            "periodos_com_dados": periodos_com_dados,
+        }
+    for pos, ano in enumerate(anos):
+        anterior = anos[pos - 1] if pos > 0 else None
+        if anterior and totais[anterior]["valor"]:
+            totais[ano]["crescimento"] = ((totais[ano]["valor"] / totais[anterior]["valor"]) - 1) * 100
+        else:
+            totais[ano]["crescimento"] = None
+
+    grafico = {
+        "periodos": [t["curto"] for t in trimestres],
+        "series": [
+            {
+                "ano": ano,
+                "valores": [dados[ano][t]["valor"] for t in range(1, 5)],
+                "quantidades": [dados[ano][t]["quantidade"] for t in range(1, 5)],
+            }
+            for ano in anos
+        ],
+    }
+
+    dados_final = dados[ano_final]
+    periodos_ativos = [t for t in range(1, 5) if dados_final[t]["origem"] != "sem_dados"]
+    periodos_com_movimento = [t for t in range(1, 5) if dados_final[t]["valor"] or dados_final[t]["quantidade"]]
+    melhor_tri = max(periodos_com_movimento, key=lambda t: dados_final[t]["valor"]) if periodos_com_movimento else None
+    destaques = {
+        "melhor_trimestre": trimestres[melhor_tri - 1]["nome"] if melhor_tri else "—",
+        "melhor_trimestre_valor": dados_final[melhor_tri]["valor"] if melhor_tri else 0.0,
+        "media_trimestral": (totais[ano_final]["valor"] / len(periodos_ativos)) if periodos_ativos else 0.0,
+        "ticket_atual": totais[ano_final]["ticket"],
+    }
+
+    return templates.TemplateResponse("admin/evolucao_vendas.html", {
+        "request": request,
+        "empresa": empresa,
+        "titulo": "Evolução de Vendas",
+        "anos": anos,
+        "ano_final": ano_final,
+        "linhas": linhas,
+        "totais": totais,
+        "grafico": grafico,
+        "destaques": destaques,
+        "meta": meta,
+        "hoje": date.today(),
+    })
+
+
+@app.post("/painel/relatorios/evolucao-vendas/historico")
+def evolucao_vendas_salvar_historico(
+        request: Request,
+        ano: int = Form(...),
+        trimestre: int = Form(...),
+        quantidade_vendas: int = Form(0),
+        valor_total: str = Form("0"),
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para editar o histórico de vendas.")
+    if trimestre < 1 or trimestre > 4 or ano < 2000 or ano > 2100:
+        raise HTTPException(400, "Competência inválida.")
+
+    valor = max(float(texto_para_float(valor_total) or 0), 0.0)
+    quantidade = max(int(quantidade_vendas or 0), 0)
+    item = db.query(EvolucaoVendasHistorico).filter_by(
+        empresa_id=empresa.id, ano=ano, trimestre=trimestre
+    ).first()
+    if item is None:
+        item = EvolucaoVendasHistorico(empresa_id=empresa.id, ano=ano, trimestre=trimestre)
+        db.add(item)
+    item.quantidade_vendas = quantidade
+    item.valor_total = valor
+    item.observacao = "Ajuste manual do histórico de vendas"
+    db.commit()
+    return RedirectResponse(
+        f"/painel/relatorios/evolucao-vendas?ano_final={max(2026, ano)}",
+        status_code=303,
+    )
+
 
 @app.get("/painel/financeiro", response_class=HTMLResponse)
 def financeiro(

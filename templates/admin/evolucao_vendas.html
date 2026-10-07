@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block body_class %}tela-evolucao-financeira{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="/static/css/evolucao_financeira.css?v=20261007-1128">{% endblock %}
+{% block conteudo %}
+<section class="evolucao-financeira">
+  <header class="evolucao-cabecalho">
+    <div class="evolucao-titulo">
+      <a href="/painel/relatorios" class="voltar-financeiro"><i class="bi bi-arrow-left"></i> Relatórios</a>
+      <div>
+        <h1>Evolução de Vendas</h1>
+        <p>Comparativo trimestral de vendas, faturamento, ticket médio e saldo a receber</p>
+      </div>
+    </div>
+    <form method="get" class="seletor-ano-comparacao">
+      <label for="ano-final">Comparar até</label>
+      <div>
+        <a href="?ano_final={{ ano_final - 1 }}" title="Anos anteriores"><i class="bi bi-chevron-left"></i></a>
+        <input id="ano-final" type="number" name="ano_final" min="2026" max="2100" value="{{ ano_final }}" onchange="this.form.submit()">
+        <a href="?ano_final={{ ano_final + 1 }}" title="Anos seguintes"><i class="bi bi-chevron-right"></i></a>
+      </div>
+    </form>
+  </header>
+
+  <div class="fonte-resumo">
+    <span><i class="bi bi-database-check"></i> <b>Dados automáticos:</b> vendas recebidas do Organiza</span>
+    <span><i class="bi bi-diagram-3"></i> Parcelas/títulos da mesma venda são consolidados para não contar uma venda mais de uma vez</span>
+    {% if ano_final == hoje.year %}<span><i class="bi bi-calendar-event"></i> <b>{{ ano_final }} é parcial:</b> dados acumulados até {{ hoje.strftime('%d/%m/%Y') }}</span>{% endif %}
+    {% if meta.ultima_sincronizacao %}
+      <span><i class="bi bi-arrow-repeat"></i> <b>Última sincronização disponível:</b> {{ meta.ultima_sincronizacao.strftime('%d/%m/%Y %H:%M') }}</span>
+    {% else %}
+      <span><i class="bi bi-exclamation-circle"></i> Nenhum lançamento de venda do Organiza encontrado para esta empresa</span>
+    {% endif %}
+  </div>
+
+  <div class="dashboard-kpis" aria-label="Indicadores de vendas do ano {{ ano_final }}">
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone"><i class="bi bi-cash-stack"></i></span>
+      <div><small>Faturamento {{ ano_final }}</small><strong>R$ {{ totais[ano_final].valor|moeda_br }}</strong><em>{{ totais[ano_final].quantidade }} venda(s)</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone"><i class="bi bi-cart-check"></i></span>
+      <div><small>Quantidade de vendas</small><strong>{{ totais[ano_final].quantidade }}</strong><em>{{ totais[ano_final].periodos_com_dados }} trimestre(s) com dados</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone"><i class="bi bi-receipt"></i></span>
+      <div><small>Ticket médio</small><strong>R$ {{ totais[ano_final].ticket|moeda_br }}</strong><em>média por venda</em></div>
+    </article>
+    <article class="dashboard-kpi">
+      <span class="dashboard-kpi-icone"><i class="bi bi-wallet2"></i></span>
+      <div><small>A receber no Organiza</small><strong>R$ {{ totais[ano_final].falta_receber|moeda_br }}</strong><em>saldo informado pela integração</em></div>
+    </article>
+  </div>
+
+  <div class="dashboard-secao-cabecalho">
+    <div><h2>Visão anual</h2><p>Comparação consolidada dos três anos exibidos</p></div>
+  </div>
+  <div class="cards-anos">
+    {% for ano in anos %}
+    <article class="card-ano">
+      <div class="card-ano-topo">
+        <strong>{{ ano }}</strong>
+        {% if totais[ano].crescimento is not none %}
+          <span class="variacao {% if totais[ano].crescimento >= 0 %}positiva{% else %}negativa{% endif %}">
+            <i class="bi bi-{% if totais[ano].crescimento >= 0 %}arrow-up-right{% else %}arrow-down-right{% endif %}"></i>
+            {{ '%.1f'|format(totais[ano].crescimento)|replace('.', ',') }}%
+          </span>
+        {% endif %}
+      </div>
+      <div class="card-ano-destaque">R$ {{ totais[ano].valor|moeda_br }}</div>
+      <div class="card-ano-metricas">
+        <span><small>Vendas</small><b>{{ totais[ano].quantidade }}</b></span>
+        <span><small>Ticket médio</small><b>R$ {{ totais[ano].ticket|moeda_br }}</b></span>
+        <span><small>A receber</small><b>R$ {{ totais[ano].falta_receber|moeda_br }}</b></span>
+        <span><small>Trimestres com dados</small><b>{{ totais[ano].periodos_com_dados }}/4</b></span>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <section class="painel-grafico box-evolucao">
+    <div class="secao-titulo">
+      <div>
+        <h2>{{ anos|join(' × ') }}</h2>
+        <p>Comparativo trimestral de vendas</p>
+      </div>
+      <div class="grafico-tipo" role="group" aria-label="Métrica do gráfico">
+        <button type="button" class="ativo" data-grafico-tipo="quantidade">Quantidade</button>
+        <button type="button" data-grafico-tipo="valor">Faturamento</button>
+      </div>
+    </div>
+    <div class="grafico-area"><div id="grafico-vendas" class="grafico-evolucao quatro-periodos" aria-label="Gráfico comparativo trimestral de vendas"></div></div>
+    <div class="legenda-grafico">
+      {% for ano in anos %}<span><i class="cor-serie cor-serie-{{ loop.index }}"></i>{{ ano }}</span>{% endfor %}
+    </div>
+  </section>
+
+  <section class="box-evolucao tabela-evolucao-box">
+    <div class="secao-titulo">
+      <div>
+        <h2>Comparativo por trimestre</h2>
+        <p>Quantidade de vendas, faturamento e origem dos dados</p>
+      </div>
+    </div>
+    <div class="tabela-evolucao-scroll">
+      <table class="tabela-evolucao">
+        <thead>
+          <tr>
+            <th rowspan="2">Trimestre</th>
+            {% for ano in anos %}<th colspan="2">{{ ano }}</th>{% endfor %}
+          </tr>
+          <tr>
+            {% for ano in anos %}<th>Qtd.</th><th>Faturamento</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for linha in linhas %}
+          <tr>
+            <th>{{ linha.curto }}<br><small>{{ linha.nome }}</small></th>
+            {% for ano in anos %}
+              {% set dado = linha.anos[ano] %}
+              <td>
+                {{ dado.quantidade }}
+                {% if dado.origem == 'historico' %}<small class="fonte-tag historico" title="Histórico manual">H</small>{% elif dado.origem == 'organiza' %}<small class="fonte-tag organiza" title="Organiza">O</small>{% endif %}
+              </td>
+              <td>
+                R$ {{ dado.valor|moeda_br }}
+                {% if dado.origem == 'historico' %}<small class="fonte-tag historico" title="Histórico manual">H</small>{% elif dado.origem == 'organiza' %}<small class="fonte-tag organiza" title="Organiza">O</small>{% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            {% for ano in anos %}<td>{{ totais[ano].quantidade }}</td><td>R$ {{ totais[ano].valor|moeda_br }}</td>{% endfor %}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="fonte-legenda"><span><b>O</b> Organiza / automático</span><span><b>H</b> Histórico informado manualmente</span></div>
+  </section>
+
+  <section class="box-evolucao">
+    <div class="secao-titulo">
+      <div>
+        <h2>Destaques de {{ ano_final }}</h2>
+        <p>Leitura rápida do desempenho de vendas</p>
+      </div>
+    </div>
+    <div class="dashboard-kpis vendas-destaques">
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-trophy"></i></span><div><small>Melhor trimestre</small><strong>{{ destaques.melhor_trimestre }}</strong><em>R$ {{ destaques.melhor_trimestre_valor|moeda_br }}</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-bar-chart"></i></span><div><small>Média trimestral</small><strong>R$ {{ destaques.media_trimestral|moeda_br }}</strong><em>considera apenas trimestres com dados</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-link-45deg"></i></span><div><small>Vendas identificadas no Organiza</small><strong>{{ meta.vendas_organiza }}</strong><em>{{ meta.titulos_organiza }} título(s)/lançamento(s) consolidados</em></div></article>
+      <article class="dashboard-kpi"><span class="dashboard-kpi-icone"><i class="bi bi-calculator"></i></span><div><small>Ticket do ano</small><strong>R$ {{ destaques.ticket_atual|moeda_br }}</strong><em>faturamento ÷ vendas</em></div></article>
+    </div>
+  </section>
+
+  <details class="box-evolucao ajuste-historico">
+    <summary><i class="bi bi-pencil-square"></i> Informar ou corrigir histórico de vendas</summary>
+    <div class="ajuste-historico-conteudo">
+      <p>Use esta opção para períodos antigos que não existem no Organiza. Quando houver dados automáticos do Organiza no mesmo trimestre, eles têm prioridade e não são substituídos pelo histórico manual.</p>
+      <form method="post" action="/painel/relatorios/evolucao-vendas/historico" class="form-historico">
+        <label>Ano<input type="number" name="ano" min="2000" max="2100" value="{{ anos[0] }}" required></label>
+        <label>Trimestre<select name="trimestre" required>{% for linha in linhas %}<option value="{{ linha.numero }}">{{ linha.nome }} — {{ linha.curto }}</option>{% endfor %}</select></label>
+        <label>Qtd. vendas<input type="number" name="quantidade_vendas" min="0" value="0" required></label>
+        <label>Faturamento<input type="text" name="valor_total" class="money" inputmode="decimal" value="0,00" required></label>
+        <button type="submit" class="botao"><i class="bi bi-check2-circle"></i> Salvar histórico</button>
+      </form>
+    </div>
+  </details>
+</section>
+
+<script>
+(() => {
+  const dados = {{ grafico|tojson }};
+  const alvo = document.getElementById('grafico-vendas');
+  const botoes = document.querySelectorAll('[data-grafico-tipo]');
+  const formatarMoeda = valor => new Intl.NumberFormat('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0}).format(valor || 0);
+  const formatarNumero = valor => new Intl.NumberFormat('pt-BR').format(valor || 0);
+  const formatarCompacto = valor => {
+    valor = Number(valor || 0);
+    if(valor >= 1000000) return (valor/1000000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mi';
+    if(valor >= 1000) return (valor/1000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mil';
+    return formatarNumero(valor);
+  };
+
+  function desenhar(tipo) {
+    alvo.innerHTML = '';
+    const chave = tipo === 'quantidade' ? 'quantidades' : 'valores';
+    const maximo = Math.max(1, ...dados.series.flatMap(s => s[chave]));
+    dados.periodos.forEach((periodo, indicePeriodo) => {
+      const grupo = document.createElement('div');
+      grupo.className = 'grupo-mes';
+      const barras = document.createElement('div');
+      barras.className = 'barras-mes';
+      dados.series.forEach((serie, indiceSerie) => {
+        const valor = Number(serie[chave][indicePeriodo] || 0);
+        const barra = document.createElement('div');
+        barra.className = `barra serie-${indiceSerie + 1}`;
+        barra.style.height = `${Math.max(valor > 0 ? 5 : 0, (valor / maximo) * 100)}%`;
+        const texto = tipo === 'quantidade' ? `${formatarNumero(valor)} venda(s)` : formatarMoeda(valor);
+        barra.title = `${periodo} ${serie.ano}: ${texto}`;
+        barra.setAttribute('aria-label', barra.title);
+        if (valor > 0) {
+          const rotulo = document.createElement('span');
+          rotulo.textContent = tipo === 'quantidade' ? formatarNumero(valor) : formatarCompacto(valor);
+          barra.appendChild(rotulo);
+        }
+        barras.appendChild(barra);
+      });
+      const nome = document.createElement('small');
+      nome.textContent = periodo;
+      grupo.appendChild(barras);
+      grupo.appendChild(nome);
+      alvo.appendChild(grupo);
+    });
+  }
+
+  botoes.forEach(botao => botao.addEventListener('click', () => {
+    botoes.forEach(b => b.classList.remove('ativo'));
+    botao.classList.add('ativo');
+    desenhar(botao.dataset.graficoTipo);
+  }));
+  desenhar('quantidade');
+})();
+</script>
+{% endblock %}
