@@ -159,7 +159,7 @@
   <details class="box-evolucao ajuste-historico">
     <summary><i class="bi bi-pencil-square"></i> Informar ou corrigir histórico de vendas</summary>
     <div class="ajuste-historico-conteudo">
-      <p>Use esta opção para períodos antigos que não existem no Organiza. Quando houver dados automáticos do Organiza no mesmo trimestre, eles têm prioridade e não são substituídos pelo histórico manual.</p>
+      <p>Use esta opção para períodos antigos que não existem no Organiza. Quando um ano for atualizado pelo botão do Organiza, os totais sincronizados passam a ser a referência daquele ano no Connect.</p>
       <form method="post" action="/painel/relatorios/evolucao-vendas/historico" class="form-historico">
         <label>Ano<input type="number" name="ano" min="2000" max="2100" value="{{ anos[0] }}" required></label>
         <label>Trimestre<select name="trimestre" required>{% for linha in linhas %}<option value="{{ linha.numero }}">{{ linha.nome }} — {{ linha.curto }}</option>{% endfor %}</select></label>

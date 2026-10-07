@@ -3646,6 +3646,91 @@ async def receber_lancamento_organiza(request: Request, db: Session = Depends(ge
     }
 
 
+@app.post("/api/integracoes/organiza/evolucao-vendas")
+async def receber_evolucao_vendas_organiza(request: Request, db: Session = Depends(get_db)):
+    """Recebe do Organiza o consolidado trimestral de um ano de vendas.
+
+    Este endpoint atualiza somente o relatório de evolução de vendas. Não cria
+    títulos a receber nem movimentações financeiras no Connect.
+    """
+    chave_esperada = os.getenv("ORGANIZA_API_KEY", "").strip()
+    if chave_esperada:
+        chave_recebida = (request.headers.get("X-API-Key") or "").strip()
+        if chave_recebida != chave_esperada:
+            raise HTTPException(status_code=401, detail="Chave de integração inválida.")
+
+    try:
+        dados = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido.")
+
+    try:
+        ano = int(dados.get("ano"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Ano inválido.")
+    if ano < 2000 or ano > 2100:
+        raise HTTPException(status_code=422, detail="Ano deve estar entre 2000 e 2100.")
+
+    empresa_slug = str(dados.get("empresa_slug") or "karaokerj").strip().lower()
+    empresa_destino = db.query(Empresa).filter(func.lower(Empresa.slug) == empresa_slug).first()
+    if not empresa_destino and empresa_slug in ("karaokerj", "karaoke-rj"):
+        empresa_destino = db.query(Empresa).filter(func.lower(Empresa.nome) == "karaoke rj").first()
+    if not empresa_destino:
+        raise HTTPException(status_code=422, detail="Empresa de destino da integração não encontrada.")
+
+    linhas = dados.get("trimestres")
+    if not isinstance(linhas, list):
+        raise HTTPException(status_code=422, detail="trimestres deve ser uma lista com os 4 trimestres.")
+
+    por_trimestre = {}
+    for linha in linhas:
+        if not isinstance(linha, dict):
+            continue
+        try:
+            trimestre = int(linha.get("trimestre"))
+            quantidade = max(int(linha.get("quantidade_vendas") or 0), 0)
+            valor = max(float(linha.get("valor_total") or 0), 0.0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Dados trimestrais inválidos.")
+        if trimestre < 1 or trimestre > 4:
+            raise HTTPException(status_code=422, detail="Trimestre deve estar entre 1 e 4.")
+        por_trimestre[trimestre] = {"quantidade": quantidade, "valor": round(valor, 2)}
+
+    if set(por_trimestre) != {1, 2, 3, 4}:
+        raise HTTPException(status_code=422, detail="Envie exatamente os trimestres 1, 2, 3 e 4.")
+
+    agora_txt = datetime.now().strftime("%d/%m/%Y %H:%M")
+    atualizados = 0
+    for trimestre in range(1, 5):
+        valores = por_trimestre[trimestre]
+        item = db.query(EvolucaoVendasHistorico).filter_by(
+            empresa_id=empresa_destino.id,
+            ano=ano,
+            trimestre=trimestre,
+        ).first()
+        if item is None:
+            item = EvolucaoVendasHistorico(
+                empresa_id=empresa_destino.id,
+                ano=ano,
+                trimestre=trimestre,
+            )
+            db.add(item)
+        item.quantidade_vendas = valores["quantidade"]
+        item.valor_total = valores["valor"]
+        item.observacao = f"Sincronizado do Organiza em {agora_txt}"
+        atualizados += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "empresa_slug": empresa_destino.slug,
+        "ano": ano,
+        "trimestres_atualizados": atualizados,
+        "quantidade_total": sum(v["quantidade"] for v in por_trimestre.values()),
+        "valor_total": round(sum(v["valor"] for v in por_trimestre.values()), 2),
+    }
+
+
 @app.get("/api/integracoes/organiza/lancamentos")
 def listar_lancamentos_organiza(request: Request, db: Session = Depends(get_db)):
     """Consulta simples para conferência da integração."""
@@ -14633,14 +14718,6 @@ def _dados_evolucao_vendas(db: Session, empresa_id: int, anos: list[int]) -> tup
         EvolucaoVendasHistorico.empresa_id == empresa_id,
         EvolucaoVendasHistorico.ano.in_(anos),
     ).all()
-    for item in historicos:
-        if item.ano in dados and 1 <= int(item.trimestre or 0) <= 4:
-            dados[item.ano][item.trimestre] = {
-                "quantidade": int(item.quantidade_vendas or 0),
-                "valor": float(item.valor_total or 0),
-                "falta_receber": 0.0,
-                "origem": "historico",
-            }
 
     vendas, ultima_sincronizacao, titulos_organiza = _agrupar_vendas_organiza(db, empresa_id)
     automaticos: dict[tuple[int, int], dict] = {}
@@ -14662,6 +14739,20 @@ def _dados_evolucao_vendas(db: Session, empresa_id: int, anos: list[int]) -> tup
             "falta_receber": float(agregado["falta_receber"]),
             "origem": "organiza",
         }
+
+    # Histórico manual e, principalmente, a sincronização anual enviada pelo
+    # próprio Organiza têm prioridade sobre lançamentos antigos/fragmentados.
+    # Isso permite que o botão "Atualizar Connect" substitua um ano inteiro
+    # pelos totais oficiais calculados no Organiza.
+    for item in historicos:
+        if item.ano in dados and 1 <= int(item.trimestre or 0) <= 4:
+            sincronizado_organiza = str(item.observacao or "").startswith("Sincronizado do Organiza")
+            dados[item.ano][item.trimestre] = {
+                "quantidade": int(item.quantidade_vendas or 0),
+                "valor": float(item.valor_total or 0),
+                "falta_receber": 0.0,
+                "origem": "organiza" if sincronizado_organiza else "historico",
+            }
 
     meta = {
         "ultima_sincronizacao": ultima_sincronizacao,
