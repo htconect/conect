@@ -1,16 +1,31 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<style>
+.relatorios-wrap{max-width:1180px;margin:0 auto}.relatorios-hero{margin-bottom:18px}.relatorios-hero h1{margin-bottom:5px}.relatorios-hero p{color:#64748b;margin:0}.relatorios-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.relatorio-card{display:flex;flex-direction:column;min-height:190px;background:#fff;border:1px solid #dbe3ee;border-radius:18px;padding:18px;text-decoration:none;color:#0f172a;box-shadow:0 8px 24px rgba(15,23,42,.04)}.relatorio-card:hover{border-color:#93b4df;transform:translateY(-1px)}.relatorio-icone{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:#eaf2ff;color:#0f3d91;font-size:22px}.relatorio-card h3{margin:14px 0 6px}.relatorio-card p{margin:0;color:#64748b;line-height:1.45;font-size:13px;flex:1}.relatorio-card span{margin-top:16px;font-weight:900;color:#0f3d91}.relatorio-card.bloqueado{opacity:.58;pointer-events:none}.relatorio-card.em-breve{border-style:dashed;box-shadow:none}.relatorio-card.em-breve .relatorio-icone{background:#f1f5f9;color:#64748b}.relatorio-card.em-breve span{color:#64748b}@media(max-width:800px){.relatorios-grid{grid-template-columns:1fr}}
+</style>
+{% endblock %}
 {% block conteudo %}
-<div class="hero-admin">
-  <div>
-    <p class="mini">Área de trabalho</p>
-    <h1>Relatórios</h1>
-    <p>Módulo preparado para receber os relatórios da empresa.</p>
-  </div>
-</div>
-<div class="grid">
-  <div class="card">
-    <h3>Relatórios em preparação</h3>
-    <p>Os próximos relatórios serão adicionados aqui sem alterar as permissões já configuradas.</p>
+<div class="relatorios-wrap">
+  <div class="hero-admin relatorios-hero"><div><p class="mini">Área de trabalho</p><h1>Relatórios</h1><p>Consulte os números da empresa sem misturar análise com a operação do dia a dia.</p></div></div>
+  <div class="relatorios-grid">
+    <a class="relatorio-card {% if not pode_financeiro %}bloqueado{% endif %}" href="/painel/relatorios/financeiro">
+      <div class="relatorio-icone"><i class="bi bi-cash-coin"></i></div>
+      <h3>Financeiro mensal por categoria</h3>
+      <p>Entradas, saídas, saldo, gráfico por categoria e correção da categoria dos lançamentos.</p>
+      <span>{% if pode_financeiro %}Abrir relatório →{% else %}Requer acesso ao Financeiro{% endif %}</span>
+    </a>
+    <a class="relatorio-card {% if not pode_financeiro %}bloqueado{% endif %}" href="/painel/evolucao-financeira">
+      <div class="relatorio-icone"><i class="bi bi-graph-up-arrow"></i></div>
+      <h3>Evolução financeira</h3>
+      <p>Comparativo mensal e anual de contratos, faturamento e ticket médio.</p>
+      <span>{% if pode_financeiro %}Abrir relatório →{% else %}Requer acesso ao Financeiro{% endif %}</span>
+    </a>
+    <div class="relatorio-card em-breve">
+      <div class="relatorio-icone"><i class="bi bi-hourglass-split"></i></div>
+      <h3>Próximos relatórios</h3>
+      <p>Contas a receber/pagar, contratos e repasses podem entrar aqui sem sobrecarregar o Financeiro.</p>
+      <span>Estrutura pronta para ampliar</span>
+    </div>
   </div>
 </div>
 {% endblock %}

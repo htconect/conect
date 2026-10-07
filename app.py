@@ -8527,8 +8527,16 @@ def acesso_negado(request: Request, area: str = "", empresa: Empresa = Depends(e
 
 
 @app.get("/painel/relatorios", response_class=HTMLResponse)
-def relatorios(request: Request, empresa: Empresa = Depends(empresa_logada)):
-    return templates.TemplateResponse("admin/relatorios.html", {"request": request, "empresa": empresa})
+def relatorios(
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada)
+):
+    return templates.TemplateResponse("admin/relatorios.html", {
+        "request": request,
+        "empresa": empresa,
+        "pode_financeiro": usuario_pode_financeiro(request, empresa, db),
+    })
 
 
 @app.get("/painel/marketing", response_class=HTMLResponse)
@@ -15400,6 +15408,277 @@ def financeiro(
         "categorias": [("casa", "Casa"), ("empresa", "Empresa"), ("aluguel", "Aluguel"), ("venda", "Venda"), ("manutencao", "Manutenção"), ("repasse", "Repasse")]
     })
 
+
+
+RELATORIO_FINANCEIRO_CATEGORIAS = [
+    ("casa", "Casa"),
+    ("empresa", "Empresa"),
+    ("aluguel", "Aluguel"),
+    ("venda", "Venda"),
+    ("manutencao", "Manutenção"),
+    ("repasse", "Repasse"),
+]
+
+
+def _periodo_mes_relatorio(mes: str) -> tuple[date, date, str]:
+    referencia = (mes or "").strip()
+    if not referencia:
+        referencia = date.today().strftime("%Y-%m")
+    try:
+        inicio = datetime.strptime(referencia, "%Y-%m").date().replace(day=1)
+    except ValueError:
+        raise HTTPException(400, "Mês inválido.")
+    indice = inicio.year * 12 + inicio.month
+    fim = date(indice // 12, indice % 12 + 1, 1) - timedelta(days=1)
+    return inicio, fim, inicio.strftime("%Y-%m")
+
+
+def _dados_relatorio_financeiro_categoria(
+        db: Session,
+        empresa_id: int,
+        inicio: date,
+        fim: date,
+        conta_id: int = 0,
+        categoria: str = "",
+):
+    categorias_validas = {valor for valor, _ in RELATORIO_FINANCEIRO_CATEGORIAS}
+    if categoria and categoria != "sem_categoria" and categoria not in categorias_validas:
+        raise HTTPException(400, "Categoria inválida.")
+
+    q_banco = db.query(LancamentoBanco).options(joinedload(LancamentoBanco.conta)).filter(
+        LancamentoBanco.empresa_id == empresa_id,
+        LancamentoBanco.data >= inicio,
+        LancamentoBanco.data <= fim,
+    )
+    q_manual = db.query(LancamentoManualFinanceiro).options(joinedload(LancamentoManualFinanceiro.conta)).filter(
+        LancamentoManualFinanceiro.empresa_id == empresa_id,
+        LancamentoManualFinanceiro.tipo == "real",
+        LancamentoManualFinanceiro.data >= inicio,
+        LancamentoManualFinanceiro.data <= fim,
+    )
+    if conta_id:
+        q_banco = q_banco.filter(LancamentoBanco.conta_id == conta_id)
+        q_manual = q_manual.filter(LancamentoManualFinanceiro.conta_id == conta_id)
+    if categoria == "sem_categoria":
+        q_banco = q_banco.filter(or_(LancamentoBanco.categoria == None, LancamentoBanco.categoria == ""))
+        q_manual = q_manual.filter(or_(LancamentoManualFinanceiro.categoria == None, LancamentoManualFinanceiro.categoria == ""))
+    elif categoria:
+        q_banco = q_banco.filter(LancamentoBanco.categoria == categoria)
+        q_manual = q_manual.filter(LancamentoManualFinanceiro.categoria == categoria)
+
+    banco = q_banco.order_by(LancamentoBanco.data.desc(), LancamentoBanco.ordem.asc(), LancamentoBanco.id.asc()).all()
+    manuais = q_manual.order_by(LancamentoManualFinanceiro.data.desc(), LancamentoManualFinanceiro.ordem.asc(), LancamentoManualFinanceiro.id.asc()).all()
+
+    movimentos = []
+    for item in banco:
+        valor = float(item.valor or 0)
+        origem = "Banco"
+        if item.pagamento_id:
+            origem = "Online / sistema"
+        elif item.origem_importacao:
+            origem = "Extrato importado"
+        movimentos.append({
+            "tipo_movimento": "banco",
+            "id": item.id,
+            "data": item.data,
+            "categoria_valor": str(item.categoria or ""),
+            "descricao": item.historico or "—",
+            "conta": item.conta.nome if item.conta else "—",
+            "origem": origem,
+            "entrada": valor if valor > 0 else 0.0,
+            "saida": abs(valor) if valor < 0 else 0.0,
+        })
+    for item in manuais:
+        valor = float(item.valor or 0)
+        origem = "Lançamento manual"
+        if item.pagamento_id:
+            origem = "Pagamento / sistema"
+        movimentos.append({
+            "tipo_movimento": "manual",
+            "id": item.id,
+            "data": item.data,
+            "categoria_valor": str(item.categoria or ""),
+            "descricao": item.descricao or "—",
+            "conta": item.conta.nome if item.conta else "—",
+            "origem": origem,
+            "entrada": valor if valor > 0 else 0.0,
+            "saida": abs(valor) if valor < 0 else 0.0,
+        })
+    movimentos.sort(key=lambda item: (item["data"], item["tipo_movimento"], item["id"]), reverse=True)
+
+    por_categoria = {}
+    for movimento in movimentos:
+        chave = movimento["categoria_valor"] or "sem_categoria"
+        grupo = por_categoria.setdefault(chave, {"quantidade": 0, "entradas": 0.0, "saidas": 0.0})
+        grupo["quantidade"] += 1
+        grupo["entradas"] += movimento["entrada"]
+        grupo["saidas"] += movimento["saida"]
+
+    rotulos = dict(RELATORIO_FINANCEIRO_CATEGORIAS)
+    categorias_resumo = []
+    ordem = [valor for valor, _ in RELATORIO_FINANCEIRO_CATEGORIAS] + ["sem_categoria"]
+    for chave in ordem:
+        grupo = por_categoria.get(chave)
+        if not grupo:
+            continue
+        entradas = float(grupo["entradas"])
+        saidas = float(grupo["saidas"])
+        categorias_resumo.append({
+            "valor": chave,
+            "rotulo": "Sem categoria" if chave == "sem_categoria" else rotulos.get(chave, chave.title()),
+            "quantidade": grupo["quantidade"],
+            "entradas": entradas,
+            "saidas": saidas,
+            "saldo": entradas - saidas,
+        })
+
+    entradas = sum(item["entrada"] for item in movimentos)
+    saidas = sum(item["saida"] for item in movimentos)
+    max_grafico = max([1.0] + [max(item["entradas"], item["saidas"]) for item in categorias_resumo])
+    grafico_categorias = [
+        {
+            **item,
+            "entrada_pct": (item["entradas"] / max_grafico) * 100 if max_grafico else 0,
+            "saida_pct": (item["saidas"] / max_grafico) * 100 if max_grafico else 0,
+        }
+        for item in categorias_resumo
+    ]
+    return {
+        "movimentos": movimentos,
+        "categorias_resumo": categorias_resumo,
+        "grafico_categorias": grafico_categorias,
+        "entradas": entradas,
+        "saidas": saidas,
+        "saldo": entradas - saidas,
+    }
+
+
+@app.get("/painel/relatorios/financeiro", response_class=HTMLResponse)
+def relatorio_financeiro_categoria(
+        request: Request,
+        mes: str = "",
+        conta_id: int = 0,
+        categoria: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para visualizar o financeiro.")
+
+    inicio, fim, mes_ref = _periodo_mes_relatorio(mes)
+    contas = garantir_contas_financeiras(db, empresa.id)
+    conta = next((item for item in contas if item.id == conta_id), None) if conta_id else None
+    if conta_id and not conta:
+        raise HTTPException(404, "Conta financeira não encontrada.")
+    dados = _dados_relatorio_financeiro_categoria(db, empresa.id, inicio, fim, conta_id, categoria)
+    categoria_rotulo = "Todas as categorias"
+    if categoria == "sem_categoria":
+        categoria_rotulo = "Sem categoria"
+    elif categoria:
+        categoria_rotulo = dict(RELATORIO_FINANCEIRO_CATEGORIAS).get(categoria, categoria)
+
+    contexto = {
+        "request": request,
+        "empresa": empresa,
+        "titulo": "Financeiro mensal por categoria",
+        "inicio": inicio,
+        "fim": fim,
+        "mes": mes_ref,
+        "contas": contas,
+        "conta": conta,
+        "conta_id": conta_id,
+        "categoria": categoria,
+        "categoria_rotulo": categoria_rotulo,
+        "categorias": RELATORIO_FINANCEIRO_CATEGORIAS,
+        "categorias_salvas": request.query_params.get("categorias_salvas", ""),
+        "categorias_bloqueadas": request.query_params.get("categorias_bloqueadas", ""),
+        **dados,
+    }
+    return templates.TemplateResponse("admin/financeiro_relatorio.html", contexto)
+
+
+@app.post("/painel/relatorios/financeiro/categorias")
+async def relatorio_financeiro_salvar_categorias(
+        request: Request,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    if not usuario_pode_financeiro(request, empresa, db):
+        raise HTTPException(403, "Usuário sem permissão para editar o financeiro.")
+
+    form = await request.form()
+    categorias_validas = {valor for valor, _ in RELATORIO_FINANCEIRO_CATEGORIAS}
+    salvos = 0
+    bloqueados = 0
+    for chave, valor in form.multi_items():
+        if not chave.startswith("categoria_"):
+            continue
+        partes = chave.split("_", 2)
+        if len(partes) != 3 or partes[1] not in {"banco", "manual"} or not partes[2].isdigit():
+            bloqueados += 1
+            continue
+        tipo = partes[1]
+        lancamento_id = int(partes[2])
+        nova_categoria = str(valor or "").strip()
+        if nova_categoria not in categorias_validas:
+            bloqueados += 1
+            continue
+
+        if tipo == "banco":
+            lanc = db.get(LancamentoBanco, lancamento_id)
+            if not lanc or lanc.empresa_id != empresa.id:
+                bloqueados += 1
+                continue
+            if nova_categoria == str(lanc.categoria or ""):
+                continue
+            if db.query(VinculoOrganizaFinanceiro).filter(
+                VinculoOrganizaFinanceiro.lancamento_banco_id == lanc.id
+            ).first():
+                bloqueados += 1
+                continue
+            if nova_categoria != "repasse" and db.query(VinculoRepasseBanco).filter(
+                VinculoRepasseBanco.lancamento_banco_id == lanc.id
+            ).first():
+                bloqueados += 1
+                continue
+            lanc.categoria = nova_categoria
+            lanc.categoria_confirmada = True
+            salvos += 1
+            continue
+
+        lanc = db.get(LancamentoManualFinanceiro, lancamento_id)
+        if not lanc or lanc.empresa_id != empresa.id or lanc.tipo != "real":
+            bloqueados += 1
+            continue
+        if nova_categoria == str(lanc.categoria or ""):
+            continue
+        if db.query(VinculoTituloFinanceiro).filter(
+            VinculoTituloFinanceiro.lancamento_manual_id == lanc.id
+        ).first() or db.query(VinculoOrganizaFinanceiro).filter(
+            VinculoOrganizaFinanceiro.lancamento_manual_id == lanc.id
+        ).first():
+            bloqueados += 1
+            continue
+        lanc.categoria = nova_categoria
+        if nova_categoria != "aluguel" and getattr(lanc, "pagamento_id", None):
+            pagamento = db.get(Pagamento, lanc.pagamento_id)
+            if pagamento:
+                pagamento.conciliado_em = None
+            lanc.pagamento_id = None
+        if nova_categoria not in ("venda", "manutencao") and getattr(lanc, "organiza_lancamento_id", None):
+            lanc.organiza_lancamento_id = None
+        salvos += 1
+
+    db.commit()
+    mes = str(form.get("mes") or date.today().strftime("%Y-%m"))
+    conta_id = str(form.get("conta_id") or "0")
+    filtro_categoria = str(form.get("filtro_categoria") or "")
+    qs = {"mes": mes, "conta_id": conta_id, "categorias_salvas": str(salvos)}
+    if filtro_categoria:
+        qs["categoria"] = filtro_categoria
+    if bloqueados:
+        qs["categorias_bloqueadas"] = str(bloqueados)
+    return RedirectResponse("/painel/relatorios/financeiro?" + urlencode(qs), status_code=303)
 
 
 def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[date] = None):
