@@ -408,6 +408,7 @@ class OpcionalEmpresa(Base):
     nome = Column(String(140), nullable=False)
     quantidade = Column(Integer, nullable=False, default=1)
     valor = Column(Float, nullable=False, default=0)
+    foto_url = Column(String(500), nullable=True)
     # Vínculo comercial -> estoque. O opcional continua existindo mesmo sem estoque;
     # quando a empresa controla recursos, esta unidade extra também consome o item vinculado.
     item_estoque_id = Column(Integer, ForeignKey("itens_produto_servico_estoque.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -563,6 +564,19 @@ class SolicitacaoOpcional(Base):
     item_estoque = relationship("ItemProdutoServicoEstoque")
 
 
+class HistoricoOpcionalContrato(Base):
+    """Trilha auditável das mudanças feitas no catálogo pelo link do cliente."""
+    __tablename__ = "historico_opcionais_contrato"
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    solicitacao_id = Column(Integer, ForeignKey("solicitacoes.id", ondelete="CASCADE"), nullable=False, index=True)
+    descricao = Column(String(500), nullable=False)
+    valor_anterior = Column(Float, nullable=False)
+    valor_novo = Column(Float, nullable=False)
+    valor_pago = Column(Float, nullable=False, default=0)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+
 class Solicitacao(Base):
     __tablename__ = "solicitacoes"
 
@@ -672,6 +686,8 @@ class Solicitacao(Base):
     # Registros antigos permanecem fora da fila mesmo que possuam histórico de
     # WhatsApp/contrato enviado de versões anteriores.
     whatsapp_contrato_confirmacao_pendente = Column(Boolean, nullable=False, default=False)
+    opcionais_alterados_em = Column(DateTime, nullable=True)
+    opcionais_reenvio_pendente = Column(Boolean, nullable=False, default=False)
     # Confirmação operacional feita pelo atendente após constatar que o cliente
     # recebeu/tem o contrato.
     contrato_recebido_em = Column(DateTime, nullable=True)

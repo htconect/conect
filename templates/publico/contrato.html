@@ -10,9 +10,43 @@
 @media(max-width:640px){.fluxo-publico{margin-bottom:24px}.resumo-rapido,.pagamento-resumo{grid-template-columns:repeat(2,minmax(0,1fr))}.resumo-rapido>div:last-child,.pagamento-resumo>div:last-child{grid-column:1/-1}.pagamento-destaque{padding:14px;margin:10px 0}.pagamento-destaque h1{font-size:1.85rem}.seguranca-pagamento{padding:12px}.secao-recolhivel>summary{padding:15px}.secao-corpo{padding:0 15px 16px}.acoes-duplas{grid-template-columns:1fr}.aceite-final{position:sticky;bottom:8px;z-index:8;background:rgba(255,255,255,.96);backdrop-filter:blur(8px);padding:10px;border-radius:16px;box-shadow:0 8px 26px rgba(15,23,42,.12)}.clausulas-publicas{max-height:48vh}.consultar-links{display:grid;grid-template-columns:1fr}.consultar-links .botao{width:100%}}
 @media(max-width:430px){.metodos-infinitepay{grid-template-columns:1fr}.metodo-infinitepay{padding:10px 12px}.pagamento-resumo{grid-template-columns:1fr 1fr}.pagamento-destaque h1{font-size:1.7rem}.conferencia-pix-infinite p{font-size:.86rem}}
 .status-pill.ok{background:color-mix(in srgb,var(--cliente-cor) 10%,#fff);color:var(--cliente-cor)}.pagamento-destaque{border-color:color-mix(in srgb,var(--cliente-cor) 28%,#dbe3ee);background:linear-gradient(180deg,color-mix(in srgb,var(--cliente-cor) 8%,#fff),#fff)}.metodo-pagamento-visual.selecionado{border-color:var(--cliente-cor)!important;background:color-mix(in srgb,var(--cliente-cor) 8%,#fff)!important}.simulador-cartao>summary{color:var(--cliente-cor)}
+/* Os opcionais aparecem antes do aceite, sem abrir menus adicionais. */
+.opcionais-cliente{border:1px solid color-mix(in srgb,var(--cliente-cor) 24%,#dbe3ee);border-radius:16px;background:#fff;padding:15px;margin:12px 0;text-align:left}
+.opcionais-cliente h3{margin:0 0 4px;font-size:1rem}
+.opcionais-cliente>p{margin:0 0 10px;font-size:.86rem;line-height:1.4}
+.opcional-cliente-linha{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #eef2f7}
+.opcional-cliente-linha>div{min-width:0}
+.opcional-cliente-linha b,.opcional-cliente-linha small{display:block;overflow-wrap:anywhere}
+.opcional-cliente-linha small{color:#64748b;margin-top:4px}
+.opcional-cliente-linha strong{flex:0 0 auto;white-space:nowrap}
+.opcional-cliente-subtotal{display:flex;justify-content:space-between;gap:10px;padding-top:12px;font-weight:900}
+@media(max-width:430px){.opcionais-cliente{padding:12px}.opcional-cliente-linha{gap:7px}.opcional-cliente-linha strong{font-size:.9rem}}
 </style>
 
+{% macro resumo_opcionais(opcionais, subtotal) %}
+  {% if opcionais %}
+  <section class="opcionais-cliente" aria-label="Opcionais incluídos no contrato">
+    <h3>Opcionais incluídos na locação</h3>
+    <p class="texto-discreto">Os valores abaixo já fazem parte do total do contrato.</p>
+    {% for opc in opcionais %}
+    <div class="opcional-cliente-linha">
+      <div><b>{{ opc.nome }}</b><small>{{ opc.quantidade }} × R$ {{ opc.valor_unitario|moeda_br }} por unidade</small></div>
+      <strong>R$ {{ opc.valor_total|moeda_br }}</strong>
+    </div>
+    {% endfor %}
+    <div class="opcional-cliente-subtotal"><span>Subtotal dos opcionais</span><span>R$ {{ subtotal|moeda_br }}</span></div>
+  </section>
+  {% endif %}
+{% endmacro %}
+
 <div class="fluxo-publico">
+{% if empresa.modulo_opcionais_ativo and item.status not in ['cancelado_cliente','cancelada','rejeitada','aguardando_nova_data'] and item.contrato_id %}
+  <div class="box" style="padding:14px;margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;border-radius:14px">
+    <b>✨ Deixe sua festa ainda mais completa!</b>
+    <p class="texto-discreto" style="margin:6px 0 12px">Confira fotos e preços de TV, pedestais e outros opcionais. Escolha, adicione ou retire pelo mesmo link.</p>
+    <a class="botao" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/opcionais">Ver catálogo de opcionais</a>
+  </div>
+{% endif %}
 {% if item.status == 'cancelado_cliente' %}
   <div class="box final-reserva">
     <span class="status-pill">Cancelado</span>
@@ -26,6 +60,7 @@
     <h1>Reserva concluída</h1>
     <p>Seu contrato está aceito e o pagamento está totalmente quitado.</p>
     <p><b>Obrigado! Sua reserva está confirmada.</b></p>
+    {{ resumo_opcionais(opcionais_contrato_view, comp.opcionais) }}
     <div class="acoes-duplas">
       <a class="botao secundario" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}.pdf" target="_blank">Ver contrato</a>
       <button type="button" onclick="fecharPaginaReserva()">Fechar</button>
@@ -49,6 +84,8 @@
   {% if not contrato_pronto %}
     <div class="box aviso"><b>Contrato em preparação.</b><p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p></div>
   {% endif %}
+
+  {{ resumo_opcionais(opcionais_contrato_view, comp.opcionais) }}
 
   <details class="secao-recolhivel">
     <summary>Dados do contrato</summary>
@@ -94,7 +131,8 @@
   <details class="secao-recolhivel">
     <summary>Pagamento</summary>
     <div class="secao-corpo">
-      <p><b>Equipamentos:</b> R$ {{ comp.equipamentos|moeda_br }}</p>
+      <p><b>Equipamentos:</b> R$ {{ comp.equipamentos_sem_opcionais|moeda_br }}</p>
+      {% if opcionais_contrato_view %}<p><b>Opcionais:</b> R$ {{ comp.opcionais|moeda_br }} <small class="texto-discreto">(já incluídos no total)</small></p>{% endif %}
       {% if comp.cupom_codigo and comp.desconto > 0 %}
         <p><b>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_rotulo }}):</b> - R$ {{ comp.desconto|moeda_br }}</p>
       {% endif %}
@@ -168,6 +206,8 @@
       <p class="texto-discreto">Você poderá usar este mesmo link para pagar depois.</p>
     </div>
   {% endif %}
+
+  {{ resumo_opcionais(opcionais_contrato_view, comp.opcionais) }}
 
   <section id="etapa-pagamento" {% if mostrar_pergunta_pagamento %}hidden{% endif %}>
     <div class="pagamento-destaque">

@@ -1,23 +1,75 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <style>
-.rec-wrap{max-width:1080px;margin:0 auto}.rec-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.rec-hero h1{margin:0;color:#fff}.rec-hero p{margin:5px 0 0;color:#dbeafe}.rec-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}.rec-grade{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.rec-card{border:1px solid #dbe3ee;border-radius:16px;padding:14px;background:#fff}.rec-card label{margin-top:0}.rec-acoes{margin-top:14px}.novo-recurso{margin-top:16px;border-top:1px solid #edf1f5;padding-top:16px}.novo-recurso .linha{align-items:end}
-@media(max-width:760px){.rec-hero{align-items:flex-start;flex-direction:column}.rec-grade{grid-template-columns:1fr}}
+.rec-wrap{max-width:1080px;margin:0 auto}
+.rec-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}
+.rec-hero h1{margin:0;color:#fff}.rec-hero p{margin:5px 0 0;color:#dbeafe}
+.rec-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}
+.rec-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rec-card{border:1px solid #dbe3ee;border-radius:16px;padding:14px;background:#fff;min-width:0}
+.rec-card .rec-campos{display:grid;grid-template-columns:minmax(0,2fr) minmax(110px,1fr);gap:10px;align-items:end}
+.rec-card label{display:block;margin:0 0 6px;font-weight:700}
+.rec-card input{width:100%;max-width:100%;box-sizing:border-box}
+.rec-card small{display:block;margin-top:8px}
+.rec-acoes{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
+.rec-status{font-size:13px;color:#64748b}.rec-status.alterado{color:#b42318;font-weight:700}
+.rec-aviso{padding:11px 13px;border-radius:12px;margin-bottom:12px}
+.rec-aviso.erro{background:#fff1f2;color:#9f1239}.rec-aviso.ok{background:#ecfdf3;color:#067647}
+.novo-recurso{margin-top:16px;border-top:1px solid #edf1f5;padding-top:16px}.novo-recurso .linha{align-items:end}
+@media(max-width:760px){.rec-hero{align-items:flex-start;flex-direction:column}.rec-grade{grid-template-columns:1fr}.rec-acoes{flex-direction:column;align-items:stretch}.rec-acoes button{width:100%}}
+@media(max-width:400px){.rec-card .rec-campos{grid-template-columns:minmax(0,1fr) 96px}}
 </style>
 {% endblock %}
 {% block conteudo %}
 <div class="rec-wrap">
-  <section class="rec-hero"><div><small>CADASTRO</small><h1>Recursos</h1><p>Itens compartilhados usados pelos produtos. O cadastro e o estoque ficam fora da tela do item.</p></div><a class="botao btn-krj-ghost" href="/painel/produtos"><i class="bi bi-box-seam"></i> Produtos e serviços</a></section>
+  <section class="rec-hero">
+    <div><small>CADASTRO</small><h1>Estoque</h1><p>Edite nomes e quantidades, como no cadastro de opcionais. Os vínculos dos equipamentos e contratos são preservados.</p></div>
+    <a class="botao btn-krj-ghost" href="/painel/produtos"><i class="bi bi-box-seam"></i> Produtos e serviços</a>
+  </section>
+  {% if erro == 'duplicado' %}<div class="rec-aviso erro" role="alert">Já existe um item do estoque com esse nome. Use nomes diferentes para cada recurso.</div>
+  {% elif erro == 'nome' %}<div class="rec-aviso erro" role="alert">O nome do recurso não pode ficar vazio.</div>
+  {% elif erro == 'tamanho' %}<div class="rec-aviso erro" role="alert">O nome deve ter no máximo 140 caracteres.</div>
+  {% elif erro == 'quantidade' %}<div class="rec-aviso erro" role="alert">A quantidade deve ser um número inteiro igual ou maior que zero.</div>
+  {% elif erro == 'formulario' %}<div class="rec-aviso erro" role="alert">Os dados enviados estão incompletos. Atualize a página e tente novamente.</div>{% endif %}
+  {% if salvo %}<div class="rec-aviso ok" role="status"><i class="bi bi-check-circle"></i> Estoque salvo com sucesso.</div>{% endif %}
   <section class="rec-box">
-    <form method="post" action="/painel/itens-estoque/salvar">
+    <form method="post" action="/painel/itens-estoque/salvar" id="formRecursos">
       <div class="rec-grade">
         {% for item in itens_estoque %}
-        <div class="rec-card"><input type="hidden" name="item_id" value="{{ item.id }}"><label>{{ item.nome }}</label><input name="quantidade_estoque" type="number" min="0" value="{{ item.quantidade_estoque or 0 }}"><small class="texto-discreto">Quantidade total disponível</small></div>
+        <div class="rec-card">
+          <input type="hidden" name="item_id" value="{{ item.id }}">
+          <div class="rec-campos">
+            <div><label for="nomeRecurso{{ item.id }}">Nome do item</label><input id="nomeRecurso{{ item.id }}" name="nome_recurso" maxlength="140" value="{{ item.nome }}" required autocomplete="off"></div>
+            <div><label for="qtdRecurso{{ item.id }}">Quantidade</label><input id="qtdRecurso{{ item.id }}" name="quantidade_estoque" type="number" min="0" step="1" value="{{ item.quantidade_estoque or 0 }}" required></div>
+          </div>
+          <small class="texto-discreto">Estoque total desse recurso</small>
+        </div>
         {% else %}<p class="texto-discreto">Nenhum recurso cadastrado.</p>{% endfor %}
       </div>
-      {% if itens_estoque %}<div class="rec-acoes"><button class="largura-total" type="submit"><i class="bi bi-check-circle"></i> Salvar quantidades</button></div>{% endif %}
+      {% if itens_estoque %}<div class="rec-acoes"><span class="rec-status" id="statusRecursos">Altere os nomes ou quantidades e salve tudo de uma vez.</span><button type="submit"><i class="bi bi-save"></i> Salvar alterações</button></div>{% endif %}
     </form>
-    <details class="accordion interno novo-recurso"><summary>+ Adicionar recurso</summary><form method="post" action="/painel/itens-estoque/novo" class="form-mobile-simples"><div class="linha"><div><label>Nome</label><input name="nome" required placeholder="Ex.: Microfone sem fio"></div><div><label>Quantidade</label><input name="quantidade_estoque" type="number" min="0" value="0"></div></div><button type="submit">Adicionar recurso</button></form></details>
+    <details class="accordion interno novo-recurso">
+      <summary>+ Adicionar item</summary>
+      <form method="post" action="/painel/itens-estoque/novo" class="form-mobile-simples">
+        <div class="linha">
+          <div><label for="novoNomeRecurso">Nome</label><input id="novoNomeRecurso" name="nome" maxlength="140" required placeholder="Ex.: Microfone sem fio"></div>
+          <div><label for="novoQtdRecurso">Quantidade</label><input id="novoQtdRecurso" name="quantidade_estoque" type="number" min="0" step="1" value="0"></div>
+        </div>
+        <button type="submit">Adicionar item</button>
+      </form>
+    </details>
   </section>
 </div>
+{% endblock %}
+{% block scripts_extra %}
+<script>
+(function(){
+ const form=document.getElementById('formRecursos'),status=document.getElementById('statusRecursos');
+ if(!form||!status)return;
+ const marcar=()=>{status.textContent='Alterações não salvas.';status.classList.add('alterado')};
+ form.addEventListener('input',marcar);
+ form.addEventListener('change',marcar);
+ form.addEventListener('submit',()=>{if(window.mostrarCarregando)window.mostrarCarregando('Salvando recursos','Atualizando nomes e quantidades...')});
+})();
+</script>
 {% endblock %}

@@ -135,7 +135,7 @@
     <div id="avisoEstoqueProduto" class="box aviso" hidden></div>
     {% if usa_opcionais %}<div id="opcionaisNovoContrato" class="box" style="margin-top:10px" hidden>
       <h3 style="margin-top:0">Opcionais do contrato</h3>
-      <p class="texto-discreto">O valor do opcional fica separado do equipamento. Se houver recurso vinculado e a empresa controlar estoque, ele também aumenta a quantidade consumida.</p>
+      <p class="texto-discreto">O valor do opcional fica separado do equipamento. Se houver item vinculado e a empresa controlar estoque, ele também aumenta a quantidade consumida.</p>
       <div id="listaOpcionaisNovoContrato"></div>
     </div>{% endif %}
     <div id="recursosNovoContrato" class="box" style="margin-top:10px" hidden>
@@ -204,9 +204,10 @@ function atualizarOpcionaisNovoContrato(){
   if(!produto||!box||!lista)return; const pid=String(produto.value||''); const ops=OPCIONAIS_POR_PRODUTO[pid]||[];
   if(!ops.length){box.hidden=true;lista.innerHTML='';recalcularValoresContratoManual();return;}
   const atuais=qtdOpcionaisNovoContrato(); box.hidden=false;
-  lista.innerHTML=ops.map(o=>{const qtd=Math.min(Math.max(0,atuais[String(o.id)]||0),Math.max(1,parseInt(o.quantidade_maxima||1,10)||1));const estoque=o.recurso_nome?`<small class="texto-discreto" style="display:block">Estoque: +1 ${o.recurso_nome} por unidade</small>`:'';return `<div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0"><div><b>${o.nome}</b><small class="texto-discreto" style="display:block">R$ ${formatarMoedaContrato(o.valor)} por unidade</small>${estoque}<input type="hidden" name="opcional_produto_id" value="${pid}"><input type="hidden" name="opcional_id" value="${o.id}"></div><div><label>Qtd. opcional</label><input name="opcional_quantidade" type="number" min="0" max="${Math.max(1,parseInt(o.quantidade_maxima||1,10)||1)}" value="${qtd}" data-opcional-id="${o.id}" data-valor="${o.valor}" data-recurso-id="${o.item_estoque_id||''}"></div></div>`}).join('');
+  lista.innerHTML=ops.map(o=>{const qtd=Math.min(Math.max(0,atuais[String(o.id)]||0),Math.max(1,parseInt(o.quantidade_maxima||1,10)||1));const estoque=o.recurso_nome?`<small class="texto-discreto" style="display:block">Estoque: +${Math.max(1,Number(o.quantidade_maxima)||1)} ${o.recurso_nome} ao marcar</small>`:'';return `<div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0"><div>${o.foto_url?`<img src="${o.foto_url}" alt="" loading="lazy" style="width:48px;height:48px;object-fit:contain;border-radius:8px;float:left;margin-right:8px">`:``}<b>${o.nome}</b><small class="texto-discreto" style="display:block">${Math.max(1,Number(o.quantidade_maxima)||1)} unidade(s) — R$ ${formatarMoedaContrato(o.valor)} por unidade</small>${estoque}<input type="hidden" name="opcional_produto_id" value="${pid}"><input type="hidden" name="opcional_id" value="${o.id}"></div><div><label class="check" style="display:flex;align-items:center;gap:9px"><input type="checkbox" class="opcional-check-admin" ${qtd>0?'checked':''}> Adicionar</label><input name="opcional_quantidade" type="hidden" value="${qtd>0?1:0}" data-opcional-id="${o.id}" data-valor="${o.valor}" data-qtd-pacote="${Math.max(1,Number(o.quantidade_maxima)||1)}" data-recurso-id="${o.item_estoque_id||''}"><small class="opcional-sem-estoque-admin" style="color:#b42318" hidden>Sem estoque</small></div></div>`}).join('');
+  renderEstoqueOpcionaisAdmin();
 }
-function totalOpcionaisNovoContrato(){let t=0;document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>t+=Math.max(0,parseInt(inp.value||'0',10)||0)*(parseFloat(inp.dataset.valor||'0')||0));return t;}
+function totalOpcionaisNovoContrato(){let t=0;document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>t+=Math.max(0,parseInt(inp.value||'0',10)||0)*(parseFloat(inp.dataset.valor||'0')||0)*(Number(inp.dataset.qtdPacote||1)));return t;}
 function atualizarRecursosNovoContrato(){
   const produto=document.querySelector('select[name="produto_id"]');
   const box=document.getElementById('recursosNovoContrato');
@@ -215,7 +216,7 @@ function atualizarRecursosNovoContrato(){
   const produtoId=String(produto.value||'');
   const mapa={};
   (RECURSOS_POR_PRODUTO[produtoId]||[]).forEach(r=>{mapa[String(r.id)]={id:r.id,nome:r.nome,quantidade:Number(r.quantidade||0)}});
-  document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>{const rid=String(inp.dataset.recursoId||'');const qtd=Math.max(0,parseInt(inp.value||'0',10)||0);if(!rid||!qtd)return;const op=(OPCIONAIS_POR_PRODUTO[produtoId]||[]).find(x=>String(x.id)===String(inp.dataset.opcionalId||''));if(!mapa[rid])mapa[rid]={id:Number(rid),nome:op?.recurso_nome||'Recurso opcional',quantidade:0};mapa[rid].quantidade+=qtd;});
+  document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>{const rid=String(inp.dataset.recursoId||'');const qtd=Math.max(0,parseInt(inp.value||'0',10)||0);if(!rid||!qtd)return;const op=(OPCIONAIS_POR_PRODUTO[produtoId]||[]).find(x=>String(x.id)===String(inp.dataset.opcionalId||''));if(!mapa[rid])mapa[rid]={id:Number(rid),nome:op?.recurso_nome||'Recurso opcional',quantidade:0};mapa[rid].quantidade+=qtd*Number(inp.dataset.qtdPacote||1);});
   const recursos=Object.values(mapa).filter(r=>r.quantidade>0);
   if(!recursos.length){ box.hidden=true; lista.innerHTML=''; return; }
   box.hidden=false;
@@ -451,5 +452,58 @@ function bloquearEnvioContratoNovo(form){
   form.dataset.enviando='1'; const btn=document.getElementById('btnContratoNovo');
   if(btn){btn.disabled=true;btn.textContent='Salvando...';} return true;
 }
+
+// Opcionais: checkbox (0/1) e controle por data e recurso compartilhado.
+let SALDOS_OPCIONAIS_ADMIN = null, SEQUENCIA_ESTOQUE_OPCIONAIS = 0;
+function usoRecursosOpcionaisAdmin(){
+  const uso={};
+  const itens=[[document.querySelector('select[name="produto_id"]')?.value||'',1]];
+  itens.forEach(([pid,qtd])=>(RECURSOS_POR_PRODUTO[String(pid)]||[]).forEach(r=>{const id=String(r.id);uso[id]=(uso[id]||0)+Math.max(1,Number(qtd)||1)*Number(r.quantidade||0);}));
+  document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]').forEach(inp=>{if(inp.value==='1'&&inp.dataset.recursoId){const id=inp.dataset.recursoId;uso[id]=(uso[id]||0)+Number(inp.dataset.qtdPacote||1);}});
+  return uso;
+}
+function renderEstoqueOpcionaisAdmin(){
+  const controles=document.querySelectorAll('#listaOpcionaisNovoContrato input[name="opcional_quantidade"]');
+  if(!controles.length)return;
+  const uso=usoRecursosOpcionaisAdmin();
+  controles.forEach(inp=>{
+    const linha=inp.closest('.linha'),check=linha?.querySelector('.opcional-check-admin'),aviso=linha?.querySelector('.opcional-sem-estoque-admin'),rid=inp.dataset.recursoId;
+    if(!check)return;
+    let liberado=true;
+    if(rid){if(SALDOS_OPCIONAIS_ADMIN===null)liberado=false;
+      else if(SALDOS_OPCIONAIS_ADMIN.controle_estoque)liberado=Number(SALDOS_OPCIONAIS_ADMIN.livres[rid]??0)-Number(uso[rid]||0)+(check.checked?Number(inp.dataset.qtdPacote||1):0)>=Number(inp.dataset.qtdPacote||1);}
+    if(!liberado&&check.checked&&SALDOS_OPCIONAIS_ADMIN!==null){check.checked=false;inp.value='0';if(rid)uso[rid]=Math.max(0,(uso[rid]||0)-Number(inp.dataset.qtdPacote||1));atualizarRecursosNovoContrato();recalcularValoresContratoManual();}
+    check.disabled=!liberado;
+    if(aviso)aviso.hidden=liberado||(!rid&&SALDOS_OPCIONAIS_ADMIN!==null);
+    if(aviso&&!liberado)aviso.textContent=SALDOS_OPCIONAIS_ADMIN?'Sem estoque nesta data':'Consultando estoque...';
+  });
+}
+async function consultarEstoqueOpcionaisAdmin(){
+  const data=document.querySelector('input[name="data_evento"]')?.value||'';
+  const seq=++SEQUENCIA_ESTOQUE_OPCIONAIS;
+  SALDOS_OPCIONAIS_ADMIN=null;renderEstoqueOpcionaisAdmin();
+  if(!data)return;
+  try{
+    const url=`/api/estoque/opcionais-disponiveis?data=${encodeURIComponent(data)}&solicitacao_id=${SOLICITACAO_ATUAL_ID}`;
+    const resp=await fetch(url);
+    if(!resp.ok)throw new Error('Estoque indisponível');
+    const resultado=await resp.json();
+    if(seq!==SEQUENCIA_ESTOQUE_OPCIONAIS)return;
+    SALDOS_OPCIONAIS_ADMIN=resultado;renderEstoqueOpcionaisAdmin();
+  }catch(_){if(seq===SEQUENCIA_ESTOQUE_OPCIONAIS){SALDOS_OPCIONAIS_ADMIN=null;renderEstoqueOpcionaisAdmin();}}
+}
+document.addEventListener('change',ev=>{
+  if(ev.target?.classList?.contains('opcional-check-admin')){
+    const linha=ev.target.closest('.linha'),inp=linha?.querySelector('input[name="opcional_quantidade"]');
+    if(!inp)return;
+    inp.value=ev.target.checked?'1':'0';
+    inp.dispatchEvent(new Event('change',{bubbles:true}));
+    renderEstoqueOpcionaisAdmin();
+    atualizarRecursosNovoContrato();
+  }
+  if(ev.target?.name==='data_evento')consultarEstoqueOpcionaisAdmin();
+  if(ev.target?.name==='produto_id'||ev.target?.name==='quantidade')queueMicrotask(()=>renderEstoqueOpcionaisAdmin());
+});
+document.addEventListener('DOMContentLoaded',()=>consultarEstoqueOpcionaisAdmin());
 </script>
 {% endblock %}

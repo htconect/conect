@@ -1,0 +1,65 @@
+{% extends "publico/base_cliente.html" %}
+{% block conteudo %}
+<div style="max-width:900px;margin:auto;padding:16px 10px 60px">
+  <div class="box" style="border-radius:20px;padding:20px;margin-bottom:14px;background:#fff">
+    <small>PERSONALIZE SUA FESTA</small>
+    <h1 style="margin:7px 0">Catálogo de opcionais</h1>
+    <p>Escolha seus adicionais com tranquilidade. Marque o que deseja incluir ou desmarque para retirar.</p>
+    <p class="texto-discreto">Cada marcação inclui a quantidade cadastrada. Você pode escolher vários opcionais.</p>
+    {% if sucesso %}<div role="status" style="padding:12px;background:#dcfce7;color:#166534;border-radius:10px"><b>Escolhas salvas!</b> Nosso atendimento recebeu a pendência para reenviar o contrato atualizado, quando houver alterações.</div>{% endif %}
+    {% if erro %}<div role="alert" style="padding:12px;background:#fee2e2;color:#991b1b;border-radius:10px;margin-top:10px">
+      {% if erro == 'pago' %}Não é possível retirar esse opcional: o valor já foi pago ou a remoção supera o saldo restante.
+      {% elif erro == 'estoque' %}Um opcional selecionado está sem estoque suficiente na data. Atualize sua escolha.
+      {% elif erro == 'cobranca' %}Há uma cobrança em andamento. Fale com o atendimento para atualizar os opcionais antes de pagar.
+      {% elif erro == 'encerrado' %}Este contrato não permite mais alterações de opcionais.
+      {% else %}Uma opção não está mais disponível. Confira o catálogo e tente novamente.{% endif %}</div>{% endif %}
+  </div>
+  <form method="post" id="catalogoExtras" class="box" style="padding:16px;border-radius:18px;background:#fff">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px">
+    {% for opc in opcoes %}
+      <label style="border:1px solid #dbe3ee;border-radius:15px;padding:10px;display:flex;flex-direction:column;gap:8px;cursor:{% if opc.disponivel %}pointer{% else %}not-allowed{% endif %};opacity:{% if opc.disponivel %}1{% else %}.55{% endif %}">
+        {% if opc.foto_url %}<img src="{{ opc.foto_url }}" loading="lazy" alt="Foto de {{ opc.nome }}" style="width:100%;height:130px;object-fit:contain;background:#f8fafc;border-radius:10px">
+        {% else %}<div style="width:100%;height:100px;border-radius:10px;background:#f1f5f9;display:grid;place-items:center;color:#64748b">Foto em breve</div>{% endif %}
+        <b>{{ opc.nome }}</b>
+        <small>{{ opc.quantidade }} {{ 'unidade' if opc.quantidade == 1 else 'unidades' }} · R$ {{ opc.preco|moeda_br }} pelo conjunto</small>
+        <span style="display:flex;gap:8px;align-items:center">
+          <input type="checkbox" name="opcional_id" value="{{ opc.id }}" data-preco="{{ opc.preco }}" {% if opc.selecionado %}checked{% endif %} {% if not opc.disponivel %}disabled{% endif %}>
+          {% if not opc.disponivel %}<b style="color:#b42318">Sem estoque</b>{% elif opc.selecionado %}Incluído · desmarque para retirar{% else %}Adicionar{% endif %}
+        </span>
+      </label>
+    {% else %}<p>Não há opcionais disponíveis no momento.</p>{% endfor %}
+    </div>
+    {% if ausentes %}<div style="margin-top:15px">{% for opc in ausentes %}<small>Já contratado: {{ opc.quantidade }}x {{ opc.nome }} (não editável pelo catálogo)</small>{% endfor %}</div>{% endif %}
+    <div style="margin:16px 0;padding:14px;border:1px solid #cbd5e1;border-radius:13px">
+      <div style="display:flex;justify-content:space-between;gap:8px"><b>Adicionais selecionados</b><strong id="totalExtras">R$ 0,00</strong></div>
+      <p class="texto-discreto" style="font-size:13px">Total do contrato após salvar (estimado): <b id="novoTotal">R$ {{ item.valor|moeda_br }}</b></p>
+      <p class="texto-discreto" style="font-size:13px">Já pago: R$ {{ pago|moeda_br }} · Saldo atual: R$ {{ saldo|moeda_br }}</p>
+      <p id="bloqueioRemocao" role="alert" hidden style="color:#b42318">Não é possível remover opcionais acima do saldo a receber. Refaça sua seleção ou fale com o atendimento.</p>
+    </div>
+    <button type="submit" id="salvarExtras" class="largura-total">Confirmar e salvar opcionais</button>
+    <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}" style="margin-top:10px">Voltar ao contrato</a>
+  </form>
+</div>
+<script>
+(()=>{
+  const form=document.getElementById('catalogoExtras'),inputs=[...form.querySelectorAll('input[name="opcional_id"]')];
+  const totalOriginal={{ item.valor|tojson }}, extrasOriginal={{ subtotal_atual|tojson }}, pago={{ pago|tojson }},
+    extrasFixos={{ (ausentes|sum(attribute='valor_total'))|tojson }};
+  const preco=el=>Number(el.dataset.preco||0);
+  function formatar(v){return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v)}
+  function atualizar(){
+    const extras=extrasFixos+inputs.filter(x=>x.checked).reduce((t,x)=>t+preco(x),0);
+    const removido=inputs.filter(x=>x.defaultChecked&&!x.checked).reduce((t,x)=>t+preco(x),0);
+    const novo=totalOriginal-extrasOriginal+extras;
+    document.getElementById('totalExtras').textContent=formatar(extras);
+    document.getElementById('novoTotal').textContent=formatar(novo);
+    const bloqueado=removido>Math.max(totalOriginal-pago,0)+.009 || novo+.009<pago;
+    document.getElementById('bloqueioRemocao').hidden=!bloqueado;
+    document.getElementById('salvarExtras').disabled=bloqueado;
+  }
+  inputs.forEach(x=>x.addEventListener('change',atualizar));atualizar();
+  form.addEventListener('submit',e=>{if(document.getElementById('salvarExtras').disabled){e.preventDefault();return;}
+    const btn=document.getElementById('salvarExtras');btn.disabled=true;btn.textContent='Salvando escolhas...';});
+})();
+</script>
+{% endblock %}

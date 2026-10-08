@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <style>
-.cad-wrap{max-width:1040px;margin:0 auto}.cad-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.cad-hero h1{margin:0;color:#fff}.cad-hero p{margin:5px 0 0;color:#dbeafe}.cad-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}.cad-lista{display:grid}.cad-linha{display:grid;grid-template-columns:auto minmax(0,1fr) 110px 150px {% if usa_recursos %}minmax(180px,1fr){% endif %} auto;gap:10px;align-items:end;padding:12px 0;border-bottom:1px solid #edf1f5;transition:box-shadow .15s,transform .15s,background .15s}.cad-linha:last-child{border-bottom:0}.cad-linha.ordenando{background:#eff6ff;box-shadow:0 12px 28px rgba(15,23,42,.14);transform:scale(1.01);border-radius:14px;z-index:5}.cad-mover{display:flex;gap:5px;align-items:center}.cad-mover button{width:40px;min-width:40px;padding:0;min-height:40px}.cad-arrastar{cursor:grab!important;touch-action:none;color:#475569}.cad-arrastar:active{cursor:grabbing!important}.cad-posicao{font-size:11px;color:#64748b;min-width:32px;text-align:center}.cad-status{display:flex;align-items:center;gap:6px;min-height:44px}.nova{margin-top:14px;border-top:2px solid #edf1f5}.cad-aviso{padding:11px 13px;border-radius:12px;margin-bottom:12px}.cad-aviso.erro{background:#fff1f2;color:#9f1239}.cad-aviso.ok{background:#ecfdf3;color:#067647}.cad-acoes-finais{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0}.cad-status-edicao{font-size:12px;color:#64748b;font-weight:700}.cad-status-edicao.alterado{color:#b42318}.cad-status-edicao.salvo{color:#067647}.ordenacao-ativa{user-select:none}
+.cad-wrap{max-width:1040px;margin:0 auto}.cad-hero{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:22px 24px;border-radius:22px;background:linear-gradient(135deg,#0f3d91,#2475c9);color:#fff;margin-bottom:18px}.cad-hero h1{margin:0;color:#fff}.cad-hero p{margin:5px 0 0;color:#dbeafe}.cad-box{background:#fff;border:1px solid #dbe3ee;border-radius:22px;padding:18px}.cad-lista{display:grid}.cad-linha{display:grid;grid-template-columns:auto 115px minmax(0,1fr) 100px 130px {% if usa_recursos %}minmax(180px,1fr){% endif %} auto;gap:10px;align-items:end;padding:12px 0;border-bottom:1px solid #edf1f5;transition:box-shadow .15s,transform .15s,background .15s}.cad-linha:last-child{border-bottom:0}.cad-linha.ordenando{background:#eff6ff;box-shadow:0 12px 28px rgba(15,23,42,.14);transform:scale(1.01);border-radius:14px;z-index:5}.cad-mover{display:flex;gap:5px;align-items:center}.cad-mover button{width:40px;min-width:40px;padding:0;min-height:40px}.cad-arrastar{cursor:grab!important;touch-action:none;color:#475569}.cad-arrastar:active{cursor:grabbing!important}.cad-posicao{font-size:11px;color:#64748b;min-width:32px;text-align:center}.cad-status{display:flex;align-items:center;gap:6px;min-height:44px}.nova{margin-top:14px;border-top:2px solid #edf1f5}.cad-aviso{padding:11px 13px;border-radius:12px;margin-bottom:12px}.cad-aviso.erro{background:#fff1f2;color:#9f1239}.cad-aviso.ok{background:#ecfdf3;color:#067647}.cad-acoes-finais{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0}.cad-status-edicao{font-size:12px;color:#64748b;font-weight:700}.cad-status-edicao.alterado{color:#b42318}.cad-status-edicao.salvo{color:#067647}.ordenacao-ativa{user-select:none}
 @media(max-width:760px){.cad-hero{flex-direction:column;align-items:flex-start}.cad-linha{grid-template-columns:auto 1fr}.cad-linha .campo-qtd,.cad-linha .campo-valor{grid-column:auto}.cad-status{align-self:end}.cad-acoes-finais{align-items:stretch;flex-direction:column}.cad-acoes-finais button{width:100%}}
 </style>
 {% endblock %}
@@ -11,6 +11,7 @@
 {% if erro == 'duplicado' %}<div class="cad-aviso erro">Já existe um opcional com esse nome.</div>{% elif erro == 'nome' %}<div class="cad-aviso erro">Todos os opcionais precisam ter um nome.</div>{% endif %}
 {% if salvo %}<div class="cad-aviso ok"><i class="bi bi-check-circle"></i> Opcionais salvos com sucesso.</div>{% endif %}
 <section class="cad-box">
+<p class="texto-discreto">Fotos pequenas: salve o opcional primeiro e depois clique na miniatura para enviar sua foto.</p>
 <form method="post" action="/painel/opcionais/salvar-todos" id="formOpcionais">
 <div class="cad-lista" id="listaOpcionais" data-sortable>
 {% for o in opcionais %}
@@ -22,10 +23,14 @@
     <button type="button" class="botao-secundario" data-move="baixo" title="Descer"><i class="bi bi-arrow-down"></i></button>
     <span class="cad-posicao" data-posicao>{{ loop.index }}º</span>
   </div>
+  <div class="foto-mini-opcional" style="display:flex;align-items:center;gap:8px">
+    {% if o.foto_url %}<img src="{{ o.foto_url }}" alt="{{ o.nome }}" loading="lazy" style="width:58px;height:58px;border-radius:9px;object-fit:contain;border:1px solid #ddd">{% else %}<span style="display:grid;place-items:center;width:58px;height:58px;border:1px dashed #9ca3af;border-radius:9px">Foto</span>{% endif %}
+    <label for="fotoOpc{{ o.id }}" class="botao-secundario" style="cursor:pointer;font-size:12px">Alterar foto</label>
+  </div>
   <div><label>Nome</label><input name="nome_{{ o.id }}" value="{{ o.nome }}" required></div>
   <div class="campo-qtd"><label>Qtd.</label><input name="quantidade_{{ o.id }}" type="number" min="1" value="{{ o.quantidade or 1 }}"></div>
   <div class="campo-valor"><label>Valor</label><input name="valor_{{ o.id }}" inputmode="decimal" value="{{ o.valor|moeda_br }}"></div>
-  {% if usa_recursos %}<div><label>Recurso / estoque</label><select name="recurso_{{ o.id }}"><option value="">Não consome estoque</option>{% for r in itens_estoque %}<option value="{{ r.id }}" {% if o.item_estoque_id == r.id %}selected{% endif %}>{{ r.nome }}</option>{% endfor %}</select></div>{% endif %}
+  {% if usa_recursos %}<div><label>Item do estoque</label><select name="recurso_{{ o.id }}"><option value="">Não consome estoque</option>{% for r in itens_estoque %}<option value="{{ r.id }}" {% if o.item_estoque_id == r.id %}selected{% endif %}>{{ r.nome }}</option>{% endfor %}</select></div>{% endif %}
   <label class="cad-status"><input type="checkbox" name="ativo_{{ o.id }}" value="1" {% if o.ativo %}checked{% endif %}> Ativo</label>
 </div>
 {% else %}<p class="texto-discreto">Nenhum opcional cadastrado.</p>{% endfor %}
@@ -33,10 +38,11 @@
 
 <div class="cad-linha nova">
   <div class="cad-mover"><span class="cad-posicao">Novo</span></div>
+  <div class="foto-mini-opcional"><span style="font-size:11px;color:#64748b">Foto após salvar</span></div>
   <div><label>Nome</label><input name="novo_nome" placeholder="Ex.: Microfone extra"></div>
   <div class="campo-qtd"><label>Qtd.</label><input name="nova_quantidade" type="number" min="1" value="1"></div>
   <div class="campo-valor"><label>Valor</label><input name="novo_valor" inputmode="decimal" value="0,00"></div>
-  {% if usa_recursos %}<div><label>Recurso / estoque</label><select name="novo_recurso"><option value="">Não consome estoque</option>{% for r in itens_estoque %}<option value="{{ r.id }}">{{ r.nome }}</option>{% endfor %}</select></div>{% endif %}
+  {% if usa_recursos %}<div><label>Item do estoque</label><select name="novo_recurso"><option value="">Não consome estoque</option>{% for r in itens_estoque %}<option value="{{ r.id }}">{{ r.nome }}</option>{% endfor %}</select></div>{% endif %}
   <label class="cad-status"><input type="checkbox" name="novo_ativo" value="1" checked> Ativo</label>
 </div>
 
@@ -45,6 +51,11 @@
   <button type="submit"><i class="bi bi-save"></i> Salvar alterações</button>
 </div>
 </form>
+{% for o in opcionais %}
+<form id="fotoForm{{ o.id }}" action="/painel/opcionais/{{ o.id }}/foto" method="post" enctype="multipart/form-data" style="display:none">
+  <input type="file" name="foto" id="fotoOpc{{ o.id }}" accept="image/*" onchange="this.form.submit()">
+</form>
+{% endfor %}
 </section></div>
 {% endblock %}
 {% block scripts_extra %}
