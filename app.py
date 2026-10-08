@@ -13223,7 +13223,7 @@ def excluir_solicitacao_completa(
         empresa_id=empresa.id, solicitacao_id=item.id
     ).first():
         return _impedir_exclusao(
-            "Este contrato possui movimentação na Carteira Humiat. Verifique a movimentação antes de excluir."
+            "Não é possível excluir este contrato, pois já foi gerada uma cobrança Humiat. Para encerrar o contrato, utilize a opção Cancelar contrato."
         )
     if db.query(VinculoRepasseBanco.id).filter_by(
         solicitacao_id=item.id
