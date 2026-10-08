@@ -19064,16 +19064,23 @@ def _processar_retorno_compra_humiat(
 
 
 def _infinitepay_seed_taxas(db: Session, empresa_id: int):
+    # Uma consulta em lote substitui as 12 consultas individuais por parcela.
+    existentes = {
+        int(parcelas) for (parcelas,) in db.query(InfinitePayTaxa.parcelas)
+        .filter(InfinitePayTaxa.empresa_id == empresa_id).all()
+    }
+    novos = []
     for parcelas, taxa in enumerate(INFINITEPAY_TAXAS_PADRAO, start=1):
-        existe = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id, parcelas=parcelas).first()
-        if not existe:
-            db.add(InfinitePayTaxa(
+        if parcelas not in existentes:
+            novos.append(InfinitePayTaxa(
                 empresa_id=empresa_id,
                 parcelas=parcelas,
                 taxa_percentual=float(taxa),
                 ativa=True,
             ))
-    db.flush()
+    if novos:
+        db.add_all(novos)
+        db.flush()
 
 
 def _infinitepay_taxas(db: Session, empresa_id: int) -> list[dict]:
@@ -19501,7 +19508,7 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
         "duracao_padrao_publica_minutos": _duracao_base_empresa_tipo(db, empresa, "residencial"),
         "duracao_padrao_publica_rotulo": _rotulo_duracao_minutos(_duracao_base_empresa_tipo(db, empresa, "residencial")),
         "campos_cfg": {ce.campo.chave: ce for ce in
-                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+                       db.query(CampoEmpresa).options(joinedload(CampoEmpresa.campo)).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     }
     pedido_vitrine = _pedido_vitrine_sessao(request, db, empresa)
     if pedido_vitrine:
@@ -19624,7 +19631,7 @@ def salvar_pre_cadastro(
         ident = cpf_limpo or cnpj_limpo or telefone_limpo or uuid.uuid4().hex[:12]
     campos_empresa = {
         ce.campo.chave: ce for ce in
-        db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()
+        db.query(CampoEmpresa).options(joinedload(CampoEmpresa.campo)).filter(CampoEmpresa.empresa_id == empresa.id).all()
     }
 
     def campo_obrigatorio(chave: str) -> bool:
@@ -20296,7 +20303,7 @@ def editar_dados_contrato_cliente(slug: str, solicitacao_id: str, request: Reque
             "como_conheceu": item.cliente.como_conheceu or "",
         },
         "campos_cfg": {ce.campo.chave: ce for ce in
-                       db.query(CampoEmpresa).join(CampoGlobal).filter(CampoEmpresa.empresa_id == empresa.id).all()}
+                       db.query(CampoEmpresa).options(joinedload(CampoEmpresa.campo)).filter(CampoEmpresa.empresa_id == empresa.id).all()}
     })
 
 
