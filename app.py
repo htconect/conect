@@ -4353,7 +4353,7 @@ def startup():
     # Migração estrutural mínima: somente colunas novas desta versão.
     _garantir_colunas_v113_criticas()
     _iniciar_migracao_duracoes_v116_em_background()
-    _iniciar_migracao_lokafest_v118_em_background()
+    # LokaFest é apenas atalho manual; não alterar configuração automaticamente.
 
     # Nunca bloquear o bind da porta do Render por causa de uma migração de dados.
     # A migração é idempotente e roda em background; app_migrations impede repetição.
@@ -11908,38 +11908,16 @@ def registrar_autorizacao_lokafest(
 
 @app.get("/painel/solicitacao/{solicitacao_id}/lokafest")
 def preparar_indicacao_lokafest(solicitacao_id: int, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    item = db.query(Solicitacao).options(joinedload(Solicitacao.cliente), selectinload(Solicitacao.itens)).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
-    pode_indicar = bool(
-        item and _vitrine_origem(item) and (
-            _vitrine_pendente_aprovacao(item)
-            or ((item.status or "") in {"cancelada", "cancelado_cliente", "rejeitada"} and _vitrine_enviado_lokafest(item))
-        )
-    )
-    if not pode_indicar:
+    """Atalho manual: não preenche campos, não altera status e não transmite dados de clientes."""
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item:
         raise HTTPException(404)
-    if not getattr(empresa, "lokafest_ativo", False) or not getattr(empresa, "lokafest_url", None):
-        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=LokaFest não está configurado nesta empresa.", status_code=303)
-    if not _vitrine_autorizou_parceiros(item):
-        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=O cliente não autorizou o encaminhamento para parceiros.", status_code=303)
-    alvo = _url_lokafest_solicitacao(empresa, item)
-    if not alvo:
-        return RedirectResponse(f"/painel/solicitacao/{item.id}?erro=Não foi possível preparar o LokaFest.", status_code=303)
-
-    # A partir da decisão de indicar, o contrato deixa o fluxo operacional do Connect.
-    # O LokaFest é externo: se a indicação não for concluída, o rascunho permanece
-    # em Cancelados e o botão de reenviar continua disponível no detalhe.
-    item.status = "cancelada"
-    item.aprovado_em = None
-    _vitrine_definir_marcador(item, "[VITRINE_PENDENTE_APROVACAO=1]", False)
-    _vitrine_definir_marcador(item, "[VITRINE_APROVADA=1]", False)
-    _vitrine_definir_marcador(item, "[VITRINE_ENVIADO_LOKAFEST=1]", True)
-    obs_visivel = observacoes_visiveis(item.observacoes)
-    if "Enviado para o LokaFest." not in obs_visivel:
-        linhas = str(item.observacoes or "").splitlines()
-        linhas.append("Enviado para o LokaFest.")
-        item.observacoes = "\n".join(linhas).strip()
-    db.commit()
-    return RedirectResponse(alvo, status_code=303)
+    destino = str(getattr(empresa, "lokafest_url", "") or LOKAFEST_PUBLIC_URL).strip()
+    parsed = urlparse(destino)
+    if parsed.scheme not in {"https", "http"} or not parsed.netloc:
+        raise HTTPException(400, "URL do LokaFest inválida")
+    # Ignora querystring preexistente: indicação sempre manual e vazia.
+    return RedirectResponse(urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/indicar", "", "", "")), status_code=303)
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}", response_class=HTMLResponse)
@@ -18710,7 +18688,7 @@ def vitrine_publica(
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id), "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
-        "fluxo_vitrine": "direto" if direto else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
+        "fluxo_vitrine": "direto",
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
@@ -18830,13 +18808,6 @@ def vitrine_publica_reservar(
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=retirada", status_code=303)
 
     whatsapp_pedido = limpar_identificador(whatsapp_pre_reserva)
-    if not celular_brasileiro_valido(whatsapp_pre_reserva):
-        params = urlencode({
-            "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "erro": "whatsapp",
-            "whatsapp": whatsapp_pre_reserva or "", "cep": cep_frete or "", "numero": numero_frete or "",
-        })
-        return RedirectResponse(f"/e/{slug}/vitrine?{params}", status_code=303)
-
     frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
     if not frete.get("ok"):
         params = urlencode({
@@ -18856,7 +18827,7 @@ def vitrine_publica_reservar(
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
         "data_evento": data_obj.isoformat(), "modo_direto": bool(direto), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
-        "whatsapp": whatsapp_pedido,
+        "whatsapp": "",
         "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
         "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
         "frete": {
@@ -18872,7 +18843,7 @@ def vitrine_publica_reservar(
         },
     }
 
-    fluxo = "direto" if direto else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+    fluxo = "direto"  # Vitrine pública leva sempre ao cadastro, sem aprovação intermediária.
     # Reaproveita o rascunho padrão do Connect. Quando a empresa exige análise,
     # a vitrine já grava o mesmo contrato em status pre_reserva, com os itens e a
     # composição comercial preenchidos. A aprovação apenas libera o cadastro do
@@ -18882,8 +18853,8 @@ def vitrine_publica_reservar(
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
         solicitacao = _criar_pre_reserva_vitrine(
-            db, empresa, pedido_ctx, whatsapp_pedido,
-            autorizou_parceiros=bool(autoriza_parceiros), pendente_aprovacao=True
+            db, empresa, pedido_ctx, "PENDENTE-" + uuid.uuid4().hex[:16],
+            autorizou_parceiros=False, pendente_aprovacao=True
         )
         db.commit()
         db.refresh(solicitacao)

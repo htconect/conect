@@ -24,6 +24,7 @@
 
 {% if erro %}<div class="box aviso">{{ erro }}</div>{% endif %}
 
+<div style="margin:8px 0 14px"><a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/lokafest" target="_blank" rel="noopener"><i class="bi bi-arrow-up-right-square"></i> Indicar no LokaFest</a></div>
 {% if pre_reserva_vitrine %}
 <section class="proxima-acao" style="border:2px solid #2563eb;background:#eff6ff">
   <small>RASCUNHO DA VITRINE · PENDENTE</small>
@@ -34,19 +35,6 @@
   </form>
   <p class="texto-discreto">Ao atender, o Connect apenas libera o cadastro já preenchido para o cliente completar o que falta. Depois ele segue direto para aceite e pagamento, usando o mesmo fluxo da reserva direta.</p>
 
-  {% if empresa.lokafest_ativo and empresa.lokafest_url %}
-    {% if vitrine_autorizou_parceiros(item) %}
-      <a class="botao largura-total secundario" href="/painel/solicitacao/{{ item.id }}/lokafest" target="_blank"><i class="bi bi-arrow-up-right-square"></i> Indicar no LokaFest</a>
-      <p class="texto-discreto" style="margin-top:8px">O cliente autorizou a indicação. O LokaFest abrirá com data, WhatsApp, local, equipamento e resumo comercial preenchidos. <b>Nada será enviado automaticamente.</b> A pessoa revisa e clica em INDICAR.</p>
-    {% else %}
-      <a class="botao-whats largura-total" href="/painel/solicitacao/{{ item.id }}/pre-reserva/solicitar-autorizacao-lokafest" target="_blank"><i class="bi bi-whatsapp"></i> Solicitar autorização para indicação</a>
-      <p class="texto-discreto" style="margin-top:8px">O cliente não autorizou a indicação no carrinho. O WhatsApp continua válido para atendimento e envio do cadastro.</p>
-      <form method="post" action="/painel/solicitacao/{{ item.id }}/pre-reserva/autorizar-lokafest" style="margin-top:8px">
-        <button class="botao largura-total secundario" type="submit"><i class="bi bi-check2-circle"></i> Registrar autorização recebida</button>
-      </form>
-      <p class="texto-discreto">Use este botão somente depois que o cliente responder autorizando a indicação pelo WhatsApp.</p>
-    {% endif %}
-  {% endif %}
 </section>
 {% endif %}
 
@@ -179,9 +167,7 @@
   <small>Status</small>
   <b>Cancelado — enviado para o LokaFest</b>
   <p>Este rascunho saiu do fluxo operacional do Connect. Se a indicação não foi concluída ou ocorreu algum erro no LokaFest, você pode abrir a indicação novamente.</p>
-  {% if empresa.lokafest_ativo and empresa.lokafest_url and vitrine_autorizou_parceiros(item) %}
-    <a class="botao largura-total secundario" href="/painel/solicitacao/{{ item.id }}/lokafest" target="_blank"><i class="bi bi-arrow-repeat"></i> Indicar novamente no LokaFest</a>
-  {% endif %}
+  
 </section>
 {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
 <section class="proxima-acao aviso-acao">
