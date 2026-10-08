@@ -63,7 +63,13 @@
     <div class="aviso-whatsapp-proprio" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff7df;border:1px solid #f0d27a;font-weight:600;line-height:1.4;">
       <strong>Importante:</strong> utilize o seu próprio WhatsApp. Este número será usado para identificar sua reserva e receber as confirmações do contrato. <strong>Não informe o WhatsApp de outra pessoa.</strong>
     </div>
-    <div id="statusBuscaClientePublico" class="texto-discreto" style="margin-top:8px;">Digite o WhatsApp para localizar seu cadastro.</div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
+    <div class="carregar-cadastro" style="margin:10px 0;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc">
+      <strong>Já é cliente?</strong><p class="texto-discreto" style="margin:5px 0 9px">Digite o seu WhatsApp e confirme seu CPF ou CNPJ para aproveitar os dados cadastrados.</p>
+      <label for="documentoConfirmacaoPublico">CPF ou CNPJ já cadastrado</label>
+      <input id="documentoConfirmacaoPublico" inputmode="numeric" autocomplete="off" placeholder="Somente para confirmar seu cadastro" maxlength="18" type="text">
+      <button id="btnCarregarCadastroPublico" type="button" class="botao-secundario" style="margin-top:8px">Carregar cadastro</button>
+      <div id="statusBuscaClientePublico" role="status" aria-live="polite" class="texto-discreto" style="margin-top:7px">Se for seu primeiro aluguel, continue preenchendo normalmente.</div>
+    </div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
     <div class="linha">
       <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" checked onchange="alternarPessoa()"> Pessoa física</label>
       <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" onchange="alternarPessoa()"> Pessoa jurídica</label>
@@ -72,7 +78,7 @@
     <div id="area-fisica">
       <label>Nome completo{% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %} *{% endif %}</label><input id="nomeClientePublico" name="nome" value="{{ cliente.nome if cliente else '' }}" {% if campos_cfg.get('nome') and campos_cfg.get('nome').obrigatorio %}required{% endif %}>
       {% if not campos_cfg.get('cpf') or campos_cfg.get('cpf').visivel %}<label>CPF{% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %} *{% endif %}</label><input id="cpfClientePublico" name="cpf" inputmode="numeric" value="{{ form.cpf if form is defined else cliente.cpf if cliente else '' }}" {% if campos_cfg.get('cpf') and campos_cfg.get('cpf').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="cpf" value="">{% endif %}
-      {% if not campos_cfg.get('data_nascimento') or campos_cfg.get('data_nascimento').visivel %}<label>Data de nascimento{% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %} *{% endif %}</label><input name="data_nascimento" type="date" value="{{ cliente.data_nascimento if cliente and cliente.data_nascimento else '' }}" {% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="data_nascimento" value="">{% endif %}
+      {% if not campos_cfg.get('data_nascimento') or campos_cfg.get('data_nascimento').visivel %}<label>Data de nascimento{% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %} *{% endif %}</label><input id="dataNascimentoPublico" name="data_nascimento" type="date" value="{{ cliente.data_nascimento if cliente and cliente.data_nascimento else '' }}" {% if campos_cfg.get('data_nascimento') and campos_cfg.get('data_nascimento').obrigatorio %}required{% endif %}>{% else %}<input type="hidden" name="data_nascimento" value="">{% endif %}
     </div>
 
     <div id="area-juridica" style="display:none">
@@ -118,7 +124,7 @@
     <h2>3. Evento</h2>
     <div class="grid duas">
       <div><label>Data do evento *</label>{% if vitrine_pedido is defined and vitrine_pedido %}<div class="box" style="padding:12px;margin:0"><b>{{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</b></div><input name="data_evento" type="hidden" value="{{ vitrine_pedido.data_evento.isoformat() }}">{% else %}<input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required>{% endif %}</div>
-      <div><label>Hora de início *</label><input id="horaInicioPreContrato" name="hora_inicio" type="time" step="1800" value="{{ form.hora_inicio if form is defined else '' }}" required></div>
+      <div><label>Hora de início *</label><select id="horaInicioPreContrato" name="hora_inicio" required><option value="">Escolha um horário</option>{% for i in range(48) %}{% set hh = '%02d:%02d'|format(i // 2, (i % 2) * 30) %}<option value="{{ hh }}" {% if form is defined and form.hora_inicio == hh %}selected{% endif %}>{{ hh }}</option>{% endfor %}</select></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
     {% if vitrine_pedido is defined and vitrine_pedido %}
@@ -170,10 +176,11 @@
 
   <section class="secao-form">
     <h2>4. Responsável no local</h2>
-    <p class="texto-discreto">O contato do responsável deve ser obrigatoriamente um WhatsApp brasileiro.</p>
+    <label class="check" style="display:flex;gap:9px;align-items:center;margin:10px 0"><input id="contratanteResponsavelPublico" type="checkbox" checked> Sou o responsável no local (usar meus dados)</label>
+    <p class="texto-discreto">Nome e WhatsApp são obrigatórios. Se outra pessoa receber o equipamento, desmarque a opção e informe o contato dela.</p>
     <div class="grid duas">
-      <div><label>Nome do responsável *</label><input name="local_responsavel_nome" value="{{ form.local_responsavel_nome if form is defined else '' }}" placeholder="Quem estará no local?" required></div>
-      <div><label>WhatsApp do responsável *</label><input name="local_responsavel_telefone" inputmode="tel" value="{{ form.local_responsavel_telefone if form is defined else '' }}" placeholder="(21) 99999-9999" required></div>
+      <div><label>Nome do responsável *</label><input id="nomeResponsavelLocalPublico" name="local_responsavel_nome" value="{{ form.local_responsavel_nome if form is defined else '' }}" placeholder="Quem estará no local?" required></div>
+      <div><label>WhatsApp do responsável *</label><input id="telefoneResponsavelLocalPublico" name="local_responsavel_telefone" inputmode="tel" value="{{ form.local_responsavel_telefone if form is defined else '' }}" placeholder="(21) 99999-9999" required></div>
     </div>
     <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
   </section>
@@ -182,50 +189,52 @@
 </form>
 
 <script>
-let timerBuscaPublico=null;
 function preencherEnderecoPublico(e){const m={cep:'cep',endereco:'endereco',numero:'numeroEventoPublico',complemento:'complementoEventoPublico',bairro:'bairro',cidade:'cidade',estado:'estado'};Object.entries(m).forEach(([k,id])=>{const el=document.getElementById(id);if(el)el.value=e[k]||'';});const local=document.querySelector('input[name="local"]');if(local)local.value=e.endereco||'';const nomeLocal=document.querySelector('input[name="local_nome"]');if(nomeLocal)nomeLocal.value=e.apelido||'';}
 function alternarCamposEnderecoPublico(mostrar){const area=document.getElementById('camposNovoEnderecoPublico');if(area)area.hidden=!mostrar;}
 function mostrarEnderecosPublico(lista){const box=document.getElementById('enderecosEncontradosPublico');if(!box)return;box.innerHTML='';alternarCamposEnderecoPublico(true);if(!lista||!lista.length){box.hidden=true;return;}box.hidden=false;const label=document.createElement('label');label.textContent='Endereços já utilizados';box.appendChild(label);const select=document.createElement('select');select.className='endereco-select';const atual=(document.getElementById('endereco')?.value||'').trim();const p=document.createElement('option');p.value='';p.selected=true;p.textContent=atual?'Manter o endereço atual desta reserva':'Escolha um endereço';select.appendChild(p);lista.forEach((e,i)=>{const o=document.createElement('option');o.value=String(i);const nome=(e.apelido||'').trim()||`Endereço ${i+1}`;o.textContent=`${nome} — ${e.endereco}${e.numero?', '+e.numero:''}${e.bairro?' — '+e.bairro:''}`;select.appendChild(o);});select.onchange=()=>{if(select.value==='')return;preencherEnderecoPublico(lista[Number(select.value)]);};box.appendChild(select);const n=document.createElement('button');n.type='button';n.className='botao-novo-endereco';n.textContent='+ Digitar novo endereço';n.onclick=()=>{select.value='';preencherEnderecoPublico({});document.getElementById('cep')?.focus();};box.appendChild(n);}
-function documentoClientePublico(){
-  const cpf=(document.getElementById('cpfClientePublico')?.value||'').replace(/\D/g,'');
-  const cnpj=(document.getElementById('cnpjClientePublico')?.value||'').replace(/\D/g,'');
-  if(cpf.length===11)return cpf;
-  if(cnpj.length===14)return cnpj;
-  return '';
+function documentoClientePublico(){return (document.getElementById('documentoConfirmacaoPublico')?.value||'').replace(/\D/g,'');}
+function atualizarResponsavelLocalPublico(){
+ const mesmo=document.getElementById('contratanteResponsavelPublico');if(!mesmo?.checked)return;
+ const nome=document.getElementById('nomeResponsavelLocalPublico'),telefone=document.getElementById('telefoneResponsavelLocalPublico');
+ const juridica=document.querySelector('input[name="tipo_pessoa"]:checked')?.value==='juridica';
+ const nomeCliente=(juridica?document.querySelector('input[name="nome_empresa"]')?.value:document.getElementById('nomeClientePublico')?.value)||'';
+ if(nome)nome.value=nomeCliente;if(telefone)telefone.value=document.getElementById('telefoneClientePublico')?.value||'';
 }
 async function consultarClientePublico(){
-  let tel=(document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'');
-  if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);
-  const st=document.getElementById('statusBuscaClientePublico');
-  if(tel.length!==11||tel[2]!=='9'){if(st)st.textContent='Digite um WhatsApp válido.';return;}
-  const documento=documentoClientePublico();
-  if(st)st.textContent='Consultando cadastro...';
-  try{
-    const url=`/e/{{ empresa.slug }}/api/clientes/por-telefone?telefone=${encodeURIComponent(tel)}${documento?`&documento=${encodeURIComponent(documento)}`:''}`;
-    const r=await fetch(url,{headers:{'Accept':'application/json'},cache:'no-store'});
-    const d=await r.json();
-    if(!d.encontrado){if(st)st.textContent='Novo cadastro. Complete seus dados.';return;}
-    if(!d.confirmado){if(st)st.textContent='Cadastro encontrado. Informe seu CPF ou CNPJ para carregar seus dados com segurança.';return;}
-    const c=d.cliente||{};
-    [['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj]].forEach(([id,v])=>{
-      const el=document.getElementById(id);if(el&&v){el.value=v;el.readOnly=true;el.classList.add('campo-travado');}
-    });
-    const nomeEmpresa=document.querySelector('input[name="nome_empresa"]');
-    if(nomeEmpresa&&c.cnpj&&c.nome){nomeEmpresa.value=c.nome;}
-    const emailEl=document.getElementById('emailClientePublico');
-    if(emailEl){emailEl.value=c.email||'';emailEl.readOnly=!!c.email;emailEl.classList.toggle('campo-travado',!!c.email);}
-    const origem=document.getElementById('comoConheceuPublico');if(origem&&c.como_conheceu)origem.value=c.como_conheceu;
-    mostrarEnderecosPublico(d.enderecos||[]);
-    if(st)st.textContent=c.email?'Cadastro confirmado. Escolha um endereço já utilizado ou informe um novo.':'Cadastro confirmado. Informe seu e-mail e o endereço do evento.';
-  }catch(e){if(st)st.textContent='Não foi possível consultar agora. Continue preenchendo.';}
+ let tel=(document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'');
+ if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);
+ const st=document.getElementById('statusBuscaClientePublico');
+ if(tel.length!==11||tel[2]!=='9'){if(st)st.textContent='Informe um WhatsApp válido antes de carregar o cadastro.';return;}
+ const documento=documentoClientePublico();
+ if(documento.length!==11&&documento.length!==14){if(st)st.textContent='Informe o CPF completo (11 dígitos) ou CNPJ (14 dígitos) para confirmar com segurança.';document.getElementById('documentoConfirmacaoPublico')?.focus();return;}
+ const btn=document.getElementById('btnCarregarCadastroPublico');if(btn)btn.disabled=true;
+ if(st)st.textContent='Consultando seu cadastro...';
+ try{
+   const dados=new URLSearchParams({telefone:tel,documento});
+   const r=await fetch('/e/{{ empresa.slug }}/api/clientes/carregar-cadastro',{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:dados,cache:'no-store'});
+   if(!r.ok)throw Error('consulta indisponível');const d=await r.json();
+   if(!d.confirmado){if(st)st.textContent='Cadastro não localizado ou documento diferente do cadastrado. Confira os números ou continue preenchendo.';return;}
+   const c=d.cliente||{};
+   if(c.cnpj){const radio=document.querySelector('input[name="tipo_pessoa"][value="juridica"]');if(radio){radio.checked=true;typeof alternarPessoa==='function'&&alternarPessoa();}}
+   [['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj],['dataNascimentoPublico',c.data_nascimento]].forEach(([id,v])=>{const el=document.getElementById(id);if(el&&v){el.value=v;if(id!=='dataNascimentoPublico'){el.readOnly=true;el.classList.add('campo-travado');}}});
+   const nomeEmpresa=document.querySelector('input[name="nome_empresa"]');if(nomeEmpresa&&c.cnpj&&c.nome)nomeEmpresa.value=c.nome;
+   const email=document.getElementById('emailClientePublico');if(email&&c.email){email.value=c.email;email.readOnly=true;email.classList.add('campo-travado');}
+   const origem=document.getElementById('comoConheceuPublico');if(origem&&c.como_conheceu)origem.value=c.como_conheceu;
+   mostrarEnderecosPublico(d.enderecos||[]);atualizarResponsavelLocalPublico();
+   if(st)st.textContent='Cadastro carregado! Confirme o endereço e continue com sua reserva.';
+ }catch(e){if(st)st.textContent='Não foi possível consultar agora. Continue preenchendo.';}
+ finally{if(btn)btn.disabled=false;}
 }
 document.addEventListener('DOMContentLoaded',()=>{
-  const agendarConsulta=()=>{clearTimeout(timerBuscaPublico);timerBuscaPublico=setTimeout(consultarClientePublico,500);};
-  const t=document.getElementById('telefoneClientePublico');
-  if(t){t.addEventListener('input',agendarConsulta);let tel=(t.value||'').replace(/\D/g,'');if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);if(tel.length===11&&tel[2]==='9')setTimeout(consultarClientePublico,100);}
-  document.getElementById('cpfClientePublico')?.addEventListener('input',agendarConsulta);
-  document.getElementById('cnpjClientePublico')?.addEventListener('input',agendarConsulta);
-  const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}
+ document.getElementById('btnCarregarCadastroPublico')?.addEventListener('click',consultarClientePublico);
+ const mesmo=document.getElementById('contratanteResponsavelPublico');
+ const nomeLocal=document.getElementById('nomeResponsavelLocalPublico'),telLocal=document.getElementById('telefoneResponsavelLocalPublico');
+ const nome=document.getElementById('nomeClientePublico'),telefone=document.getElementById('telefoneClientePublico');
+ const outraPessoa=!!(nomeLocal?.value&&telLocal?.value&&((nomeLocal.value.trim()!==nome?.value.trim())||(telLocal.value.replace(/\D/g,'')!==telefone?.value.replace(/\D/g,''))));
+ if(mesmo){mesmo.checked=!outraPessoa;mesmo.addEventListener('change',()=>{if(mesmo.checked)atualizarResponsavelLocalPublico();if(nomeLocal)nomeLocal.readOnly=mesmo.checked;if(telLocal)telLocal.readOnly=mesmo.checked;});mesmo.dispatchEvent(new Event('change'));}
+ [nome,telefone,document.querySelector('input[name="nome_empresa"]')].forEach(el=>el?.addEventListener('input',atualizarResponsavelLocalPublico));
+ document.querySelectorAll('input[name="tipo_pessoa"]').forEach(el=>el.addEventListener('change',()=>setTimeout(atualizarResponsavelLocalPublico,0)));
+ const h=document.getElementById('horaInicioPreContrato');if(h){h.addEventListener('input',atualizarHoraFimPreContrato);h.addEventListener('change',atualizarHoraFimPreContrato);atualizarHoraFimPreContrato();}
 });
 const VITRINE_DURACAO_MINUTOS={{ vitrine_pedido.duracao_maxima_minutos if vitrine_pedido is defined and vitrine_pedido else duracao_padrao_publica_minutos }};
 const VITRINE_CORTESIA={{ 'true' if empresa.retirada_cortesia_proximo_dia else 'false' }};

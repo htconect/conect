@@ -53,6 +53,12 @@
       {% endif %}
     </div>
 
+    {% if whatsapp_responsavel_url %}
+    <div class="confirmacao-fechar" style="margin-top:16px">
+      <a href="{{ whatsapp_responsavel_url }}" target="_blank" rel="noopener noreferrer" class="botao largura-total" style="display:block;text-align:center;text-decoration:none">Enviar contrato via WhatsApp</a>
+      <p class="texto-discreto" style="margin:7px 0 0">Abre a mensagem para o responsável pelo atendimento. Confirme o envio no WhatsApp.</p>
+    </div>
+    {% endif %}
     <div class="confirmacao-fechar">
       <button type="button" class="largura-total" onclick="conectFecharAba('avisoFecharPagamento')">Fechar</button>
       <p id="avisoFecharPagamento" class="texto-discreto" hidden>Se esta aba não fechar automaticamente, você pode fechá-la pelo seletor de abas do navegador.</p>

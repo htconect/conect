@@ -420,7 +420,12 @@
       {% endif %}
       {% if contrato_aceito and link_contrato_whatsapp %}
         {% if not fluxo_infinitepay or pago > 0 %}
-          <a class="link-botao" target="_blank" href="{{ link_contrato_whatsapp }}">{% if item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
+          <a class="link-botao" target="_blank" rel="noopener noreferrer" href="{{ link_contrato_whatsapp }}">{% if item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
+          {% if not item.contrato_enviado_em or item.opcionais_reenvio_pendente %}
+          <form method="post" action="/painel/solicitacao/{{ item.id }}/contrato-enviado" style="display:inline;margin:0" onsubmit="return confirm('Você realmente enviou o contrato pelo WhatsApp?')">
+            <button type="submit" class="link-botao" style="border-color:#067647;color:#067647">Contrato enviado</button>
+          </form>
+          {% endif %}
         {% endif %}
       {% endif %}
     </div>
@@ -447,10 +452,10 @@
     <div class="box" style="margin:14px 0;padding:14px">
       {% if item.contrato_enviado_em %}
         <b>Contrato enviado</b>
-        <small class="texto-discreto" style="display:block;margin-top:4px">O envio pelo WhatsApp já foi acionado. Use “Reenviar contrato” se precisar enviar novamente.</small>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Envio confirmado pelo atendente. Use “Reenviar contrato” se precisar.</small>
       {% else %}
         <b>Pagamento confirmado — contrato aguardando envio</b>
-        <small class="texto-discreto" style="display:block;margin-top:4px">Use “Enviar contrato”. O cliente não precisa executar nenhuma etapa adicional após o pagamento.</small>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Abra “Enviar contrato” no WhatsApp e, após enviar a mensagem, marque “Contrato enviado”.</small>
       {% endif %}
     </div>
   {% endif %}

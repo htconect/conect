@@ -12611,30 +12611,31 @@ def compartilhar_contrato_whatsapp(
 
     texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
 
-    # O botão "Enviar contrato" volta a seguir a rotina antiga: ao acionar o
-    # WhatsApp, registramos o contrato como enviado e encerramos esta pendência.
-    # Não existe mais uma etapa operacional de "confirmar recebimento".
-    agora = agora_utc()
-    alterou = False
-    if not item.contrato_enviado_em:
-        item.contrato_enviado_em = agora
-        alterou = True
-    if _infinitepay_habilitada(empresa) and not item.whatsapp_contrato_acionado_em:
-        item.whatsapp_contrato_acionado_em = agora
-        alterou = True
-    if item.whatsapp_contrato_confirmacao_pendente:
-        item.whatsapp_contrato_confirmacao_pendente = False
-        alterou = True
-    if item.opcionais_reenvio_pendente:
-        item.opcionais_reenvio_pendente = False
-        alterou = True
-    if alterou:
-        db.commit()
-
+    # Abrir o WhatsApp não garante envio; registro somente no botão "Contrato enviado".
     return RedirectResponse(
         f"https://wa.me/{telefone}?text={quote(texto)}",
         status_code=303,
     )
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/contrato-enviado")
+def confirmar_envio_contrato_manual(solicitacao_id: int, request: Request,
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    """O atendente marca envio REAL; abrir WhatsApp nunca confirma envio por si só."""
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item:
+        raise HTTPException(404)
+    if not status_reserva_confirmada(item.status):
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro=Aceite o contrato antes de confirmar o envio.#pagamento", status_code=303)
+    if _infinitepay_habilitada(empresa) and float(item.valor_pago or 0) <= 0.009:
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro=Aguarde o primeiro pagamento antes de marcar o envio.#pagamento", status_code=303)
+    agora = agora_utc()
+    item.contrato_enviado_em = agora
+    item.whatsapp_contrato_acionado_em = item.whatsapp_contrato_acionado_em or agora
+    item.whatsapp_contrato_confirmacao_pendente = False
+    item.opcionais_reenvio_pendente = False
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?contrato=enviado#pagamento", status_code=303)
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/confirmar-recebimento-contrato")
@@ -13550,11 +13551,18 @@ def api_publico_cliente_por_telefone(slug: str, telefone: str, documento: str = 
         "confirmado": True,
         "cliente": {
             "nome": cliente.nome or "", "cpf": cliente.cpf or "", "cnpj": cliente.cnpj or "",
+            "data_nascimento": cliente.data_nascimento.isoformat() if cliente.data_nascimento else "",
             "email": cliente.email or "", "telefone": cliente.telefone or tel,
             "como_conheceu": cliente.como_conheceu or "",
         },
         "enderecos": [endereco_cliente_payload(e) for e in enderecos[:10]],
     }, headers=headers)
+
+
+@app.post("/e/{slug}/api/clientes/carregar-cadastro")
+def api_publico_carregar_cadastro(slug: str, telefone: str = Form(""), documento: str = Form(""), db: Session = Depends(get_db)):
+    """Busca cadastro apenas com WhatsApp + CPF/CNPJ completo, sem documento na URL."""
+    return api_publico_cliente_por_telefone(slug, telefone, documento, db)
 
 
 @app.get("/api/clientes/por-telefone")
@@ -21280,6 +21288,7 @@ def _processar_retorno_infinitepay(
             "saldo_restante": _saldo_contrato(item),
             "link_reserva": f"/e/{empresa.slug}/contrato/{_ref_publica(db, item)}",
             "whatsapp_acionado": bool(item.whatsapp_contrato_acionado_em),
+            "whatsapp_responsavel_url": _url_whatsapp_registro_contrato(request, db, empresa, item),
         }, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     return templates.TemplateResponse("publico/pagamento_pendente.html", {
         "request": request, "empresa": empresa, "item": item, "cobranca": cobranca,
