@@ -19584,8 +19584,20 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
 def cadastro_pre_reserva_aprovada(slug: str, solicitacao_ref: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_ref) if empresa else None
-    if not empresa or not item or item.empresa_id != empresa.id or not _vitrine_cadastro_liberado(item):
-        raise HTTPException(404, "Pedido da vitrine ainda não foi liberado para cadastro.")
+    if not empresa or not item or item.empresa_id != empresa.id or not _vitrine_origem(item):
+        raise HTTPException(404, "Link de cadastro não encontrado. Solicite um novo link à empresa.")
+    # O link enviado pelo atendente pode ser reaberto depois de o cadastro ter
+    # avançado para contrato. Nunca volta ao formulário depois da contratação:
+    # envia à página permanente de aceite/pagamento, sem alterar dados.
+    if (item.status in (STATUS_CONTRATO_PENDENTE_ACEITE | STATUS_CONTRATO_ACEITO)
+            and item.contrato_id and item.itens):
+        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
+    if not _vitrine_cadastro_liberado(item):
+        # Pedido existente: mostrar estado real, não um 404 enganoso.
+        pendente = _vitrine_pendente_aprovacao(item)
+        return templates.TemplateResponse("publico/pre_reserva_indisponivel.html", {
+            "request": request, "empresa": empresa, "pendente": pendente,
+        }, status_code=409)
     pedido = _pedido_vitrine_solicitacao(db, item)
     form = {
         "telefone": item.cliente.telefone or item.cliente.identificador or "" if item.cliente else "",
@@ -19663,8 +19675,17 @@ def salvar_pre_cadastro(
     pre_reserva_existente = None
     if pre_reserva_token:
         pre_reserva_existente = _solicitacao_publica_por_ref(db, empresa, pre_reserva_token)
-        if not pre_reserva_existente or pre_reserva_existente.empresa_id != empresa.id or not _vitrine_cadastro_liberado(pre_reserva_existente):
-            raise HTTPException(404, "Pedido da vitrine não encontrado ou ainda não liberado para cadastro.")
+        if not pre_reserva_existente or pre_reserva_existente.empresa_id != empresa.id or not _vitrine_origem(pre_reserva_existente):
+            raise HTTPException(404, "Link de cadastro não encontrado. Solicite um novo link à empresa.")
+        # Evita alterar um contrato após o aceite ou um reenvio de formulário antigo.
+        if (pre_reserva_existente.status in (STATUS_CONTRATO_PENDENTE_ACEITE | STATUS_CONTRATO_ACEITO)
+                and pre_reserva_existente.contrato_id and pre_reserva_existente.itens):
+            return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, pre_reserva_existente)}", status_code=303)
+        if not _vitrine_cadastro_liberado(pre_reserva_existente):
+            return templates.TemplateResponse("publico/pre_reserva_indisponivel.html", {
+                "request": request, "empresa": empresa,
+                "pendente": _vitrine_pendente_aprovacao(pre_reserva_existente),
+            }, status_code=409)
     pedido_vitrine = _pedido_vitrine_solicitacao(db, pre_reserva_existente) if pre_reserva_existente else _pedido_vitrine_sessao(request, db, empresa)
     if pedido_vitrine:
         # O mesmo endereço usado no cálculo do deslocamento segue para o rascunho do contrato.
@@ -20523,29 +20544,14 @@ def aceitar_contrato(
             _processar_humiat_aceite(db, empresa, item)
         db.commit()
 
-        # Após o aceite, empresas com InfinitePay seguem AUTOMATICAMENTE para
-        # o checkout do SINAL. A reserva já está confirmada neste ponto; portanto,
-        # se a InfinitePay falhar ou o cliente abandonar o checkout, o contrato
-        # continua reservado e pode ser cobrado posteriormente pelo responsável.
-        # A confirmação de aceite por WhatsApp não participa deste caminho.
-        if _infinitepay_habilitada(empresa):
-            sinal_checkout = min(_sinal_infinitepay_contrato(empresa, item), _saldo_contrato(item))
-            if sinal_checkout > 0.009:
-                return infinitepay_criar_checkout(
-                    slug=slug,
-                    solicitacao_id=_ref_publica(db, item),
-                    request=request,
-                    tipo_pagamento="sinal",
-                    db=db,
-                )
-            return RedirectResponse(
-                f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento",
-                status_code=303,
-            )
-
-        # Mantém o comportamento anterior das empresas sem InfinitePay.
+        # O aceite é uma etapa independente do checkout. Após persistir a
+        # confirmação no banco, voltamos ao link permanente do contrato para
+        # que o cliente escolha SE quer pagar agora. Não criar checkout aqui:
+        # chamadas externas podem travar a resposta mesmo depois do aceite.
+        # A criação de cobrança continua exclusiva do POST de pagamento,
+        # que protege contra cobranças duplicadas.
         return RedirectResponse(
-            f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, item)}?tipo=aceite",
+            f"/e/{slug}/contrato/{_ref_publica(db, item)}?aceite=ok",
             status_code=303,
         )
 
@@ -20569,12 +20575,19 @@ def cancelar_cobranca_infinitepay_local(
     local. Se o checkout antigo for pago depois, o webhook continua sendo
     processado para não perder um pagamento real.
     """
-    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
-    cobranca = db.get(InfinitePayCobranca, cobranca_id)
-    if not item or item.empresa_id != empresa.id or not cobranca:
+    # A rota administrativa recebe um ID inteiro. A busca por token público
+    # retorna None para IDs e produzia sempre 404, mesmo para cobranças válidas.
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
+    if not item:
         raise HTTPException(404)
-    if cobranca.empresa_id != empresa.id or cobranca.solicitacao_id != item.id:
-        raise HTTPException(404)
+    cobranca = db.query(InfinitePayCobranca).filter_by(
+        id=cobranca_id, empresa_id=empresa.id, solicitacao_id=item.id
+    ).first()
+    if not cobranca:
+        return RedirectResponse(
+            f"/painel/solicitacao/{item.id}?erro=Cobrança não encontrada neste contrato.#pagamento",
+            status_code=303,
+        )
     if cobranca.status == "PAGO":
         return RedirectResponse(
             f"/painel/solicitacao/{item.id}?erro=Uma cobrança já paga não pode ser cancelada.#pagamento",

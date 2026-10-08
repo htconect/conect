@@ -42,13 +42,39 @@
   </div>
 </header>
 <main class="cliente-main">{% block conteudo %}{% endblock %}</main>
-<div id="app-loading" class="cliente-loading" aria-hidden="true"><div class="cliente-loading-card"><div class="cliente-loading-spin"></div><strong id="app-loading-title">Aguarde</strong><p id="app-loading-text" style="margin:7px 0 0;color:var(--cliente-muted)">Carregando...</p></div></div>
+<div id="app-loading" class="cliente-loading" aria-hidden="true"><div class="cliente-loading-card"><div class="cliente-loading-spin"></div><strong id="app-loading-title">Aguarde</strong><p id="app-loading-text" style="margin:7px 0 0;color:var(--cliente-muted)">Carregando...</p><a id="app-loading-status" class="botao" href="#" hidden style="margin-top:14px;display:none;">Verificar situação do contrato</a><p id="app-loading-status-help" hidden style="font-size:.82rem;color:#64748b;margin-top:8px;">Não envie o aceite novamente antes de verificar. Ele pode já ter sido registrado.</p></div></div>
 <script>
 (function(){
-  const overlay=document.getElementById('app-loading'),titulo=document.getElementById('app-loading-title'),texto=document.getElementById('app-loading-text');let timer=null;
-  window.mostrarCarregando=function(t,m){if(titulo&&t)titulo.textContent=t;if(texto&&m)texto.textContent=m;clearTimeout(timer);timer=setTimeout(()=>{overlay?.classList.add('ativo');overlay?.setAttribute('aria-hidden','false');},350)};
-  window.fecharCarregando=function(){clearTimeout(timer);overlay?.classList.remove('ativo');overlay?.setAttribute('aria-hidden','true')};
-  document.addEventListener('submit',function(e){const f=e.target;if(!f||f.dataset.noLoading==='1')return;window.mostrarCarregando(f.dataset.loadingTitle||'Processando',f.dataset.loadingText||'Só um instante.');const b=f.querySelector('button[type="submit"],button:not([type])');if(b){b.dataset.textoOriginal=b.textContent;b.textContent='Aguarde...';b.disabled=true;}},true);
+  const overlay=document.getElementById('app-loading'),titulo=document.getElementById('app-loading-title'),texto=document.getElementById('app-loading-text');
+  const statusLink=document.getElementById('app-loading-status'),statusHelp=document.getElementById('app-loading-status-help');
+  let timer=null,statusTimer=null;
+  window.mostrarCarregando=function(t,m){
+    if(titulo&&t)titulo.textContent=t;if(texto&&m)texto.textContent=m;
+    clearTimeout(timer);clearTimeout(statusTimer);
+    if(statusLink){statusLink.hidden=true;statusLink.style.display='none';statusLink.removeAttribute('href');}
+    if(statusHelp)statusHelp.hidden=true;
+    timer=setTimeout(()=>{overlay?.classList.add('ativo');overlay?.setAttribute('aria-hidden','false');},350);
+  };
+  window.fecharCarregando=function(){
+    clearTimeout(timer);clearTimeout(statusTimer);
+    overlay?.classList.remove('ativo');overlay?.setAttribute('aria-hidden','true');
+    if(statusLink){statusLink.hidden=true;statusLink.style.display='none';}if(statusHelp)statusHelp.hidden=true;
+  };
+  document.addEventListener('submit',function(e){
+    const f=e.target;if(!f||f.dataset.noLoading==='1')return;
+    window.mostrarCarregando(f.dataset.loadingTitle||'Processando',f.dataset.loadingText||'Só um instante.');
+    const checkUrl=f.dataset.loadingStatusUrl;
+    if(checkUrl&&checkUrl.startsWith('/e/')){
+      statusTimer=setTimeout(()=>{
+        if(titulo)titulo.textContent='A confirmação está demorando';
+        if(texto)texto.textContent='Pode ter sido registrada. Consulte o contrato antes de tentar outra vez.';
+        if(statusLink){statusLink.href=checkUrl;statusLink.hidden=false;statusLink.style.display='inline-block';}
+        if(statusHelp)statusHelp.hidden=false;
+      },8000);
+    }
+    const b=f.querySelector('button[type="submit"],button:not([type])');
+    if(b){b.dataset.textoOriginal=b.textContent;b.textContent='Aguarde...';b.disabled=true;}
+  },true);
   window.addEventListener('pageshow',()=>{window.fecharCarregando();document.querySelectorAll('button[disabled][data-texto-original]').forEach(b=>{b.disabled=false;b.textContent=b.dataset.textoOriginal;delete b.dataset.textoOriginal;});});
   window.conectFecharAba=function(avisoId){const aviso=avisoId?document.getElementById(avisoId):null;try{window.close()}catch(e){}setTimeout(()=>{if(!window.closed&&aviso)aviso.hidden=false},350)};
 })();

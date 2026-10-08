@@ -1,0 +1,14 @@
+{% extends "publico/base_cliente.html" %}
+{% block conteudo %}
+<section class="box" style="margin:22px auto;max-width:650px;padding:26px;border:1px solid var(--cliente-borda);border-radius:18px;background:#fff">
+  {% if pendente %}
+    <h1>Seu pedido está em análise</h1>
+    <p>A empresa ainda precisa liberar o cadastro para continuar a reserva. Aguarde a confirmação antes de preencher os dados.</p>
+  {% else %}
+    <h1>Cadastro indisponível neste link</h1>
+    <p>Esta solicitação não está disponível para preencher o cadastro agora. Ela pode ter mudado de etapa ou ter sido encerrada.</p>
+    <p>Fale com a empresa para conferir sua reserva. Seus dados não foram alterados por esta tentativa.</p>
+  {% endif %}
+  <a class="botao" href="/e/{{ empresa.slug }}">Voltar à empresa</a>
+</section>
+{% endblock %}

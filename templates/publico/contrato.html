@@ -115,7 +115,7 @@
   {% if contrato_pronto %}
     <div class="box">
       <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar">Editar meus dados</a>
-      <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.public_token }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento.">
+      <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.public_token }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento." data-loading-status-url="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}">
         <div class="horario-aceite-box" id="horarioAceiteBox"
              data-inicio="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}"
              data-base-minutos="{{ duracao_base_aceite }}"
