@@ -23,6 +23,14 @@
 .opcional-publico b{line-height:1.35;display:block}
 .opcional-publico small{font-size:.78rem;line-height:1.4}
 @media(max-width:620px){.pill-grupo{max-width:none}.pill-grupo .data-pill{font-size:.75rem!important;padding:8px 6px!important}.pill-grupo .data-pill select{font-size:.75rem!important}.carrinho-linha{align-items:flex-start!important;flex-wrap:wrap}.carrinho-acoes{margin-left:auto}.carrinho-mini{width:48px;height:48px}}
+
+/* v1.0.136 - dois seletores exatamente iguais e na cor do tema da empresa */
+.pill-grupo{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:10px!important;width:100%!important;max-width:420px!important;align-items:stretch!important}
+.pill-grupo>.data-pill{display:flex!important;box-sizing:border-box!important;width:100%!important;height:48px!important;min-height:48px!important;max-height:48px!important;min-width:0!important;margin:0!important;padding:0 9px!important;border-radius:13px!important;border:1px solid var(--cliente-cor)!important;background:var(--cliente-suave)!important;color:var(--cliente-cor)!important;justify-content:center!important;align-items:center!important;gap:6px!important;font-size:.82rem!important;font-weight:800!important;line-height:1.2!important;box-shadow:none!important}
+.pill-grupo>.data-pill i{flex:0 0 auto;color:var(--cliente-cor)!important}
+.pill-grupo>.data-pill select{display:block!important;flex:1 1 auto!important;box-sizing:border-box!important;width:100%!important;max-width:none!important;min-width:0!important;height:100%!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;color:var(--cliente-cor)!important;font-size:.82rem!important;font-weight:800!important;text-align:center!important;text-align-last:center!important;outline-offset:-3px!important}
+.pill-grupo>.data-pill:focus-visible,.pill-grupo>.data-pill:focus-within{outline:2px solid var(--cliente-cor)!important;outline-offset:2px!important}
+@media(max-width:620px){.pill-grupo{max-width:none!important;gap:8px!important}.pill-grupo>.data-pill{height:46px!important;min-height:46px!important;max-height:46px!important;font-size:.75rem!important;padding:0 6px!important}.pill-grupo>.data-pill select{font-size:.75rem!important}}
 </style>
 {% endblock %}
 {% block conteudo %}
