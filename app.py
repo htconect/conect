@@ -36,6 +36,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
 from sqlalchemy import func, text, inspect, or_, case
+from sqlalchemy.exc import IntegrityError
 
 from config import (
     APP_NOME, APP_VERSION, SECRET_KEY, ADMIN_NOME, ADMIN_SENHA, ORGANIZA_NFSE_URL,
@@ -13193,33 +13194,98 @@ def excluir_solicitacao_completa(
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada)
 ):
-    item = db.get(Solicitacao, solicitacao_id)
-    if not item or item.empresa_id != empresa.id:
+    # Bloquear a linha durante a exclusão evita uma confirmação de pagamento
+    # concorrente com a remoção. Não alterar os registros financeiros.
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).with_for_update().first()
+    if not item:
         raise HTTPException(404)
-    if existe_pagamento_conciliado(item):
-        msg = quote("Pagamento conciliado. Chame o financeiro antes de excluir este contrato.")
-        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={msg}", status_code=303)
 
-    cliente = item.cliente
-    pagamento_ids = [p.id for p in (item.pagamentos or [])]
-    if pagamento_ids:
-        db.query(LancamentoBanco).filter(
-            LancamentoBanco.empresa_id == empresa.id,
-            LancamentoBanco.pagamento_id.in_(pagamento_ids)
-        ).update({LancamentoBanco.pagamento_id: None}, synchronize_session=False)
-        db.query(LancamentoManualFinanceiro).filter(
-            LancamentoManualFinanceiro.empresa_id == empresa.id,
-            LancamentoManualFinanceiro.pagamento_id.in_(pagamento_ids)
-        ).update({LancamentoManualFinanceiro.pagamento_id: None}, synchronize_session=False)
+    def _impedir_exclusao(mensagem: str):
+        db.rollback()
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro={quote(mensagem)}", status_code=303
+        )
 
-    db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete()
-    db.delete(item)
-    db.flush()
+    if existe_pagamento_conciliado(item) or db.query(Pagamento.id).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).first() or float(item.valor_pago or 0) > 0.009:
+        return _impedir_exclusao(
+            "Este contrato tem pagamento registrado. Para preservar o financeiro, ele não pode ser excluído."
+        )
+    if db.query(InfinitePayCobranca.id).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).first():
+        return _impedir_exclusao(
+            "Há cobrança ou histórico da InfinitePay neste contrato. Não é possível apagar a reserva sem perder a auditoria financeira. Use o cancelamento do contrato."
+        )
+    if db.query(HumiatMovimento.id).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id
+    ).first():
+        return _impedir_exclusao(
+            "Este contrato possui movimentação na Carteira Humiat. Verifique a movimentação antes de excluir."
+        )
+    if db.query(VinculoRepasseBanco.id).filter_by(
+        solicitacao_id=item.id
+    ).first() or db.query(LancamentoBanco.id).filter_by(
+        repasse_solicitacao_id=item.id
+    ).first() or db.query(LancamentoManualFinanceiro.id).filter_by(
+        repasse_solicitacao_id=item.id
+    ).first():
+        return _impedir_exclusao(
+            "Este contrato está vinculado a repasses financeiros. Remova ou regularize esses vínculos antes da exclusão."
+        )
+    if db.query(Solicitacao.id).filter(
+        Solicitacao.id != item.id,
+        or_(Solicitacao.transferencia_origem_id == item.id, Solicitacao.transferencia_copia_id == item.id),
+    ).first() or item.transferencia_origem_id or item.transferencia_copia_id:
+        return _impedir_exclusao(
+            "Este contrato possui transferência entre empresas. Regularize os contratos vinculados antes de excluir."
+        )
 
-    if cliente and db.query(Solicitacao).filter_by(empresa_id=empresa.id, cliente_id=cliente.id).count() == 0:
-        db.delete(cliente)
+    try:
+        # As oportunidades da vitrine apontam para o contrato, mas NÃO possuem
+        # exclusão em cascata. Desvinculá-las antes de remover a reserva evita
+        # o erro de FK, mantendo o histórico do pedido original.
+        for oportunidade in db.query(VitrineOportunidade).filter_by(
+            empresa_id=empresa.id, solicitacao_id=item.id
+        ).all():
+            oportunidade.solicitacao_id = None
+            if oportunidade.status == "convertida":
+                oportunidade.status = "cancelada"
 
-    db.commit()
+        # O roteiro pode referenciar a reserva e sua agenda, ambas removidas.
+        db.query(RotaInteligenteParada).filter(
+            RotaInteligenteParada.solicitacao_id == item.id
+        ).update({RotaInteligenteParada.solicitacao_id: None,
+                  RotaInteligenteParada.agenda_id: None}, synchronize_session=False)
+        agenda_ids = [a.id for a in db.query(Agenda.id).filter_by(
+            empresa_id=empresa.id, solicitacao_id=item.id
+        ).all()]
+        if agenda_ids:
+            db.query(RotaInteligenteParada).filter(
+                RotaInteligenteParada.agenda_id.in_(agenda_ids)
+            ).update({RotaInteligenteParada.agenda_id: None}, synchronize_session=False)
+
+        # Excluir explicitamente vínculos operacionais, inclusive em bancos
+        # antigos sem a cláusula ON DELETE CASCADE nas constraints reais.
+        db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
+        db.query(HistoricoOpcionalContrato).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
+        db.query(SolicitacaoRecurso).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).delete(synchronize_session=False)
+        # Os itens e opcionais têm cascade ORM configurado; deletar o pai
+        # remove estes registros sem alterar o catálogo ou o estoque da empresa.
+        db.delete(item)
+        db.flush()
+        # O cadastro do cliente pertence à empresa e deve continuar disponível
+        # para futuras locações, mesmo que este fosse seu único contrato.
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.exception("Exclusão de contrato bloqueada por vínculo no banco (solicitacao=%s)", solicitacao_id)
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro="
+            + quote("Não foi possível excluir: existem registros vinculados. O contrato e seus pagamentos foram preservados. Consulte os logs do Render."),
+            status_code=303,
+        )
     return RedirectResponse("/painel", status_code=303)
 
 

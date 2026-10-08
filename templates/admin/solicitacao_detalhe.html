@@ -615,7 +615,7 @@
     </div>
   {% endif %}
 
-  <form method="post" action="/painel/solicitacao/{{ item.id }}/excluir" class="form-excluir-contrato" onsubmit="return confirm('Deseja excluir este contrato/reserva? Isso apaga reserva, itens, pagamentos não conciliados e agenda. Se houver pagamento conciliado, o sistema não vai excluir.')">
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/excluir" class="form-excluir-contrato" onsubmit="return confirm('Deseja excluir este contrato/reserva? Isso apaga a reserva e os itens relacionados, mas preserva o cliente. Não é permitido excluir contratos com pagamentos, cobranças InfinitePay ou vínculos financeiros.')">
     <button class="botao-perigo largura-total" type="submit">Excluir contrato</button>
   </form>
 
