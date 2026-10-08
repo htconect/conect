@@ -37,20 +37,6 @@
       <label for="tipoEvento" style="margin-top:10px">Tipo de evento</label>
       <select id="tipoEvento" name="tipo_evento" required><option value="residencial">Residencial</option><option value="empresa">Empresa</option></select>
       <div id="tipoEventoMensagem" class="tipo-evento-msg"></div>
-      <div class="inicio-dados">
-        <div class="inicio-dados-cab"><div><strong>Contato e endereço <span class="opcional">opcional para navegar</span></strong><small>Se preencher agora, o catálogo já abre com o deslocamento calculado. Estes dados serão obrigatórios somente ao adicionar um item ao pedido.</small></div></div>
-        <label for="whatsappCatalogo">WhatsApp</label>
-        <input id="whatsappCatalogo" name="whatsapp" type="tel" inputmode="tel" autocomplete="tel" placeholder="(21) 99999-9999">
-        <div id="clienteEncontrado" class="cliente-encontrado">
-          <p>Já encontramos um cadastro com este WhatsApp. Para sua segurança, confirme CPF ou CNPJ para carregar o CEP e o número salvos.</p>
-          <div class="cliente-encontrado-linha"><input id="documentoConfirmacao" inputmode="numeric" autocomplete="off" placeholder="CPF ou CNPJ"><button type="button" id="carregarEndereco">Usar endereço</button></div>
-          <div id="clienteEncontradoStatus" class="cliente-encontrado-status"></div>
-        </div>
-        <div class="inicio-endereco" style="margin-top:8px">
-          <div><label for="cepCatalogo">CEP</label><input id="cepCatalogo" name="cep" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000"></div>
-          <div><label for="numeroCatalogo">Número</label><input id="numeroCatalogo" name="numero" inputmode="numeric" autocomplete="address-line2" maxlength="30" placeholder="Nº"></div>
-        </div>
-      </div>
       <button type="submit"><i class="bi bi-grid"></i> Montar catálogo</button>
     </form>
     {% if empresa.catalogo_musicas_url %}<a class="inicio-musicas" href="{{ empresa.catalogo_musicas_url }}" target="_blank" rel="noopener"><i class="bi bi-music-note-list"></i> Ver catálogo de músicas</a>{% endif %}

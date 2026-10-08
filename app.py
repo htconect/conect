@@ -18707,7 +18707,7 @@ def vitrine_publica(
     bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_obj)
     return templates.TemplateResponse("publico/vitrine.html", {
         "request": request, "empresa": empresa, "data_evento": data_obj, "tipo_evento": tipo_evento,
-        "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "itens": itens,
+        "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id), "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
         "fluxo_vitrine": "direto" if direto else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto"),
