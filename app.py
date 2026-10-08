@@ -15230,7 +15230,12 @@ def financeiro(
         status_sistema = "pendente"
         q_pagamentos_sistema = q_pagamentos_sistema.filter(Pagamento.conciliado_em == None)
 
-    pagamentos_sistema = q_pagamentos_sistema.order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc()).all()
+    # Reutilizar a consulta mensal ja carregada quando nao houver filtro de conciliacao.
+    # Evita um SELECT repetido com os mesmos joins de pagamentos/clientes.
+    if status_sistema == "todos":
+        pagamentos_sistema = pagamentos_sistema_mes
+    else:
+        pagamentos_sistema = q_pagamentos_sistema.order_by(Pagamento.data_pagamento.desc(), Pagamento.id.desc()).all()
 
     pagamentos_pendentes_vinculo = db.query(Pagamento).options(
         joinedload(Pagamento.solicitacao).joinedload(Solicitacao.cliente)
