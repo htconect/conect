@@ -473,6 +473,9 @@
           </div>
         </div>
         {% if c.status == 'AGUARDANDO_PAGAMENTO' %}
+        {% if c.checkout_url and c.checkout_url.startswith('https://') %}
+        <a class="botao secundario" href="{{ c.checkout_url }}" target="_blank" rel="noopener noreferrer">Abrir InfinitePay</a>
+        {% endif %}
         <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
           <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
         </form>

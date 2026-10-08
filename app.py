@@ -21252,6 +21252,33 @@ def infinitepay_escolha_pagamento(slug: str, solicitacao_id: str, request: Reque
     return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento", status_code=303)
 
 
+@app.get("/e/{slug}/pagamento/{solicitacao_id}/abrir", response_class=HTMLResponse, name="infinitepay_abrir_checkout")
+def infinitepay_abrir_checkout(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    """Navega ao checkout sem depender de um redirect externo após POST.
+
+    Em navegadores que aplicam CSP `form-action 'self'` também aos redirects
+    posteriores ao envio do formulário, um POST -> 303 externo pode ser bloqueado
+    embora a cobrança tenha sido criada. Uma página GET da própria aplicação
+    faz a navegação e oferece um link clicável caso o navegador a impeça.
+    Nenhuma cobrança nova é criada aqui.
+    """
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
+    if not empresa or not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    contrato_url = f"/e/{slug}/contrato/{_ref_publica(db, item)}#etapa-pagamento"
+    if not _infinitepay_habilitada(empresa) or not status_contrato_aceito(item.status) or _saldo_contrato(item) <= 0.009:
+        return RedirectResponse(contrato_url, status_code=303)
+    cobranca = _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+    if not cobranca or not str(cobranca.checkout_url or "").strip().startswith("https://"):
+        return RedirectResponse(contrato_url, status_code=303)
+    return templates.TemplateResponse("publico/pagamento_abrir.html", {
+        "request": request, "empresa": empresa, "item": item,
+        "checkout_url": str(cobranca.checkout_url).strip(),
+        "contrato_url": contrato_url,
+    }, headers={"Cache-Control": "no-store, private, max-age=0"})
+
+
 @app.post("/e/{slug}/pagamento/{solicitacao_id}/infinitepay", name="infinitepay_criar_checkout")
 def infinitepay_criar_checkout(
     slug: str,
@@ -21280,7 +21307,9 @@ def infinitepay_criar_checkout(
         valor_pendente = float(pendente.valor_centavos or 0) / 100.0
         ja_pagou = float(item.valor_pago or 0) > 0.009
         if (not ja_pagou) or abs(valor_pendente - saldo) <= 0.009:
-            return RedirectResponse(str(pendente.checkout_url), status_code=303)
+            return RedirectResponse(
+                f"/e/{slug}/pagamento/{_ref_publica(db, item)}/abrir", status_code=303
+            )
         return templates.TemplateResponse("publico/pagamento_erro.html", {
             "request": request, "empresa": empresa, "item": item,
             "erro": "Já existe uma cobrança InfinitePay ativa para este contrato.",
@@ -21380,7 +21409,9 @@ def infinitepay_criar_checkout(
             raise RuntimeError("InfinitePay não retornou uma URL válida de checkout.")
         cobranca.checkout_url = checkout_url
         db.commit()
-        return RedirectResponse(checkout_url, status_code=303)
+        return RedirectResponse(
+            f"/e/{slug}/pagamento/{_ref_publica(db, item)}/abrir", status_code=303
+        )
     except Exception as exc:
         cobranca.status = "ERRO_CHECKOUT"
         db.commit()

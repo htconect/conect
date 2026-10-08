@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div class="box" style="max-width:680px;margin:24px auto;text-align:center;padding:24px">
+  <h1>Abra seu pagamento na InfinitePay</h1>
+  <p>Seu link de pagamento está pronto. Você será direcionado para concluir com segurança.</p>
+  <a id="abrirCheckoutInfinite" class="botao largura-total" href="{{ checkout_url }}" rel="noreferrer">Abrir pagamento na InfinitePay</a>
+  <p class="texto-discreto" style="margin-top:12px">Se a página não abrir automaticamente, toque no botão acima. <b>Não é necessário gerar outra cobrança.</b></p>
+  <a class="botao secundario" href="{{ contrato_url }}" style="margin-top:10px">Voltar ao contrato</a>
+</div>
+<script>
+(function(){
+  var link = document.getElementById('abrirCheckoutInfinite');
+  if (!link || !link.href) return;
+  // A navegação de um GET não é submetida à regra CSP form-action do POST.
+  // Em navegadores que bloquearem a navegação automática, o link fica disponível.
+  try { window.location.replace(link.href); } catch (_) { /* link manual visível */ }
+})();
+</script>
+{% endblock %}

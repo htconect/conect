@@ -266,7 +266,8 @@
           <div class="aviso-pagamento-iniciado"><b>Pagamento em andamento</b><p class="texto-discreto">Continuaremos na mesma cobrança para evitar duplicidade.</p></div>
           {% if (item.valor_pago or 0) <= 0.009 %}
           {% endif %}
-          <a class="botao largura-total" href="{{ cobranca_pendente.checkout_url }}">Ir para pagamento</a>
+          <a class="botao largura-total" href="/e/{{ empresa.slug }}/pagamento/{{ item.public_token }}/abrir">Abrir pagamento na InfinitePay</a>
+          <p class="texto-discreto" style="text-align:center;margin:8px 0 0">A mesma cobrança será aberta. Não é necessário gerar outro link.</p>
         {% else %}
           <form method="post" action="/e/{{ empresa.slug }}/pagamento/{{ item.public_token }}/infinitepay" data-loading-title="Abrindo a InfinitePay" data-loading-text="Estamos preparando o pagamento com o valor escolhido.">
             {% for opcao in opcoes_pagamento %}
