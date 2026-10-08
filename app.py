@@ -6593,10 +6593,13 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
 
     Empresas novas começam vazias e configuram seu próprio cadastro de categorias.
     """
+    # A mesma leitura fornece os nomes cadastrados e a próxima posição.
+    # Antes havia também um SELECT MAX(...) separado em todo acesso público.
+    categorias_existentes = db.query(VitrineCategoria).filter(VitrineCategoria.empresa_id == empresa.id).all()
     existentes = {
-        str(nome or "").strip().casefold()
-        for (nome,) in db.query(VitrineCategoria.nome).filter(VitrineCategoria.empresa_id == empresa.id).all()
-        if str(nome or "").strip()
+        str(categoria.nome or "").strip().casefold()
+        for categoria in categorias_existentes
+        if str(categoria.nome or "").strip()
     }
     nomes_produtos = [
         str(nome or "").strip()
@@ -6606,7 +6609,7 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
         ).distinct().all()
         if str(nome or "").strip()
     ]
-    ordem = db.query(func.max(VitrineCategoria.ordem)).filter(VitrineCategoria.empresa_id == empresa.id).scalar() or 0
+    ordem = max((int(categoria.ordem or 0) for categoria in categorias_existentes), default=0)
     mudou = False
     for nome in nomes_produtos:
         if nome.casefold() not in existentes:
@@ -6657,18 +6660,49 @@ def _garantir_tipos_evento_padrao(db: Session, empresa: Empresa) -> None:
             db.add(TipoEventoEmpresa(empresa_id=empresa.id, nome=nome, descricao=descricao or None, ordem=idx * 10, ativo=True))
             mudou = True
     if mudou:
+        # Uma configuração modificada invalida o cache local da requisição.
+        db.info.pop(("tipos_evento_vitrine", int(empresa.id)), None)
         db.commit()
+    else:
+        # A verificação acima já trouxe os registros do banco. Reutilizar o
+        # mesmo resultado evita outro SELECT na renderização do catálogo.
+        tipos_atuais = [
+            t for t in existentes.values()
+            if str(t.nome or "").strip().casefold() in TIPOS_EVENTO_VITRINE
+        ]
+        tipos_atuais.sort(key=lambda t: (int(t.ordem or 0), str(t.nome or "")))
+        db.info[("tipos_evento_vitrine", int(empresa.id))] = tipos_atuais
 
 
 def _tipos_evento_empresa(db: Session, empresa_id: int, somente_ativos: bool = True) -> list[TipoEventoEmpresa]:
-    nomes = [nome.casefold() for nome in TIPOS_EVENTO_VITRINE.values()]
-    q = db.query(TipoEventoEmpresa).filter(
-        TipoEventoEmpresa.empresa_id == empresa_id,
-        func.lower(TipoEventoEmpresa.nome).in_(nomes),
+    """Carrega os tipos uma vez por sessão HTTP, sem cache entre empresas/requisições.
+
+    Uma alteração pendente de TipoEventoEmpresa força a consulta novamente para
+    preservar leitura consistente em telas administrativas de edição.
+    """
+    chave_cache = ("tipos_evento_vitrine", int(empresa_id))
+    pendente = any(
+        isinstance(obj, TipoEventoEmpresa)
+        for conjunto in (db.new, db.dirty, db.deleted)
+        for obj in conjunto
     )
-    if somente_ativos:
-        q = q.filter(TipoEventoEmpresa.ativo == True)
-    return q.order_by(TipoEventoEmpresa.ordem.asc(), TipoEventoEmpresa.nome.asc()).all()
+    if pendente:
+        db.info.pop(chave_cache, None)
+    tipos = None if pendente else db.info.get(chave_cache)
+    if tipos is None:
+        nomes = [nome.casefold() for nome in TIPOS_EVENTO_VITRINE.values()]
+        tipos = (
+            db.query(TipoEventoEmpresa)
+            .filter(
+                TipoEventoEmpresa.empresa_id == empresa_id,
+                func.lower(TipoEventoEmpresa.nome).in_(nomes),
+            )
+            .order_by(TipoEventoEmpresa.ordem.asc(), TipoEventoEmpresa.nome.asc())
+            .all()
+        )
+        if not pendente:
+            db.info[chave_cache] = tipos
+    return [tipo for tipo in tipos if tipo.ativo] if somente_ativos else list(tipos)
 
 
 def _mensagens_tipos_evento_empresa(db: Session, empresa_id: int) -> dict[str, str]:
@@ -6724,11 +6758,13 @@ def _duracao_padrao_empresa(empresa: Empresa) -> int:
 
 def _tipo_evento_empresa_por_chave(db: Session, empresa_id: int, tipo_evento: str) -> TipoEventoEmpresa | None:
     chave = _normalizar_tipo_evento_vitrine(tipo_evento)
-    nome = TIPOS_EVENTO_VITRINE[chave]
-    return db.query(TipoEventoEmpresa).filter(
-        TipoEventoEmpresa.empresa_id == empresa_id,
-        func.lower(TipoEventoEmpresa.nome) == nome.casefold(),
-    ).first()
+    # Os dois tipos já são carregados em lote na sessão da requisição.
+    # Evita repetir SELECT para preço, duração e validação do mesmo pedido.
+    return next(
+        (tipo for tipo in _tipos_evento_empresa(db, empresa_id, somente_ativos=False)
+         if str(tipo.nome or "").strip().casefold() == chave),
+        None,
+    )
 
 
 def _duracao_base_empresa_tipo(db: Session, empresa: Empresa, tipo_evento: str = "residencial") -> int:
@@ -6791,11 +6827,7 @@ def _preco_vitrine_produto(db: Session, empresa: Empresa, produto: ProdutoServic
     valor_normal = max(float(produto.valor_base or 0), 0.0)
     if not bool(getattr(produto, "preco_por_tipo_evento", False)):
         return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
-    tipo_nome = TIPOS_EVENTO_VITRINE[tipo_chave]
-    tipo = db.query(TipoEventoEmpresa).filter(
-        TipoEventoEmpresa.empresa_id == empresa.id,
-        func.lower(TipoEventoEmpresa.nome) == tipo_nome.casefold(),
-    ).first()
+    tipo = _tipo_evento_empresa_por_chave(db, empresa.id, tipo_chave)
     if not tipo:
         return {"modo": "normal", "valor": valor_normal, "valor_normal": valor_normal, "sob_consulta": False, "promocao": False}
     cfg = db.query(ProdutoPrecoEvento).filter_by(
@@ -8348,12 +8380,18 @@ def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) ->
     ).order_by(BloqueioData.data_inicio.asc(), BloqueioData.id.asc()).first()
 
 
-def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, tipo_evento: str = "residencial") -> list[dict]:
-    """Disponibilidade pública em lote, sem consultas repetidas por produto."""
+def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
+                          tipo_evento: str = "residencial", apenas_disponibilidade: bool = False) -> list[dict]:
+    """Vitrine completa ou verificação leve de estoque da reserva.
+
+    A conferência final precisa de disponibilidade, não de fotos, preços e
+    opcionais já escolhidos. Essas consultas continuam no catálogo público.
+    """
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_consulta)
-    _garantir_categorias_vitrine_existentes(db, empresa)
-    _garantir_tipos_evento_padrao(db, empresa)
+    if not apenas_disponibilidade:
+        _garantir_categorias_vitrine_existentes(db, empresa)
+        _garantir_tipos_evento_padrao(db, empresa)
 
     # Uma única leitura de categorias atende ordem, cadastro e inativas.
     categorias_todas = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
@@ -8362,9 +8400,11 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
     categorias_cadastradas = {c.nome.casefold() for c in categorias_todas}
     categorias_inativas = {c.nome.casefold() for c in categorias_todas if not c.ativa}
 
+    consulta_produtos = db.query(ProdutoServico)
+    if not apenas_disponibilidade:
+        consulta_produtos = consulta_produtos.options(selectinload(ProdutoServico.fotos))
     produtos = (
-        db.query(ProdutoServico)
-        .options(selectinload(ProdutoServico.fotos))
+        consulta_produtos
         .filter(
             ProdutoServico.empresa_id == empresa.id,
             ProdutoServico.ativo == True,
@@ -8381,7 +8421,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
     produto_ids = [int(p.id) for p in produtos]
 
     # Tipo de evento e configurações de preço/duração são carregados uma única vez.
-    tipo_cfg = _tipo_evento_empresa_por_chave(db, empresa.id, tipo_evento)
+    tipo_cfg = None if apenas_disponibilidade else _tipo_evento_empresa_por_chave(db, empresa.id, tipo_evento)
     duracao_base = _duracao_padrao_empresa(empresa)
     if tipo_cfg and getattr(tipo_cfg, "duracao_minutos", None):
         try:
@@ -8400,7 +8440,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
     # O catálogo de opcionais é da empresa; por produto guardamos apenas exclusões.
     catalogo_opcionais = []
     excluidos_por_produto: dict[int, set[int]] = {}
-    if produto_ids and any(bool(getattr(p, "utiliza_opcionais", False)) for p in produtos):
+    if not apenas_disponibilidade and produto_ids and any(bool(getattr(p, "utiliza_opcionais", False)) for p in produtos):
         catalogo_opcionais = [
             o for o in _opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True)
             if int(o.quantidade or 0) > 0
@@ -8440,6 +8480,10 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date, t
             disponiveis = disponivel_fisico
         if bloqueio_data:
             disponiveis = 0
+
+        if apenas_disponibilidade:
+            saida.append({'produto': produto, 'disponiveis': max(0, int(disponiveis))})
+            continue
 
         categoria = str(produto.vitrine_categoria or '').strip()
         fotos_publicas = [
@@ -15139,10 +15183,14 @@ def financeiro(
     titulos_receber_abertos = [titulo for titulo in titulos_abertos if titulo.tipo == "receber"]
     titulos_pagar_abertos = [titulo for titulo in titulos_abertos if titulo.tipo == "pagar"]
 
+    # Esta lista alimenta tanto a conciliação por banco quanto o cálculo dos
+    # repasses. Buscar só uma vez, em vez de fazer SELECT DISTINCT e novo SELECT.
+    vinculos_repasse_todos = db.query(VinculoRepasseBanco).options(
+        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.cliente),
+        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.empresa_transferida),
+    ).filter(VinculoRepasseBanco.empresa_id == empresa.id).all()
     bancos_com_repasse_vinculado = {
-        banco_id for (banco_id,) in db.query(VinculoRepasseBanco.lancamento_banco_id).filter(
-            VinculoRepasseBanco.empresa_id == empresa.id
-        ).distinct().all()
+        vr.lancamento_banco_id for vr in vinculos_repasse_todos
     }
     saldo_vinculo_por_banco = {}
     candidatos_titulo_por_banco = {}
@@ -15418,12 +15466,7 @@ def financeiro(
     repasses_base = q_repasses.order_by(Solicitacao.data_evento.desc(), Solicitacao.id.desc()).all()
 
     # O status do repasse é calculado pelo total efetivamente vinculado no banco.
-    vinculos_repasse_todos = db.query(VinculoRepasseBanco).options(
-        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.cliente),
-        joinedload(VinculoRepasseBanco.solicitacao).joinedload(Solicitacao.empresa_transferida),
-    ).filter(
-        VinculoRepasseBanco.empresa_id == empresa.id
-    ).all()
+    # Reutiliza a leitura antecipada acima, com os mesmos relacionamentos.
     valor_vinculado_por_repasse = {}
     vinculos_por_banco = {}
     for vr in vinculos_repasse_todos:
@@ -15533,8 +15576,10 @@ def financeiro(
         if (
             l.pagamento_id or getattr(l, "organiza_lancamento_id", None)
             or l.categoria not in ("venda", "manutencao") or (l.valor or 0) <= 0
-            or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_banco_id == l.id).first()
-            or db.query(VinculoRepasseBanco).filter(VinculoRepasseBanco.lancamento_banco_id == l.id).first()
+            # Os vínculos desta empresa já foram carregados para a própria tela.
+            # Consultar individualmente para cada lançamento gerava N+1 SQLs.
+            or bool(vinculos_titulo_por_banco.get(l.id))
+            or bool(vinculos_por_banco.get(l.id))
         ):
             continue
         usado = sum(float(v.valor or 0) for v in vinculos_organiza_por_banco.get(l.id, []))
@@ -15577,7 +15622,7 @@ def financeiro(
         if (
             getattr(m, "pagamento_id", None) or getattr(m, "organiza_lancamento_id", None)
             or m.categoria not in ("venda", "manutencao") or (m.valor or 0) <= 0
-            or db.query(VinculoTituloFinanceiro).filter(VinculoTituloFinanceiro.lancamento_manual_id == m.id).first()
+            or bool(vinculos_titulo_por_manual.get(m.id))
         ):
             continue
         usado = sum(float(v.valor or 0) for v in vinculos_organiza_por_manual.get(m.id, []))
@@ -19752,7 +19797,10 @@ def salvar_pre_cadastro(
         data_obj = pedido_vitrine["data_evento"]
         disponibilidade_atual = {
             int(reg["produto"].id): int(reg["disponiveis"])
-            for reg in _itens_vitrine_publica(db, empresa, data_obj, pedido_vitrine.get("tipo_evento", "residencial"))
+            for reg in _itens_vitrine_publica(
+                db, empresa, data_obj, pedido_vitrine.get("tipo_evento", "residencial"),
+                apenas_disponibilidade=True,
+            )
         }
         for reg in pedido_vitrine["itens"]:
             if int(reg["quantidade"]) > max(0, disponibilidade_atual.get(int(reg["produto_id"]), 0)):

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="pt-br"{% if request.url.path.startswith('/painel/reservas') %} class="operacao-preparando-visual"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -13,7 +13,18 @@
   <link rel="stylesheet" href="/static/css/style.css?v=20261004-1091">
   <link rel="stylesheet" href="/static/css/humiat-design-system.css?v=20261004-1091">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="/static/css/connect-adminator.css?v=20261008-1.0.138">
+  <link rel="stylesheet" href="/static/css/connect-adminator.css?v=20261008-1.0.140">
+  {% if request.url.path.startswith('/painel/reservas') %}
+  <style>
+    /* Evita o flash de controles sem as classes finais no carregamento. */
+    .operacao-preparando-visual .container-app{visibility:hidden}
+  </style>
+  <noscript><style>.operacao-preparando-visual .container-app{visibility:visible}</style></noscript>
+  <script>
+    /* Libera a operação também se a decoração dos botões falhar. */
+    window.addEventListener('load', function(){document.documentElement.classList.remove('operacao-preparando-visual');}, {once:true});
+  </script>
+  {% endif %}
   {% block head_extra %}{% endblock %}
 </head>
 <body class="{% if empresa is defined and empresa %}tema-global-{{ empresa.tema or 'azul' }}{% endif %} {% if request.session.get('empresa_id') %}painel-interno humiat-system-shell humiat-ui{% endif %} {% if not request.session.get('empresa_id') and not request.session.get('admin_geral') %}publico-cliente{% endif %} {% block body_class %}{% endblock %}">
@@ -747,6 +758,7 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
   }
   function aplicar(){
     document.querySelectorAll('button, a.botao, a.botao-whats, .botao-whats, .botao-whats-btn, .botao-rota, label.btn-importar-topo, a.btn-limpar-filtros, .link-botao, .registrar-pagamento-operacao > summary').forEach(decorar);
+    document.documentElement.classList.remove('operacao-preparando-visual');
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', aplicar); else aplicar();
 })();
