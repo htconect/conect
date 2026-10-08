@@ -325,6 +325,10 @@ def observacoes_visiveis(texto: str | None) -> str:
             continue
         if limpa.startswith("[VITRINE_"):
             continue
+        if limpa == "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente.":
+            continue
+        if limpa.startswith("Cliente autorizou no carrinho") or limpa.startswith("Cliente não autorizou indicação a parceiros"):
+            continue
         if limpa.startswith("Pré-reserva criada pela vitrine."):
             continue
         if limpa.startswith("Cliente autorizou no carrinho"):
@@ -1938,7 +1942,7 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
     add(linhas, "Cidade/UF", cidade_uf)
     add(linhas, "CEP", getattr(cliente, "cep", ""))
     add(linhas, "Observações do cliente", getattr(cliente, "observacoes", ""))
-    add(linhas, "Observações da reserva", item.observacoes)
+    add(linhas, "Observações da reserva", observacoes_visiveis(item.observacoes))
 
     comp = composicao_valores_contrato(item)
     add(linhas, "Equipamentos", f"R$ {moeda_br(comp['equipamentos_sem_opcionais'])}")
@@ -1957,66 +1961,97 @@ def linhas_informacoes_preenchidas_contrato(item: Solicitacao, formato: str = "t
 
 
 def _resumo_reserva_whatsapp(empresa: Empresa, item: Solicitacao, itens_reserva) -> list[str]:
-    """Monta o resumo principal da reserva para mensagens de WhatsApp."""
-    total = float(item.valor or 0)
-    pago = float(item.valor_pago or 0)
-    falta = max(total - pago, 0)
+    """Resumo completo e compacto: dados do evento sem linhas vazias.
+
+    O endereço vem do snapshot da reserva (não do endereço atual do cliente).
+    Conserva as informações da mensagem antiga e destaca cada rótulo no WhatsApp.
+    """
     comp = composicao_valores_contrato(item)
-    data_txt = item.data_evento.strftime("%d/%m/%Y") if item.data_evento else "-"
-    hora_txt = item.hora_inicio.strftime("%H:%M") if item.hora_inicio else "-"
+    total = max(float(item.valor or 0), 0.0)
+    pago = max(float(item.valor_pago or 0), 0.0)
+    saldo = max(total - pago, 0.0)
+    linhas = [
+        f"*{empresa.nome or 'Karaokê RJ'}*",
+        f"*Cliente:* {item.cliente.nome if item.cliente else '-'}",
+    ]
+
+    data = item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-'
+    inicio = item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-'
+    fim = item.hora_fim.strftime('%H:%M') if item.hora_fim else ''
+    data_hora = f"*Data:* {data} | *Horário:* {inicio}" + (f" às {fim}" if fim else '')
+    duracao = int(getattr(item, 'duracao_contratada_minutos', 0) or 0)
+    if duracao > 0:
+        data_hora += f" | *Período:* {_rotulo_duracao_minutos(duracao)}"
+    linhas.append(data_hora)
+
+    suporte = horario_suporte_contrato(empresa, item)
+    if suporte:
+        linhas.append(f"*Suporte técnico:* {suporte[0]} às {suporte[1]}")
+    linhas.append(f"*Retirada:* {texto_retirada_contrato(item)}")
+
+    # Endereço mantém exatamente a apresentação já utilizada antes da 1.0.147.
+    # Não mistura endereço com outros campos compactados.
+    # A observação é tratada separadamente para ocultar metadados da vitrine.
+    endereco_linhas = [
+        linha.replace("*Endereço:* ", "").replace("*Local:* ", "")
+             .replace("*Bairro:* ", "Bairro: ")
+        for linha in linhas_endereco_reserva(item)
+        if not linha.startswith("*Observação:*")
+    ]
+    linhas.append("*📍 Local*")
+    linhas.extend(endereco_linhas)
+
+    infos_local = []
+    if item.acesso_local:
+        infos_local.append(f"*Acesso:* {item.acesso_local}")
+    if item.local_responsavel_nome:
+        infos_local.append(f"*Responsável:* {item.local_responsavel_nome}")
+    if item.local_responsavel_telefone:
+        infos_local.append(f"*Telefone:* {item.local_responsavel_telefone}")
+    if infos_local:
+        linhas.append(' | '.join(infos_local))
+    observacoes = observacoes_visiveis(item.observacoes)
+    if observacoes:
+        linhas.append(f"*Observações:* {'; '.join(x.strip() for x in observacoes.splitlines() if x.strip())}")
 
     equipamentos = []
-    if itens_reserva:
-        for ri in itens_reserva:
-            prefixo = f"{ri.quantidade or 1}x " if (ri.quantidade or 1) > 1 else ""
-            equipamentos.append(f"• {prefixo}{ri.nome}")
-    elif item.produto:
-        equipamentos.append(f"• {item.produto.nome}")
-    else:
-        equipamentos.append("• Itens da reserva")
+    for ri in itens_reserva or []:
+        qtd = max(int(ri.quantidade or 1),1)
+        equipamentos.append(f"{qtd}x {ri.nome}" if qtd > 1 else str(ri.nome))
+    if not equipamentos and item.produto:
+        equipamentos.append(str(item.produto.nome))
+    linhas.append(f"*🎤 Equipamentos:* {', '.join(equipamentos) if equipamentos else 'Itens da reserva'}")
 
-    opcionais_contrato = _opcionais_contrato_view(item)
-    linhas_opcionais = [
-        f"• {op['quantidade']}x {op['nome']} — R$ {moeda_br(op['valor_unitario'])} cada = R$ {moeda_br(op['valor_total'])}"
-        for op in opcionais_contrato
-    ]
-    endereco_linhas = linhas_endereco_reserva(item)
-    endereco_texto = "\n".join(
-        l.replace("*Endereço:* ", "").replace("*Local:* ", "").replace("*Bairro:* ", "Bairro: ")
-        for l in endereco_linhas
-    )
+    opcionais = _opcionais_contrato_view(item)
+    if opcionais:
+        texto_opcionais = '; '.join(
+            f"{op['quantidade']}x {op['nome']} (R$ {moeda_br(op['valor_unitario'])}/un. = R$ {moeda_br(op['valor_total'])})"
+            for op in opcionais
+        )
+        linhas.append(f"*Opcionais contratados:* {texto_opcionais}")
 
-    return [
-        f"*{empresa.nome or 'Karaokê RJ'}*",
-        "",
-        f"*Cliente:* {item.cliente.nome if item.cliente else '-'}",
-        "",
-        "*📅 Início do evento*",
-        f"{data_txt} às {hora_txt}",
-        "",
-        *(["*🛠️ Suporte técnico*", f"{horario_suporte_contrato(empresa, item)[0]} às {horario_suporte_contrato(empresa, item)[1]}", ""] if horario_suporte_contrato(empresa, item) else []),
-        "*🚚 Retirada*",
-        texto_retirada_contrato(item),
-        "",
-        "*📍 Local*",
-        endereco_texto or "-",
-        "",
-        "*🎤 Equipamentos*",
-        *equipamentos,
-        *( ["", "*➕ Opcionais contratados*", *linhas_opcionais] if linhas_opcionais else [] ),
-        "",
-        "*💰 Financeiro*",
-        f"*Equipamentos:* R$ {moeda_br(comp['equipamentos_sem_opcionais'])}",
-        *( [f"*Opcionais:* R$ {moeda_br(comp['opcionais'])}"] if linhas_opcionais else [] ),
-        *([f"*Cupom:* {comp['cupom_codigo']} ({comp['cupom_rotulo']})",
-           f"*Desconto:* - R$ {moeda_br(comp['desconto'])}"]
-          if comp['cupom_codigo'] and comp['desconto'] > 0 else []),
-        *([f"*Horas adicionais:* R$ {moeda_br(comp['horas_adicionais'])}"] if comp['horas_adicionais'] > 0 else []),
-        f"*Frete:* R$ {moeda_br(comp['frete'])}",
-        f"*Total:* R$ {moeda_br(total)}",
-        f"*Pago:* R$ {moeda_br(pago)}",
-        f"*Saldo:* R$ {moeda_br(falta)}",
-    ]
+    resumo_precos = [f"*Equipamentos:* R$ {moeda_br(comp['equipamentos_sem_opcionais'])}"]
+    if opcionais or comp['opcionais'] > 0.009:
+        resumo_precos.append(f"*Opcionais:* R$ {moeda_br(comp['opcionais'])}")
+    if comp['horas_adicionais'] > 0.009:
+        resumo_precos.append(f"*Horas adicionais:* R$ {moeda_br(comp['horas_adicionais'])}")
+    linhas.append(' | '.join(resumo_precos))
+
+    if comp['desconto'] > 0.009:
+        desconto = []
+        if comp['cupom_codigo'] and comp['desconto_cupom'] > 0.009:
+            desconto.append(f"*Cupom:* {comp['cupom_codigo']} ({comp['cupom_rotulo']})")
+        if comp['desconto_manual'] > 0.009:
+            desconto.append(f"*Desconto manual:* - R$ {moeda_br(comp['desconto_manual'])}")
+        if comp['desconto_cupom'] > 0.009:
+            desconto.append(f"*Desconto cupom:* - R$ {moeda_br(comp['desconto_cupom'])}")
+        if not (comp['desconto_cupom'] > 0.009 or comp['desconto_manual'] > 0.009):
+            desconto.append(f"*Desconto:* - R$ {moeda_br(comp['desconto'])}")
+        linhas.append(' | '.join(desconto))
+
+    linhas.append(f"*Frete:* R$ {moeda_br(comp['frete'])} | *Total:* R$ {moeda_br(total)}")
+    linhas.append(f"*Pago:* R$ {moeda_br(pago)} | *Saldo:* R$ {moeda_br(saldo)}")
+    return linhas
 
 
 def _quantidade_equipamentos_contrato(item: Solicitacao) -> int:
@@ -2089,60 +2124,57 @@ def _valor_pagamento_manual_sugerido(empresa: Empresa, item: Solicitacao) -> flo
     return round(min(max(sinal, 0.0), saldo), 2)
 
 
+def _inserir_link_opcionais_whatsapp(linhas: list[str], request: Request,
+                                       empresa: Empresa, item: Solicitacao, db: Session) -> None:
+    """Insere o catálogo logo depois dos equipamentos, sem repetir textos longos."""
+    if not _empresa_modulo_ativo(empresa, 'opcionais'):
+        return
+    link = _link_absoluto(request, 'opcionais_cliente', slug=empresa.slug,
+                          solicitacao_id=_ref_publica(db, item))
+    indice = next((i for i, linha in enumerate(linhas)
+                   if linha.startswith('*🎤 Equipamentos:*')), len(linhas)) + 1
+    linhas[indice:indice] = ['*✨ Opcionais (adicionar ou remover):*', link]
+
+
 def montar_mensagem_whatsapp_aceite(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem única do link permanente de aceite/pagamento da reserva."""
-    link_aceite = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
-    cliente_nome = item.cliente.nome if item.cliente else "cliente"
-    texto = aplicar_variaveis_mensagem(
-        mensagens_empresa(empresa).get("aceite", ""),
-        link=link_aceite,
-        empresa=empresa.nome,
-        cliente=cliente_nome,
-        valor_sinal=moeda_br(_sinal_infinitepay_contrato(empresa, item) if _infinitepay_habilitada(empresa) else (item.sinal or 0)),
-        pix=empresa.pix_copia_cola or "",
-    ).strip()
-    convite = ("\n\n✨ *Que tal deixar sua festa ainda mais completa?*\n"
-               "Veja nosso catálogo de opcionais com fotos e preços, escolha seus extras e salve pelo link:\n"
-               + _link_absoluto(request, "opcionais_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))) if _empresa_modulo_ativo(empresa, "opcionais") else ""
-    return (texto or aplicar_variaveis_mensagem(
-        MENSAGEM_ACEITE_PADRAO, link=link_aceite, empresa=empresa.nome, cliente=cliente_nome
-    )) + convite
+    """Pré-aceite: dados essenciais completos, link de opcionais e aceite."""
+    itens = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    link_aceite = _link_absoluto(request, 'contrato_cliente', slug=empresa.slug,
+                                solicitacao_id=_ref_publica(db, item))
+    linhas = _resumo_reserva_whatsapp(empresa, item, itens)
+    _inserir_link_opcionais_whatsapp(linhas, request, empresa, item, db)
+
+    personalizado = str(getattr(empresa, 'mensagem_aceite', '') or '').strip()
+    if (personalizado and personalizado not in {MENSAGEM_ACEITE_PADRAO, MENSAGEM_ACEITE_LEGADA}
+            and 'No link você poderá conferir os dados da reserva' not in personalizado):
+        nome = item.cliente.nome if item.cliente else 'cliente'
+        texto = aplicar_variaveis_mensagem(
+            personalizado, link=link_aceite, empresa=empresa.nome, cliente=nome,
+            valor_sinal=moeda_br(_sinal_infinitepay_contrato(empresa, item) if _infinitepay_habilitada(empresa) else (item.sinal or 0)),
+            pix=empresa.pix_copia_cola or '',
+        ).strip()
+        # A personalização pode já conter {{link}}. Não repetir o mesmo URL.
+        if texto:
+            linhas.append(texto)
+    if not personalizado or personalizado in {MENSAGEM_ACEITE_PADRAO, MENSAGEM_ACEITE_LEGADA} or 'No link você poderá conferir os dados da reserva' in personalizado or link_aceite not in '\n'.join(linhas):
+        linhas.extend(['*📄 Confira e aceite o contrato:*', link_aceite])
+    return '\n'.join(linhas)
 
 
 def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
-    """Mensagem final ao cliente: link permanente em destaque e PDF separado.
-
-    As cláusulas não precisam de um link isolado: continuam disponíveis dentro do
-    link permanente da reserva, que também acompanha aceite, pagamentos e quitação.
-    """
-    itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
-    link_reserva = _link_absoluto(request, "contrato_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
-    link_pdf = _link_absoluto(request, "contrato_cliente_pdf", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
-
-    linhas = _resumo_reserva_whatsapp(empresa, item, itens_reserva)
-    mensagem_final = mensagens_empresa(empresa).get("confirmacao", "").strip()
-    if mensagem_final:
-        linhas.extend(["", mensagem_final])
-
-    saldo = _saldo_contrato(item)
-    linhas.extend([
-        "",
-        "*🔗 PAGAMENTO E ACOMPANHAMENTO*",
-        ("Use este link para acompanhar a reserva e fazer o próximo pagamento:"
-         if saldo > 0.009 else
-         "Use este link para acompanhar a reserva e consultar a situação do pagamento:"),
-        link_reserva,
-        "",
-        "*📄 Contrato em PDF*",
-        link_pdf,
-    ])
-
-    if _empresa_modulo_ativo(empresa, "opcionais"):
-        linhas.extend(["", "*✨ Personalize sua festa!*",
-            "Quer incluir ou ajustar TV, pedestais e outros adicionais? Veja fotos, preços e escolha com facilidade:",
-            _link_absoluto(request, "opcionais_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item)),
-            "Ao salvar uma alteração, enviaremos o contrato atualizado."])
-    return "\n".join(linhas).strip()
+    """Contrato confirmado: resumo completo em menos linhas, com links clicáveis."""
+    itens = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    link = _link_absoluto(request, 'contrato_cliente', slug=empresa.slug,
+                          solicitacao_id=_ref_publica(db, item))
+    pdf = _link_absoluto(request, 'contrato_cliente_pdf', slug=empresa.slug,
+                         solicitacao_id=_ref_publica(db, item))
+    linhas = _resumo_reserva_whatsapp(empresa, item, itens)
+    _inserir_link_opcionais_whatsapp(linhas, request, empresa, item, db)
+    mensagem_final = mensagens_empresa(empresa).get('confirmacao', '').strip()
+    if mensagem_final and mensagem_final != 'Sua reserva foi efetivada com sucesso.\n\nObrigado pela confiança!':
+        linhas.append(mensagem_final)
+    linhas.extend(['*📄 Contrato e acompanhamento:*', link, '*PDF:*', pdf])
+    return '\n'.join(linhas)
 
 
 def montar_mensagem_whatsapp_saldo_operacao(request: Request, empresa: Empresa, item: Solicitacao, db: Session) -> str:
@@ -4696,8 +4728,7 @@ MENSAGEM_ACEITE_PADRAO = (
     "Olá, {{cliente}}! Sua reserva está aguardando seu aceite.\n\n"
     "*Clique no link abaixo para continuar:*\n"
     "{{link}}\n\n"
-    "No link você poderá conferir os dados da reserva, ler as cláusulas e consultar as informações de pagamento e, quando disponível, as opções de parcelamento.\n\n"
-    "*Importante:* o contrato só será efetuado após a conclusão desta etapa."
+    "Confira os dados, opcionais e condições antes de aceitar."
 )
 
 MENSAGEM_ACEITE_LEGADA = (
@@ -7545,19 +7576,13 @@ def _criar_pre_reserva_vitrine(
 
     frete = pedido.get("frete") or {}
     autorizacao = "1" if autorizou_parceiros else "0"
-    texto_autorizacao = (
-        "Cliente autorizou no carrinho o encaminhamento da solicitação a empresas parceiras."
-        if autorizou_parceiros
-        else "Cliente não autorizou indicação a parceiros no carrinho. O WhatsApp continua autorizado para o atendimento da pré-reserva e envio do cadastro da locação."
-    )
     obs = (
         "[VITRINE_ORIGEM=1]\n"
         + ("[VITRINE_PENDENTE_APROVACAO=1]\n" if pendente_aprovacao else "[VITRINE_APROVADA=1]\n")
         + f"[VITRINE_TIPO_EVENTO={pedido.get('tipo_evento', 'residencial')}]\n"
         + f"[VITRINE_AUTORIZA_PARCEIROS={autorizacao}]\n"
         + ("[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM=carrinho]\n" if autorizou_parceiros else "")
-        + "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente.\n"
-        + texto_autorizacao
+        # Marcadores internos ficam fora do campo de observacoes visiveis ao cliente.
     )
     inicio_pedido = pedido.get("hora_inicio")
     if isinstance(inicio_pedido, str):
@@ -12507,12 +12532,10 @@ def enviar_catalogo_opcionais_whatsapp(solicitacao_id: int, request: Request,
     if not telefone:
         raise HTTPException(400, "Cliente sem WhatsApp")
     link = _link_absoluto(request, "opcionais_cliente", slug=empresa.slug, solicitacao_id=_ref_publica(db, item))
-    msg = (f"Olá, {item.cliente.nome or 'tudo bem'}! ✨\n\n"
-           "Quer deixar sua festa ainda mais completa? Escolha seus opcionais com fotos e preços, "
-           "marque os que desejar e salve sua escolha.\n\n"
-           f"🛍️ *Veja os opcionais:* {link}\n\n"
-           "Se fizer alguma alteração, enviaremos seu contrato atualizado.\n\n"
-           f"Equipe {empresa.nome}")
+    msg = (f"Olá, {item.cliente.nome or 'tudo bem'}! ✨\n"
+           "Quer personalizar sua festa? Veja fotos, preços e marque seus extras:\n"
+           f"{link}\n"
+           "Ao salvar, atualizamos seu contrato.")
     return RedirectResponse(f"https://wa.me/{telefone}?text={quote(msg)}", status_code=303)
 
 
@@ -12734,10 +12757,10 @@ def salvar_edicao_solicitacao(
     item.sinal = texto_para_float(sinal)
     if _vitrine_origem(item):
         marcadores_vitrine = [ln for ln in str(item.observacoes or "").splitlines() if ln.strip().startswith("[VITRINE_")]
-        origem_txt = "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente."
-        partes = marcadores_vitrine + [origem_txt]
-        if observacoes.strip() and observacoes.strip() != origem_txt:
-            partes.append(observacoes.strip())
+        partes = marcadores_vitrine[:]
+        obs_cliente = observacoes_visiveis(observacoes)
+        if obs_cliente:
+            partes.append(obs_cliente)
         item.observacoes = "\n".join(partes).strip()
     else:
         item.observacoes = observacoes
@@ -13820,7 +13843,7 @@ def form_solicitacao_completo(item: Solicitacao) -> dict:
         "acesso_local": item.acesso_local or "",
         "local_responsavel_nome": item.local_responsavel_nome or "",
         "local_responsavel_telefone": item.local_responsavel_telefone or "",
-        "observacoes": item.observacoes or "",
+        "observacoes": observacoes_visiveis(item.observacoes),
         "modo_criacao": "manual",
     }
 
@@ -20121,8 +20144,7 @@ def salvar_pre_cadastro(
         solicitacao.local_responsavel_nome = local_responsavel_nome; solicitacao.local_responsavel_telefone = local_responsavel_telefone
         solicitacao.acesso_local = acesso_local
         marcadores = "\n".join(l for l in str(solicitacao.observacoes or "").splitlines() if l.startswith("[VITRINE_"))
-        origem_visivel = "Origem: Vitrine. Equipamentos, valores, deslocamento e horário preenchidos pelo cliente." if _vitrine_origem(solicitacao) else ""
-        partes_obs = [p for p in [marcadores, origem_visivel, observacoes.strip()] if p]
+        partes_obs = [p for p in [marcadores, observacoes_visiveis(observacoes)] if p]
         solicitacao.observacoes = "\n".join(partes_obs).strip()
         solicitacao.responsavel_contrato = responsavel_pre_nome[:120] if responsavel_pre_nome else solicitacao.responsavel_contrato
         solicitacao.responsavel_contrato_telefone = responsavel_pre_telefone[:30] if responsavel_pre_telefone else solicitacao.responsavel_contrato_telefone
@@ -20385,7 +20407,7 @@ def contrato_cliente_pdf(slug: str, solicitacao_id: str, request: Request, db: S
     c.setFont("Helvetica-Bold", 11);
     c.drawString(40, y, contrato.nome if contrato else "Contrato");
     y -= 16
-    y = _wrap_pdf_text(c, contrato.clausulas if contrato else (item.observacoes or ""), 40, y, w - 80)
+    y = _wrap_pdf_text(c, contrato.clausulas if contrato else observacoes_visiveis(item.observacoes), 40, y, w - 80)
     y -= 24
     if y < 120:
         c.showPage();

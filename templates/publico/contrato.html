@@ -85,8 +85,6 @@
     <div class="box aviso"><b>Contrato em preparação.</b><p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p></div>
   {% endif %}
 
-  {{ resumo_opcionais(opcionais_contrato_view, comp.opcionais) }}
-
   <details class="secao-recolhivel">
     <summary>Dados do contrato</summary>
     <div class="secao-corpo">
@@ -112,11 +110,13 @@
       <p><b>Responsável no local:</b> {{ item.local_responsavel_nome or '-' }}{% if item.local_responsavel_telefone %} · {{ item.local_responsavel_telefone }}{% endif %}</p>
       {% if item.acesso_local %}<p><b>Acesso:</b> {{ item.acesso_local }}</p>{% endif %}
       <p><b>Retirada:</b> {{ retirada_texto }}</p>
-      {% if item.observacoes %}<p><b>Observações:</b> {{ item.observacoes }}</p>{% endif %}
+      {% set notas_cliente = observacoes_visiveis(item.observacoes) %}
+      {% if notas_cliente %}<p><b>Observações:</b> {{ notas_cliente }}</p>{% endif %}
       <h3 style="margin-top:16px">Produtos e serviços</h3>
       {% for it in itens_reserva %}
         <div class="item-locacao"><b>{{ it.nome }}</b>{% if it.descricao %}<div class="texto-discreto">{{ it.descricao }}</div>{% endif %}<div>{{ it.quantidade }} × R$ {{ it.valor_unitario|moeda_br }} = <b>R$ {{ it.valor_total|moeda_br }}</b></div></div>
       {% else %}<p class="texto-discreto">Itens ainda não informados.</p>{% endfor %}
+      {{ resumo_opcionais(opcionais_contrato_view, comp.opcionais) }}
     </div>
   </details>
 
@@ -133,8 +133,9 @@
     <div class="secao-corpo">
       <p><b>Equipamentos:</b> R$ {{ comp.equipamentos_sem_opcionais|moeda_br }}</p>
       {% if opcionais_contrato_view %}<p><b>Opcionais:</b> R$ {{ comp.opcionais|moeda_br }} <small class="texto-discreto">(já incluídos no total)</small></p>{% endif %}
-      {% if comp.cupom_codigo and comp.desconto > 0 %}
-        <p><b>Cupom {{ comp.cupom_codigo }} ({{ comp.cupom_rotulo }}):</b> - R$ {{ comp.desconto|moeda_br }}</p>
+      {% if comp.desconto > 0 %}
+        {% if comp.cupom_codigo and comp.desconto_cupom > 0 %}<p><b>Cupom {{ comp.cupom_codigo }}:</b> - R$ {{ comp.desconto_cupom|moeda_br }}</p>{% endif %}
+        {% if comp.desconto_manual > 0 %}<p><b>Desconto:</b> - R$ {{ comp.desconto_manual|moeda_br }}</p>{% endif %}
       {% endif %}
       {% if comp.horas_adicionais > 0 %}<p><b>Horas adicionais:</b> R$ {{ comp.horas_adicionais|moeda_br }}</p>{% endif %}
       <p><b>Frete:</b> R$ {{ comp.frete|moeda_br }}</p>
