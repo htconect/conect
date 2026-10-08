@@ -6152,9 +6152,11 @@ def _comprometimento_recursos_data(
         data_consulta: date,
         excluir_solicitacao_id: int | None = None,
         reservas: list[Solicitacao] | None = None,
+        mapa_produtos: dict[int, dict[int, int]] | None = None,
 ) -> dict[int, int]:
     """Soma recursos comprometidos em lote, sem consultar ajustes reserva a reserva."""
-    mapa_produtos = _mapa_recursos_produtos(db, empresa_id)
+    if mapa_produtos is None:
+        mapa_produtos = _mapa_recursos_produtos(db, empresa_id)
     reservas = list(reservas) if reservas is not None else _reservas_ativas_na_data(
         db, empresa_id, data_consulta, excluir_solicitacao_id
     )
@@ -6655,10 +6657,18 @@ def _atualizar_metadados_humiat_empresa(empresa: Empresa, empresa_h: dict | None
 
 
 def _categorias_vitrine_empresa(db: Session, empresa_id: int, somente_ativas: bool = True) -> list[VitrineCategoria]:
-    consulta = db.query(VitrineCategoria).filter(VitrineCategoria.empresa_id == empresa_id)
-    if somente_ativas:
-        consulta = consulta.filter(VitrineCategoria.ativa == True)
-    return consulta.order_by(VitrineCategoria.ordem.asc(), VitrineCategoria.nome.asc()).all()
+    # Cache restrito à sessão HTTP: a vitrine usa a mesma lista em até três pontos.
+    # Se houver alterações pendentes, lê do banco para não usar uma lista antiga.
+    chave = ("categorias_vitrine_http", int(empresa_id))
+    pendente = any(isinstance(obj, VitrineCategoria) for grupo in (db.new, db.dirty, db.deleted) for obj in grupo)
+    categorias = None if pendente else db.info.get(chave)
+    if categorias is None:
+        categorias = db.query(VitrineCategoria).filter(
+            VitrineCategoria.empresa_id == empresa_id
+        ).order_by(VitrineCategoria.ordem.asc(), VitrineCategoria.nome.asc()).all()
+        if not pendente:
+            db.info[chave] = categorias
+    return [c for c in categorias if c.ativa] if somente_ativas else list(categorias)
 
 
 def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> None:
@@ -6668,7 +6678,7 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
     """
     # A mesma leitura fornece os nomes cadastrados e a próxima posição.
     # Antes havia também um SELECT MAX(...) separado em todo acesso público.
-    categorias_existentes = db.query(VitrineCategoria).filter(VitrineCategoria.empresa_id == empresa.id).all()
+    categorias_existentes = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
     existentes = {
         str(categoria.nome or "").strip().casefold()
         for categoria in categorias_existentes
@@ -6691,6 +6701,7 @@ def _garantir_categorias_vitrine_existentes(db: Session, empresa: Empresa) -> No
             existentes.add(nome.casefold())
             mudou = True
     if mudou:
+        db.info.pop(("categorias_vitrine_http", int(empresa.id)), None)
         db.commit()
 
 
@@ -6924,9 +6935,10 @@ def _precos_contrato_produtos(db: Session, empresa: Empresa, produtos: list[Prod
     tipos_por_nome = {}
     configs = {}
     if com_preco_especifico:
+        # A mesma sessão já carregou os tipos para calcular as durações.
         tipos_por_nome = {
             str(t.nome or "").casefold(): int(t.id)
-            for t in db.query(TipoEventoEmpresa).filter(TipoEventoEmpresa.empresa_id == empresa.id).all()
+            for t in _tipos_evento_empresa(db, empresa.id, somente_ativos=False)
         }
         ids = [int(p.id) for p in com_preco_especifico]
         configs = {
@@ -7006,13 +7018,39 @@ def _duracao_contrato_solicitacao(db: Session, empresa: Empresa, item: Solicitac
 
 
 def _mapa_duracoes_produtos_evento(db: Session, empresa: Empresa, produtos: list[ProdutoServico]) -> dict[int, dict[str, int]]:
-    return {
-        int(p.id): {
-            "residencial": _duracao_vitrine_produto(db, empresa, p, "residencial"),
-            "empresa": _duracao_vitrine_produto(db, empresa, p, "empresa"),
-        }
-        for p in produtos if getattr(p, "id", None)
-    }
+    """Durações da tela manual em lote: evita 2 SELECTs por produto.
+
+    As regras são idênticas a _duracao_vitrine_produto: duração base por tipo,
+    acrescida das horas do preço específico quando horas_modo='adicionar'.
+    """
+    produtos = [p for p in produtos if getattr(p, "id", None)]
+    if not produtos:
+        return {}
+    tipos = {str(t.nome or "").strip().casefold(): t for t in _tipos_evento_empresa(db, empresa.id, somente_ativos=False)}
+    base_empresa = _duracao_padrao_empresa(empresa)
+    bases = {}
+    for chave in TIPOS_EVENTO_VITRINE:
+        tipo = tipos.get(chave)
+        bases[chave] = max(60, int(tipo.duracao_minutos or base_empresa)) if tipo and tipo.duracao_minutos else base_empresa
+    com_preco = [int(p.id) for p in produtos if bool(getattr(p, "preco_por_tipo_evento", False))]
+    configs = {}
+    if com_preco:
+        configs = {(int(c.produto_id), int(c.tipo_evento_id)): c for c in db.query(ProdutoPrecoEvento).filter(
+            ProdutoPrecoEvento.empresa_id == empresa.id,
+            ProdutoPrecoEvento.produto_id.in_(com_preco),
+        ).all()}
+    resultado = {}
+    for produto in produtos:
+        por_tipo = {}
+        for chave in TIPOS_EVENTO_VITRINE:
+            duracao = bases[chave]
+            tipo = tipos.get(chave)
+            cfg = configs.get((int(produto.id), int(tipo.id))) if tipo and int(produto.id) in com_preco else None
+            if cfg and str(cfg.horas_modo or "padrao").lower() == "adicionar":
+                duracao += max(0, int(cfg.horas_adicionais or 0)) * 60
+            por_tipo[chave] = duracao
+        resultado[int(produto.id)] = por_tipo
+    return resultado
 
 
 def _valor_horas_adicionais_empresa(empresa: Empresa, quantidade: int) -> float:
@@ -8500,12 +8538,19 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
 def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) -> BloqueioData | None:
     if not data_consulta:
         return None
-    return db.query(BloqueioData).filter(
+    chave = ("bloqueio_data_http", int(empresa_id), data_consulta)
+    pendente = any(isinstance(obj, BloqueioData) for grupo in (db.new, db.dirty, db.deleted) for obj in grupo)
+    if not pendente and chave in db.info:
+        return db.info[chave]
+    resultado = db.query(BloqueioData).filter(
         BloqueioData.empresa_id == empresa_id,
         BloqueioData.ativo == True,
         BloqueioData.data_inicio <= data_consulta,
         BloqueioData.data_fim >= data_consulta,
     ).order_by(BloqueioData.data_inicio.asc(), BloqueioData.id.asc()).first()
+    if not pendente:
+        db.info[chave] = resultado
+    return resultado
 
 
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
@@ -8592,7 +8637,9 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
 
     usa_recursos = _empresa_modulo_ativo(empresa, 'recursos')
     mapa_recursos = _mapa_recursos_produtos(db, empresa.id) if usa_recursos else {}
-    comprometido_recursos = _comprometimento_recursos_data(db, empresa.id, data_consulta, reservas=reservas_do_dia) if usa_recursos else {}
+    comprometido_recursos = _comprometimento_recursos_data(
+        db, empresa.id, data_consulta, reservas=reservas_do_dia, mapa_produtos=mapa_recursos
+    ) if usa_recursos else {}
     itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)} if usa_recursos else {}
 
     saldos_recursos = {
@@ -18238,12 +18285,18 @@ def api_estoque_produto(
     )
     total = max(0, int(produto.quantidade_disponivel or 0))
     disponivel_fisico = max(total - int(alugados or 0), 0)
-    mapa = _mapa_recursos_produtos(db, empresa.id)
-    comprometido = _comprometimento_recursos_data(db, empresa.id, data_consulta, solicitacao_id or None)
-    itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
-    disponiveis, recursos = _limite_recursos_produto(
-        produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico
-    )
+    if _empresa_modulo_ativo(empresa, "recursos"):
+        mapa = _mapa_recursos_produtos(db, empresa.id)
+        comprometido = _comprometimento_recursos_data(
+            db, empresa.id, data_consulta, solicitacao_id or None,
+            reservas=reservas_data, mapa_produtos=mapa,
+        )
+        itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+        disponiveis, recursos = _limite_recursos_produto(
+            produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico
+        )
+    else:
+        disponiveis, recursos = disponivel_fisico, []
     return JSONResponse({
         "produto_id": produto.id,
         "produto": produto.nome,
@@ -19385,8 +19438,22 @@ def _infinitepay_seed_taxas(db: Session, empresa_id: int):
 
 
 def _infinitepay_taxas(db: Session, empresa_id: int) -> list[dict]:
-    _infinitepay_seed_taxas(db, empresa_id)
-    rows = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id, ativa=True).order_by(InfinitePayTaxa.parcelas).all()
+    """Obtém parcelas em uma leitura; inclui padrões ausentes sem outro SELECT.
+
+    Não modifica taxas que a empresa já cadastrou, inclusive as inativas.
+    """
+    rows = db.query(InfinitePayTaxa).filter_by(empresa_id=empresa_id).order_by(InfinitePayTaxa.parcelas).all()
+    presentes = {int(r.parcelas) for r in rows}
+    novos = [
+        InfinitePayTaxa(empresa_id=empresa_id, parcelas=i, taxa_percentual=float(taxa), ativa=True)
+        for i, taxa in enumerate(INFINITEPAY_TAXAS_PADRAO, start=1)
+        if i not in presentes
+    ]
+    if novos:
+        db.add_all(novos)
+        db.flush()
+        rows.extend(novos)
+    rows = sorted((r for r in rows if r.ativa), key=lambda r: int(r.parcelas or 0))
     return [{"parcelas": int(r.parcelas), "taxa": float(r.taxa_percentual or 0)} for r in rows if 1 <= int(r.parcelas or 0) <= 12]
 
 
@@ -20637,6 +20704,10 @@ def contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Sessi
     contrato = db.get(Contrato, item.contrato_id) if item.contrato_id else None
     produto = db.get(ProdutoServico, item.produto_id) if item.produto_id else None
     itens_reserva = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    # O template também acessa item.itens. Marca a relação como já carregada,
+    # sem atribuição mutável/UPDATE e sem repetir a mesma consulta SELECT.
+    from sqlalchemy.orm.attributes import set_committed_value
+    set_committed_value(item, "itens", itens_reserva)
 
     # O primeiro link de aceite vira a página permanente do cliente para todo o fluxo:
     # leitura/aceite, primeiro pagamento, saldo e consulta final.
