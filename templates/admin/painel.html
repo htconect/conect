@@ -189,10 +189,17 @@ document.addEventListener('DOMContentLoaded', function(){
                         <small>{{ i.data_evento.strftime('%d/%m/%Y') }} · {{ i.bairro or '-' }}</small>
                         {% if i.whatsapp_contrato_delegado_em and not i.whatsapp_contrato_clique_em %}<small>Cliente deixou o envio para o responsável.</small>{% endif %}
                     </a>
-                    <a class="botao-enviar-contrato" target="_blank"
-                       href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato">
-                        Enviar contrato
-                    </a>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                      <a class="botao-enviar-contrato" target="_blank" rel="noopener noreferrer"
+                         href="/painel/solicitacao/{{ i.id }}/whatsapp-contrato"
+                         onclick="setTimeout(function(){window.location.reload()}, 1500)">
+                          Enviar contrato
+                      </a>
+                      <form method="post" action="/painel/solicitacao/{{ i.id }}/contrato-enviado" style="margin:0"
+                            onsubmit="return confirm('Confirmar que o cliente já enviou o contrato pelo WhatsApp?')">
+                        <button class="botao-enviar-contrato" type="submit" style="background:#067647;border-color:#067647;color:#fff">Contrato enviado</button>
+                      </form>
+                    </div>
                 </div>
                 {% endfor %}
             </div>

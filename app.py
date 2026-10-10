@@ -9049,8 +9049,8 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
                     Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
                     Solicitacao.contrato_id.isnot(None),
                     Solicitacao.cancelado_em.is_(None),
-                    or_(Solicitacao.valor_pago > 0.009, Solicitacao.opcionais_reenvio_pendente == True),
-                    Solicitacao.contrato_enviado_em.is_(None),
+                    Solicitacao.valor_pago > 0.009,
+                    or_(Solicitacao.contrato_enviado_em.is_(None), Solicitacao.opcionais_reenvio_pendente == True),
                 )
                 .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
                 .limit(12)
@@ -9064,7 +9064,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
                     Solicitacao.empresa_id == empresa.id,
                     Solicitacao.status.in_(["aceito", "aguardando_pagamento", "reserva_confirmada"]),
                     Solicitacao.contrato_id.isnot(None),
-                    Solicitacao.contrato_enviado_em.is_(None),
+                    or_(Solicitacao.contrato_enviado_em.is_(None), Solicitacao.opcionais_reenvio_pendente == True),
                     Solicitacao.cancelado_em.is_(None),
                 )
                 .order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc())
@@ -12608,19 +12608,81 @@ def compartilhar_contrato_whatsapp(
     if not telefone:
         raise HTTPException(400, "Cliente sem telefone para WhatsApp")
 
-    texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
+    if _infinitepay_habilitada(empresa) and float(item.valor_pago or 0) <= 0.009:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Aguarde o primeiro pagamento antes de enviar o contrato.#pagamento",
+            status_code=303,
+        )
 
-    # Abrir o WhatsApp não garante envio; registro somente no botão "Contrato enviado".
+    texto = montar_mensagem_whatsapp_contrato(request, empresa, item, db)
+    # Regra operacional solicitada: ao acionar "Enviar contrato", registrar o envio
+    # no Connect sem exigir um segundo clique. O WhatsApp não confirma entrega,
+    # então a data representa o acionamento de envio pelo atendente.
+    agora = agora_utc()
+    item.contrato_enviado_em = agora
+    item.whatsapp_contrato_acionado_em = agora
+    item.whatsapp_contrato_confirmacao_pendente = False
+    item.opcionais_reenvio_pendente = False
+    db.commit()
     return RedirectResponse(
         f"https://wa.me/{telefone}?text={quote(texto)}",
         status_code=303,
     )
 
 
+@app.get("/painel/solicitacao/{solicitacao_id}/infinitepay/{cobranca_id}/reenviar-link")
+def reenviar_link_infinitepay_whatsapp(
+    solicitacao_id: int,
+    cobranca_id: int,
+    db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    """Reenvia a URL da mesma cobrança ativa para o WhatsApp do cliente.
+
+    Não cria nem modifica cobrança e só mostra links pertencentes à empresa.
+    """
+    if not _infinitepay_habilitada(empresa):
+        raise HTTPException(404)
+    item = (db.query(Solicitacao)
+            .options(joinedload(Solicitacao.cliente))
+            .filter_by(id=solicitacao_id, empresa_id=empresa.id)
+            .first())
+    if not item:
+        raise HTTPException(404)
+    cobranca = _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id)
+    if not cobranca or cobranca.id != cobranca_id:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Esta cobrança não está mais ativa. Confira o pagamento antes de reenviar.#pagamento",
+            status_code=303,
+        )
+    checkout_url = str(cobranca.checkout_url or "").strip()
+    if not checkout_url.startswith("https://"):
+        raise HTTPException(400, "Link de pagamento inválido.")
+    telefone = _limpar_tel_whatsapp(item.cliente.telefone or item.cliente.identificador) if item.cliente else ""
+    if not telefone:
+        return RedirectResponse(
+            f"/painel/solicitacao/{solicitacao_id}?erro=Cadastre o telefone do cliente antes de reenviar o link.#pagamento",
+            status_code=303,
+        )
+    nome = ((item.cliente.nome or "").strip().split() or ["cliente"])[0]
+    tipo = {"sinal": "sinal", "integral": "valor integral", "restante": "saldo restante"}.get(
+        str(cobranca.tipo_pagamento or ""), "pagamento"
+    )
+    valor = moeda_br(float(cobranca.valor_centavos or 0) / 100.0)
+    texto = (
+        f"Olá, {nome}! Segue novamente o link para pagamento do {tipo} "
+        f"da sua reserva de karaokê com a {empresa.nome} (contrato #{item.id}).\n\n"
+        f"*Valor: R$ {valor}*\n"
+        f"*Link de pagamento:*\n{checkout_url}\n\n"
+        "Se já efetuou o pagamento, desconsidere esta mensagem."
+    )
+    return RedirectResponse(f"https://wa.me/{telefone}?text={quote(texto)}", status_code=303)
+
+
 @app.post("/painel/solicitacao/{solicitacao_id}/contrato-enviado")
 def confirmar_envio_contrato_manual(solicitacao_id: int, request: Request,
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    """O atendente marca envio REAL; abrir WhatsApp nunca confirma envio por si só."""
+    """Confirmação manual quando o cliente encaminhou o contrato diretamente."""
     item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).first()
     if not item:
         raise HTTPException(404)

@@ -420,7 +420,7 @@
       {% endif %}
       {% if contrato_aceito and link_contrato_whatsapp %}
         {% if not fluxo_infinitepay or pago > 0 %}
-          <a class="link-botao" target="_blank" rel="noopener noreferrer" href="{{ link_contrato_whatsapp }}">{% if item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
+          <a class="link-botao" target="_blank" rel="noopener noreferrer" href="{{ link_contrato_whatsapp }}" onclick="setTimeout(function(){window.location.reload()}, 1500)">{% if item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
           {% if not item.contrato_enviado_em or item.opcionais_reenvio_pendente %}
           <form method="post" action="/painel/solicitacao/{{ item.id }}/contrato-enviado" style="display:inline;margin:0" onsubmit="return confirm('Você realmente enviou o contrato pelo WhatsApp?')">
             <button type="submit" class="link-botao" style="border-color:#067647;color:#067647">Contrato enviado</button>
@@ -452,10 +452,10 @@
     <div class="box" style="margin:14px 0;padding:14px">
       {% if item.contrato_enviado_em %}
         <b>Contrato enviado</b>
-        <small class="texto-discreto" style="display:block;margin-top:4px">Envio confirmado pelo atendente. Use “Reenviar contrato” se precisar.</small>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Envio registrado ao acionar o WhatsApp ou pela confirmação manual. Use “Reenviar contrato” se precisar.</small>
       {% else %}
         <b>Pagamento confirmado — contrato aguardando envio</b>
-        <small class="texto-discreto" style="display:block;margin-top:4px">Abra “Enviar contrato” no WhatsApp e, após enviar a mensagem, marque “Contrato enviado”.</small>
+        <small class="texto-discreto" style="display:block;margin-top:4px">Ao acionar “Enviar contrato”, o Connect registra o envio. Use “Contrato enviado” apenas quando o cliente encaminhar diretamente.</small>
       {% endif %}
     </div>
   {% endif %}
@@ -480,6 +480,7 @@
         {% if c.status == 'AGUARDANDO_PAGAMENTO' %}
         {% if c.checkout_url and c.checkout_url.startswith('https://') %}
         <a class="botao secundario" href="{{ c.checkout_url }}" target="_blank" rel="noopener noreferrer">Abrir InfinitePay</a>
+        <a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/reenviar-link" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i> Reenviar link ao cliente</a>
         {% endif %}
         <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
           <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
