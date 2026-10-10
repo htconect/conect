@@ -154,11 +154,15 @@ class BasicRateLimitMiddleware:
             limite = 10
         elif method == "GET" and path.startswith("/e/") and path.endswith("/api/clientes/por-telefone"):
             limite = 30
+        elif method == "POST" and re.fullmatch(r"/e/[^/]+/contrato/\d+/recuperar", path):
+            # Limita a recuperação de TODOS os contratos legados por IP, não por número.
+            limite = 8
         elif method == "POST" and path.startswith("/e/"):
             limite = 40
         if limite:
             agora = time_module.monotonic()
-            chave = f"{_client_ip_scope(scope)}:{path.rsplit('/', 1)[0]}"
+            prefixo = "/contratos-legados" if re.fullmatch(r"/e/[^/]+/contrato/\d+/recuperar", path) else path.rsplit('/', 1)[0]
+            chave = f"{_client_ip_scope(scope)}:{prefixo}"
             with _RATE_LIMIT_LOCK:
                 historico = [t for t in _RATE_LIMIT_BUCKETS.get(chave, []) if agora - t < janela]
                 if len(historico) >= limite:
@@ -3456,13 +3460,8 @@ def _solicitacao_publica_por_ref(db: Session, empresa: Empresa | None, referenci
     ).first()
     if item:
         return item
-    # Compatibilidade desligada por padrão. Só deve ser usada de forma temporária
-    # se for indispensável reabrir links numéricos antigos já enviados.
-    if LEGACY_PUBLIC_CONTRACT_IDS and ref.isdigit():
-        legado = db.get(Solicitacao, int(ref))
-        if legado and legado.empresa_id == empresa.id:
-            _token_publico_item(db, legado)
-            return legado
+    # Links numéricos antigos são tratados SOMENTE pelo fluxo de confirmação
+    # ou pelo acesso da equipe; nunca por consulta pública direta de ID.
     return None
 
 
@@ -20551,6 +20550,8 @@ def pedido_vitrine_oportunidade_recebido(slug: str, token: str, request: Request
 
 @app.get("/e/{slug}/pedido/{solicitacao_id}", response_class=HTMLResponse)
 def pedido_vitrine_recebido(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    if solicitacao_id.isdigit():
+        return _pagina_recuperacao_legado(slug, solicitacao_id, request, db)
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id) if empresa else None
     if not empresa or not item or item.empresa_id != empresa.id:
@@ -20600,8 +20601,75 @@ def _wrap_pdf_text(c, texto, x, y, largura, leading=14, fonte="Helvetica", taman
     return y
 
 
+def _equipe_autorizada_abrir_legado(request: Request, empresa: Empresa) -> bool:
+    """Admin geral ou funcionário autenticado da mesma empresa."""
+    sessao = request.session
+    if sessao.get("admin_geral"):
+        return True
+    try:
+        return int(sessao.get("empresa_id") or 0) == int(empresa.id)
+    except (ValueError, TypeError):
+        return False
+
+
+def _pagina_recuperacao_legado(slug: str, referencia: str, request: Request,
+                               db: Session, pdf: bool = False):
+    """Restaura links antigos sem expor documentos por IDs sequenciais.
+
+    Visitantes informam CPF/CNPJ do cadastro; equipe logada é redirecionada
+    imediatamente. A tela jamais mostra dados do contrato antes de validar.
+    """
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not referencia.isdigit():
+        raise HTTPException(404)
+    if _equipe_autorizada_abrir_legado(request, empresa):
+        item = db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=int(referencia)).first()
+        if not item:
+            raise HTTPException(404)
+        ref_nova = _ref_publica(db, item)
+        sufixo = '.pdf' if pdf else ''
+        return RedirectResponse(
+            f"/e/{slug}/contrato/{ref_nova}{sufixo}", status_code=303,
+            headers={"Cache-Control": "no-store, private"},
+        )
+    # Não confirma existência de ID/cliente, inclusive quando a referência não existe.
+    return templates.TemplateResponse("publico/recuperar_contrato_legado.html", {
+        "request": request, "empresa": empresa, "referencia": referencia,
+        "pdf": pdf, "erro": False,
+    }, headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
+
+
+@app.post("/e/{slug}/contrato/{solicitacao_id}/recuperar", include_in_schema=False)
+def recuperar_contrato_legado(slug: str, solicitacao_id: str, request: Request,
+                             documento: str = Form(""), pdf: str = Form(""),
+                             db: Session = Depends(get_db)):
+    """Converte URL numérica antiga em URL com token após conferir CPF/CNPJ."""
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not solicitacao_id.isdigit():
+        raise HTTPException(404)
+    somente_pdf = str(pdf).strip() == "1"
+    item = db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=int(solicitacao_id)).first()
+    cliente = db.get(Cliente, item.cliente_id) if item else None
+    doc = limpar_identificador(documento)
+    cadastrado = {limpar_identificador(cliente.cpf or ""), limpar_identificador(cliente.cnpj or "")} if cliente and cliente.empresa_id == empresa.id else set()
+    cadastrado.discard("")
+    confirmado = (len(doc) in (11, 14) and any(hmac.compare_digest(doc, salvo) for salvo in cadastrado))
+    if confirmado:
+        ref_nova = _ref_publica(db, item)
+        return RedirectResponse(
+            f"/e/{slug}/contrato/{ref_nova}{'.pdf' if somente_pdf else ''}",
+            status_code=303, headers={"Cache-Control": "no-store, private"},
+        )
+    return templates.TemplateResponse("publico/recuperar_contrato_legado.html", {
+        "request": request, "empresa": empresa, "referencia": solicitacao_id,
+        "pdf": somente_pdf, "erro": True,
+    }, status_code=200, headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
+
+
 @app.get("/e/{slug}/contrato/{solicitacao_id}.pdf")
 def contrato_cliente_pdf(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    if solicitacao_id.isdigit():
+        return _pagina_recuperacao_legado(slug, solicitacao_id, request, db, pdf=True)
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
@@ -20887,6 +20955,8 @@ async def salvar_opcionais_cliente(slug: str, solicitacao_id: str, request: Requ
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}", response_class=HTMLResponse)
 def contrato_cliente(slug: str, solicitacao_id: str, request: Request, db: Session = Depends(get_db)):
+    if solicitacao_id.isdigit():
+        return _pagina_recuperacao_legado(slug, solicitacao_id, request, db)
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     item = _solicitacao_publica_por_ref(db, empresa, solicitacao_id)
     if not empresa or not item or item.empresa_id != empresa.id:

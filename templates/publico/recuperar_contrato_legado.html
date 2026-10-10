@@ -1,0 +1,27 @@
+{% extends "publico/base_cliente.html" %}
+{% block head_extra %}
+<style>
+  .recuperar-card{max-width:540px;margin:24px auto;background:#fff;border:1px solid var(--cliente-borda);border-radius:20px;padding:28px;box-shadow:0 10px 32px rgba(15,23,42,.06)}
+  .recuperar-card h1{font-size:1.45rem;margin:0 0 10px}.recuperar-card p{line-height:1.55;color:var(--cliente-muted)}
+  .recuperar-card label{display:block;font-weight:700;margin:20px 0 7px}
+  .recuperar-card input{width:100%;font-size:16px;border:1px solid #cbd5e1;border-radius:9px;padding:13px;background:#fff;color:#10223c}
+  .recuperar-card button{display:block;width:100%;border:0;border-radius:10px;padding:13px 16px;color:#fff;background:var(--cliente-cor);font-weight:700;cursor:pointer;margin-top:16px}
+  .recuperar-card .erro{border-radius:10px;padding:12px;background:#fff4f4;color:#9b1c1c;margin-top:14px}
+  .recuperar-card .ajuda{font-size:.91rem;margin-top:20px}
+  @media(max-width:600px){.recuperar-card{padding:22px 18px}}
+</style>
+{% endblock %}
+{% block conteudo %}
+<section class="recuperar-card">
+  <h1>Acessar contrato antigo</h1>
+  <p>Este link foi enviado em uma versão anterior do sistema. Por segurança, confirme o CPF ou CNPJ informado no cadastro para abrir {{ 'o PDF do contrato' if pdf else 'seu contrato' }}.</p>
+  {% if erro %}<div class="erro" role="alert">Não foi possível confirmar os dados. Confira o CPF/CNPJ cadastrado ou solicite um link atualizado à empresa.</div>{% endif %}
+  <form action="/e/{{ empresa.slug }}/contrato/{{ referencia }}/recuperar" method="post" autocomplete="off" data-no-loading="1">
+    <input type="hidden" name="pdf" value="{{ '1' if pdf else '0' }}">
+    <label for="documento">CPF ou CNPJ completo</label>
+    <input name="documento" id="documento" type="text" inputmode="numeric" maxlength="20" placeholder="Digite seu CPF ou CNPJ" autocomplete="off" required autofocus>
+    <button type="submit">Abrir {{ 'PDF do contrato' if pdf else 'contrato' }}</button>
+  </form>
+  <p class="ajuda">Não possui o documento cadastrado? Entre em contato com a empresa para receber um novo link de acesso.</p>
+</section>
+{% endblock %}
