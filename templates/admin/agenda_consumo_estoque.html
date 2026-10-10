@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div style="max-width:1250px;margin:0 auto">
+  <a class="voltar" href="/painel/agenda">← Agenda</a>
+  <h1 style="margin:9px 0 4px">Consumo de estoque na agenda</h1>
+  <p class="texto-discreto">Quantidades para a data selecionada, calculadas com as mesmas reservas e recursos da vitrine. Este relatório não altera o estoque.</p>
+  <form method="get" action="/painel/agenda/consumo-estoque" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:16px 0">
+    <label>Data da consulta <input type="date" name="data" value="{{ data_consulta.isoformat() }}" required></label>
+    <button type="submit" class="botao">Consultar</button>
+  </form>
+  <div class="box" style="margin-bottom:18px">
+    <h2 style="font-size:1.08rem">Equipamentos — {{ data_consulta.strftime('%d/%m/%Y') }}</h2>
+    <p class="texto-discreto">Disponível = quantidade cadastrada menos contratos ativos; se houver controle de recursos, também respeita a capacidade dos recursos vinculados.</p>
+    <div style="overflow-x:auto"><table class="tabela" style="width:100%;min-width:640px"><thead><tr><th>Equipamento</th><th>Estoque</th><th>Reservados</th><th>Disponíveis</th><th>Motivo da restrição</th></tr></thead><tbody>
+    {% for p in produtos %}<tr><td><b>{{ p.nome }}</b>{% if not p.ativo_vitrine %}<small style="display:block">Fora da vitrine</small>{% endif %}</td><td>{{ p.total }}</td><td>{{ p.reservado }}</td><td><strong style="color:{% if p.livre == 0 %}#b42318{% else %}#067647{% endif %}">{{ p.livre }}</strong></td><td>{% if p.total == 0 %}Quantidade do equipamento cadastrada como zero{% elif p.limitadores %}{% for r in p.limitadores %}{{ r.nome }}: {{ r.disponivel }}/{{ r.estoque_total }} disponíveis{% if not loop.last %}; {% endif %}{% endfor %}{% elif p.reservado > 0 %}Reservas da data{% else %}Sem restrições{% endif %}</td></tr>{% else %}<tr><td colspan="5">Nenhum equipamento cadastrado.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  {% if controle_estoque %}
+  <div class="box" style="margin-bottom:18px">
+    <h2 style="font-size:1.08rem">Recursos e opcionais</h2>
+    <p class="texto-discreto">Ocupado inclui equipamentos, opcionais e ajustes manuais do contrato. Clique no contrato para conferir o consumo.</p>
+    <div style="overflow-x:auto"><table class="tabela" style="width:100%;min-width:650px"><thead><tr><th>Recurso</th><th>Estoque cadastrado</th><th>Comprometido</th><th>Livre</th><th>Contratos que consomem</th></tr></thead><tbody>
+    {% for r in recursos %}<tr><td><b>{{ r.nome }}</b>{% if not r.ativo %}<small style="display:block;color:#b42318">Recurso inativo</small>{% endif %}</td><td>{{ r.total }}</td><td>{{ r.ocupado }}</td><td><strong style="color:{% if r.livre == 0 %}#b42318{% else %}#067647{% endif %}">{{ r.livre }}</strong></td><td>{% for c in r.detalhes %}<div style="margin-bottom:6px"><a href="/painel/solicitacao/{{ c.contrato_id }}">#{{ c.contrato_id }} · {{ c.cliente }}</a> — {{ c.quantidade }} ({{ c.origem }})</div>{% else %}<span class="texto-discreto">Nenhum contrato nesta data</span>{% endfor %}</td></tr>{% else %}<tr><td colspan="5">Nenhum recurso cadastrado.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </div>
+  {% endif %}
+  <div class="box">
+    <h2 style="font-size:1.08rem">Contratos ativos considerados ({{ contratos|length }})</h2>
+    {% for c in contratos %}<div style="padding:10px 0;border-bottom:1px solid #e5e7eb"><a href="/painel/solicitacao/{{ c.id }}"><b>#{{ c.id }} · {{ c.cliente }}</b></a> · {{ c.status }}<small style="display:block">{{ c.produtos }}</small></div>{% else %}<p>Nenhum contrato ativo consome estoque nesta data. Se um item aparece indisponível, confira a quantidade cadastrada e os recursos vinculados acima.</p>{% endfor %}
+  </div>
+</div>
+{% endblock %}

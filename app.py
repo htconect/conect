@@ -6039,7 +6039,7 @@ def configurar_campos_empresa(db: Session, empresa_id: int):
 ITENS_ESTOQUE_PADRAO = ()  # Novas empresas começam sem recursos pré-cadastrados.
 
 
-STATUS_ESTOQUE_IGNORADOS = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data", "vitrine_pre_reserva"}
+STATUS_ESTOQUE_RESERVANTES = frozenset(STATUS_CONTRATO_APROVADO)  # Só contrato liberado para operação compromete estoque.
 
 
 def garantir_itens_estoque_padrao(db: Session, empresa_id: int):
@@ -6140,7 +6140,7 @@ def _reservas_ativas_na_data(db: Session, empresa_id: int, data_consulta: date, 
         .options(selectinload(Solicitacao.itens), selectinload(Solicitacao.opcionais_contrato))
         .filter(Solicitacao.empresa_id == empresa_id)
         .filter(Solicitacao.data_evento == data_consulta)
-        .filter(~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)))
+        .filter(Solicitacao.status.in_(list(STATUS_ESTOQUE_RESERVANTES)))
     )
     if excluir_solicitacao_id:
         q = q.filter(Solicitacao.id != excluir_solicitacao_id)
@@ -6234,7 +6234,7 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
             .filter(
                 Solicitacao.empresa_id == empresa_id,
                 Solicitacao.data_evento.in_(list(datas)),
-                ~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)),
+                Solicitacao.status.in_(list(STATUS_ESTOQUE_RESERVANTES)),
             )
             .all()
         )
@@ -9122,7 +9122,7 @@ def painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = D
             .filter(
                 Solicitacao.empresa_id == empresa.id,
                 Solicitacao.data_evento >= hoje,
-                ~Solicitacao.status.in_(list(STATUS_ESTOQUE_IGNORADOS)),
+                Solicitacao.status.in_(list(STATUS_ESTOQUE_RESERVANTES)),
             )
             .order_by(Solicitacao.data_evento.asc(), Solicitacao.hora_inicio.asc(), Solicitacao.id.asc())
             .limit(60)
@@ -18597,7 +18597,7 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
         Solicitacao.data_evento >= inicio_mes,
         Solicitacao.data_evento <= fim_mes,
     ).all()
-    status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada"}
+    status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data", "vitrine_pre_reserva"}
     status_pendentes = {"reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite", "aceite_pagamento_pendente"}
     for item in solicitacoes:
         if not item.data_evento:
@@ -18632,6 +18632,136 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
             else:
                 dia["entregas_pendentes"] += 1
     return resumo
+
+
+@app.get("/painel/agenda/consumo-estoque", response_class=HTMLResponse)
+def agenda_consumo_estoque(
+        request: Request,
+        data: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    """Auditoria por data usando exatamente a mesma reserva/recursos que a vitrine.
+
+    O relatório é somente leitura e não altera quantidades ou reservas.
+    """
+    try:
+        dia = date.fromisoformat(data) if data else date.today()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Data inválida; use AAAA-MM-DD")
+
+    reservas = _reservas_ativas_na_data(db, empresa.id, dia)
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+    recursos_db = _itens_estoque_empresa(db, empresa.id, somente_ativos=False)
+    recursos_por_id = {int(r.id): r for r in recursos_db}
+    ids = [int(r.id) for r in reservas]
+    ajustes = {}
+    if ids:
+        for ajuste in db.query(SolicitacaoRecurso).filter(
+            SolicitacaoRecurso.empresa_id == empresa.id,
+            SolicitacaoRecurso.solicitacao_id.in_(ids),
+        ).all():
+            ajustes.setdefault(int(ajuste.solicitacao_id), {})[int(ajuste.item_estoque_id)] = max(0, int(ajuste.quantidade or 0))
+
+    clientes_ids = {int(r.cliente_id) for r in reservas if r.cliente_id}
+    clientes = {}
+    if clientes_ids:
+        clientes = {int(c.id): c.nome for c in db.query(Cliente).filter(
+            Cliente.empresa_id == empresa.id, Cliente.id.in_(clientes_ids)
+        ).all()}
+
+    produtos_db = db.query(ProdutoServico).filter(
+        ProdutoServico.empresa_id == empresa.id,
+        ProdutoServico.ativo == True,
+    ).order_by(ProdutoServico.nome.asc()).all()
+    produtos_by_id = {int(p.id): p for p in produtos_db}
+    consumos = {int(r.id): [] for r in recursos_db}
+    contratado_recursos = {int(r.id): 0 for r in recursos_db}
+    reservado_produtos = {}
+    detalhes_reservas = []
+    for reserva in reservas:
+        sid = int(reserva.id)
+        produtos_reserva = []
+        consumos_base = {}
+        consumos_opcionais = {}
+        for item in (reserva.itens or []):
+            if not item.produto_id:
+                continue
+            pid = int(item.produto_id)
+            qtd = max(1, int(item.quantidade or 1))
+            reservado_produtos[pid] = reservado_produtos.get(pid, 0) + qtd
+            produto = produtos_by_id.get(pid)
+            produtos_reserva.append(f"{qtd}x {getattr(item, 'nome', None) or (produto.nome if produto else str(pid))}")
+            for rid, qtd_recurso in mapa.get(pid, {}).items():
+                consumos_base[rid] = consumos_base.get(rid, 0) + qtd * int(qtd_recurso)
+        for opcional in (reserva.opcionais_contrato or []):
+            rid = getattr(opcional, "item_estoque_id", None)
+            if rid:
+                rid = int(rid)
+                consumos_opcionais[rid] = consumos_opcionais.get(rid, 0) + max(0, int(opcional.quantidade or 0))
+        todos = set(consumos_base) | set(consumos_opcionais)
+        requisitos = _requisitos_solicitacao_padrao(reserva, mapa)
+        for rid in list(requisitos):
+            if rid in ajustes.get(sid, {}):
+                requisitos[rid] = ajustes[sid][rid]
+        nome_cliente = str(clientes.get(reserva.cliente_id) or f"Cliente do contrato {sid}")
+        for rid in todos | set(requisitos):
+            qtd = max(0, int(requisitos.get(rid, 0)))
+            if qtd <= 0:
+                continue
+            contratado_recursos[rid] = contratado_recursos.get(rid, 0) + qtd
+            origens = []
+            if consumos_base.get(rid):
+                origens.append("Equipamento")
+            if consumos_opcionais.get(rid):
+                origens.append("Opcional")
+            if rid in ajustes.get(sid, {}):
+                origens.append("Ajuste manual")
+            consumos.setdefault(rid, []).append({
+                "contrato_id": sid,
+                "cliente": nome_cliente,
+                "quantidade": qtd,
+                "origem": " + ".join(origens) or "Contrato",
+            })
+        detalhes_reservas.append({
+            "id": sid, "cliente": nome_cliente, "status": reserva.status,
+            "produtos": ", ".join(produtos_reserva) or "Sem equipamento vinculado",
+        })
+
+    # O resumo das reservas deve ser igual à rotina que controla a vitrine.
+    comprometido = _comprometimento_recursos_data(db, empresa.id, dia, reservas=reservas, mapa_produtos=mapa)
+    recursos = []
+    for item in recursos_db:
+        rid = int(item.id)
+        total = max(0, int(item.quantidade_estoque or 0)) if item.ativo else 0
+        ocupado = max(0, int(comprometido.get(rid, 0)))
+        recursos.append({
+            "nome": item.nome, "ativo": bool(item.ativo), "total": total,
+            "ocupado": ocupado, "livre": max(0, total - ocupado),
+            "falta": max(0, ocupado - total), "detalhes": consumos.get(rid, []),
+        })
+    produtos = []
+    controla_recursos = _empresa_modulo_ativo(empresa, "recursos")
+    for produto in produtos_db:
+        pid = int(produto.id)
+        total = max(0, int(produto.quantidade_disponivel or 0))
+        reservado = reservado_produtos.get(pid, 0)
+        livres = max(0, total - reservado)
+        if controla_recursos:
+            disponivel, limitadores = _limite_recursos_produto(produto, mapa.get(pid, {}), recursos_por_id, comprometido, livres)
+        else:
+            disponivel, limitadores = livres, []
+        produtos.append({
+            "nome": produto.nome, "total": total, "reservado": reservado,
+            "livre": disponivel, "fisico_livre": livres,
+            "limitadores": [x for x in limitadores if x["capacidade_produto"] < livres],
+            "ativo_vitrine": bool(produto.vitrine_ativo),
+        })
+    return templates.TemplateResponse("admin/agenda_consumo_estoque.html", {
+        "request": request, "empresa": empresa, "data_consulta": dia,
+        "recursos": recursos, "produtos": produtos,
+        "contratos": detalhes_reservas, "controle_estoque": controla_recursos,
+    })
 
 
 @app.get("/painel/agenda", response_class=HTMLResponse)

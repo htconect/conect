@@ -9,6 +9,7 @@
 <div class="agenda-geral">
   <div class="agenda-geral-topo">
     <div><a class="voltar" href="/painel">← Início</a><h1>Agenda</h1><p class="texto-discreto">Visão geral do mês. Clique em um dia para abrir a tela que você já usa.</p></div>
+    <a class="botao-secundario" href="/painel/agenda/consumo-estoque?data={{ referencia.strftime('%Y-%m-%d') }}" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;padding:10px 12px"><i class="bi bi-box-seam"></i> Consumo de estoque</a>
     <div class="agenda-modos">
       <a class="{% if modo == 'contratos' %}ativo{% endif %}" href="/painel/agenda?modo=contratos&mes={{ referencia.strftime('%Y-%m') }}">Contratos</a>
       {% if pode_operacao %}<a class="{% if modo == 'operacao' %}ativo{% endif %}" href="/painel/agenda?modo=operacao&mes={{ referencia.strftime('%Y-%m') }}">Operação</a>{% endif %}
