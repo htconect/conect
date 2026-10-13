@@ -52,6 +52,7 @@
     <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível para você.' }}</p>
     {% if empresa.vitrine_descricao %}<p class="inicio-desc">{{ empresa.vitrine_descricao }}</p>{% endif %}
     <form class="inicio-form" method="get" action="/e/{{ empresa.slug }}/vitrine" data-loading-title="Montando seu catálogo" data-loading-text="Aguarde. Estamos verificando disponibilidade e aplicando os valores do seu evento.">
+      <input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
       <div class="connect-orientador" id="inicioGuia" aria-live="polite">
  <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Preparando sua festa</span><span id="inicioEtapa" class="connect-orientador-numero">Passo 1 de 2</span><button class="connect-orientador-x" id="inicioFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
  <h2 id="inicioTitulo"></h2><p id="inicioTexto"></p>

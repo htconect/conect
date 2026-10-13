@@ -27,6 +27,7 @@ class Empresa(Base):
     pre_contrato_responsavel_nome = Column(String(120), nullable=True)
     pre_contrato_responsavel_telefone = Column(String(30), nullable=True)
     pre_contrato_responsavel_email = Column(String(160), nullable=True)
+    vitrine_responsavel_token = Column(String(64), nullable=True)  # responsável padrão da vitrine
     infinitepay_ativa = Column(Boolean, default=False)
     nfse_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)
@@ -320,6 +321,17 @@ class VitrineCategoria(Base):
     criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
     empresa = relationship("Empresa")
+
+
+class VitrineCompartilhamento(Base):
+    """Link curto das escolhas da vitrine; nunca armazena cadastro pessoal."""
+    __tablename__ = "vitrine_compartilhamentos"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    codigo = Column(String(24), unique=True, index=True, nullable=False)
+    pedido_json = Column(Text, nullable=False)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
 
 
 class VitrineOportunidade(Base):

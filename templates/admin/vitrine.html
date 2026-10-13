@@ -90,7 +90,20 @@
     <aside style="display:grid;gap:16px">
       <section class="painel-card"><header><div><h2>Prévia</h2><p>A capa aparece no topo do catálogo, não como fundo da tela inicial.</p></div></header><div class="painel-corpo"><div class="preview-pub"><div class="preview-capa">{% if empresa.vitrine_fundo_url %}<img src="{{ empresa.vitrine_fundo_url }}" alt="Capa">{% else %}<span>Capa do catálogo</span>{% endif %}</div><div class="preview-cab"><div><h3>Escolha o que você quer</h3><p>{{ empresa.vitrine_subtitulo or empresa.vitrine_descricao or 'As opções disponíveis aparecem abaixo.' }}</p>{% if empresa.catalogo_musicas_url %}<span class="preview-musicas"><i class="bi bi-music-note-list"></i> Ver catálogo de músicas</span>{% endif %}</div><div class="preview-logo-mini">{% set logo_empresa = empresa.logo_url or empresa.logo_idb_url %}{% if logo_empresa and imagem_disponivel(logo_empresa) %}<img src="{{ logo_empresa }}">{% else %}<span><i class="bi bi-image"></i></span>{% endif %}</div></div></div></div></section>
       <section class="painel-card"><header><div><h2>Saúde da vitrine</h2><p>O essencial para o cliente conseguir reservar.</p></div></header><div class="painel-corpo"><div class="saude-box"><div class="saude-ok"><i class="bi bi-check-lg"></i></div><b>{% if empresa.vitrine_ativa and (produtos|selectattr('vitrine_ativo')|list|length) %}Vitrine pronta{% else %}Ainda falta configurar{% endif %}</b><p class="texto-discreto">Logo, cores, produtos e deslocamento ficam em um fluxo simples.</p></div></div></section>
-      <section class="painel-card"><header><div><h2>Link público</h2></div></header><div class="painel-corpo"><div class="link-publico"><code id="linkVitrine">{{ link_publico }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkVitrine').textContent)"><i class="bi bi-copy"></i></button></div></div></section>
+      <section class="painel-card"><header><div><h2>Responsável da vitrine</h2><p>Contratos e avisos do WhatsApp seguem o responsável vinculado à vitrine.</p></div></header>
+        <div class="painel-corpo">
+          <form method="post" action="/painel/vitrine/responsavel" style="display:grid;gap:8px;margin-bottom:14px">
+            <label for="responsavelVitrine">Responsável padrão do link público</label>
+            <select id="responsavelVitrine" name="responsavel_token" required style="width:100%;min-height:42px">
+              {% for resp in responsaveis_vitrine %}<option value="{{ resp.token }}" {% if responsavel_padrao_token == resp.token %}selected{% endif %}>{{ resp.nome }} — {{ resp.telefone }}</option>{% endfor %}
+            </select>
+            {% if responsaveis_vitrine %}<button type="submit" class="botao">Salvar responsável padrão</button>{% else %}<p>Configure o WhatsApp em Perfil ou no cadastro dos usuários para habilitar o encaminhamento.</p>{% endif %}
+          </form>
+          <label>Link geral (utiliza o responsável padrão)</label>
+          <div class="link-publico"><code id="linkVitrine">{{ link_publico }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkVitrine').textContent)" aria-label="Copiar link geral"><i class="bi bi-copy"></i></button></div>
+          {% if link_pessoal_vitrine %}<label style="display:block;margin:12px 0 6px">Minha vitrine (recebo os contratos)</label><div class="link-publico"><code id="linkPessoalVitrine">{{ link_pessoal_vitrine }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkPessoalVitrine').textContent)" aria-label="Copiar minha vitrine"><i class="bi bi-copy"></i></button></div>{% else %}<p style="font-size:.85rem;margin-top:10px">Cadastre seu número em Perfil para ativar o link pessoal.</p>{% endif %}
+        </div>
+      </section>
     </aside>
   </div>
 </div>
