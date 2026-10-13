@@ -46,14 +46,19 @@
 @media(max-width:640px){.guia-vitrine{top:5px;display:block;padding:10px 12px;margin:8px 0 12px;border-radius:13px}.guia-vitrine h2{font-size:.98rem;margin:3px 0}.guia-vitrine p{font-size:.77rem;line-height:1.3}.guia-vitrine-acoes{justify-content:flex-start;margin-top:8px}.guia-vitrine button{min-height:37px!important;padding:7px 11px!important;font-size:.77rem!important}.guia-vitrine-progresso{margin-top:7px}.guia-vitrine-sobre{font-size:.66rem}}
 @media(prefers-reduced-motion:reduce){.guia-foco{animation:none!important}.guia-vitrine button{transition:none!important}}
 
-/* Compartilhar vitrine e pesquisa de CEP sem alterar o fluxo principal. */
+/* Compartilhar a vitrine somente pelo ícone do WhatsApp, no canto superior direito. */
 .dados-card{max-height:calc(100dvh - 26px);overflow-y:auto;overscroll-behavior:contain}
-.vitrine-compartilhar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0 16px}
-.vitrine-compartilhar button{display:inline-flex;align-items:center;gap:7px;min-height:43px;border-radius:13px;padding:9px 14px;font-weight:850;border:1px solid var(--cliente-cor);color:var(--cliente-cor);background:#fff;cursor:pointer}
-.vitrine-compartilhar button:focus-visible,.cep-busca-alternar:focus-visible{outline:3px solid var(--cliente-cor);outline-offset:2px}
-.vitrine-compartilhar small{font-size:.77rem;line-height:1.35;color:var(--cliente-muted);flex:1;min-width:165px}
-.vitrine-compartilhar .feedback{flex-basis:100%;margin:0;font-size:.8rem;color:#067647;font-weight:750}
-.vitrine-compartilhar .feedback[hidden]{display:none}
+.vitrine-topo{position:relative}
+.vitrine-topo .pill-grupo{margin-right:54px}
+.vitrine-share-whatsapp{position:absolute;top:0;right:0;z-index:4;display:inline-flex!important;align-items:center!important;justify-content:center!important;width:44px!important;height:44px!important;min-width:44px!important;min-height:44px!important;padding:0!important;margin:0!important;border:1px solid #c8ecda!important;border-radius:50%!important;background:#fff!important;color:#128c53!important;box-shadow:0 2px 9px rgba(0,0,0,.08)!important;cursor:pointer!important;line-height:1!important}
+.vitrine-share-whatsapp i{font-size:1.6rem!important;line-height:1!important}
+.vitrine-share-whatsapp:hover{background:#edfcf4!important}
+.vitrine-share-whatsapp:focus-visible,.cep-busca-alternar:focus-visible{outline:3px solid #128c53!important;outline-offset:3px!important}
+.vitrine-share-whatsapp:disabled{opacity:.65;cursor:wait!important}
+.vitrine-share-feedback{position:relative;margin:-5px 0 10px;font-size:.8rem;color:#067647;font-weight:750;line-height:1.4}
+.vitrine-share-feedback[hidden]{display:none}
+@media(max-width:620px){.vitrine-topo>div:first-child{padding-right:52px}.vitrine-topo .pill-grupo{margin-right:0}.vitrine-share-whatsapp{top:0;right:0}}
+
 .cep-busca-alternar{margin:8px 0 5px!important;background:none!important;border:0!important;color:var(--cliente-cor)!important;text-decoration:underline;min-height:35px!important;padding:4px 0!important;font-size:.83rem!important;font-weight:850!important}
 .cep-busca-painel{margin:8px 0 14px;border:1px solid var(--cliente-borda);background:#f8fafc;border-radius:12px;padding:12px}
 .cep-busca-painel[hidden]{display:none}
@@ -65,7 +70,7 @@
 .cep-resultado button{width:100%;display:block;min-height:50px;border:1px solid #cedbea;border-radius:10px;text-align:left;background:white;color:#0f172a;padding:8px 10px;white-space:normal;font-size:.81rem}
 .cep-resultado button b{display:block;font-size:.87rem;color:var(--cliente-cor)}
 .cep-busca-mensagem{font-size:.81rem;line-height:1.35;margin:8px 0 0}
-@media(max-width:450px){.vitrine-compartilhar button{width:100%;justify-content:center}.vitrine-compartilhar small{min-width:100%}}
+
 
 .dados-card{max-height:92dvh;overflow-y:auto}
 .cep-procurar,.dados-confirmar{color:#fff!important;font-weight:850!important}
@@ -77,6 +82,7 @@
 <div class="vitrine-topo">
   <div><p>{{ empresa.nome }}</p><h1>Escolha o que você quer</h1><div class="vitrine-links">{% if empresa.catalogo_musicas_url %}<a class="catalogo-musicas-link" href="{{ empresa.catalogo_musicas_url }}" target="_blank" rel="noopener"><i class="bi bi-music-note-list"></i> Ver catálogo de músicas</a>{% endif %}</div><input id="alterarDataInput" class="alterar-data-input" type="date" min="{{ hoje }}" value="{{ data_evento.isoformat() }}" aria-label="Escolher nova data"></div>
   <div class="pill-grupo"><button type="button" class="data-pill abrir-calendario" aria-label="Alterar data"><i class="bi bi-calendar-check"></i> {{ data_evento.strftime('%d/%m/%Y') }} <i class="bi bi-pencil"></i></button><label class="data-pill" for="alterarTipoEvento"><i class="bi bi-people"></i><select id="alterarTipoEvento" aria-label="Tipo de evento" style="border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;max-width:135px"><option value="residencial" {% if tipo_evento == "residencial" %}selected{% endif %}>Residencial</option><option value="empresa" {% if tipo_evento == "empresa" %}selected{% endif %}>Empresa</option></select></label></div>
+  <button type="button" id="compartilharVitrine" class="vitrine-share-whatsapp" data-iconizado="1" aria-label="Compartilhar escolhas da vitrine pelo WhatsApp" title="Compartilhar pelo WhatsApp"><i class="bi bi-whatsapp" aria-hidden="true"></i></button>
 </div>
 <div class="tipo-evento-msg" style="margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--cliente-suave);color:var(--cliente-cor);font-size:.86rem;font-weight:750">{{ (mensagens_tipo_evento|default({})).get(tipo_evento, "") }}</div>
 <div class="guia-vitrine" id="guiaVitrine" aria-live="polite" aria-atomic="true">
@@ -89,11 +95,7 @@
   <div class="guia-vitrine-acoes"><button type="button" id="guiaAcao">Data confirmada</button><button type="button" id="guiaAcaoSecundaria" class="secundario" hidden></button></div>
 </div>
 <button type="button" class="connect-orientador-reabrir" id="vitrineReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
-<div class="vitrine-compartilhar" id="compartilharVitrineBox">
-  <button type="button" id="compartilharVitrine" aria-label="Compartilhar a vitrine com as escolhas preenchidas"><i class="bi bi-share"></i> Compartilhar vitrine preenchida</button>
-  <small>Envia data, endereço, produtos, opcionais, cupom e horário já escolhidos. Quem receber pode continuar e alterar.</small>
-  <p id="partilhaFeedback" class="feedback" role="status" hidden></p>
-</div>
+<p id="partilhaFeedback" class="vitrine-share-feedback" role="status" aria-live="polite" hidden></p>
 <div class="catalogo-entrega" id="catalogoEntrega"><div class="catalogo-entrega-info"><b id="catalogoFreteTitulo">{% if frete_inicial %}Deslocamento {% if frete_inicial.consultar %}sob consulta{% else %}calculado{% endif %}{% else %}Deslocamento ainda não calculado{% endif %}</b><small id="catalogoEndereco">{% if frete_inicial %}{{ frete_inicial.endereco_formatado or ('CEP ' ~ cep_inicial ~ ' · nº ' ~ numero_inicial) }}{% else %}Informe CEP e número agora ou calcule o frete no carrinho depois.{% endif %}</small></div><strong id="catalogoFreteValor">{% if frete_inicial %}{% if frete_inicial.consultar %}Sob consulta{% else %}R$ {{ frete_inicial.valor|moeda_br }}{% endif %}{% else %}A calcular{% endif %}</strong><button type="button" class="botao-secundario" id="alterarDadosCatalogo">{% if frete_inicial %}Alterar frete{% else %}Calcular frete{% endif %}</button></div>
 {% if bloqueio_data %}<div class="vitrine-aviso"><b>Data indisponível para reservas.</b>{% if bloqueio_data.descricao %} {{ bloqueio_data.descricao }}.{% endif %} Você pode continuar vendo o catálogo e escolher outra data.</div>{% endif %}
 {% if erro == 'data_bloqueada' %}<div class="vitrine-aviso">Esta data está bloqueada para novas reservas. Escolha outra data para continuar.</div>{% endif %}
@@ -358,20 +360,26 @@
  }
  function avisoPartilha(mensagem,erro=false){if(!feedbackPartilha)return;feedbackPartilha.hidden=false;feedbackPartilha.textContent=mensagem;feedbackPartilha.style.color=erro?'#b42318':'#067647'}
  botaoCompartilhar?.addEventListener('click',async()=>{
-   botaoCompartilhar.disabled=true;const labelOriginal=botaoCompartilhar.innerHTML;botaoCompartilhar.textContent='Preparando link...';
-   try{
-     const resp=await fetch('/e/{{ empresa.slug }}/vitrine/compartilhar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(estadoParaCompartilhar())});
-     const dados=await resp.json();if(!resp.ok||!dados.ok)throw new Error(dados.erro||'Não foi possível criar o link.');
-     const url=dados.url;
-     if(navigator.share){
-       try{await navigator.share({title:'Continue sua reserva',text:'Escolhi estas opções para a festa. Confira e continue sua reserva:',url});avisoPartilha('Vitrine compartilhada.');return}
-       catch(err){if(err.name==='AbortError'){avisoPartilha('Compartilhamento cancelado.');return}}
-     }
-     if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);avisoPartilha('Link com as escolhas copiado! Envie no WhatsApp ou onde preferir.');}
-     else{window.prompt('Copie o link da vitrine preenchida:',url);avisoPartilha('Link pronto para compartilhar.');}
-   }catch(err){avisoPartilha(err.message||'Não foi possível compartilhar.',true)}
-   finally{botaoCompartilhar.disabled=false;botaoCompartilhar.innerHTML=labelOriginal}
- });
+    // Abre a aba durante o gesto do usuário para não ser bloqueada após a requisição.
+    // No celular o endereço wa.me aciona o WhatsApp; no desktop abre o WhatsApp Web.
+    const abaWhatsApp=window.open('about:blank','_blank');
+    botaoCompartilhar.disabled=true;
+    botaoCompartilhar.setAttribute('aria-busy','true');
+    if(abaWhatsApp){
+      try{abaWhatsApp.document.title='Abrindo WhatsApp…';abaWhatsApp.document.body.textContent='Preparando link para compartilhar pelo WhatsApp…'}catch(_e){}
+    }
+    try{
+      const resp=await fetch('/e/{{ empresa.slug }}/vitrine/compartilhar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(estadoParaCompartilhar())});
+      const dados=await resp.json();if(!resp.ok||!dados.ok)throw new Error(dados.erro||'Não foi possível criar o link.');
+      const url=dados.url;
+      const texto='Confira as escolhas que preparei e continue a reserva:\n'+url;
+      const whatsapp='https://wa.me/?text='+encodeURIComponent(texto);
+      if(abaWhatsApp&&!abaWhatsApp.closed){abaWhatsApp.location.replace(whatsapp)}
+      else{window.location.assign(whatsapp)}
+      avisoPartilha('Abrindo o WhatsApp para compartilhar…');
+    }catch(err){try{abaWhatsApp?.close()}catch(_e){}avisoPartilha(err.message||'Não foi possível compartilhar.',true)}
+    finally{botaoCompartilhar.disabled=false;botaoCompartilhar.removeAttribute('aria-busy')}
+  });
 
  // Alternativa opcional ao campo de CEP: busca por UF, cidade e rua via ViaCEP.
  const btnBusca=document.getElementById('alternarBuscaEndereco'),painelBusca=document.getElementById('painelBuscaEndereco'),buscarEndereco=document.getElementById('consultarEndereco'),buscaMensagem=document.getElementById('buscaCepMensagem'),resultadosCEP=document.getElementById('resultadosBuscaCep'),buscaUF=document.getElementById('buscaUf'),buscaCidade=document.getElementById('buscaCidade'),buscaRua=document.getElementById('buscaRua');
