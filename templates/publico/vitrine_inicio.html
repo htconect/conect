@@ -7,7 +7,7 @@
 .inicio-selo{font-size:.78rem;font-weight:800;color:var(--cliente-cor);letter-spacing:.08em;text-transform:uppercase}.inicio-hero h1{font-size:clamp(2rem,8vw,3rem);line-height:1.03;margin:10px 0 12px;max-width:410px}.inicio-hero p{color:#526076;line-height:1.5;margin:0 0 20px;max-width:430px}.inicio-desc{font-size:.9rem!important;margin-top:-8px!important}.inicio-form{background:rgba(255,255,255,.94);border:1px solid rgba(255,255,255,.75);padding:14px;border-radius:18px;box-shadow:0 14px 40px rgba(15,23,42,.08)}.inicio-form label{display:block;font-size:.82rem;font-weight:800;margin:0 0 7px}.inicio-form input,.inicio-form select{width:100%;min-height:48px;border:1px solid var(--cliente-borda);border-radius:12px;padding:0 12px;font-size:16px;background:#fff}.inicio-form button{width:100%;min-height:50px;border:0;border-radius:13px;color:#fff;font-weight:850;margin-top:10px}.tipo-evento-msg{margin:8px 2px 0;padding:9px 11px;border-radius:11px;background:var(--cliente-suave);color:var(--cliente-cor);font-size:.82rem;font-weight:800;line-height:1.35}.tipo-evento-msg:empty{display:none}.inicio-tempo{text-align:center;font-size:.78rem;color:var(--cliente-muted);margin:10px 0 0}.inicio-erro{background:#fff1f2;color:#9f1239;border:1px solid #fecdd3;border-radius:14px;padding:11px 13px;margin-bottom:12px;font-size:.9rem}.inicio-dados{margin-top:12px;padding-top:12px;border-top:1px solid var(--cliente-borda)}.inicio-dados-cab{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:9px}.inicio-dados-cab strong{font-size:.86rem}.inicio-dados-cab small{display:block;color:var(--cliente-muted);font-size:.74rem;line-height:1.35;margin-top:2px}.inicio-endereco{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px}.inicio-dados .opcional{font-size:.72rem;color:var(--cliente-muted);font-weight:700;margin-left:4px}.cliente-encontrado{display:none;margin-top:9px;padding:10px;border:1px solid var(--cliente-borda);border-radius:12px;background:#f8fafc}.cliente-encontrado.ativo{display:block}.cliente-encontrado p{margin:0 0 8px!important;font-size:.78rem!important;color:var(--cliente-muted)!important}.cliente-encontrado-linha{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.cliente-encontrado input{min-height:42px!important}.cliente-encontrado button{min-height:42px!important;margin:0!important;padding:8px 12px!important}.cliente-encontrado-status{font-size:.75rem;margin-top:6px;color:var(--cliente-muted)}.inicio-musicas{display:flex;align-items:center;justify-content:center;gap:7px;margin:12px auto 0;color:var(--cliente-cor);font-weight:850;text-decoration:none}.inicio-musicas:hover{text-decoration:underline}
 @media(max-width:560px){.inicio-vitrine{margin-top:0}.inicio-hero{min-height:calc(100svh - 104px);min-height:570px;border-radius:24px;padding:92px 20px 22px}.inicio-medalhao{width:94px;height:94px}}
 .tipo-cartoes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}.tipo-cartao{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:16px 8px;border:2px solid var(--cliente-borda);border-radius:14px;background:#fff;cursor:pointer;text-align:center}.tipo-cartao i{font-size:25px;color:var(--cliente-cor)}.tipo-cartao span{font-weight:850}.tipo-cartao small{font-size:.72rem;color:var(--cliente-muted)}.tipo-cartao:has(input:checked){background:var(--cliente-suave);border-color:var(--cliente-cor);box-shadow:0 0 0 1px var(--cliente-cor)}.tipo-cartao-link{text-decoration:none;color:inherit}.tipo-cartao-link:hover{border-color:var(--cliente-cor);background:var(--cliente-suave)}.tipo-cartao input{position:absolute;opacity:0;width:1px;height:1px}.tipo-cartao:focus-within{outline:2px solid var(--cliente-cor);outline-offset:2px}.inicio-form .tipo-cartao{display:flex;flex-direction:column;gap:5px;min-width:0;min-height:100px;padding:10px 4px;align-items:center;justify-content:center}.inicio-form .tipo-cartao i{display:block;font-size:24px;line-height:1.2}.inicio-form .tipo-cartao span{display:block;width:100%;font-size:.78rem;line-height:1.25;overflow-wrap:anywhere}.inicio-form .tipo-cartao small{display:block;width:100%;line-height:1.3;font-size:.68rem;overflow-wrap:break-word}.inicio-form button[type=submit]:disabled{background:#a6aec4!important;cursor:not-allowed;opacity:.7}.inicio-form button[type=submit]:not(:disabled){background:var(--cliente-cor)}
-.inicio-guia{display:flex;align-items:flex-start;gap:8px;border:1px solid var(--cliente-borda);background:var(--cliente-suave);border-radius:12px;padding:10px 12px;margin-bottom:12px;color:var(--cliente-texto);font-size:.83rem;line-height:1.4;font-weight:750}.inicio-guia i{color:var(--cliente-cor);font-size:18px;flex:0 0 auto}
+.inicio-form .connect-orientador{margin:0 0 15px}.inicio-guia-campo{border-radius:14px!important}
 </style>
 {% endblock %}
 {% block scripts_extra %}
@@ -16,7 +16,22 @@
  const seletor=document.querySelector('input[name=tipo_evento]:checked'), aviso=document.getElementById('tipoEventoMensagem'), cep=document.getElementById('cepCatalogo');
  const mensagens={{ mensagens_tipo_evento|tojson }};
  const dataEvento=document.getElementById('dataEvento'), botaoCatalogo=document.getElementById('verCatalogoBtn');
- function validarInicio(){const temData=!!dataEvento?.value,temTipo=!!document.querySelector('input[name=tipo_evento]:checked');if(botaoCatalogo)botaoCatalogo.disabled=!(temData&&temTipo);const dica=document.getElementById('orientacaoInicioTexto');if(dica)dica.textContent=!temData?'1. Escolha a data da sua festa.':!temTipo?'2. Agora, o que você procura: Residencial ou Empresa?':'Tudo pronto! Toque em Ver equipamentos e preços.';}
+ const orientacao=window.conectOrientacaoUI('inicio',{{ empresa.slug|tojson }});
+ const titulo=document.getElementById('inicioTitulo'),texto=document.getElementById('inicioTexto'),etapa=document.getElementById('inicioEtapa'),acao=document.getElementById('inicioAcao');
+ const cartoes=document.querySelector('.tipo-cartoes');
+ function validarInicio(){
+   const temData=!!dataEvento?.value,temTipo=!!document.querySelector('input[name=tipo_evento]:checked');
+   if(botaoCatalogo)botaoCatalogo.disabled=!(temData&&temTipo);
+   const passo=!temData?1:2;
+   if(etapa)etapa.textContent='Passo '+passo+' de 2';
+   if(titulo)titulo.textContent=!temData?'Escolha a data do seu evento':(!temTipo?'O que você procura?':'Tudo pronto para entrar!');
+   if(texto)texto.textContent=!temData?'Selecione o dia da sua festa. Depois vamos escolher o tipo de evento.':(!temTipo?'Toque em Residencial ou Empresa para mostrar os valores adequados.':'Data e tipo definidos. Toque em Entrar para consultar equipamentos disponíveis e calcular o frete.');
+   if(acao)acao.textContent=!temData?'Escolher data':(!temTipo?'Escolher tipo de evento':'Entrar na vitrine');
+   document.querySelectorAll('#inicioGuia .connect-orientador-barras span').forEach((b,i)=>{b.classList.toggle('concluido',i+1<passo||(temData&&temTipo));b.classList.toggle('atual',i+1===passo&&!(temData&&temTipo))});
+   orientacao.marcar(!temData?dataEvento:(!temTipo?cartoes:botaoCatalogo));
+ }
+ acao?.addEventListener('click',()=>{if(!dataEvento.value){try{dataEvento.showPicker()}catch(_){dataEvento.focus()}return}if(!document.querySelector('input[name=tipo_evento]:checked')){orientacao.ir(cartoes);cartoes?.querySelector('input')?.focus({preventScroll:true});return}botaoCatalogo?.click()});
+ window.addEventListener('connect-orientacao-reaberta',validarInicio);
  dataEvento?.addEventListener('input',validarInicio);dataEvento?.addEventListener('change',validarInicio);document.querySelectorAll('input[name=tipo_evento]').forEach(el=>el.addEventListener('change',validarInicio));
  function atualizarMensagem(){if(!aviso)return;const escolhido=document.querySelector('input[name=tipo_evento]:checked');aviso.textContent=(mensagens[escolhido?.value]||'').trim();}
  function formatCep(v){v=(v||'').replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v}
@@ -37,7 +52,12 @@
     <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível para você.' }}</p>
     {% if empresa.vitrine_descricao %}<p class="inicio-desc">{{ empresa.vitrine_descricao }}</p>{% endif %}
     <form class="inicio-form" method="get" action="/e/{{ empresa.slug }}/vitrine" data-loading-title="Montando seu catálogo" data-loading-text="Aguarde. Estamos verificando disponibilidade e aplicando os valores do seu evento.">
-      <div class="inicio-guia" id="orientacaoInicio" aria-live="polite"><i class="bi bi-signpost-split"></i><span id="orientacaoInicioTexto">1. Escolha a data da sua festa.</span></div>
+      <div class="connect-orientador" id="inicioGuia" aria-live="polite">
+ <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Preparando sua festa</span><span id="inicioEtapa" class="connect-orientador-numero">Passo 1 de 2</span><button class="connect-orientador-x" id="inicioFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
+ <h2 id="inicioTitulo"></h2><p id="inicioTexto"></p>
+ <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span></div>
+ <div class="connect-orientador-acoes"><button type="button" id="inicioAcao"></button><button type="button" class="orientador-secundario" id="inicioProximo" hidden></button></div>
+</div><button type="button" class="connect-orientador-reabrir" id="inicioReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
       <label for="dataEvento">Data do evento</label>
       <input id="dataEvento" name="data_evento" type="date" min="{{ hoje }}" required>
       <label style="margin-top:10px">O que você procura?</label>
@@ -47,7 +67,7 @@
         {% if empresa.catalogo_musicas_url %}<a class="tipo-cartao tipo-cartao-link" href="{{ empresa.catalogo_musicas_url }}" target="_blank" rel="noopener noreferrer" aria-label="Abrir catálogo virtual de músicas"><i class="bi bi-music-note-list"></i><span>Catálogo virtual</span><small>Ver músicas</small></a>{% endif %}
       </div>
       <div id="tipoEventoMensagem" class="tipo-evento-msg"></div>
-      <button type="submit" id="verCatalogoBtn" disabled><i class="bi bi-grid"></i> Ver equipamentos e preços</button>
+      <button type="submit" id="verCatalogoBtn" disabled><i class="bi bi-box-arrow-in-right"></i> Entrar na vitrine</button>
     </form>
     <p class="inicio-tempo"><i class="bi bi-clock"></i> Leva menos de 1 minuto para montar seu pedido</p>
   </section>

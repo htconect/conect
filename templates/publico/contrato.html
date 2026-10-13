@@ -80,12 +80,18 @@
     </div>
   </div>
 
+<div class="connect-orientador" id="contratoConferenciaGuia" aria-live="polite">
+ <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Confira antes de aceitar</span><span id="contratoConferenciaEtapa" class="connect-orientador-numero">Passo 1 de 6</span><button class="connect-orientador-x" id="contratoConferenciaFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
+ <h2 id="contratoConferenciaTitulo"></h2><p id="contratoConferenciaTexto"></p>
+ <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+ <div class="connect-orientador-acoes"><button type="button" id="contratoConferenciaAcao"></button><button type="button" class="orientador-secundario" id="contratoConferenciaProximo" hidden></button></div>
+</div><button type="button" class="connect-orientador-reabrir" id="contratoConferenciaReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
   {% if erro_aceite %}<div class="box aviso alerta-aceite"><b>Marque “Li, conferi os dados e aceito o contrato” para continuar.</b></div>{% endif %}
   {% if not contrato_pronto %}
     <div class="box aviso"><b>Contrato em preparação.</b><p class="texto-discreto">A empresa ainda precisa incluir os itens e/ou configurar as cláusulas antes do aceite.</p></div>
   {% endif %}
 
-  <details class="secao-recolhivel">
+  <details class="secao-recolhivel" id="guiaDadosContrato">
     <summary>Dados do contrato</summary>
     <div class="secao-corpo">
       <p><b>Cliente:</b> {{ item.cliente.nome or '-' }}</p>
@@ -97,7 +103,7 @@
     </div>
   </details>
 
-  <details class="secao-recolhivel">
+  <details class="secao-recolhivel" id="guiaDadosLocacao">
     <summary>Dados da locação</summary>
     <div class="secao-corpo">
       <p><b>Data:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
@@ -120,7 +126,7 @@
     </div>
   </details>
 
-  <details class="secao-recolhivel">
+  <details class="secao-recolhivel" id="guiaClausulasContrato">
     <summary>Cláusulas do contrato</summary>
     <div class="secao-corpo">
       {% if contrato and contrato.descricao %}<p><b>{{ contrato.nome }}</b> — {{ contrato.descricao }}</p>{% endif %}
@@ -128,7 +134,7 @@
     </div>
   </details>
 
-  <details class="secao-recolhivel">
+  <details class="secao-recolhivel" id="guiaPagamentoContrato">
     <summary>Pagamento</summary>
     <div class="secao-corpo">
       <p><b>Equipamentos:</b> R$ {{ comp.equipamentos_sem_opcionais|moeda_br }}</p>
@@ -195,6 +201,12 @@
   {% endif %}
 
 {% else %}
+<div class="connect-orientador" id="contratoPagamentoGuia" aria-live="polite">
+ <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Etapa de pagamento</span><span id="contratoPagamentoEtapa" class="connect-orientador-numero">Passo 1 de 2</span><button class="connect-orientador-x" id="contratoPagamentoFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
+ <h2 id="contratoPagamentoTitulo"></h2><p id="contratoPagamentoTexto"></p>
+ <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span></div>
+ <div class="connect-orientador-acoes"><button type="button" id="contratoPagamentoAcao"></button><button type="button" class="orientador-secundario" id="contratoPagamentoProximo" hidden></button></div>
+</div><button type="button" class="connect-orientador-reabrir" id="contratoPagamentoReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
   {% if mostrar_pergunta_pagamento %}
     <div id="perguntaPagamento" class="box pergunta-pagamento">
       <span class="status-pill ok">Contrato aceito</span>
@@ -342,6 +354,54 @@
 {% endif %}
 </div>
 
+<script>
+(function(){
+ const slug={{ empresa.slug|tojson }};
+ const opcoes=[
+   {id:'guiaDadosContrato',titulo:'Confira seus dados',texto:'Veja nome, documento e contatos. Se precisar corrigir, use Editar meus dados.'},
+   {id:'guiaDadosLocacao',titulo:'Confira a locação',texto:'Revise endereço, data, equipamentos, opcionais e responsável pela entrega.'},
+   {id:'guiaClausulasContrato',titulo:'Leia as cláusulas',texto:'Abra esta seção e leia as condições antes de aceitar o contrato.'},
+   {id:'guiaPagamentoContrato',titulo:'Confira os valores',texto:'Revise equipamentos, opcionais, frete, descontos e condições do pagamento.'},
+   {id:'horarioAceiteBox',titulo:'Horário e retirada',texto:'Confira a retirada no mesmo dia, a cortesia e as horas adicionais, se precisar.'},
+   {id:'aceiteContrato',titulo:'Aceite do contrato',texto:'Após conferir todas as seções, marque a caixa de concordância e toque em Aceitar contrato.'}
+ ];
+ const card=document.getElementById('contratoConferenciaGuia');
+ if(card){
+   const guia=window.conectOrientacaoUI('contratoConferencia',slug),titulo=document.getElementById('contratoConferenciaTitulo'),texto=document.getElementById('contratoConferenciaTexto'),etapa=document.getElementById('contratoConferenciaEtapa'),abrir=document.getElementById('contratoConferenciaAcao'),proximo=document.getElementById('contratoConferenciaProximo');
+   let atual=0; // orientação, não é obrigação adicional para aceitar
+   const alvoEtapa=()=>{let el=document.getElementById(opcoes[atual].id);return atual===5?el?.closest('.check-aceite'):el};
+   function atualizar(){if(!opcoes[atual])return;const dados=opcoes[atual];
+     if(titulo)titulo.textContent=dados.titulo;if(texto)texto.textContent=dados.texto;
+     if(etapa)etapa.textContent='Seção '+(atual+1)+' de '+opcoes.length;
+     if(abrir)abrir.textContent=atual===5?'Ir para o aceite':'Conferir seção';
+     if(proximo){proximo.hidden=atual===opcoes.length-1;proximo.textContent='Conferi, próxima seção';}
+     document.querySelectorAll('#contratoConferenciaGuia .connect-orientador-barras span').forEach((el,i)=>{el.classList.toggle('concluido',i<atual);el.classList.toggle('atual',i===atual)});
+     guia.marcar(guia.visivel()?alvoEtapa():null);
+   }
+   abrir?.addEventListener('click',()=>{const sec=document.getElementById(opcoes[atual].id);if(sec?.tagName==='DETAILS')sec.open=true;guia.ir(alvoEtapa());});
+   proximo?.addEventListener('click',()=>{atual=Math.min(atual+1,opcoes.length-1);atualizar();const sec=document.getElementById(opcoes[atual].id);if(sec?.tagName==='DETAILS')sec.open=true;guia.ir(alvoEtapa());});
+   document.getElementById('aceiteContrato')?.addEventListener('change',e=>{if(e.target.checked){atual=5;atualizar()}});
+   window.addEventListener('connect-orientacao-reaberta',atualizar);atualizar();
+ }
+ const cardPagamento=document.getElementById('contratoPagamentoGuia');
+ if(cardPagamento){
+   const guia=window.conectOrientacaoUI('contratoPagamento',slug),titulo=document.getElementById('contratoPagamentoTitulo'),texto=document.getElementById('contratoPagamentoTexto'),etapa=document.getElementById('contratoPagamentoEtapa'),acao=document.getElementById('contratoPagamentoAcao'),proximo=document.getElementById('contratoPagamentoProximo');
+   const pergunta=document.getElementById('perguntaPagamento'),painel=document.getElementById('etapa-pagamento');
+   function atualizar(){const perguntar=!!pergunta&&!pergunta.hidden;const passo=perguntar?1:2;
+     if(etapa)etapa.textContent='Pagamento · '+passo+' de 2';
+     if(titulo)titulo.textContent=perguntar?'Contrato aceito com sucesso!':'Escolha a forma de pagamento';
+     if(texto)texto.textContent=perguntar?'Você pode continuar para o pagamento agora ou usar este link mais tarde.':'Confira o valor, escolha PIX ou cartão (quando disponível) e siga para pagar.';
+     if(acao)acao.textContent=perguntar?'Continuar para pagamento':'Ver opções de pagamento';
+     if(proximo)proximo.hidden=true;
+     document.querySelectorAll('#contratoPagamentoGuia .connect-orientador-barras span').forEach((el,i)=>{el.classList.toggle('concluido',i+1<passo);el.classList.toggle('atual',i+1===passo)});
+     guia.marcar(guia.visivel()?(perguntar?pergunta:painel):null);
+   }
+   acao?.addEventListener('click',()=>{if(pergunta&&!pergunta.hidden&&typeof mostrarEtapaPagamento==='function'){mostrarEtapaPagamento()}atualizar();guia.ir(painel&&!painel.hidden?painel:pergunta)});
+   document.querySelector('#perguntaPagamento button')?.addEventListener('click',()=>{requestAnimationFrame(atualizar)});
+   window.addEventListener('connect-orientacao-reaberta',atualizar);atualizar();
+ }
+})();
+</script>
 <script>
 (function(){
   const check=document.getElementById('aceiteContrato');

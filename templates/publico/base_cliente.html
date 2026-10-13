@@ -29,7 +29,48 @@
     .cliente-loading-spin{width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:var(--cliente-cor);border-radius:50%;margin:0 auto 12px;animation:girar .75s linear infinite}@keyframes girar{to{transform:rotate(360deg)}}
     @media(max-width:600px){.cliente-topo-inner{min-height:60px}.cliente-marca img{width:40px;height:40px}.cliente-seguro{display:none}.cliente-main{padding-top:16px}}
   </style>
+  <style>
+  /* Orientação compartilhada entre entrada, cadastro e contrato (1.0.160) */
+  .connect-orientador{position:sticky;top:6px;z-index:680;isolation:isolate;max-width:100%;background:linear-gradient(115deg,var(--cliente-suave),#fff 85%);border:2px solid var(--cliente-cor);border-radius:17px;padding:13px 14px;margin:12px 0;box-shadow:0 10px 24px rgba(15,23,42,.13)}
+  .connect-orientador[hidden],.connect-orientador-reabrir[hidden]{display:none!important}
+  .connect-orientador-cab{display:flex;gap:8px;align-items:center;font-size:.72rem;font-weight:850;color:var(--cliente-cor);text-transform:uppercase;letter-spacing:.02em}
+  .connect-orientador-cab>span:first-child{min-width:0;display:flex;align-items:center;gap:5px}
+  .connect-orientador-numero{margin-left:auto;color:#475569;background:var(--cliente-suave);border-radius:100px;padding:3px 8px;white-space:nowrap;text-transform:none}
+  .connect-orientador .connect-orientador-x,.guia-vitrine .connect-orientador-x{border:0!important;background:transparent!important;color:#475569!important;box-shadow:none!important;min-height:34px!important;width:34px!important;min-width:34px!important;max-width:34px!important;padding:4px!important;border-radius:9px!important;display:grid;place-items:center;cursor:pointer;font-size:1.05rem!important;flex:0 0 34px}
+  .connect-orientador h2{font-size:1.04rem;margin:5px 0;color:var(--cliente-texto);line-height:1.24}
+  .connect-orientador p{font-size:.82rem;margin:0;color:#475569;line-height:1.42}
+  .connect-orientador-barras{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:5px;margin:10px 0}
+  .connect-orientador-barras span{height:4px;background:#dbe2ec;border-radius:6px}
+  .connect-orientador-barras span.atual{background:var(--cliente-cor)}.connect-orientador-barras span.concluido{background:#16a34a}
+  .connect-orientador-acoes{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .connect-orientador-acoes button{border-radius:11px!important;min-height:40px!important;padding:8px 12px!important;font-size:.83rem!important;font-weight:850!important;background:var(--cliente-cor)!important;color:#fff!important;white-space:normal}
+  .connect-orientador-acoes button.orientador-secundario{border:1px solid var(--cliente-cor)!important;background:#fff!important;color:var(--cliente-cor)!important}
+  .connect-orientador-acoes button[hidden]{display:none!important}
+  .connect-orientador-reabrir{position:sticky;top:5px;z-index:670;background:#fff!important;color:var(--cliente-cor)!important;border:1px solid var(--cliente-cor)!important;border-radius:999px!important;padding:8px 12px!important;margin:8px 0 12px;font-size:.8rem!important;font-weight:800!important;min-height:36px!important;box-shadow:0 5px 12px rgba(15,23,42,.08)}
+  .connect-orientador-foco{outline:3px solid var(--cliente-cor)!important;outline-offset:2px!important;box-shadow:0 0 0 6px color-mix(in srgb,var(--cliente-cor) 12%,transparent)!important;animation:connect-orientador-pulso 1.4s ease-in-out 3}
+  @keyframes connect-orientador-pulso{50%{box-shadow:0 0 0 10px color-mix(in srgb,var(--cliente-cor) 22%,transparent)}}
+  @media(max-width:640px){.connect-orientador{padding:11px 12px;border-radius:14px}.connect-orientador h2{font-size:.97rem}.connect-orientador p{font-size:.78rem}.connect-orientador-acoes button{min-height:38px!important;font-size:.79rem!important}}
+  @media(prefers-reduced-motion:reduce){.connect-orientador-foco{animation:none!important}}
+  </style>
   {% block head_extra %}{% endblock %}
+<script>
+  // Preferência temporária por empresa: quem fecha pode reabrir em qualquer tela.
+  window.conectOrientacaoUI=function(prefix,slug){
+    const card=document.getElementById(prefix+'Guia')||(prefix==='vitrine'?document.getElementById('guiaVitrine'):null),reabrir=document.getElementById(prefix+'Reabrir');
+    const fechar=document.getElementById(prefix+'Fechar'),key='connect_guia_'+slug+'_fechado';
+    let fechadoLocal=false;
+    const ler=()=>{try{return sessionStorage.getItem(key)==='1'}catch(_){return fechadoLocal}};
+    const guardar=fechado=>{fechadoLocal=fechado;try{sessionStorage.setItem(key,fechado?'1':'0')}catch(_){}};
+    let foco=null;
+    const aplicar=()=>{if(card)card.hidden=ler();if(reabrir)reabrir.hidden=!ler();if(ler())marcar(null)};
+    function marcar(alvo){if(foco===alvo)return;foco?.classList.remove('connect-orientador-foco');foco=alvo;if(!ler())foco?.classList.add('connect-orientador-foco')}
+    function ir(alvo){if(!alvo)return;const altura=(card&&!card.hidden)?card.getBoundingClientRect().height+28:60;const y=Math.max(0,window.scrollY+alvo.getBoundingClientRect().top-altura);window.scrollTo({top:y,behavior:window.matchMedia('(prefers-reduced-motion:reduce)').matches?'auto':'smooth'})}
+    fechar?.addEventListener('click',()=>{guardar(true);aplicar();window.dispatchEvent(new Event('connect-orientacao-fechada'))});
+    reabrir?.addEventListener('click',()=>{guardar(false);aplicar();window.dispatchEvent(new Event('connect-orientacao-reaberta'))});
+    aplicar();return {card,marcar,ir,visivel:()=>!ler(),aplicar};
+  };
+
+</script>
 </head>
 <body class="cliente-publico">
 <header class="cliente-topo">

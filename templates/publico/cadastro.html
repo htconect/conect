@@ -52,11 +52,17 @@
 </div>
 {% endif %}
 
-<form method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="{% if vitrine_pedido is defined and vitrine_pedido %}Preparando contrato{% else %}Salvando pré-contrato{% endif %}" data-loading-text="{% if vitrine_pedido is defined and vitrine_pedido %}Estamos montando o contrato com os itens escolhidos.{% else %}Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp.{% endif %}"{% endif %}>
+<form id="formCadastroOrientado" method="post" action="{% if modo_edicao_contrato is defined and modo_edicao_contrato %}/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar{% else %}/e/{{ empresa.slug }}/reserva{% endif %}" class="box tema-{{ empresa.tema or 'azul' }}"{% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %} data-loading-title="{% if vitrine_pedido is defined and vitrine_pedido %}Preparando contrato{% else %}Salvando pré-contrato{% endif %}" data-loading-text="{% if vitrine_pedido is defined and vitrine_pedido %}Estamos montando o contrato com os itens escolhidos.{% else %}Estamos salvando seus dados. Na próxima tela, você poderá escolher se deseja avisar o responsável pelo WhatsApp.{% endif %}"{% endif %}>
   <input type="hidden" name="identificador" value="{{ identificador or 'novo' }}">
   {% if pre_reserva_token is defined and pre_reserva_token %}<input type="hidden" name="pre_reserva_token" value="{{ pre_reserva_token }}">{% endif %}
   {% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %}<input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">{% endif %}
 
+<div class="connect-orientador" id="cadastroGuia" aria-live="polite">
+ <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Preencha seu contrato</span><span id="cadastroEtapa" class="connect-orientador-numero">Passo 1 de 4</span><button class="connect-orientador-x" id="cadastroFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
+ <h2 id="cadastroTitulo"></h2><p id="cadastroTexto"></p>
+ <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+ <div class="connect-orientador-acoes"><button type="button" id="cadastroAcao"></button><button type="button" class="orientador-secundario" id="cadastroProximo" hidden></button></div>
+</div><button type="button" class="connect-orientador-reabrir" id="cadastroReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>
     <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
@@ -185,8 +191,37 @@
     <label>Observações</label><textarea name="observacoes">{{ cliente.observacoes if cliente else '' }}</textarea>
   </section>
 
-  <button>{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Salvar correções{% elif vitrine_pedido is defined and vitrine_pedido %}Continuar para o contrato{% else %}Enviar reserva{% endif %}</button>
+  <button id="botaoContinuarContrato">{% if modo_edicao_contrato is defined and modo_edicao_contrato %}Salvar correções{% elif vitrine_pedido is defined and vitrine_pedido %}Continuar para o contrato{% else %}Enviar reserva{% endif %}</button>
 </form>
+<script>
+(function(){
+ const orientacao=window.conectOrientacaoUI('cadastro',{{ empresa.slug|tojson }});
+ const form=document.getElementById('formCadastroOrientado');if(!form)return;
+ const secoes=[...form.querySelectorAll('section.secao-form')],botaoFinal=document.getElementById('botaoContinuarContrato');
+ const titulos=['Quem está reservando?','Endereço do evento','Informações do evento','Responsável no local'];
+ const textos=['Informe seu WhatsApp e dados pessoais. Se já é cliente, você pode carregar seu cadastro.','Revise o CEP, número e complemento do endereço de entrega.','Confirme o horário de início, retirada e as informações do evento.','Confira quem receberá o equipamento no local e depois continue para o contrato.'];
+ const titulo=document.getElementById('cadastroTitulo'),texto=document.getElementById('cadastroTexto'),etapa=document.getElementById('cadastroEtapa'),acao=document.getElementById('cadastroAcao'),proximo=document.getElementById('cadastroProximo');
+ let atual=0,animado=false;
+ function mostrar(){if(!secoes.length)return;const idx=Math.min(atual,secoes.length-1),alvo=secoes[idx];
+   if(etapa)etapa.textContent='Seção '+(idx+1)+' de '+secoes.length;
+   if(titulo)titulo.textContent=titulos[idx]||'Confira seus dados';if(texto)texto.textContent=textos[idx]||'';
+   if(acao)acao.textContent=idx===secoes.length-1?'Ver responsável no local':'Ir para esta seção';
+   if(proximo){proximo.hidden=false;proximo.textContent=idx===secoes.length-1?'Continuar para o contrato':'Próxima seção';}
+   document.querySelectorAll('#cadastroGuia .connect-orientador-barras span').forEach((el,i)=>{el.classList.toggle('concluido',i<idx);el.classList.toggle('atual',i===idx)});
+   orientacao.marcar(orientacao.visivel()?alvo:null);
+ }
+ acao?.addEventListener('click',()=>orientacao.ir(secoes[atual]));
+ proximo?.addEventListener('click',()=>{if(atual<secoes.length-1){atual++;mostrar();orientacao.ir(secoes[atual]);}else orientacao.ir(botaoFinal)});
+ // A orientação acompanha a seção que estiver sendo preenchida quando o cliente rola.
+ let tick=false;window.addEventListener('scroll',()=>{if(tick)return;tick=true;requestAnimationFrame(()=>{tick=false;if(!orientacao.visivel())return;
+   const topo=(orientacao.card?.getBoundingClientRect().height||0)+60;
+   let pos=0;secoes.forEach((e,i)=>{if(e.getBoundingClientRect().top<topo+45)pos=i});
+   if(pos!==atual){atual=pos;mostrar()}
+ })},{passive:true});
+ window.addEventListener('connect-orientacao-reaberta',mostrar);
+ mostrar();
+})();
+</script>
 
 <script>
 function preencherEnderecoPublico(e){const m={cep:'cep',endereco:'endereco',numero:'numeroEventoPublico',complemento:'complementoEventoPublico',bairro:'bairro',cidade:'cidade',estado:'estado'};Object.entries(m).forEach(([k,id])=>{const el=document.getElementById(id);if(el)el.value=e[k]||'';});const local=document.querySelector('input[name="local"]');if(local)local.value=e.endereco||'';const nomeLocal=document.querySelector('input[name="local_nome"]');if(nomeLocal)nomeLocal.value=e.apelido||'';}
