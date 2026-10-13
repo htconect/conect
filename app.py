@@ -20,6 +20,7 @@ import unicodedata
 from xml.sax.saxutils import escape as xml_escape
 from difflib import SequenceMatcher
 from urllib.parse import quote, urlparse, parse_qsl, urlencode, urlunparse, urljoin
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 import time as time_module
@@ -8573,46 +8574,37 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         if None not in (lat1, lon1, lat2, lon2):
             distancia_ida, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
 
-        # Uma geocodificação pode achar o CEP correto no ViaCEP, mas posicionar
-        # origem ou destino em outra cidade. Uma rota >300km na mesma cidade
-        # não prova CEP inválido: tenta referências postais independentes.
-        incoerente = bool(mesma_cidade and distancia_ida is not None and distancia_ida > 300)
-        if distancia_ida is None or incoerente:
-            if incoerente:
-                geo_logger.warning(
-                    "[FRETE] rota inicial suspeita empresa=%s origem=%s destino=%s km=%.1f; consultando referencias postais",
-                    empresa.id, origem, cep, distancia_ida,
-                )
+        # Distância zero entre CEPs diferentes indica rota/coordinate inválida.
+        # Isso acontece quando o geocodificador aponta a origem e o destino
+        # ao mesmo ponto; não significa frete grátis.
+        def rota_incoerente(km):
+            return (km is None or not math.isfinite(float(km))
+                    or float(km) < 0.2
+                    or (mesma_cidade and float(km) > 300.0))
+        if rota_incoerente(distancia_ida):
+            geo_logger.warning("[FRETE] rota suspeita origem=%s destino=%s km=%s fonte=%s", origem, cep, distancia_ida, fonte)
             ref_lat1, ref_lon1, ref_fonte1 = _coordenadas_cep_referencia(origem, dados_origem)
             ref_lat2, ref_lon2, ref_fonte2 = _coordenadas_cep_referencia(cep, dados_destino)
-            if None not in (ref_lat1, ref_lon1, ref_lat2, ref_lon2):
-                ref_km, _minutos, ref_fonte = _trecho_rodoviario(
-                    ref_lat1, ref_lon1, ref_lat2, ref_lon2, forcar_recalculo=True
-                )
-                if ref_km is not None and (not mesma_cidade or ref_km <= 300):
-                    distancia_ida, fonte = ref_km, f"{ref_fonte};cep:{ref_fonte1}+{ref_fonte2}"
-                    geo_logger.info(
-                        "[FRETE] rota corrigida empresa=%s origem=%s destino=%s km=%.1f fonte=%s",
-                        empresa.id, origem, cep, distancia_ida, fonte,
-                    )
-                else:
-                    geo_logger.error(
-                        "[FRETE] referencias postais sem rota confiavel empresa=%s origem=%s destino=%s km=%s",
-                        empresa.id, origem, cep, ref_km,
-                    )
-
-        if distancia_ida is None:
-            return {"ok": False, "erro": "CEP confirmado, mas não foi possível calcular a distância agora. Tente novamente."}
-        distancia_ida = max(float(distancia_ida), 0.0)
-        if mesma_cidade and distancia_ida > 300:
-            geo_logger.error(
-                "[FRETE] rota rejeitada por incoerência empresa=%s origem=%s destino=%s km=%.1f",
-                empresa.id, origem, cep, distancia_ida,
+            # Mistura fonte original e referência para corrigir mesmo quando
+            # somente uma das duas coordenadas está equivocada.
+            tentativas = (
+                (ref_lat1, ref_lon1, lat2, lon2, "origem_postal"),
+                (lat1, lon1, ref_lat2, ref_lon2, "destino_postal"),
+                (ref_lat1, ref_lon1, ref_lat2, ref_lon2, "ambos_postais"),
             )
-            return {
-                "ok": False,
-                "erro": "CEP confirmado, mas a localização da rota está inconsistente. Tente novamente ou fale com o atendimento.",
-            }
+            for a, b, c, d, origem_fonte in tentativas:
+                if None in (a, b, c, d):
+                    continue
+                novo_km, _minutos, nova_fonte = _trecho_rodoviario(a, b, c, d, forcar_recalculo=True)
+                if not rota_incoerente(novo_km):
+                    distancia_ida = float(novo_km)
+                    fonte = f"{nova_fonte};{origem_fonte}:{ref_fonte1}+{ref_fonte2}"
+                    geo_logger.info("[FRETE] rota refeita origem=%s destino=%s km=%.1f fonte=%s", origem, cep, distancia_ida, fonte)
+                    break
+        if rota_incoerente(distancia_ida):
+            geo_logger.error("[FRETE] nenhum percurso confiável origem=%s destino=%s km=%s", origem, cep, distancia_ida)
+            return {"ok": False, "erro": "CEP confirmado, mas não foi possível validar a distância. Tente novamente ou entre em contato com o atendimento."}
+        distancia_ida = float(distancia_ida)
 
         quantidade_km = distancia_ida * 2.0
         valor = round(quantidade_km * valor_km, 2)
@@ -19337,7 +19329,7 @@ def portal_empresa_identificar(slug: str, request: Request, db: Session = Depend
 @app.get("/e/{slug}/vitrine", response_class=HTMLResponse)
 def vitrine_publica(
     slug: str, request: Request, data_evento: str = "", tipo_evento: str = "residencial",
-    whatsapp: str = "", cep: str = "", numero: str = "", db: Session = Depends(get_db),
+    whatsapp: str = "", cep: str = "", numero: str = "", partilha: str = "", db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
@@ -19357,6 +19349,18 @@ def vitrine_publica(
     categorias = [c.nome for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True) if c.nome.casefold() in nomes_presentes]
     if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
         categorias.append("Outros")
+
+    estado_compartilhado = None
+    if partilha and len(partilha) <= 16000:
+        try:
+            compartilhado = _partilha_vitrine_serializer().loads(partilha, max_age=60 * 60 * 24 * 30)
+            if compartilhado.get("empresa") == slug:
+                estado_compartilhado = _estado_partilha_validado(compartilhado)
+        except (BadSignature, SignatureExpired, ValueError, TypeError, AttributeError):
+            pass
+    if estado_compartilhado:
+        cep = estado_compartilhado.get("cep") or cep
+        numero = estado_compartilhado.get("numero") or numero
 
     # WhatsApp e endereço são opcionais para navegar no catálogo. Quando vierem
     # preenchidos, o deslocamento já nasce calculado; para adicionar ao pedido,
@@ -19380,8 +19384,133 @@ def vitrine_publica(
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
+        "estado_compartilhado": estado_compartilhado,
         "bloqueio_data": bloqueio_data,
     })
+
+
+_PARTILHA_VITRINE_SALT = "connect-vitrine-partilha-1"
+
+
+def _partilha_vitrine_serializer():
+    return URLSafeTimedSerializer(SECRET_KEY, salt=_PARTILHA_VITRINE_SALT)
+
+
+def _estado_partilha_validado(data):
+    """Whitelist de escolhas. Não compartilha cadastro, telefone nem pagamento."""
+    if not isinstance(data, dict):
+        raise ValueError("Dados inválidos para compartilhar.")
+    estado = {}
+    cep = re.sub(r"\D", "", str(data.get("cep") or ""))
+    numero = str(data.get("numero") or "").strip()
+    if cep and len(cep) != 8:
+        raise ValueError("Confira o CEP antes de compartilhar.")
+    if len(numero) > 30:
+        raise ValueError("Número do endereço inválido.")
+    if cep:
+        estado["cep"] = cep
+    if numero:
+        estado["numero"] = numero
+    cupom = str(data.get("cupom") or "").strip().upper()
+    if len(cupom) > 40:
+        raise ValueError("Cupom muito longo.")
+    if cupom:
+        estado["cupom"] = cupom
+    hora = str(data.get("hora") or "").strip()
+    if hora:
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):(?:00|30)", hora):
+            raise ValueError("Horário inválido.")
+        estado["hora"] = hora
+    estado["retirada_mesmo_dia"] = bool(data.get("retirada_mesmo_dia"))
+    try:
+        horas = int(data.get("horas") or 0)
+    except (TypeError, ValueError):
+        horas = 0
+    estado["horas"] = max(0, min(12, horas))
+    produtos = data.get("produtos") or []
+    if not isinstance(produtos, list) or len(produtos) > 35:
+        raise ValueError("Há muitos produtos no carrinho.")
+    normalizados = []
+    for registro in produtos:
+        if not isinstance(registro, dict):
+            continue
+        try:
+            pid = int(registro.get("id"))
+            qtd = int(registro.get("q") or 1)
+        except (ValueError, TypeError):
+            continue
+        if pid <= 0:
+            continue
+        opcionais = []
+        for opc in (registro.get("opcionais") or [])[:50]:
+            if not isinstance(opc, dict):
+                continue
+            try:
+                oid = int(opc.get("id"))
+                oq = int(opc.get("q") or 0)
+            except (ValueError, TypeError):
+                continue
+            if oid > 0 and oq > 0:
+                opcionais.append({"id": oid, "q": max(1, min(99, oq))})
+        normalizados.append({"id": pid, "q": max(1, min(99, qtd)), "opcionais": opcionais})
+    estado["produtos"] = normalizados
+    return estado
+
+
+@app.post("/e/{slug}/vitrine/compartilhar")
+async def vitrine_gerar_link_compartilhamento(slug: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+        raise HTTPException(404)
+    if int(request.headers.get("content-length") or 0) > 20000:
+        return JSONResponse({"ok": False, "erro": "O compartilhamento é muito grande."}, status_code=413)
+    try:
+        corpo = await request.body()
+        if len(corpo) > 20000:
+            raise ValueError("O compartilhamento é muito grande.")
+        payload = json.loads(corpo)
+        data_obj = datetime.strptime(str(payload.get("data_evento") or ""), "%Y-%m-%d").date()
+        if data_obj < date.today():
+            raise ValueError("Escolha uma data futura para compartilhar.")
+        tipo = _normalizar_tipo_evento_vitrine(str(payload.get("tipo_evento") or "residencial"))
+        estado = _estado_partilha_validado(payload)
+        estado["empresa"] = slug
+        token = _partilha_vitrine_serializer().dumps(estado)
+        # URL absoluta montada a partir da origem da requisição.
+        query = urlencode({"data_evento": data_obj.isoformat(), "tipo_evento": tipo, "partilha": token})
+        caminho = f"/e/{quote(slug, safe='')}/vitrine?{query}"
+        return {"ok": True, "url": str(request.base_url).rstrip("/") + caminho}
+    except (ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+        return JSONResponse({"ok": False, "erro": str(exc) or "Não foi possível compartilhar."}, status_code=400)
+
+
+@app.get("/e/{slug}/vitrine/buscar-cep")
+def vitrine_buscar_cep_endereco(slug: str, request: Request, uf: str = "", cidade: str = "", rua: str = "", db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+        raise HTTPException(404)
+    uf = re.sub(r"[^A-Za-z]", "", uf).upper()
+    cidade, rua = cidade.strip(), rua.strip()
+    if (uf not in {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"} or len(cidade) < 3 or len(rua) < 3
+            or len(cidade) > 90 or len(rua) > 110):
+        return JSONResponse({"ok": False, "erro": "Informe UF, cidade e pelo menos 3 letras da rua."}, status_code=400)
+    url = f"https://viacep.com.br/ws/{quote(uf)}/{quote(cidade, safe='')}/{quote(rua, safe='')}/json/"
+    try:
+        pedido = UrlRequest(url, headers={"User-Agent": "Connect-Humiat/1.0", "Accept": "application/json"})
+        with urlopen(pedido, timeout=6) as resp:
+            retorno = json.loads(resp.read(256000).decode("utf-8"))
+        resultados = []
+        for rec in retorno if isinstance(retorno, list) else []:
+            cep = re.sub(r"\D", "", str(rec.get("cep") or ""))
+            if len(cep) == 8 and str(rec.get("uf") or "").upper() == uf:
+                resultados.append({"cep": cep, "logradouro": str(rec.get("logradouro") or ""),
+                                   "bairro": str(rec.get("bairro") or ""), "cidade": str(rec.get("localidade") or ""),
+                                   "uf": uf})
+            if len(resultados) >= 30:
+                break
+        return {"ok": True, "resultados": resultados}
+    except Exception:
+        return JSONResponse({"ok": False, "erro": "Não foi possível consultar endereços agora. Tente novamente."}, status_code=503)
 
 
 @app.post("/e/{slug}/vitrine/calcular-deslocamento")

@@ -45,6 +45,31 @@
 @keyframes guia-pulso{0%,100%{box-shadow:0 0 0 3px color-mix(in srgb,var(--cliente-cor) 15%,transparent)}50%{box-shadow:0 0 0 9px color-mix(in srgb,var(--cliente-cor) 25%,transparent)}}
 @media(max-width:640px){.guia-vitrine{top:5px;display:block;padding:10px 12px;margin:8px 0 12px;border-radius:13px}.guia-vitrine h2{font-size:.98rem;margin:3px 0}.guia-vitrine p{font-size:.77rem;line-height:1.3}.guia-vitrine-acoes{justify-content:flex-start;margin-top:8px}.guia-vitrine button{min-height:37px!important;padding:7px 11px!important;font-size:.77rem!important}.guia-vitrine-progresso{margin-top:7px}.guia-vitrine-sobre{font-size:.66rem}}
 @media(prefers-reduced-motion:reduce){.guia-foco{animation:none!important}.guia-vitrine button{transition:none!important}}
+
+/* Compartilhar vitrine e pesquisa de CEP sem alterar o fluxo principal. */
+.dados-card{max-height:calc(100dvh - 26px);overflow-y:auto;overscroll-behavior:contain}
+.vitrine-compartilhar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:8px 0 16px}
+.vitrine-compartilhar button{display:inline-flex;align-items:center;gap:7px;min-height:43px;border-radius:13px;padding:9px 14px;font-weight:850;border:1px solid var(--cliente-cor);color:var(--cliente-cor);background:#fff;cursor:pointer}
+.vitrine-compartilhar button:focus-visible,.cep-busca-alternar:focus-visible{outline:3px solid var(--cliente-cor);outline-offset:2px}
+.vitrine-compartilhar small{font-size:.77rem;line-height:1.35;color:var(--cliente-muted);flex:1;min-width:165px}
+.vitrine-compartilhar .feedback{flex-basis:100%;margin:0;font-size:.8rem;color:#067647;font-weight:750}
+.vitrine-compartilhar .feedback[hidden]{display:none}
+.cep-busca-alternar{margin:8px 0 5px!important;background:none!important;border:0!important;color:var(--cliente-cor)!important;text-decoration:underline;min-height:35px!important;padding:4px 0!important;font-size:.83rem!important;font-weight:850!important}
+.cep-busca-painel{margin:8px 0 14px;border:1px solid var(--cliente-borda);background:#f8fafc;border-radius:12px;padding:12px}
+.cep-busca-painel[hidden]{display:none}
+.cep-busca-painel label{display:block;font-weight:800;font-size:.81rem;margin:6px 0 4px}
+.cep-busca-painel input,.cep-busca-painel select{min-width:0;width:100%;min-height:41px;border:1px solid var(--cliente-borda);border-radius:9px;padding:7px 9px;font-size:16px;background:white;color:#0f172a}
+.cep-busca-painel .cep-local{display:grid;grid-template-columns:84px minmax(0,1fr);gap:8px}
+.cep-busca-painel button.cep-procurar{width:100%;min-height:42px;border-radius:10px;margin-top:10px}
+.cep-resultado{max-height:195px;overflow-y:auto;margin-top:8px;display:grid;gap:6px}
+.cep-resultado button{width:100%;display:block;min-height:50px;border:1px solid #cedbea;border-radius:10px;text-align:left;background:white;color:#0f172a;padding:8px 10px;white-space:normal;font-size:.81rem}
+.cep-resultado button b{display:block;font-size:.87rem;color:var(--cliente-cor)}
+.cep-busca-mensagem{font-size:.81rem;line-height:1.35;margin:8px 0 0}
+@media(max-width:450px){.vitrine-compartilhar button{width:100%;justify-content:center}.vitrine-compartilhar small{min-width:100%}}
+
+.dados-card{max-height:92dvh;overflow-y:auto}
+.cep-procurar,.dados-confirmar{color:#fff!important;font-weight:850!important}
+.cep-resultado button{color:#10223c!important}
 </style>
 {% endblock %}
 {% block conteudo %}
@@ -64,6 +89,11 @@
   <div class="guia-vitrine-acoes"><button type="button" id="guiaAcao">Data confirmada</button><button type="button" id="guiaAcaoSecundaria" class="secundario" hidden></button></div>
 </div>
 <button type="button" class="connect-orientador-reabrir" id="vitrineReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
+<div class="vitrine-compartilhar" id="compartilharVitrineBox">
+  <button type="button" id="compartilharVitrine" aria-label="Compartilhar a vitrine com as escolhas preenchidas"><i class="bi bi-share"></i> Compartilhar vitrine preenchida</button>
+  <small>Envia data, endereço, produtos, opcionais, cupom e horário já escolhidos. Quem receber pode continuar e alterar.</small>
+  <p id="partilhaFeedback" class="feedback" role="status" hidden></p>
+</div>
 <div class="catalogo-entrega" id="catalogoEntrega"><div class="catalogo-entrega-info"><b id="catalogoFreteTitulo">{% if frete_inicial %}Deslocamento {% if frete_inicial.consultar %}sob consulta{% else %}calculado{% endif %}{% else %}Deslocamento ainda não calculado{% endif %}</b><small id="catalogoEndereco">{% if frete_inicial %}{{ frete_inicial.endereco_formatado or ('CEP ' ~ cep_inicial ~ ' · nº ' ~ numero_inicial) }}{% else %}Informe CEP e número agora ou calcule o frete no carrinho depois.{% endif %}</small></div><strong id="catalogoFreteValor">{% if frete_inicial %}{% if frete_inicial.consultar %}Sob consulta{% else %}R$ {{ frete_inicial.valor|moeda_br }}{% endif %}{% else %}A calcular{% endif %}</strong><button type="button" class="botao-secundario" id="alterarDadosCatalogo">{% if frete_inicial %}Alterar frete{% else %}Calcular frete{% endif %}</button></div>
 {% if bloqueio_data %}<div class="vitrine-aviso"><b>Data indisponível para reservas.</b>{% if bloqueio_data.descricao %} {{ bloqueio_data.descricao }}.{% endif %} Você pode continuar vendo o catálogo e escolher outra data.</div>{% endif %}
 {% if erro == 'data_bloqueada' %}<div class="vitrine-aviso">Esta data está bloqueada para novas reservas. Escolha outra data para continuar.</div>{% endif %}
@@ -90,7 +120,7 @@
         <button type="button" class="btn-detalhes" data-detalhes="{{ p.id }}">Ver detalhes{% if reg.fotos|length > 1 %} · {{ reg.fotos|length }} fotos{% endif %}</button>
         <div class="produto-rodape"><div class="produto-preco">{% if reg.promocao %}<small class="promo-rotulo">PROMOÇÃO {{ tipo_evento_nome|upper }}</small><span class="preco-de">R$ {{ reg.preco_normal|moeda_br }}</span>{% else %}<small>{{ tipo_evento_nome|upper }}</small>{% endif %}{% if reg.sob_consulta %}<strong class="consulta">Sob consulta</strong>{% else %}<strong>R$ {{ reg.preco|moeda_br }}</strong>{% endif %}</div><button type="button" class="btn-adicionar" {% if reg.disponiveis <= 0 %}disabled{% endif %}>{% if reg.disponiveis > 0 %}{{ empresa.vitrine_botao_texto or 'Adicionar ao pedido' }}{% else %}Indisponível{% endif %}</button></div>
         <input class="produto-check" type="checkbox" name="produto_id" value="{{ p.id }}" hidden><div class="qtd-box"><button type="button" class="qtd-menor" aria-label="Diminuir quantidade">−</button><input class="produto-qtd" type="number" name="quantidade" value="1" min="1" max="{{ reg.disponiveis }}" disabled readonly><button type="button" class="qtd-maior" aria-label="Aumentar quantidade">+</button><span>quantidade</span></div>
-        {% if reg.opcionais %}<div class="opcionais-publicos" data-produto-id="{{ p.id }}"><h3>Escolha seus opcionais</h3><small>Você pode marcar vários opcionais.</small>{% for opc in reg.opcionais %}<div class="opcional-publico" data-produto-id="{{ p.id }}" data-recurso-id="{{ opc.item_estoque_id or '' }}" data-pacote-quantidade="{{ opc.quantidade or 1 }}" data-preco="{{ opc.valor or 0 }}"><label class="opcional-selecao"><input class="opcional-check" type="checkbox" aria-label="Adicionar {{ opc.nome }}"><span>{% if opc.foto_url %}<img src="{{ opc.foto_url }}" alt="" loading="lazy" style="width:45px;height:45px;object-fit:contain;border-radius:8px;float:left;margin-right:8px">{% endif %}<b>{{ opc.nome }}</b><small>{{ opc.quantidade or 1 }} unidade(s) · + R$ {{ ((opc.valor or 0)*(opc.quantidade or 1))|moeda_br }}</small><small class="opcional-sem-estoque" hidden>Sem estoque nesta data</small></span></label><input type="hidden" name="opcional_produto_id" value="{{ p.id }}"><input type="hidden" name="opcional_id" value="{{ opc.id }}"><input class="opcional-qtd" name="opcional_quantidade" type="hidden" value="0"></div>{% endfor %}</div>{% endif %}
+        {% if reg.opcionais %}<div class="opcionais-publicos" data-produto-id="{{ p.id }}"><h3>Escolha seus opcionais</h3><small>Você pode marcar vários opcionais.</small>{% for opc in reg.opcionais %}<div class="opcional-publico" data-opcional-id="{{ opc.id }}" data-produto-id="{{ p.id }}" data-recurso-id="{{ opc.item_estoque_id or '' }}" data-pacote-quantidade="{{ opc.quantidade or 1 }}" data-preco="{{ opc.valor or 0 }}"><label class="opcional-selecao"><input class="opcional-check" type="checkbox" aria-label="Adicionar {{ opc.nome }}"><span>{% if opc.foto_url %}<img src="{{ opc.foto_url }}" alt="" loading="lazy" style="width:45px;height:45px;object-fit:contain;border-radius:8px;float:left;margin-right:8px">{% endif %}<b>{{ opc.nome }}</b><small>{{ opc.quantidade or 1 }} unidade(s) · + R$ {{ ((opc.valor or 0)*(opc.quantidade or 1))|moeda_br }}</small><small class="opcional-sem-estoque" hidden>Sem estoque nesta data</small></span></label><input type="hidden" name="opcional_produto_id" value="{{ p.id }}"><input type="hidden" name="opcional_id" value="{{ opc.id }}"><input class="opcional-qtd" name="opcional_quantidade" type="hidden" value="0"></div>{% endfor %}</div>{% endif %}
       </div>
     </article>
     {% endfor %}
@@ -141,7 +171,16 @@
     <button id="reservarFinal" type="submit" class="btn-reservar-final" disabled><i class="bi bi-arrow-right"></i> Reservar</button>
   </div></section>
   <div id="carrinhoFlutuante" class="carrinho-flutuante" hidden><div><strong><i class="bi bi-cart3"></i> <span id="carrinhoFlutuanteQtd">0 itens</span></strong><small id="carrinhoFlutuanteTotal">R$ 0,00</small></div><button type="button" id="abrirCarrinho">Ver carrinho</button></div>
-  <div class="dados-modal" id="dadosPedidoModal" aria-hidden="true"><div class="dados-card"><div class="dados-topo"><div><h2 id="tituloDadosPedido">Calcular frete</h2><p id="textoDadosPedido">Informe CEP e número para calcular o deslocamento.</p></div><button type="button" class="dados-fechar" id="fecharDadosPedido" aria-label="Fechar">✕</button></div><input id="gateWhatsapp" type="hidden" value="{{ whatsapp_inicial }}"><div class="dados-endereco"><div><label for="gateCep">CEP *</label><input id="gateCep" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000" value="{{ cep_inicial }}"></div><div><label for="gateNumero">Número *</label><input id="gateNumero" inputmode="numeric" autocomplete="address-line2" maxlength="30" placeholder="Nº" value="{{ numero_inicial }}"></div></div><p id="gateStatus" class="checkout-status">Informe o endereço para calcular o deslocamento.</p><button type="button" class="dados-confirmar" id="confirmarDadosPedido"><i class="bi bi-geo-alt"></i> Calcular deslocamento e continuar</button></div></div>
+  <div class="dados-modal" id="dadosPedidoModal" aria-hidden="true"><div class="dados-card"><div class="dados-topo"><div><h2 id="tituloDadosPedido">Calcular frete</h2><p id="textoDadosPedido">Informe CEP e número para calcular o deslocamento.</p></div><button type="button" class="dados-fechar" id="fecharDadosPedido" aria-label="Fechar">✕</button></div><input id="gateWhatsapp" type="hidden" value="{{ whatsapp_inicial }}"><div class="dados-endereco"><div><label for="gateCep">CEP *</label><input id="gateCep" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000" value="{{ cep_inicial }}"></div><div><label for="gateNumero">Número *</label><input id="gateNumero" inputmode="numeric" autocomplete="address-line2" maxlength="30" placeholder="Nº" value="{{ numero_inicial }}"></div></div><button type="button" class="cep-busca-alternar" id="alternarBuscaEndereco" aria-expanded="false" aria-controls="painelBuscaEndereco">Não sei meu CEP — buscar pelo endereço</button>
+<div class="cep-busca-painel" id="painelBuscaEndereco" hidden>
+  <div class="cep-local"><div><label for="buscaUf">Estado (UF)</label><select id="buscaUf"><option value="">UF</option>{% for uf in ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"] %}<option value="{{ uf }}">{{ uf }}</option>{% endfor %}</select></div><div><label for="buscaCidade">Cidade</label><input id="buscaCidade" autocomplete="address-level2" placeholder="Ex.: Rio de Janeiro" maxlength="90"></div></div>
+  <label for="buscaRua">Rua ou avenida</label><input id="buscaRua" placeholder="Digite pelo menos 3 letras" maxlength="110" autocomplete="address-line1">
+  <label for="buscaBairro">Bairro (opcional, para filtrar)</label><input id="buscaBairro" placeholder="Ex.: Freguesia" maxlength="80">
+  <button type="button" class="cep-procurar" id="consultarEndereco">Encontrar CEP</button>
+  <p class="cep-busca-mensagem" id="buscaCepMensagem" role="status">Selecione o estado e informe a cidade e a rua.</p>
+  <div class="cep-resultado" id="resultadosBuscaCep" aria-label="Endereços encontrados"></div>
+</div>
+<p id="gateStatus" class="checkout-status">Informe o endereço para calcular o deslocamento.</p><button type="button" class="dados-confirmar" id="confirmarDadosPedido"><i class="bi bi-geo-alt"></i> Calcular deslocamento e continuar</button></div></div>
   {% else %}<div class="vitrine-vazia"><i class="bi bi-calendar-x"></i><h2>Nenhuma opção disponível</h2><p>Escolha outra data para consultar novamente.</p><button type="button" class="botao abrir-calendario">Escolher outra data</button></div>{% endif %}
 </form>
 {% endblock %}
@@ -151,6 +190,7 @@
  const cards=[...document.querySelectorAll('[data-produto]')],checkout=document.getElementById('checkoutVitrine'),qtdLabel=document.getElementById('checkoutQtd'),subtotalLabel=document.getElementById('subtotalLabel'),freteLabel=document.getElementById('freteLabel'),totalLabel=document.getElementById('totalLabel'),form=document.getElementById('formVitrine'),cepHidden=document.getElementById('cepFreteHidden'),numeroHidden=document.getElementById('numeroFreteHidden'),cepStatus=document.getElementById('cepStatus'),btnReservar=document.getElementById('reservarFinal'),whatsappPreReserva=document.getElementById('whatsappPreReserva'),cupom=document.getElementById('cupomCodigo'),cupomHidden=document.getElementById('cupomHidden'),cupomStatus=document.getElementById('cupomStatus'),btnCupom=document.getElementById('aplicarCupom'),descontoTitulo=document.getElementById('descontoTitulo'),descontoLabel=document.getElementById('descontoLabel'),detalheKm=document.getElementById('detalheKm'),carrinhoItens=document.getElementById('carrinhoItens'),carrinhoFlutuante=document.getElementById('carrinhoFlutuante'),carrinhoFlutuanteQtd=document.getElementById('carrinhoFlutuanteQtd'),carrinhoFlutuanteTotal=document.getElementById('carrinhoFlutuanteTotal'),
  horaInicioVitrine=document.getElementById('horaInicioVitrine'),retiradaMesmoDiaCarrinho=document.getElementById('retiradaMesmoDiaCarrinho'),horasExtrasCarrinho=document.getElementById('horasExtrasCarrinho'),horaExtraMenosCarrinho=document.getElementById('horaExtraMenosCarrinho'),horaExtraMaisCarrinho=document.getElementById('horaExtraMaisCarrinho'),horasExtrasQtdCarrinho=document.getElementById('horasExtrasQtdCarrinho'),horasAdicionaisCarrinho=document.getElementById('horasAdicionaisCarrinho'),horasExtrasPrecoCarrinho=document.getElementById('horasExtrasPrecoCarrinho'),horaFimContratoCarrinho=document.getElementById('horaFimContratoCarrinho'),horaRetiradaCarrinho=document.getElementById('horaRetiradaCarrinho'),duracaoContratoCarrinho=document.getElementById('duracaoContratoCarrinho'),retiradaLimiteAvisoCarrinho=document.getElementById('retiradaLimiteAvisoCarrinho'),horasExtraTituloCarrinho=document.getElementById('horasExtraTituloCarrinho'),horasExtraValorCarrinho=document.getElementById('horasExtraValorCarrinho'),
  dadosModal=document.getElementById('dadosPedidoModal'),gateWhatsapp=document.getElementById('gateWhatsapp'),gateCep=document.getElementById('gateCep'),gateNumero=document.getElementById('gateNumero'),gateStatus=document.getElementById('gateStatus'),confirmarDados=document.getElementById('confirmarDadosPedido'),catalogoEndereco=document.getElementById('catalogoEndereco'),catalogoFreteTitulo=document.getElementById('catalogoFreteTitulo'),catalogoFreteValor=document.getElementById('catalogoFreteValor'),checkoutWhatsappResumo=document.getElementById('checkoutWhatsappResumo'),alterarDataInput=document.getElementById('alterarDataInput');
+ const ESTADO_COMPARTILHADO={{ estado_compartilhado|tojson }};
  const FRETE_INICIAL={{ frete_inicial|tojson }};const EXIGE_CONTATO_PRE_RESERVA=false;
  let freteDados=FRETE_INICIAL&&FRETE_INICIAL.ok?FRETE_INICIAL:null,frete=freteDados?Number(freteDados.valor)||0:0,freteOk=!!freteDados,freteConsulta=!!(freteDados&&freteDados.consultar),cupomTipo='percentual',cupomValor=0,horasExtrasSelecionadas=0,retiradaHorarioValido=true,produtoPendente=null;
  const CORTESIA_RETIRADA={{ 'true' if empresa.retirada_cortesia_proximo_dia else 'false' }},HORA_EXTRA_PRIMEIRA={{ empresa.hora_extra_primeira_valor or 0 }},HORA_EXTRA_DEMAIS={{ empresa.hora_extra_demais_valor or 0 }},RETIRADA_MAXIMA='{{ empresa.retirada_hora_maxima or "22:00" }}';
@@ -293,12 +333,95 @@
  function fecharDetalhes(){detalheModal?.classList.remove('ativo');detalheModal?.setAttribute('aria-hidden','true')}
  document.querySelectorAll('[data-detalhes]').forEach(el=>el.addEventListener('click',()=>abrirDetalhes(el.dataset.detalhes)));document.getElementById('fecharDetalhe')?.addEventListener('click',fecharDetalhes);detalheModal?.addEventListener('click',e=>{if(e.target===detalheModal)fecharDetalhes()});detAdicionar?.addEventListener('click',()=>{const card=cards.find(c=>c.querySelector('.produto-check')?.value===String(detalheProdutoId));if(!card)return;card.querySelector('.btn-adicionar')?.click();detAdicionar.textContent=card.querySelector('.produto-check')?.checked?'Remover do pedido':'Adicionar ao pedido'});
  document.querySelectorAll('.filtro-vitrine').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filtro-vitrine').forEach(x=>x.classList.remove('ativo'));b.classList.add('ativo');const f=b.dataset.filtro||'';cards.forEach(c=>c.hidden=!!f&&(c.dataset.categoria||'')!==f);atualizarGuia()}));
+
  gateCep?.addEventListener('input',()=>{gateCep.value=formatCep(gateCep.value);if(digitos(gateCep.value)!==digitos(cepHidden?.value||''))invalidarFreteAnterior();if(digitos(gateCep.value).length===8){gateStatus.textContent='Agora informe o número e calcule o frete.';gateStatus.className='checkout-status'}else validarCepFormulario()});gateNumero?.addEventListener('input',()=>{if(String(gateNumero.value||'').trim()!==String(numeroHidden?.value||'').trim())invalidarFreteAnterior()});confirmarDados?.addEventListener('click',calcularDeslocamento);document.getElementById('fecharDadosPedido')?.addEventListener('click',fecharDados);dadosModal?.addEventListener('click',e=>{if(e.target===dadosModal)fecharDados()});document.getElementById('alterarDadosCatalogo')?.addEventListener('click',()=>abrirDados());document.getElementById('alterarDadosCheckout')?.addEventListener('click',()=>abrirDados());document.getElementById('calcularFreteCheckout')?.addEventListener('click',()=>abrirDados());
  function abrirCalendario(){if(!alterarDataInput)return;try{if(typeof alterarDataInput.showPicker==='function')alterarDataInput.showPicker();else{alterarDataInput.style.pointerEvents='auto';alterarDataInput.focus();alterarDataInput.click();alterarDataInput.style.pointerEvents='none'}}catch(_){alterarDataInput.focus();alterarDataInput.click()}}
  document.getElementById('alterarTipoEvento')?.addEventListener('change',e=>{const u=new URL(window.location.href);u.pathname='/e/{{ empresa.slug }}/vitrine';u.searchParams.set('data_evento',alterarDataInput.value);u.searchParams.set('tipo_evento',e.target.value);u.searchParams.delete('erro');window.location.href=u.toString()});document.getElementById('alterarDataBtn')?.addEventListener('click',abrirCalendario);document.querySelectorAll('.abrir-calendario').forEach(b=>b.addEventListener('click',abrirCalendario));alterarDataInput?.addEventListener('change',()=>{if(!alterarDataInput.value)return;const u=new URL(window.location.href);u.pathname='/e/{{ empresa.slug }}/vitrine';u.searchParams.set('data_evento',alterarDataInput.value);u.searchParams.set('tipo_evento','{{ tipo_evento }}');if(whatsappPreReserva?.value)u.searchParams.set('whatsapp',whatsappPreReserva.value);else u.searchParams.delete('whatsapp');if(cepHidden?.value)u.searchParams.set('cep',cepHidden.value);else u.searchParams.delete('cep');if(numeroHidden?.value)u.searchParams.set('numero',numeroHidden.value);else u.searchParams.delete('numero');u.searchParams.delete('erro');window.location.href=u.toString()});
  btnCupom?.addEventListener('click',async()=>{const codigo=(cupom?.value||'').trim();if(!codigo){cupomTipo='percentual';cupomValor=0;cupomHidden.value='';cupomStatus.textContent='Informe um código de cupom.';cupomStatus.className='checkout-status erro';atualizar();return}btnCupom.disabled=true;try{const body=new URLSearchParams({codigo}),resp=await fetch('/e/{{ empresa.slug }}/vitrine/validar-cupom',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body}),data=await resp.json();if(!resp.ok||!data.ok)throw new Error(data.erro||'Cupom inválido.');cupomTipo=data.tipo==='fixo'?'fixo':'percentual';cupomValor=Number(data.valor)||0;cupomHidden.value=data.codigo||codigo.toUpperCase();cupom.value=cupomHidden.value;const rotulo=cupomTipo==='fixo'?brl(cupomValor):`${cupomValor.toLocaleString('pt-BR')}%`;cupomStatus.textContent=`Cupom aplicado: ${rotulo} de desconto.`;cupomStatus.className='checkout-status ok';atualizar()}catch(err){cupomTipo='percentual';cupomValor=0;cupomHidden.value='';cupomStatus.textContent=err.message||'Cupom inválido.';cupomStatus.className='checkout-status erro';atualizar()}finally{btnCupom.disabled=false}});
  horaInicioVitrine?.addEventListener('input',atualizar);retiradaMesmoDiaCarrinho?.addEventListener('change',()=>{if(CORTESIA_RETIRADA&&!retiradaMesmoDiaAtiva())horasExtrasSelecionadas=0;atualizar()});horaExtraMaisCarrinho?.addEventListener('click',()=>{atualizarHorarioCarrinho();if(!horaExtraMaisCarrinho.disabled){horasExtrasSelecionadas+=1;atualizar()}});horaExtraMenosCarrinho?.addEventListener('click',()=>{horasExtrasSelecionadas=Math.max(0,horasExtrasSelecionadas-1);atualizar()});document.getElementById('abrirCarrinho')?.addEventListener('click',()=>rolarParaGuia(checkout));
  form?.addEventListener('submit',e=>{if(!cards.some(c=>c.querySelector('.produto-check')?.checked)||!dadosPedidoOk()||!horaInicioValida()||!retiradaHorarioValido){e.preventDefault();if(!dadosPedidoOk())abrirDados();else if(!horaInicioValida())horaInicioVitrine?.focus();atualizarBotaoFinal();return}window.mostrarCarregando?.('{% if fluxo_vitrine == "aprovacao" %}Enviando pré-reserva{% else %}Preparando sua reserva{% endif %}','Aguarde só um instante.')});
+
+ // Compartilhar somente escolhas de compra (nenhum dado do cadastro/WhatsApp/pagamento).
+ const botaoCompartilhar=document.getElementById('compartilharVitrine'),feedbackPartilha=document.getElementById('partilhaFeedback');
+ function estadoParaCompartilhar(){
+   const produtos=cards.filter(c=>c.querySelector('.produto-check')?.checked).map(c=>{
+     const id=Number(c.querySelector('.produto-check').value),q=Number(c.querySelector('.produto-qtd')?.value)||1;
+     const opcionais=[...document.querySelectorAll('.opcional-publico')].filter(row=>String(row.dataset.produtoId)===String(id))
+       .map(row=>({id:Number(row.querySelector('input[name="opcional_id"]')?.value),q:Number(row.querySelector('.opcional-qtd')?.value)||0}))
+       .filter(o=>o.id>0&&o.q>0);
+     return {id,q,opcionais};
+   });
+   return {data_evento:form.querySelector('[name="data_evento"]').value,tipo_evento:form.querySelector('[name="tipo_evento"]').value,
+       cep:digitos(gateCep?.value||cepHidden?.value),numero:(gateNumero?.value||numeroHidden?.value||'').trim(),
+       cupom:(cupom?.value||cupomHidden?.value||'').trim(),hora:horaInicioVitrine?.value||'',
+       retirada_mesmo_dia:retiradaMesmoDiaAtiva(),horas:horasExtrasSelecionadas,produtos};
+ }
+ function avisoPartilha(mensagem,erro=false){if(!feedbackPartilha)return;feedbackPartilha.hidden=false;feedbackPartilha.textContent=mensagem;feedbackPartilha.style.color=erro?'#b42318':'#067647'}
+ botaoCompartilhar?.addEventListener('click',async()=>{
+   botaoCompartilhar.disabled=true;const labelOriginal=botaoCompartilhar.innerHTML;botaoCompartilhar.textContent='Preparando link...';
+   try{
+     const resp=await fetch('/e/{{ empresa.slug }}/vitrine/compartilhar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(estadoParaCompartilhar())});
+     const dados=await resp.json();if(!resp.ok||!dados.ok)throw new Error(dados.erro||'Não foi possível criar o link.');
+     const url=dados.url;
+     if(navigator.share){
+       try{await navigator.share({title:'Continue sua reserva',text:'Escolhi estas opções para a festa. Confira e continue sua reserva:',url});avisoPartilha('Vitrine compartilhada.');return}
+       catch(err){if(err.name==='AbortError'){avisoPartilha('Compartilhamento cancelado.');return}}
+     }
+     if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(url);avisoPartilha('Link com as escolhas copiado! Envie no WhatsApp ou onde preferir.');}
+     else{window.prompt('Copie o link da vitrine preenchida:',url);avisoPartilha('Link pronto para compartilhar.');}
+   }catch(err){avisoPartilha(err.message||'Não foi possível compartilhar.',true)}
+   finally{botaoCompartilhar.disabled=false;botaoCompartilhar.innerHTML=labelOriginal}
+ });
+
+ // Alternativa opcional ao campo de CEP: busca por UF, cidade e rua via ViaCEP.
+ const btnBusca=document.getElementById('alternarBuscaEndereco'),painelBusca=document.getElementById('painelBuscaEndereco'),buscarEndereco=document.getElementById('consultarEndereco'),buscaMensagem=document.getElementById('buscaCepMensagem'),resultadosCEP=document.getElementById('resultadosBuscaCep'),buscaUF=document.getElementById('buscaUf'),buscaCidade=document.getElementById('buscaCidade'),buscaRua=document.getElementById('buscaRua');
+ btnBusca?.addEventListener('click',()=>{painelBusca.hidden=!painelBusca.hidden;btnBusca.setAttribute('aria-expanded',String(!painelBusca.hidden));if(!painelBusca.hidden)buscaUF?.focus()});
+ buscarEndereco?.addEventListener('click',async()=>{
+   const uf=buscaUF?.value||'',cidade=(buscaCidade?.value||'').trim(),rua=(buscaRua?.value||'').trim(),bairro=(document.getElementById('buscaBairro')?.value||'').trim();
+   resultadosCEP.replaceChildren();
+   if(uf.length!==2||cidade.length<3||rua.length<3){buscaMensagem.textContent='Informe estado, cidade e pelo menos 3 letras da rua.';return}
+   buscarEndereco.disabled=true;buscaMensagem.textContent='Procurando endereços...';
+   try{
+     const url='/e/{{ empresa.slug }}/vitrine/buscar-cep?'+new URLSearchParams({uf,cidade,rua});
+     const resp=await fetch(url);const data=await resp.json();if(!resp.ok||!data.ok)throw new Error(data.erro||'Não foi possível buscar o CEP.');
+     const base=Array.isArray(data.resultados)?data.resultados:[];
+     const comparar=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+     const lista=base.filter(item=>!bairro||comparar(item.bairro).includes(comparar(bairro)));
+     buscaMensagem.textContent=lista.length?`Encontramos ${lista.length} endereço(s). Toque no correto para preencher o CEP.`:'Nenhum endereço encontrado. Confira rua, cidade e bairro.';
+     lista.forEach(r=>{const b=document.createElement('button');b.type='button';const titulo=document.createElement('b');titulo.textContent=formatCep(r.cep)+' · '+(r.logradouro||'Logradouro não informado');const detalhe=document.createElement('span');detalhe.textContent=[r.bairro,r.cidade,r.uf].filter(Boolean).join(' · ');b.append(titulo,detalhe);
+       b.addEventListener('click',()=>{gateCep.value=formatCep(r.cep);invalidarFreteAnterior();painelBusca.hidden=true;btnBusca.setAttribute('aria-expanded','false');gateStatus.className='checkout-status';gateStatus.textContent='CEP encontrado. Confirme o número e calcule o deslocamento.';gateNumero?.focus();});resultadosCEP.appendChild(b)});
+   }catch(err){buscaMensagem.textContent=err.message||'Erro na pesquisa do endereço.'}
+   finally{buscarEndereco.disabled=false}
+ });
+
+ // Retomar a vitrine recebida; estoque, opções e cupom são revalidados no momento.
+ function restaurarPartilha(){
+   if(!ESTADO_COMPARTILHADO||!Array.isArray(ESTADO_COMPARTILHADO.produtos))return;
+   let faltando=0;
+   ESTADO_COMPARTILHADO.produtos.forEach(item=>{
+     const card=cards.find(c=>Number(c.querySelector('.produto-check')?.value)===Number(item.id));
+     if(!card||Number(card.dataset.disponivel)<=0){faltando++;return}
+     const check=card.querySelector('.produto-check'),q=card.querySelector('.produto-qtd'),add=card.querySelector('.btn-adicionar'),limite=Number(card.dataset.disponivel)||0;
+     check.checked=true;q.disabled=false;q.value=String(Math.max(1,Math.min(Number(item.q)||1,limite)));
+     card.classList.add('selecionado');add?.classList.add('selecionado');if(add)add.textContent='Adicionado ✓';
+     (item.opcionais||[]).forEach(op=>{
+       const linha=[...card.querySelectorAll('.opcional-publico')].find(r=>Number(r.querySelector('input[name="opcional_id"]')?.value)===Number(op.id));
+       if(!linha)return;
+       const opcCheck=linha.querySelector('.opcional-check'),opcQtd=linha.querySelector('.opcional-qtd');
+       opcCheck.checked=true;opcQtd.value=String(Math.max(1,Math.min(99,Number(op.q)||1)));
+     });
+     if((Number(item.q)||1)>limite)faltando++;
+   });
+   if(ESTADO_COMPARTILHADO.hora&&horaInicioVitrine){horaInicioVitrine.value=ESTADO_COMPARTILHADO.hora}
+   if(retiradaMesmoDiaCarrinho?.type==='checkbox')retiradaMesmoDiaCarrinho.checked=!!ESTADO_COMPARTILHADO.retirada_mesmo_dia;
+   horasExtrasSelecionadas=Math.max(0,Math.min(12,Number(ESTADO_COMPARTILHADO.horas)||0));
+   if(ESTADO_COMPARTILHADO.cupom&&cupom&&btnCupom){cupom.value=ESTADO_COMPARTILHADO.cupom;setTimeout(()=>btnCupom.click(),50)}
+   if(ESTADO_COMPARTILHADO.cep&&gateCep)gateCep.value=formatCep(ESTADO_COMPARTILHADO.cep);
+   if(ESTADO_COMPARTILHADO.numero&&gateNumero)gateNumero.value=ESTADO_COMPARTILHADO.numero;
+   if(faltando>0)avisoPartilha('Alguns itens ou quantidades mudaram de disponibilidade. Confira o carrinho.',true);
+   else avisoPartilha('Vitrine recebida! Confira as escolhas e continue sua reserva.');
+ }
+ restaurarPartilha();
  atualizar();
 })();
 </script>
