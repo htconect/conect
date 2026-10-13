@@ -8460,6 +8460,69 @@ def _coordenadas_cep_numero(cep: str, numero: str = "", identificador: str = "ce
     return lat, lon, detalhe
 
 
+# Fontes de CEP com geolocalização são usadas somente quando a rota do
+# geocodificador comum estiver incoerente. A existência do CEP continua sendo
+# validada pelo ViaCEP; coordenadas externas nunca tornam um CEP inválido válido.
+_CEP_GEO_REFERENCIA_CACHE: dict[str, tuple[float, float, str]] = {}
+
+
+def _coordenadas_cep_referencia(cep: str, dados_cep: dict | None = None):
+    """Obtém posição postal alternativa, conferindo município/UF com o ViaCEP.
+
+    Evita aceitar correspondências com ruas homônimas em cidades distantes.
+    Somente cacheia resultados de coordenadas válidas; indisponibilidade dos
+    serviços não é armazenada, para permitir nova tentativa posterior.
+    """
+    codigo = re.sub(r"\D", "", str(cep or ""))
+    if len(codigo) != 8:
+        return None, None, "cep_invalido"
+    dados_cep = dados_cep or _dados_cep_brasil(codigo)
+    if not dados_cep.get("cidade") or not dados_cep.get("estado"):
+        return None, None, "cep_nao_confirmado"
+    if codigo in _CEP_GEO_REFERENCIA_CACHE:
+        return _CEP_GEO_REFERENCIA_CACHE[codigo]
+
+    def _comparavel(valor):
+        texto = unicodedata.normalize("NFKD", str(valor or ""))
+        return re.sub(r"\s+", " ", "".join(c for c in texto if not unicodedata.combining(c)).casefold()).strip()
+
+    esperada_cidade = _comparavel(dados_cep.get("cidade"))
+    esperada_uf = _comparavel(dados_cep.get("estado"))
+    provedores = (
+        ("brasilapi", f"https://brasilapi.com.br/api/cep/v2/{codigo}"),
+        ("awesomeapi", f"https://cep.awesomeapi.com.br/json/{codigo}"),
+    )
+    for provedor, url in provedores:
+        try:
+            pedido = UrlRequest(url, headers={"User-Agent": "Connect-Humiat/1.0", "Accept": "application/json"})
+            with urlopen(pedido, timeout=3.5) as resposta:
+                dados = json.loads(resposta.read().decode("utf-8"))
+            if not isinstance(dados, dict):
+                continue
+            # Não confiar nas coordenadas se o CEP/cidade/estado divergir.
+            cep_resposta = re.sub(r"\D", "", str(dados.get("cep") or ""))
+            if cep_resposta != codigo:
+                continue
+            uf = _comparavel(dados.get("state") or dados.get("uf"))
+            cidade = _comparavel(dados.get("city") or dados.get("localidade"))
+            if uf != esperada_uf or cidade != esperada_cidade:
+                geo_logger.warning("[FRETE] referência divergente cep=%s provedor=%s cidade=%s uf=%s", codigo, provedor, cidade, uf)
+                continue
+            coords = ((dados.get("location") or {}).get("coordinates") or {}) if provedor == "brasilapi" else dados
+            lat = float(coords.get("latitude") if provedor == "brasilapi" else coords.get("lat"))
+            lon = float(coords.get("longitude") if provedor == "brasilapi" else coords.get("lng"))
+            if not _coordenadas_validas_brasil(lat, lon):
+                continue
+            resultado = (lat, lon, provedor)
+            _CEP_GEO_REFERENCIA_CACHE[codigo] = resultado
+            return resultado
+        except (HTTPError, URLError, TimeoutError, ValueError, TypeError, KeyError, AttributeError, json.JSONDecodeError) as exc:
+            geo_logger.warning("[FRETE] referência postal indisponível cep=%s provedor=%s motivo=%s", codigo, provedor, type(exc).__name__)
+        except Exception:
+            geo_logger.exception("[FRETE] falha inesperada na referência postal cep=%s provedor=%s", codigo, provedor)
+    return None, None, "referencia_indisponivel"
+
+
 def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: str = "") -> dict:
     # Não truncar CEPs longos: um CEP com 9 dígitos não pode virar outro CEP válido.
     cep = re.sub(r"\D", "", str(cep_destino or ""))
@@ -8497,32 +8560,58 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         valor_km = max(float(getattr(empresa, "frete_valor_km", 0) or 0), 0.0)
         if len(origem) != 8 or valor_km <= 0:
             return {"ok": False, "erro": "O cálculo por KM ainda não foi configurado pela empresa."}
-        lat1, lon1, _ = _coordenadas_cep(origem, f"frete-origem-{empresa.id}")
-        lat2, lon2, _ = _coordenadas_cep_numero(cep, numero, f"frete-destino-{empresa.id}")
-        if None in (lat1, lon1, lat2, lon2):
-            return {"ok": False, "erro": "Não foi possível localizar este endereço agora. Confira CEP e número."}
-        distancia_ida, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
-        if distancia_ida is None:
-            return {"ok": False, "erro": "Não foi possível calcular o deslocamento agora."}
-        distancia_ida = max(float(distancia_ida), 0.0)
-
-        # Trava de segurança: se origem e destino pertencem ao mesmo município/UF,
-        # uma rota extremamente longa indica geocodificação incorreta. Nunca cobrar
-        # milhares de quilômetros silenciosamente do cliente.
         dados_origem = _dados_cep_brasil(origem)
         mesma_cidade = bool(
             dados_origem and dados_destino
             and str(dados_origem.get("cidade") or "").strip().casefold() == str(dados_destino.get("cidade") or "").strip().casefold()
             and str(dados_origem.get("estado") or "").strip().upper() == str(dados_destino.get("estado") or "").strip().upper()
         )
+        lat1, lon1, _ = _coordenadas_cep(origem, f"frete-origem-{empresa.id}")
+        lat2, lon2, _ = _coordenadas_cep_numero(cep, numero, f"frete-destino-{empresa.id}")
+        distancia_ida = None
+        fonte = "sem_rota"
+        if None not in (lat1, lon1, lat2, lon2):
+            distancia_ida, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
+
+        # Uma geocodificação pode achar o CEP correto no ViaCEP, mas posicionar
+        # origem ou destino em outra cidade. Uma rota >300km na mesma cidade
+        # não prova CEP inválido: tenta referências postais independentes.
+        incoerente = bool(mesma_cidade and distancia_ida is not None and distancia_ida > 300)
+        if distancia_ida is None or incoerente:
+            if incoerente:
+                geo_logger.warning(
+                    "[FRETE] rota inicial suspeita empresa=%s origem=%s destino=%s km=%.1f; consultando referencias postais",
+                    empresa.id, origem, cep, distancia_ida,
+                )
+            ref_lat1, ref_lon1, ref_fonte1 = _coordenadas_cep_referencia(origem, dados_origem)
+            ref_lat2, ref_lon2, ref_fonte2 = _coordenadas_cep_referencia(cep, dados_destino)
+            if None not in (ref_lat1, ref_lon1, ref_lat2, ref_lon2):
+                ref_km, _minutos, ref_fonte = _trecho_rodoviario(
+                    ref_lat1, ref_lon1, ref_lat2, ref_lon2, forcar_recalculo=True
+                )
+                if ref_km is not None and (not mesma_cidade or ref_km <= 300):
+                    distancia_ida, fonte = ref_km, f"{ref_fonte};cep:{ref_fonte1}+{ref_fonte2}"
+                    geo_logger.info(
+                        "[FRETE] rota corrigida empresa=%s origem=%s destino=%s km=%.1f fonte=%s",
+                        empresa.id, origem, cep, distancia_ida, fonte,
+                    )
+                else:
+                    geo_logger.error(
+                        "[FRETE] referencias postais sem rota confiavel empresa=%s origem=%s destino=%s km=%s",
+                        empresa.id, origem, cep, ref_km,
+                    )
+
+        if distancia_ida is None:
+            return {"ok": False, "erro": "CEP confirmado, mas não foi possível calcular a distância agora. Tente novamente."}
+        distancia_ida = max(float(distancia_ida), 0.0)
         if mesma_cidade and distancia_ida > 300:
             geo_logger.error(
-                "[FRETE] rota rejeitada por inconsistência geográfica empresa=%s origem=%s destino=%s distancia=%.1fkm",
+                "[FRETE] rota rejeitada por incoerência empresa=%s origem=%s destino=%s km=%.1f",
                 empresa.id, origem, cep, distancia_ida,
             )
             return {
                 "ok": False,
-                "erro": "Não foi possível validar a distância deste endereço. Tente novamente em alguns instantes.",
+                "erro": "CEP confirmado, mas a localização da rota está inconsistente. Tente novamente ou fale com o atendimento.",
             }
 
         quantidade_km = distancia_ida * 2.0
