@@ -8314,7 +8314,8 @@ def _dados_cep_brasil(cep: str) -> dict:
         "cidade": str(bruto.get("localidade") or "").strip(),
         "estado": str(bruto.get("uf") or "").strip().upper(),
     } if bruto else {}
-    _CEP_DADOS_CACHE[cep_limpo] = dados
+    if dados.get("cidade") and dados.get("estado"):
+        _CEP_DADOS_CACHE[cep_limpo] = dados
     return dict(dados)
 
 
@@ -8460,13 +8461,18 @@ def _coordenadas_cep_numero(cep: str, numero: str = "", identificador: str = "ce
 
 
 def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: str = "") -> dict:
-    cep = _cep_limpo(cep_destino)
+    # Não truncar CEPs longos: um CEP com 9 dígitos não pode virar outro CEP válido.
+    cep = re.sub(r"\D", "", str(cep_destino or ""))
     numero = str(numero_destino or "").strip()[:30]
     if len(cep) != 8:
-        return {"ok": False, "erro": "Informe um CEP válido."}
+        return {"ok": False, "erro": "CEP inválido. Informe os 8 dígitos."}
     if not numero:
         return {"ok": False, "erro": "Informe o número do endereço."}
     dados_destino = _dados_cep_brasil(cep)
+    if not dados_destino.get("cidade") or not dados_destino.get("estado"):
+        # Não cobrar valor fixo/por km e nem marcar como 'sob consulta' com CEP
+        # não localizado ou quando a consulta de CEP estiver indisponível.
+        return {"ok": False, "erro": "CEP não localizado ou consulta indisponível. Confira o CEP e tente novamente."}
     partes_endereco = [dados_destino.get("logradouro") if dados_destino else "", numero, dados_destino.get("bairro") if dados_destino else "",
                       (f"{dados_destino.get('cidade')}/{dados_destino.get('estado')}" if dados_destino and dados_destino.get('cidade') else ""),
                       f"CEP {cep[:5]}-{cep[5:]}"]

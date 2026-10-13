@@ -3,8 +3,8 @@
 <p><a class="voltar" href="/painel">← Voltar ao painel</a></p>
 <h1>Contratos e reservas</h1>
 
-<form method="get" class="filtro-periodo" style="margin-bottom:14px">
-  <label style="min-width:220px;flex:1">
+<form method="get" class="filtro-periodo filtro-periodo-contratos" style="margin-bottom:14px">
+  <label class="contratos-busca">
     <span>Buscar cliente</span>
     <input name="busca" value="{{ busca or '' }}" placeholder="Nome, WhatsApp, CPF ou CNPJ">
   </label>
@@ -21,7 +21,7 @@
     <label class="check"><input type="checkbox" name="credito" value="1" {% if filtro_credito %}checked{% endif %}> Em crédito</label>
     <label class="check"><input type="checkbox" name="cancelados" value="1" {% if filtro_cancelados %}checked{% endif %}> Cancelados</label>
   </div>
-  <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+  <div class="contratos-acoes-filtros">
     <button class="botao" type="submit"><i class="bi bi-funnel"></i> Filtrar</button>
     <a class="botao-secundario" href="/painel/solicitacoes"><i class="bi bi-x-circle"></i> Limpar filtros</a>
   </div>
