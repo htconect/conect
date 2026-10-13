@@ -1288,7 +1288,7 @@ def limpar_agenda_operacional(db: Session):
             # Depois de roteirizado, data e hora pertencem exclusivamente à rota.
             # Alterações no contrato ou rotinas de sincronização não podem mudar
             # a posição operacional; somente o botão Salvar da roteirização pode.
-            if not principal.roteirizado:
+            if not principal.roteirizado and principal.status_operacional != "concluido":
                 principal.data = reserva.data_evento
                 principal.hora_inicio = reserva.hora_inicio
                 principal.hora_fim = reserva.hora_fim
@@ -4559,15 +4559,110 @@ def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
         )
         db.add(retirada)
 
-    # Retirada obrigatória é uma exigência contratual. Ao alterar a data/hora
-    # no contrato, a rota deve acompanhar imediatamente, mesmo que já estivesse
-    # roteirizada. Assim as duas horas exibidas permanecem iguais.
+    # Uma operação concluída é histórica e nunca pode ser remarcada pelo contrato.
+    if retirada.status_operacional == "concluido":
+        return
+
+    # Retirada obrigatória acompanha a data/hora contratadas, mesmo roteirizada.
     retirada.data = data_retirada
     retirada.hora_inicio = hora_retirada
     retirada.hora_fim = None
     retirada.previsao_entrega = hora_retirada.strftime("%H:%M") if hora_retirada else ""
     retirada.titulo = titulo_base
     retirada.bairro = item.bairro
+
+
+
+def sincronizar_datas_operacao_com_contrato(
+    db: Session, item: Solicitacao, data_anterior: date | None = None,
+    corrigir_existentes: bool = False, usuario: str = "Sistema",
+) -> tuple[int, int]:
+    """Atualiza entrega/busca PENDENTES quando o contrato muda de data.
+
+    Remarcações feitas pelo contrato deslocam todos os eventos pela mesma
+    quantidade de dias, preservando entregas planejadas antes do evento e
+    retiradas com horário personalizado. O reparo manual alinha uma operação
+    antiga à data atual do contrato. Nunca edita operações concluídas.
+    """
+    if not item or not item.id or not item.data_evento:
+        return 0, 0
+    mudou = bool(data_anterior and data_anterior != item.data_evento)
+    if not mudou and not corrigir_existentes:
+        return 0, 0
+    if retirada_obrigatoria_ativa(item) and (mudou or corrigir_existentes):
+        # Retirada obrigatória sempre ocorre na mesma data do novo contrato.
+        item.retirada_data = item.data_evento
+
+    eventos = db.query(Agenda).filter_by(
+        empresa_id=item.empresa_id, solicitacao_id=item.id
+    ).order_by(Agenda.id).all()
+    if not eventos:
+        return 0, 0
+    # Não se deve deslocar uma viagem parcialmente ou totalmente concluída.
+    # Caso precise, ela exige um ajuste operacional explícito e auditado.
+    concluidos = sum(a.status_operacional == "concluido" for a in eventos)
+    if concluidos:
+        return 0, concluidos
+
+    entrega = next((a for a in eventos if a.tipo_evento == "entrega"), None)
+    data_antiga_entrega = entrega.data if entrega else None
+    delta = item.data_evento - data_anterior if mudou else timedelta(0)
+    alterados = 0
+    momento = datetime.now().strftime("%d/%m/%Y %H:%M")
+    usuario = (usuario or "Sistema").strip()[:80]
+    for a in eventos:
+        if a.tipo_evento not in ("entrega", "retirada"):
+            continue
+        anterior = a.data
+        horario_antigo = a.hora_inicio
+        if a.tipo_evento == "retirada" and retirada_obrigatoria_ativa(item):
+            nova_data = item.retirada_data or item.data_evento
+            nova_hora = item.retirada_hora or item.hora_fim or item.hora_inicio
+        elif corrigir_existentes and a.tipo_evento == "entrega":
+            nova_data = item.data_evento
+            nova_hora = a.hora_inicio or item.hora_inicio
+        elif corrigir_existentes and a.tipo_evento == "retirada":
+            # Se a retirada tinha um intervalo planejado a partir da entrega,
+            # conserva esse intervalo. Caso contrário, usa a regra da empresa.
+            if data_antiga_entrega and anterior and anterior >= data_antiga_entrega:
+                intervalo = min((anterior - data_antiga_entrega).days, 30)
+                nova_data = item.data_evento + timedelta(days=intervalo)
+            else:
+                nova_data, _ = _previsao_retirada_operacional(item)
+            nova_hora = a.hora_inicio
+        else:
+            nova_data = (anterior + delta) if anterior else item.data_evento
+            nova_hora = a.hora_inicio
+        if a.tipo_evento == "retirada" and nova_data < item.data_evento:
+            nova_data, hora_prevista = _previsao_retirada_operacional(item, entrega)
+            nova_hora = nova_hora or hora_prevista
+        if a.tipo_evento == "entrega" and nova_data > item.data_evento:
+            nova_data = item.data_evento
+        if a.tipo_evento == "entrega" and nova_data == item.data_evento and item.hora_inicio and nova_hora and nova_hora > item.hora_inicio:
+            # Entrega nunca pode chegar depois do início do evento.
+            nova_hora = item.hora_inicio
+        if a.data == nova_data and a.hora_inicio == nova_hora:
+            continue
+        a.data = nova_data
+        if nova_hora:
+            a.hora_inicio = nova_hora
+            if a.roteirizado or (a.previsao_entrega or "").strip():
+                a.previsao_entrega = nova_hora.strftime("%H:%M")
+        if a.tipo_evento == "entrega" and not a.roteirizado:
+            a.hora_fim = item.hora_fim
+        # Mantém equipe e marcação roteirizada para não esconder o card na
+        # Operação. O horário/itinerário devem ser revisados após a remarcação.
+        registro = (
+            f"[{momento}] Data sincronizada com contrato por {usuario}: "
+            f"{anterior.strftime('%d/%m/%Y') if anterior else '-'} "
+            f"{horario_antigo.strftime('%H:%M') if horario_antigo else '-'} → "
+            f"{nova_data.strftime('%d/%m/%Y')} "
+            f"{a.hora_inicio.strftime('%H:%M') if a.hora_inicio else '-'}. "
+            "Revisar rota e equipe após remarcação."
+        )
+        a.observacoes_operacionais = ((a.observacoes_operacionais or "") + "\n" + registro).strip()
+        alterados += 1
+    return alterados, 0
 
 
 def criar_eventos_operacionais(db: Session, item: Solicitacao):
@@ -4603,7 +4698,7 @@ def criar_eventos_operacionais(db: Session, item: Solicitacao):
             or (entrega.data and item.data_evento and entrega.data != item.data_evento)
             or (entrega.hora_inicio and item.hora_inicio and entrega.hora_inicio != item.hora_inicio)
         )
-        if not ja_roteirizado:
+        if not ja_roteirizado and entrega.status_operacional != "concluido":
             entrega.data = item.data_evento
             entrega.hora_inicio = item.hora_inicio
             entrega.hora_fim = item.hora_fim
@@ -13019,6 +13114,7 @@ def salvar_edicao_solicitacao(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    data_anterior_contrato = item.data_evento
 
     if status in ["aguardando_nova_data", "cancelada", "cancelado_cliente", "rejeitada"]:
         item.status = status
@@ -13065,6 +13161,7 @@ def salvar_edicao_solicitacao(
         item.aprovado_em = agora_utc()
 
     _invalidar_geocodificacao(item)
+    sincronizar_datas_operacao_com_contrato(db, item, data_anterior_contrato)
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     _tentar_geocodificar_solicitacao(db, item)
@@ -13193,6 +13290,7 @@ def salvar_cliente_local_solicitacao(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    data_anterior_contrato = item.data_evento
 
     cliente = item.cliente
     cliente.nome = nome.strip() or cliente.nome
@@ -13232,6 +13330,7 @@ def salvar_cliente_local_solicitacao(
         criar_eventos_operacionais(db, item)
 
     _invalidar_geocodificacao(item)
+    sincronizar_datas_operacao_com_contrato(db, item, data_anterior_contrato)
     db.commit()
     _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
@@ -13262,6 +13361,7 @@ async def preparar_contrato(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id:
         raise HTTPException(404)
+    data_anterior_contrato = item.data_evento
     if item.status in ["cancelada", "cancelado_cliente"]:
         return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -13421,6 +13521,7 @@ async def preparar_contrato(
     elif item.status not in ["contrato_enviado", "aguardando_aceite"]:
         item.status = "pre_reserva"
 
+    sincronizar_datas_operacao_com_contrato(db, item, data_anterior_contrato)
     db.commit()
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
 
@@ -14289,6 +14390,7 @@ def salvar_solicitacao_completa(
     item = db.get(Solicitacao, solicitacao_id)
     if not item or item.empresa_id != empresa.id or not item.cliente:
         raise HTTPException(404)
+    data_anterior_contrato = item.data_evento
 
     produtos = db.query(ProdutoServico).filter_by(empresa_id=empresa.id, ativo=True).order_by(ProdutoServico.nome).all()
     contratos = db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all()
@@ -14476,6 +14578,7 @@ def salvar_solicitacao_completa(
         retirar_solicitacao_da_operacao(db, item)
     else:
         criar_eventos_operacionais(db, item)
+    sincronizar_datas_operacao_com_contrato(db, item, data_anterior_contrato)
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     _tentar_geocodificar_solicitacao(db, item)
@@ -19225,6 +19328,36 @@ def salvar_responsavel_retirada(solicitacao_id: int, request: Request, retirada_
     db.commit()
     return RedirectResponse(request.headers.get("referer") or "/painel/preparar", status_code=303)
 
+
+@app.post("/painel/agenda/{agenda_id}/sincronizar-data-contrato")
+def corrigir_data_operacao_pelo_contrato(
+    agenda_id: int, request: Request, db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    agenda = db.query(Agenda).filter_by(id=agenda_id, empresa_id=empresa.id).first()
+    if not agenda or not agenda.solicitacao or agenda.solicitacao.empresa_id != empresa.id:
+        raise HTTPException(404)
+    item = agenda.solicitacao
+    retorno = f"/painel/reservas?data_inicial={agenda.data.isoformat()}&data_final={agenda.data.isoformat()}&mostrar_entregas=1&mostrar_retiradas=1" if agenda.data else "/painel/reservas"
+    if not contrato_aprovado_para_operacao(item):
+        return RedirectResponse(retorno + "&op_erro=" + quote("Contrato sem operação ativa. Confirme o contrato antes de sincronizar."), status_code=303)
+    usuario = request.session.get("usuario_nome") or request.session.get("usuario") or "Usuário"
+    atualizados, concluidos = sincronizar_datas_operacao_com_contrato(
+        db, item, corrigir_existentes=True, usuario=str(usuario),
+    )
+    if concluidos:
+        return RedirectResponse(retorno + "&op_erro=" + quote("Há uma entrega ou retirada concluída. O histórico não foi alterado. Faça um ajuste manual específico."), status_code=303)
+    db.commit()
+    data_evento = item.data_evento.isoformat()
+    url = (f"/painel/reservas?data_inicial={data_evento}&data_final={data_evento}"
+           "&mostrar_entregas=1&mostrar_retiradas=1")
+    if atualizados:
+        url += "&datas_ok=" + str(atualizados)
+    else:
+        url += "&op_erro=" + quote("As datas já estão alinhadas ao contrato.")
+    return RedirectResponse(url, status_code=303)
+
+
 @app.post("/painel/agenda/{agenda_id}/roteiro")
 def atualizar_roteiro(
         request: Request,
@@ -21584,6 +21717,7 @@ def salvar_dados_contrato_cliente(
     if status_reserva_confirmada(item.status) or item.status in {"aceite_pagamento_pendente", "cancelado_cliente"}:
         return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)
 
+    data_anterior_contrato = item.data_evento
     cliente = item.cliente
     cliente.nome = nome.strip()
     cliente.data_nascimento = datetime.strptime(data_nascimento, "%Y-%m-%d").date() if data_nascimento else None
@@ -21629,6 +21763,7 @@ def salvar_dados_contrato_cliente(
     )
     _invalidar_geocodificacao(item)
 
+    sincronizar_datas_operacao_com_contrato(db, item, data_anterior_contrato)
     db.commit()
     _tentar_geocodificar_solicitacao(db, item)
     return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}", status_code=303)

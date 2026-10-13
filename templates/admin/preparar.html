@@ -59,6 +59,9 @@
     </details>
 </section>
 
+{% if request.query_params.get('datas_ok') %}
+<div class="box" role="status"><b>Datas sincronizadas:</b> {{ request.query_params.get('datas_ok') }} operação(ões) atualizada(s). Confira a equipe e os horários da rota.</div>
+{% endif %}
 {% if request.query_params.get('op_erro') %}
 <div class="alerta-operacao-pagamento">{{ request.query_params.get('op_erro') }}</div>
 {% endif %}
@@ -199,6 +202,7 @@
             <span class="seta-card seta-expandir">⌄</span>
         </summary>
 
+        <form id="sincronizar-data-{{ a.id }}" method="post" action="/painel/agenda/{{ a.id }}/sincronizar-data-contrato"></form>
         <form id="roteiro-{{ a.id }}" method="post" action="/painel/agenda/{{ a.id }}/roteiro"
               class="preparo-acoes form-operacao"
               data-data-evento="{{ a.solicitacao.data_evento.isoformat() if a.solicitacao and a.solicitacao.data_evento else '' }}"
@@ -248,6 +252,21 @@
                 <span><b>Contrato:</b> {{ data_contrato_texto }} às {{ hora_contrato_texto }}</span>
                 <span><b>{{ 'Retirar' if tipo == 'retirada' else 'Entregar' }}:</b> {{ data_entrega_texto }} às {{ hora_entrega }}</span>
             </div>
+            {% set data_divergente = not concluido and (
+               (tipo == 'entrega' and a.data and a.solicitacao.data_evento and a.data != a.solicitacao.data_evento)
+               or (tipo == 'retirada' and retirada_obrigatoria and a.data != (a.solicitacao.retirada_data or a.solicitacao.data_evento))
+               or (tipo == 'retirada' and a.data and a.solicitacao.data_evento and a.data < a.solicitacao.data_evento)
+            ) %}
+            {% if data_divergente %}
+            <div class="box aviso" style="margin:8px 0; padding:10px;">
+                <b>Datas diferentes</b>
+                <p style="margin:5px 0 8px">Se o contrato foi remarcado, alinhe a entrega e a busca com a nova data. Entregas antecipadas intencionalmente podem permanecer como estão.</p>
+                <button type="submit" form="sincronizar-data-{{ a.id }}" class="botao-mini principal"
+                        onclick="return confirm('Atualizar as datas das operações pendentes conforme o contrato? A equipe será mantida, mas você deve revisar a rota.')">
+                    Corrigir datas pelo contrato
+                </button>
+            </div>
+            {% endif %}
             {% if a.solicitacao.observacoes %}
             <div class="observacoes-contrato-operacao">
                 <b>Observações do contrato</b>
