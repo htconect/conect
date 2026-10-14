@@ -2264,6 +2264,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_telefone VARCHAR(30)")
     if "vitrine_responsavel_token" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_responsavel_token VARCHAR(64)")
+    if "vitrine_responsavel_configurado" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN vitrine_responsavel_configurado BOOLEAN DEFAULT false")
     if "pre_contrato_responsavel_email" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN pre_contrato_responsavel_email VARCHAR(160)")
     if "infinitepay_ativa" not in cols_emp:
@@ -4085,6 +4087,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS hora_extra_demais_valor FLOAT DEFAULT 50",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_link_direto_token VARCHAR(64)",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_responsavel_token VARCHAR(64)",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_responsavel_configurado BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS modulo_opcionais_ativo BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS catalogo_musicas_url VARCHAR(500)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
@@ -4524,6 +4527,21 @@ def nome_item_reserva(item: Solicitacao) -> str:
 
 def retirada_obrigatoria_ativa(item: Solicitacao) -> bool:
     return bool(getattr(item, "retirada_obrigatoria", False))
+
+def _validar_hora_retirada_obrigatoria(empresa: Empresa, horario: str, termino: time | None) -> time:
+    """Retirada operacional é independente das horas adicionais cobradas."""
+    try:
+        hora = datetime.strptime(str(horario or "").strip(), "%H:%M").time()
+    except (ValueError, TypeError):
+        raise ValueError("Informe a retirada no formato HH:MM.")
+    if termino and hora < termino:
+        raise ValueError(f"A retirada não pode ocorrer antes do término contratado ({termino.strftime('%H:%M')}).")
+    limite = _hora_maxima_retirada_empresa(empresa)
+    if hora > limite:
+        raise ValueError(f"A retirada obrigatória não pode ultrapassar {limite.strftime('%H:%M')}.")
+    return hora
+
+
 
 
 def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
@@ -9733,26 +9751,34 @@ def _garantir_tokens_responsaveis_vitrine(db: Session, empresa: Empresa) -> None
 
 
 def _token_responsavel_vitrine(db: Session, empresa: Empresa, token: str = "") -> str:
-    """Pessoal válido > padrão configurado > primeiro responsável com WhatsApp."""
+    """Link pessoal explícito > padrão escolhido > Junior (Karaokê RJ) > fallback válido.
+
+    O link geral não transmite quem compartilhou pelo WhatsApp. Uma escolha
+    antiga de fallback não pode enviar o contrato a um funcionário aleatório.
+    A seleção explícita do responsável geral continua configurável no painel.
+    """
     opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
-    # Cadastros antigos podem ter WhatsApp, mas ainda não ter token pessoal.
-    # Garante o fallback real no primeiro acesso à vitrine, mesmo sem abrir o painel.
-    if not opcoes:
-        possui_admin = bool(_limpar_tel_whatsapp(getattr(empresa, "pre_contrato_responsavel_telefone", "") or ""))
-        possui_usuario = db.query(UsuarioEmpresa.id).filter(
-            UsuarioEmpresa.empresa_id == empresa.id,
-            UsuarioEmpresa.ativo == True,
-            UsuarioEmpresa.telefone.isnot(None),
-            UsuarioEmpresa.telefone != "",
-        ).first() is not None
-        if possui_admin or possui_usuario:
-            _garantir_tokens_responsaveis_vitrine(db, empresa)
-            opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
+    # Mesmo quando outro usuário já tem token, um novo atendente pode ter WhatsApp
+    # mas ainda não ter recebido o seu token pessoal.
+    if not opcoes or db.query(UsuarioEmpresa.id).filter(
+        UsuarioEmpresa.empresa_id == empresa.id, UsuarioEmpresa.ativo == True,
+        UsuarioEmpresa.telefone.isnot(None), UsuarioEmpresa.telefone != "",
+        UsuarioEmpresa.pre_contrato_token.is_(None),
+    ).first():
+        _garantir_tokens_responsaveis_vitrine(db, empresa)
+        opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
     tokens = {reg["token"] for reg in opcoes}
     token = str(token or "").strip()
     padrao = str(getattr(empresa, "vitrine_responsavel_token", "") or "").strip()
     if token in tokens:
         return token
+    if padrao in tokens and (str(empresa.slug or "").lower() not in ("karaokerj", "karaoke-rj") or bool(getattr(empresa, "vitrine_responsavel_configurado", False))):
+        return padrao
+    if str(empresa.slug or "").lower() in ("karaokerj", "karaoke-rj"):
+        for reg in opcoes:
+            nome = unicodedata.normalize("NFKD", str(reg.get("nome") or "")).encode("ascii", "ignore").decode("ascii").lower()
+            if re.search(r"\bjunior\b", nome):
+                return reg["token"]
     if padrao in tokens:
         return padrao
     return opcoes[0]["token"] if opcoes else ""
@@ -10251,6 +10277,7 @@ def painel_vitrine_definir_responsavel(request: Request, responsavel_token: str 
     if responsavel_token not in {p["token"] for p in opcoes}:
         return RedirectResponse("/painel/vitrine?erro=Cadastre o WhatsApp do atendente no Perfil antes de selecioná-lo.", status_code=303)
     empresa.vitrine_responsavel_token = responsavel_token
+    empresa.vitrine_responsavel_configurado = True
     db.commit()
     return RedirectResponse("/painel/vitrine?salvo=Responsável padrão atualizado.", status_code=303)
 
@@ -12554,7 +12581,9 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "opcionais_contrato_view": _opcionais_contrato_view(item),
                                        "precos_produtos_contrato": _precos_contrato_produtos(db, empresa, produtos),
                                        "vitrine_autorizou_parceiros": _vitrine_autorizou_parceiros,
-                                       "cupons_ativos": cupons_ativos})
+                                       "cupons_ativos": cupons_ativos,
+                                       "responsaveis_vitrine": _responsaveis_vitrine_disponiveis(db, empresa),
+                                       "pode_editar_responsavel": (lambda perfil: perfil[0] == "admin" or bool(getattr(perfil[1], "acesso_cadastros", False)))(usuario_empresa_atual(db, empresa, request))})
 
 
 
@@ -12714,6 +12743,30 @@ def _sincronizar_copia_transferencia(db: Session, origem: Solicitacao, destino: 
             agenda_destino.link_localizacao = agenda_origem.link_localizacao
             agenda_destino.tipo_evento = agenda_origem.tipo_evento
     return copia
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/responsavel-contrato")
+def atualizar_responsavel_contrato(
+    solicitacao_id: int, request: Request, responsavel_token: str = Form(""),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    """Corrige o WhatsApp de retorno sem alterar pagamento, aceite ou contrato."""
+    tipo, usuario = usuario_empresa_atual(db, empresa, request)
+    if tipo != "admin" and not bool(getattr(usuario, "acesso_cadastros", False)):
+        raise HTTPException(403, "Sem permissão para mudar responsável.")
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not _responsavel_pre_contrato_por_token(db, empresa, responsavel_token):
+        raise HTTPException(400, "Selecione um responsável ativo com WhatsApp cadastrado.")
+    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
+    if responsavel_token not in {reg["token"] for reg in opcoes}:
+        raise HTTPException(400, "Responsável sem WhatsApp cadastrado.")
+    nome, telefone = _responsavel_pre_contrato_por_token(db, empresa, responsavel_token)
+    item.responsavel_contrato = nome[:120]
+    item.responsavel_contrato_telefone = telefone[:30]
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?responsavel_atualizado=1", status_code=303)
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/transferir")
@@ -13076,6 +13129,39 @@ def salvar_cliente_da_solicitacao(
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/retirada-obrigatoria")
+def atualizar_retirada_obrigatoria_reserva(
+    solicitacao_id: int, request: Request, retirada_hora: str = Form(""),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    """Altera somente a busca obrigatória; nunca altera preço, aceite nem duração."""
+    item = db.get(Solicitacao, solicitacao_id)
+    if not item or item.empresa_id != empresa.id:
+        raise HTTPException(404)
+    if not retirada_obrigatoria_ativa(item):
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro=Este contrato não tem retirada obrigatória.", status_code=303)
+    busca = db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id, tipo_evento="retirada").first()
+    if busca and busca.status_operacional == "concluido":
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro=Retirada já concluída. Não é possível remarcá-la.", status_code=303)
+    try:
+        nova_hora = _validar_hora_retirada_obrigatoria(empresa, retirada_hora, item.hora_fim)
+    except ValueError as exc:
+        return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={quote(str(exc))}", status_code=303)
+    item.retirada_data = item.data_evento
+    item.retirada_hora = nova_hora
+    if busca:
+        hora_anterior = busca.hora_inicio
+        criar_ou_atualizar_retirada_obrigatoria(db, item)
+        if hora_anterior != nova_hora:
+            quem = (request.session.get("usuario_nome") or request.session.get("usuario_sistema") or "Operador")[:80]
+            registro = f"[{datetime.now().strftime('%d/%m/%Y %H:%M')}] Retirada obrigatória: {hora_anterior.strftime('%H:%M') if hora_anterior else '-'} → {nova_hora.strftime('%H:%M')} por {quem}. Revisar rota."
+            busca.observacoes_operacionais = ((busca.observacoes_operacionais or "") + "\n" + registro).strip()
+    elif contrato_aprovado_para_operacao(item):
+        criar_eventos_operacionais(db, item)
+    db.commit()
+    return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?retirada_atualizada=1", status_code=303)
 
 
 @app.get("/painel/solicitacao/{solicitacao_id}/editar", response_class=HTMLResponse)
@@ -14135,7 +14221,15 @@ def contrato_novo_salvar(
     valor_horas_manual = _valor_horas_adicionais_empresa(empresa, horas_adicionais_manual) if retirada_mesmo_dia_bool else 0.0
     retirada_obrigatoria_bool = retirada_mesmo_dia_bool
     retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
-    retirada_hora_obj = fim_calculado if retirada_obrigatoria_bool else None
+    if retirada_obrigatoria_bool:
+        try:
+            retirada_hora_obj = _validar_hora_retirada_obrigatoria(
+                empresa, retirada_hora or fim_calculado.strftime("%H:%M"), fim_calculado
+            )
+        except ValueError as exc:
+            return render_erro(str(exc))
+    else:
+        retirada_hora_obj = None
     valor_equipamentos_float = texto_para_float(valor)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
     cupom = _cupom_valido(db, empresa.id, codigo_cupom) if codigo_cupom else None
@@ -14481,7 +14575,13 @@ def salvar_solicitacao_completa(
         if fim_min >= 24 * 60 or fim_min > limite.hour * 60 + limite.minute:
             return render_erro(f"A retirada no mesmo dia ultrapassa o limite de {limite.strftime('%H:%M')}.")
     retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
-    retirada_hora_obj = fim_calculado if retirada_obrigatoria_bool else None
+    if retirada_obrigatoria_bool:
+        try:
+            retirada_hora_obj = _validar_hora_retirada_obrigatoria(empresa, retirada_hora or fim_calculado.strftime("%H:%M"), fim_calculado)
+        except ValueError as exc:
+            return render_erro(str(exc))
+    else:
+        retirada_hora_obj = None
     valor_horas_manual = _valor_horas_adicionais_empresa(empresa, horas_adicionais_manual) if retirada_obrigatoria_bool else 0.0
     valor_equipamentos_float = texto_para_float(valor)
     codigo_cupom = _normalizar_codigo_cupom(cupom_codigo)
@@ -20970,8 +21070,9 @@ def salvar_pre_cadastro(
         marcadores = "\n".join(l for l in str(solicitacao.observacoes or "").splitlines() if l.startswith("[VITRINE_"))
         partes_obs = [p for p in [marcadores, observacoes_visiveis(observacoes)] if p]
         solicitacao.observacoes = "\n".join(partes_obs).strip()
-        solicitacao.responsavel_contrato = responsavel_pre_nome[:120] if responsavel_pre_nome else solicitacao.responsavel_contrato
-        solicitacao.responsavel_contrato_telefone = responsavel_pre_telefone[:30] if responsavel_pre_telefone else solicitacao.responsavel_contrato_telefone
+        # Não trocar o negociador original ao cliente reabrir um link de cadastro.
+        solicitacao.responsavel_contrato = solicitacao.responsavel_contrato or (responsavel_pre_nome[:120] if responsavel_pre_nome else None)
+        solicitacao.responsavel_contrato_telefone = solicitacao.responsavel_contrato_telefone or (responsavel_pre_telefone[:30] if responsavel_pre_telefone else None)
         db.flush()
     else:
         solicitacao = Solicitacao(

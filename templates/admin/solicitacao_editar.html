@@ -48,4 +48,15 @@
 
   <button type="submit">Salvar status</button>
 </form>
+{% if item.retirada_obrigatoria %}
+<section class="card" style="margin-top:16px">
+  <h2>Retirada obrigatória</h2>
+  <p class="texto-discreto">Altere apenas o horário da busca. O período do contrato e seus valores continuam iguais.</p>
+  <form method="post" action="/painel/solicitacao/{{ item.id }}/retirada-obrigatoria">
+    <label>Horário da retirada</label>
+    <input type="time" name="retirada_hora" value="{{ (item.retirada_hora or item.hora_fim).strftime('%H:%M') if (item.retirada_hora or item.hora_fim) else '' }}" max="{{ empresa.retirada_hora_maxima or '22:00' }}" required>
+    <button type="submit">Salvar horário da retirada</button>
+  </form>
+</section>
+{% endif %}
 {% endblock %}

@@ -28,6 +28,7 @@ class Empresa(Base):
     pre_contrato_responsavel_telefone = Column(String(30), nullable=True)
     pre_contrato_responsavel_email = Column(String(160), nullable=True)
     vitrine_responsavel_token = Column(String(64), nullable=True)  # responsável padrão da vitrine
+    vitrine_responsavel_configurado = Column(Boolean, default=False)  # escolhido explicitamente após atualização
     infinitepay_ativa = Column(Boolean, default=False)
     nfse_ativa = Column(Boolean, default=False)
     infinitepay_handle = Column(String(80), nullable=True)

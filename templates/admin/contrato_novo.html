@@ -111,6 +111,11 @@
         <input type="hidden" name="horas_adicionais_manual" id="horasAdicionaisManual" value="{{ form.horas_adicionais_manual or 0 }}">
         <small class="texto-discreto">1ª hora: R$ {{ empresa.hora_extra_primeira_valor|moeda_br }} · próximas: R$ {{ empresa.hora_extra_demais_valor|moeda_br }} · limite {{ empresa.retirada_hora_maxima or '22:00' }}.</small>
         <div id="limiteHoraManual" class="erro" style="margin-top:7px" hidden>Limite de retirada no mesmo dia atingido.</div>
+        <div style="margin-top:12px">
+          <label for="retiradaHoraContratoManual">Horário da retirada obrigatória</label>
+          <input id="retiradaHoraContratoManual" type="time" name="retirada_hora" step="60" value="{{ form.retirada_hora or '' }}" max="{{ empresa.retirada_hora_maxima or '22:00' }}">
+          <small class="texto-discreto">Pode ajustar a retirada sem alterar o término contratado ou acrescentar horas pagas. Deixe em branco para utilizar o horário de término.</small>
+        </div>
       </div>
     </div>
   </section>

@@ -76,8 +76,28 @@
       <div class="alerta-retirada-obrigatoria">
         <b>Retirada obrigatória</b>
         <span>{{ (item.retirada_data or item.data_evento).strftime('%d/%m/%Y') if (item.retirada_data or item.data_evento) else '-' }} · {{ (item.retirada_hora or item.hora_fim or item.hora_inicio).strftime('%H:%M') if (item.retirada_hora or item.hora_fim or item.hora_inicio) else '-' }}</span>
+        <form id="editarRetiradaObrigatoria" method="post" action="/painel/solicitacao/{{ item.id }}/retirada-obrigatoria" style="display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:10px">
+          <label style="margin:0;min-width:170px">Alterar horário da retirada
+            <input type="time" name="retirada_hora" value="{{ (item.retirada_hora or item.hora_fim).strftime('%H:%M') if (item.retirada_hora or item.hora_fim) else '' }}" max="{{ empresa.retirada_hora_maxima or '22:00' }}" required>
+          </label>
+          <button type="submit" class="botao-secundario">Salvar retirada</button>
+        </form>
       </div>
     {% endif %}
+    <div style="margin-top:12px;font-size:.85rem">
+      <strong>Responsável pelo contrato:</strong> {{ item.responsavel_contrato or 'Não definido' }}
+      {% if item.responsavel_contrato_telefone %}<small>· WhatsApp {{ item.responsavel_contrato_telefone }}</small>{% endif %}
+      {% if pode_editar_responsavel and responsaveis_vitrine %}
+      <form method="post" action="/painel/solicitacao/{{ item.id }}/responsavel-contrato" style="display:flex;flex-wrap:wrap;align-items:end;gap:8px;margin-top:7px">
+        <label style="min-width:220px;margin:0">Corrigir responsável
+          <select name="responsavel_token" required>
+            {% for resp in responsaveis_vitrine %}<option value="{{ resp.token }}" {% if item.responsavel_contrato_telefone and (item.responsavel_contrato_telefone|replace(' ', '')|replace('-', '')) == resp.telefone %}selected{% endif %}>{{ resp.nome }} — {{ resp.telefone }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="botao-secundario" type="submit">Salvar responsável</button>
+      </form>
+      {% endif %}
+    </div>
     <a class="botao-cliente-card" href="/painel/solicitacao/{{ item.id }}/cliente">Editar cliente</a>
   </div>
 

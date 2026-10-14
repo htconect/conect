@@ -100,6 +100,7 @@
             {% if responsaveis_vitrine %}<button type="submit" class="botao">Salvar responsável padrão</button>{% else %}<p>Configure o WhatsApp em Perfil ou no cadastro dos usuários para habilitar o encaminhamento.</p>{% endif %}
           </form>
           <label>Link geral (utiliza o responsável padrão)</label>
+          <small class="texto-discreto">O link geral não identifica quem enviou pelo WhatsApp. Na Karaokê RJ, o padrão inicial é Junior; selecione e salve outro responsável somente se desejar mudar o destino de todas as reservas desse link.</small>
           <div class="link-publico"><code id="linkVitrine">{{ link_publico }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkVitrine').textContent)" aria-label="Copiar link geral"><i class="bi bi-copy"></i></button></div>
           {% if link_pessoal_vitrine %}<label style="display:block;margin:12px 0 6px">Minha vitrine (recebo os contratos)</label><div class="link-publico"><code id="linkPessoalVitrine">{{ link_pessoal_vitrine }}</code><button type="button" class="botao-secundario botao-copiar" onclick="navigator.clipboard.writeText(document.getElementById('linkPessoalVitrine').textContent)" aria-label="Copiar minha vitrine"><i class="bi bi-copy"></i></button></div>{% else %}<p style="font-size:.85rem;margin-top:10px">Cadastre seu número em Perfil para ativar o link pessoal.</p>{% endif %}
         </div>
