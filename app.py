@@ -9751,37 +9751,62 @@ def _garantir_tokens_responsaveis_vitrine(db: Session, empresa: Empresa) -> None
 
 
 def _token_responsavel_vitrine(db: Session, empresa: Empresa, token: str = "") -> str:
-    """Link pessoal explícito > padrão escolhido > Junior (Karaokê RJ) > fallback válido.
+    """Apenas links pessoais válidos vinculam a negociação a um atendente.
 
-    O link geral não transmite quem compartilhou pelo WhatsApp. Uma escolha
-    antiga de fallback não pode enviar o contrato a um funcionário aleatório.
-    A seleção explícita do responsável geral continua configurável no painel.
+    O link público sem parâmetro não elege Junior, Luiz, administradores ou
+    qualquer outro usuário. Tokens antigos (?r=) continuam aceitos.
     """
-    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
-    # Mesmo quando outro usuário já tem token, um novo atendente pode ter WhatsApp
-    # mas ainda não ter recebido o seu token pessoal.
-    if not opcoes or db.query(UsuarioEmpresa.id).filter(
-        UsuarioEmpresa.empresa_id == empresa.id, UsuarioEmpresa.ativo == True,
-        UsuarioEmpresa.telefone.isnot(None), UsuarioEmpresa.telefone != "",
-        UsuarioEmpresa.pre_contrato_token.is_(None),
-    ).first():
-        _garantir_tokens_responsaveis_vitrine(db, empresa)
-        opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
-    tokens = {reg["token"] for reg in opcoes}
     token = str(token or "").strip()
-    padrao = str(getattr(empresa, "vitrine_responsavel_token", "") or "").strip()
-    if token in tokens:
+    if not token:
+        return ""
+    titular = _responsavel_pre_contrato_por_token(db, empresa, token)
+    if titular and titular[1]:
         return token
-    if padrao in tokens and (str(empresa.slug or "").lower() not in ("karaokerj", "karaoke-rj") or bool(getattr(empresa, "vitrine_responsavel_configurado", False))):
-        return padrao
-    if str(empresa.slug or "").lower() in ("karaokerj", "karaoke-rj"):
-        for reg in opcoes:
-            nome = unicodedata.normalize("NFKD", str(reg.get("nome") or "")).encode("ascii", "ignore").decode("ascii").lower()
-            if re.search(r"\bjunior\b", nome):
-                return reg["token"]
-    if padrao in tokens:
-        return padrao
-    return opcoes[0]["token"] if opcoes else ""
+    return ""
+
+
+def _codigo_curto_responsavel_vitrine(token: str, tokens: list[str]) -> str:
+    """Prefixo estável e único dentro da empresa; não publica número de WhatsApp.
+
+    Usa a identidade persistida já existente em pre_contrato_token, sem criar
+    coluna, expor o token completo ou depender de alterações do SECRET_KEY.
+    """
+    token = str(token or "").strip()
+    if not token:
+        return ""
+    for tamanho in range(8, len(token) + 1):
+        prefixo = token[:tamanho]
+        if sum(str(candidato).startswith(prefixo) for candidato in tokens) == 1:
+            return prefixo
+    return ""
+
+
+def _token_por_codigo_curto_vitrine(db: Session, empresa: Empresa, codigo: str) -> str:
+    """Código ?u= exclusivo da empresa e de usuário ativo com WhatsApp."""
+    codigo = str(codigo or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", codigo):
+        return ""
+    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
+    matches = [reg["token"] for reg in opcoes if reg["token"].startswith(codigo)]
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _resolver_responsavel_link_vitrine(db: Session, empresa: Empresa, u: str = "", r: str = "") -> str:
+    """Parâmetro novo curto tem prioridade; parâmetro antigo permanece válido."""
+    if str(u or "").strip():
+        token = _token_por_codigo_curto_vitrine(db, empresa, u)
+        if not token:
+            raise HTTPException(404, "Link pessoal inválido ou atendente sem WhatsApp ativo. Solicite o link atualizado.")
+        return token
+    return _token_responsavel_vitrine(db, empresa, r)
+
+
+def _links_usuarios_vitrine(request: Request, db: Session, empresa: Empresa) -> list[dict]:
+    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
+    tokens = [reg["token"] for reg in opcoes]
+    return [{**reg, "codigo": (codigo := _codigo_curto_responsavel_vitrine(reg["token"], tokens)),
+             "link": url_publica(request, f"/e/{empresa.slug}?u={codigo}")}
+            for reg in opcoes if _codigo_curto_responsavel_vitrine(reg["token"], tokens)]
 
 
 def _url_pre_contrato_pessoal(request: Request, db: Session, empresa: Empresa) -> tuple[str, str, str]:
@@ -9799,6 +9824,9 @@ def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Emp
     perfil_usuario_valor = usuario.usuario if tipo == "usuario" else (empresa.usuario_admin or request.session.get("usuario_sistema") or "")
     perfil_telefone = (usuario.telefone or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_telefone", "") or "")
     perfil_email = (getattr(usuario, "email", "") or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_email", "") or "")
+    token_pessoal, _, whatsapp_pessoal = _identidade_link_pre_contrato(request, db, empresa)
+    outros_tokens = [x["token"] for x in _responsaveis_vitrine_disponiveis(db, empresa)]
+    codigo_pessoal = _codigo_curto_responsavel_vitrine(token_pessoal, outros_tokens) if whatsapp_pessoal and token_pessoal else ""
     return templates.TemplateResponse("admin/perfil.html", {
         "request": request,
         "empresa": empresa,
@@ -9806,6 +9834,7 @@ def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Emp
         "perfil_usuario": perfil_usuario_valor,
         "perfil_telefone": perfil_telefone,
         "perfil_email": perfil_email,
+        "link_pessoal_vitrine": url_publica(request, f"/e/{empresa.slug}?u={codigo_pessoal}") if codigo_pessoal else "",
         "erro": request.query_params.get("erro"),
         "sucesso": request.query_params.get("sucesso"),
     })
@@ -10255,13 +10284,15 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     _garantir_tokens_responsaveis_vitrine(db, empresa)
     opcoes_responsaveis = _responsaveis_vitrine_disponiveis(db, empresa)
     pessoal_token, pessoal_nome, pessoal_telefone = _identidade_link_pre_contrato(request, db, empresa)
+    links_usuarios = _links_usuarios_vitrine(request, db, empresa)
+    codigo_pessoal = _codigo_curto_responsavel_vitrine(pessoal_token, [r["token"] for r in opcoes_responsaveis]) if pessoal_telefone else ""
     return templates.TemplateResponse("admin/vitrine.html", {
         "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
         "oportunidades": oportunidades,
         "link_publico": url_publica(request, f"/e/{empresa.slug}"),
-        "link_pessoal_vitrine": url_publica(request, f"/e/{empresa.slug}?r={pessoal_token}") if pessoal_telefone and pessoal_token else "",
+        "link_pessoal_vitrine": url_publica(request, f"/e/{empresa.slug}?u={codigo_pessoal}") if codigo_pessoal else "",
+        "links_usuarios_vitrine": links_usuarios,
         "responsaveis_vitrine": opcoes_responsaveis,
-        "responsavel_padrao_token": _token_responsavel_vitrine(db, empresa),
         "salvo": request.query_params.get("salvo", ""),
         "erro": request.query_params.get("erro", ""),
     })
@@ -10270,16 +10301,8 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
 @app.post("/painel/vitrine/responsavel")
 def painel_vitrine_definir_responsavel(request: Request, responsavel_token: str = Form(""),
                                      db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    tipo, usuario = usuario_empresa_atual(db, empresa, request)
-    if tipo != "admin" and not bool(getattr(usuario, "acesso_cadastros", False)):
-        raise HTTPException(403, "Sem permissão para mudar o responsável padrão.")
-    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
-    if responsavel_token not in {p["token"] for p in opcoes}:
-        return RedirectResponse("/painel/vitrine?erro=Cadastre o WhatsApp do atendente no Perfil antes de selecioná-lo.", status_code=303)
-    empresa.vitrine_responsavel_token = responsavel_token
-    empresa.vitrine_responsavel_configurado = True
-    db.commit()
-    return RedirectResponse("/painel/vitrine?salvo=Responsável padrão atualizado.", status_code=303)
+    # Compatibilidade da rota antiga: não há mais responsável padrão do link geral.
+    return RedirectResponse("/painel/vitrine?salvo=Use%20os%20links%20individuais%20de%20cada%20atendente.", status_code=303)
 
 
 def _url_whatsapp_autorizacao_oportunidade(empresa: Empresa, oportunidade: VitrineOportunidade) -> str | None:
@@ -19623,7 +19646,7 @@ def portal_empresa_direto(slug: str, token: str, request: Request, db: Session =
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)
-def portal_empresa(slug: str, request: Request, r: str = "", db: Session = Depends(get_db)):
+def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
@@ -19636,7 +19659,7 @@ def portal_empresa(slug: str, request: Request, r: str = "", db: Session = Depen
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
         "modo_direto": direto,
-        "responsavel_vitrine_token": _token_responsavel_vitrine(db, empresa, r),
+        "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
     })
 
 
@@ -19651,7 +19674,7 @@ def portal_empresa_identificar(slug: str, request: Request, db: Session = Depend
 @app.get("/e/{slug}/vitrine", response_class=HTMLResponse)
 def vitrine_publica(
     slug: str, request: Request, data_evento: str = "", tipo_evento: str = "residencial",
-    whatsapp: str = "", cep: str = "", numero: str = "", partilha: str = "", r: str = "",
+    whatsapp: str = "", cep: str = "", numero: str = "", partilha: str = "", r: str = "", u: str = "",
     estado_partilha_direto: dict | None = None, db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -19708,7 +19731,7 @@ def vitrine_publica(
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
         "estado_compartilhado": estado_compartilhado,
-        "responsavel_vitrine_token": _token_responsavel_vitrine(db, empresa, r),
+        "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
         "bloqueio_data": bloqueio_data,
     })
 
@@ -20488,14 +20511,15 @@ def _responsavel_contrato_dados(request: Request | None, db: Session, empresa: E
 
     nome = nome_atual
     telefone = tel_atual
-    # Reservas da vitrine sem identidade adotam o padrão. Contratos manuais
-    # preservam o responsável definido pelo primeiro envio do atendente logado.
-    sem_atendente_logado = not (request and (request.session.get("usuario_sistema") or request.session.get("usuario")))
-    if not nome and not telefone and (_vitrine_origem(item) or sem_atendente_logado):
-        token_padrao = _token_responsavel_vitrine(db, empresa)
-        titular = _responsavel_pre_contrato_por_token(db, empresa, token_padrao)
-        if titular:
-            nome, telefone = titular
+    # O link geral da vitrine não elege atendente. Sem ?u, enviar à empresa,
+    # nunca a um funcionário escolhido pelo banco/sessão de outro acesso.
+    if _vitrine_origem(item) and not nome_atual and not tel_atual:
+        nome = str(empresa.nome or "Equipe").strip()
+        telefone = _limpar_tel_whatsapp(getattr(empresa, "whatsapp_retorno", "") or "")
+        if fixar:
+            item.responsavel_contrato = nome[:120]
+            item.responsavel_contrato_telefone = telefone[:30] if telefone else None
+        return nome, telefone
     if usuario:
         nome = nome or usuario.nome or usuario.usuario
         telefone = telefone or _limpar_tel_whatsapp(usuario.telefone or "")
@@ -21056,6 +21080,11 @@ def salvar_pre_cadastro(
     else:
         duracao_base_vitrine = _duracao_base_empresa_tipo(db, empresa, tipo_evento_comercial)
         fim_obj = somar_minutos(inicio_obj, duracao_base_vitrine)
+    # Uma reserva criada diretamente pela vitrine precisa manter o marcador de
+    # origem. Isso evita que o link público geral herde responsável logado de
+    # outra operação e permite usar o WhatsApp institucional quando não há ?u.
+    if pedido_vitrine and not pre_reserva_existente:
+        observacoes = "[VITRINE_ORIGEM=1]" + ("\n" + observacoes_visiveis(observacoes) if observacoes_visiveis(observacoes) else "")
     if pre_reserva_existente:
         solicitacao = pre_reserva_existente
         solicitacao.cliente_id = cliente.id

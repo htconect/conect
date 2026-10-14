@@ -50,10 +50,11 @@ def test_compartilhamento_selecoes_nao_dados_pessoais():
       'whatsapp':'21999999999','nome':'Fulano', 'cpf':'12345678909',
     }
     req=Req(json.dumps(registro).encode())
-    resposta=asyncio.run(app.vitrine_gerar_link_compartilhamento('karaokerj',req,db=_db()))
+    db=_db()
+    resposta=asyncio.run(app.vitrine_gerar_link_compartilhamento('karaokerj',req,db=db))
     assert resposta['ok']
-    query=parse_qs(urlparse(resposta['url']).query)
-    original=app._partilha_vitrine_serializer().loads(query['partilha'][0],max_age=60)
+    assert '/s/' in urlparse(resposta['url']).path
+    original=json.loads(db.add.call_args.args[0].pedido_json)
     assert original['produtos']==registro['produtos']
     assert original['cupom']=='ABC10' and original['hora']=='16:00'
     assert 'whatsapp' not in original and 'nome' not in original and 'cpf' not in original

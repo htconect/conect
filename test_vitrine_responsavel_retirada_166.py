@@ -41,18 +41,18 @@ def base(slug='karaokerj'):
     db.add_all([entrega,busca]);db.commit()
     return db, empresa, item, entrega, busca
 
-def test_link_geral_vai_para_junior_mesmo_com_fallback_antigo_luiz():
+def test_link_geral_sem_responsavel_padrao_apos_atualizacao_167():
     db,empresa,_,_,_=base()
-    assert app._token_responsavel_vitrine(db,empresa)=='junior-token'
+    assert app._token_responsavel_vitrine(db,empresa)==''
     assert app._token_responsavel_vitrine(db,empresa,'luiz-token')=='luiz-token'
     empresa.vitrine_responsavel_configurado=True
     db.commit()
-    assert app._token_responsavel_vitrine(db,empresa)=='luiz-token'
+    assert app._token_responsavel_vitrine(db,empresa)==''
     db.close()
 
-def test_outra_empresa_nao_muda_padroes():
+def test_outra_empresa_tambem_exige_link_individual():
     db,empresa,_,_,_=base('vivioke')
-    assert app._token_responsavel_vitrine(db,empresa)=='luiz-token'
+    assert app._token_responsavel_vitrine(db,empresa)==''
     db.close()
 
 def test_retirada_19_para_20_sem_mudar_contrato_e_entrega():

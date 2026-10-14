@@ -18,7 +18,11 @@
 
   <label>Meu WhatsApp</label>
   <input type="tel" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ perfil_telefone or '' }}">
-  <p class="texto-discreto">Usado no seu link pessoal de pré-contrato para o cliente retornar a negociação diretamente para você.</p>
+  <p class="texto-discreto">Usado nos seus links individuais de pré-contrato e vitrine. O cliente envia o contrato para o seu WhatsApp.</p>
+  {% if link_pessoal_vitrine %}
+  <label>Meu link individual da vitrine</label>
+  <div style="display:flex;align-items:center;gap:8px;max-width:100%"><input id="meuLinkVitrine" readonly value="{{ link_pessoal_vitrine }}" style="min-width:0;flex:1"><button type="button" class="botao secundario" onclick="navigator.clipboard.writeText(document.getElementById('meuLinkVitrine').value)" aria-label="Copiar meu link da vitrine"><i class="bi bi-copy"></i> Copiar</button></div>
+  {% else %}<p class="texto-discreto">Salve um WhatsApp válido para ativar seu link pessoal da vitrine.</p>{% endif %}
 
   <label>Meu e-mail</label>
   <input type="email" name="email" autocomplete="email" placeholder="voce@empresa.com.br" value="{{ perfil_email or '' }}">
