@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<style>
+  .auditoria-estoque{max-width:1250px;margin:0 auto}
+  .auditoria-estoque .cabecalho-auditoria{display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+  .auditoria-estoque .filtro-data{display:flex;align-items:end;flex-wrap:wrap;gap:10px;margin:16px 0}
+  .auditoria-estoque .filtro-data label{min-width:165px}
+  .auditoria-estoque .tabela-estoque{width:100%;border-collapse:collapse;min-width:770px}
+  .auditoria-estoque .tabela-estoque th,.auditoria-estoque .tabela-estoque td{padding:10px 9px;text-align:left;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  .auditoria-estoque .tabela-estoque th:nth-child(n+2),.auditoria-estoque .tabela-estoque td:nth-child(n+2){text-align:center;font-variant-numeric:tabular-nums}
+  .auditoria-estoque .tabela-estoque th{font-size:12px;line-height:1.3;color:#475569}
+  .auditoria-estoque .alerta-estoque{font-weight:750;color:#b42318}
+  .auditoria-estoque .ok-estoque{color:#067647;font-weight:700}
+  .auditoria-estoque .resumo-auditoria{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin:12px 0 16px}
+  .auditoria-estoque .indicador-auditoria{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px}
+  .auditoria-estoque .indicador-auditoria small{display:block;color:#64748b}
+  .auditoria-estoque .indicador-auditoria b{display:block;font-size:1.4rem}
+  .auditoria-estoque .tabela-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  @media(max-width:600px){.auditoria-estoque .tabela-estoque{min-width:0}}
+  @media(max-width:600px){
+    .auditoria-estoque .tabela-estoque thead{display:none}
+    .auditoria-estoque .tabela-estoque,.auditoria-estoque .tabela-estoque tbody,.auditoria-estoque .tabela-estoque tr{display:block;width:100%}
+    .auditoria-estoque .tabela-estoque tr{border:1px solid #e2e8f0;border-radius:12px;margin-bottom:10px;padding:7px 10px;background:#fff}
+    .auditoria-estoque .tabela-estoque td{display:flex;justify-content:space-between;gap:10px;padding:7px 0;text-align:right!important}
+    .auditoria-estoque .tabela-estoque td:before{content:attr(data-label);font-weight:650;text-align:left;min-width:0;color:#475569}
+    .auditoria-estoque .tabela-estoque td:first-child{font-weight:800}
+  }
+</style>
+<div class="auditoria-estoque">
+  <div class="cabecalho-auditoria">
+    <div><a class="voltar" href="/painel/reservas">← Operação</a><h1 style="margin:8px 0 4px">Estoque do dia</h1></div>
+    <span class="texto-discreto">Consulta somente leitura</span>
+  </div>
+  <p class="texto-discreto">Total cadastrado e posição física calculada pelas entregas e retiradas marcadas como concluídas. <b>Na rua</b> e <b>Na loja</b> são estimativas de agora; as saídas correspondem à data selecionada. Uma retirada programada ainda não soma ao estoque da loja.</p>
+  <form class="filtro-data" method="get" action="/painel/reservas/consumo-estoque">
+    <label>Data das saídas <input type="date" name="data" value="{{ data_consulta.isoformat() }}" required></label>
+    <button class="botao" type="submit">Consultar</button>
+  </form>
+  <div class="resumo-auditoria" aria-label="Resumo da operação">
+    <div class="indicador-auditoria"><small>Entregas da data</small><b>{{ contratos|selectattr('saida_dia')|list|length }}</b></div>
+    <div class="indicador-auditoria"><small>A preparar</small><b>{{ contratos|selectattr('a_preparar')|list|length }}</b></div>
+    <div class="indicador-auditoria"><small>Contratos na rua agora</small><b>{{ contratos|selectattr('na_rua')|list|length }}</b></div>
+    <div class="indicador-auditoria"><small>Avisos de vínculos/ajustes</small><b>{{ avisos|length }}</b></div>
+  </div>
+  {% macro tabela_itens(itens) %}
+  <div class="tabela-scroll"><table class="tabela-estoque">
+    <thead><tr><th>Item</th><th>Total cadastrado</th><th>Na rua agora</th><th>Na loja agora</th><th>Saídas {{ data_consulta.strftime('%d/%m') }}</th><th>A preparar</th><th>Saldo após preparar</th></tr></thead>
+    <tbody>
+      {% for p in itens %}
+      <tr>
+        <td data-label="Item">{{ p.nome }}{% if not p.ativo %} <small>(inativo)</small>{% endif %}</td>
+        <td data-label="Total cadastrado">{{ p.total }}</td>
+        <td data-label="Na rua agora">{{ p.na_rua }}</td>
+        <td data-label="Na loja agora">{{ p.na_loja }}</td>
+        <td data-label="Saídas da data">{{ p.saidas_dia }}</td>
+        <td data-label="A preparar">{{ p.a_preparar }}</td>
+        <td data-label="Saldo após preparar"><span class="{% if p.falta or p.divergencia_fisica %}alerta-estoque{% else %}ok-estoque{% endif %}">{{ p.saldo_apos_saida }}{% if p.falta %} · faltam {{ p.falta }}{% endif %}{% if p.divergencia_fisica %} · divergência {{ p.divergencia_fisica }}{% endif %}</span></td>
+      </tr>
+      {% else %}<tr><td colspan="7">Nenhum item cadastrado.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% endmacro %}
+  <section class="box" style="margin:14px 0"><h2 style="font-size:1.15rem">Equipamentos</h2>{{ tabela_itens(produtos) }}</section>
+  {% if controle_estoque %}
+  <section class="box" style="margin:14px 0"><h2 style="font-size:1.15rem">Recursos e opcionais</h2><p class="texto-discreto">Os opcionais com recurso vinculado entram pela quantidade registrada no contrato. Ajustes manuais são respeitados.</p>{{ tabela_itens(recursos) }}</section>
+  {% else %}
+  <p class="texto-discreto">Controle de recursos desativado nesta empresa. Para descontar opcionais, ative o controle de estoque e vincule cada opcional ao recurso correspondente.</p>
+  {% endif %}
+  {% if avisos_cadastro %}
+  <section class="box" style="margin:14px 0"><h2 style="font-size:1.15rem">Conferir cadastro dos opcionais ({{ avisos_cadastro|length }})</h2>
+    <p class="texto-discreto">A conferência inclui todos os opcionais ativos da empresa, mesmo sem reserva na data. Nem todo opcional precisa consumir estoque; valide os que deveriam consumir.</p>
+    {% for aviso in avisos_cadastro %}<p style="margin:8px 0"><b>{{ aviso.nome }}</b>: {{ aviso.mensagem }}</p>{% endfor %}
+    <a href="/painel/opcionais">Conferir cadastro dos opcionais</a>
+  </section>
+  {% endif %}
+  {% if avisos %}
+  <section class="box" style="margin:14px 0"><h2 style="font-size:1.15rem">Conferir vínculos e ajustes ({{ avisos|length }})</h2>
+    {% for aviso in avisos %}<p style="margin:8px 0"><a href="/painel/solicitacao/{{ aviso.contrato }}">Contrato #{{ aviso.contrato }}</a>: {{ aviso.mensagem }}</p>{% endfor %}
+  </section>
+  {% endif %}
+  <section class="box" style="margin:14px 0"><h2 style="font-size:1.15rem">Contratos considerados ({{ contratos|length }})</h2>
+    {% for c in contratos %}<div style="padding:10px 0;border-bottom:1px solid #e2e8f0"><a href="/painel/solicitacao/{{ c.id }}"><b>#{{ c.id }} — {{ c.cliente }}</b></a><small style="display:block;color:#64748b">{% if c.na_rua %}Na rua agora{% endif %}{% if c.na_rua and c.saida_dia %} · {% endif %}{% if c.saida_dia %}Entrega nesta data{% endif %}{% if c.a_preparar %} · A preparar{% endif %}</small></div>{% else %}<p>Nenhuma entrega programada ou contrato na rua.</p>{% endfor %}
+  </section>
+  <p class="texto-discreto">A posição física depende da equipe marcar Entrega e Retirada como concluídas. Este relatório não faz baixa permanente no cadastro nem substitui a contagem física.</p>
+</div>
+{% endblock %}

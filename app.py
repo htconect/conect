@@ -971,6 +971,21 @@ def _cupom_valido_ou_snapshot(db: Session, empresa_id: int, codigo: str, item: S
     return _cupom_valido(db, empresa_id, codigo_limpo)
 
 
+def _total_pedido_frete_unico(subtotal_itens: float, desconto: float = 0.0,
+                             horas_adicionais: float = 0.0, frete_pedido: float = 0.0) -> float:
+    """Total comercial: frete é UMA despesa da reserva, nunca por equipamento.
+
+    O subtotal recebido aqui deve conter exclusivamente produtos e opcionais.
+    Ida e volta, quando configuradas por quilômetro, já estão dentro de
+    ``frete_pedido`` e não são multiplicadas de novo nesta função.
+    """
+    itens = max(float(subtotal_itens or 0), 0.0)
+    desconto_limpo = min(max(float(desconto or 0), 0.0), itens)
+    horas = max(float(horas_adicionais or 0), 0.0)
+    frete = max(float(frete_pedido or 0), 0.0)
+    return round(max(itens - desconto_limpo, 0.0) + horas + frete, 2)
+
+
 def _aplicar_composicao_comercial(
         item: Solicitacao, valor_equipamentos: float, frete: float, cupom: Cupom | None,
         valor_horas_adicionais: float | None = None, desconto_manual: float | None = None) -> None:
@@ -988,7 +1003,7 @@ def _aplicar_composicao_comercial(
     # O desconto manual entra depois do cupom e nunca deixa o subtotal negativo.
     desconto_manual_efetivo = min(desconto_manual_bruto, max(subtotal - desconto_cupom, 0.0))
     desconto_total = round(min(subtotal, desconto_cupom + desconto_manual_efetivo), 2)
-    total = round(max(subtotal - desconto_total + valor_horas + valor_frete, 0.0), 2)
+    total = _total_pedido_frete_unico(subtotal, desconto_total, valor_horas, valor_frete)
     item.valor_equipamentos = round(subtotal, 2)
     item.cupom_codigo = cupom.codigo.upper() if cupom else None
     item.cupom_percentual = float(getattr(cupom, "percentual", 0) or 0) if cupom else 0.0
@@ -1238,7 +1253,7 @@ def recalcular_valores_reservas(db: Session):
         desconto_cupom = _calcular_desconto_cupom(subtotal, cupom_snapshot)
         desconto_manual = min(max(float(getattr(item, "valor_desconto_manual", 0) or 0), 0.0), max(subtotal - desconto_cupom, 0.0))
         desconto = round(min(subtotal, desconto_cupom + desconto_manual), 2)
-        total_final = round(max(subtotal - desconto + horas + frete, 0.0), 2)
+        total_final = _total_pedido_frete_unico(subtotal, desconto, horas, frete)
         antes = (
             round(float(getattr(item, "valor_equipamentos", 0) or 0), 2),
             round(float(getattr(item, "valor_desconto", 0) or 0), 2),
@@ -6313,7 +6328,7 @@ def _comprometimento_recursos_data(
 
 def _analise_estoque_vazia() -> dict:
     return {
-        "produtos": [], "recursos": [],
+        "produtos": [], "recursos": [], "opcionais": [], "opcionais_sem_estoque": [],
         "conflitos_produtos": [], "conflitos_recursos": [],
         "conflitos": [], "tem_conflito": False,
     }
@@ -6465,6 +6480,38 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
             key=lambda x: (ordem.get((x.nome or "").casefold(), 999), (x.nome or "").casefold()),
         )
 
+        # Opcionais consomem o recurso físico do snapshot do contrato (1:1).
+        # Sem este lote, a análise de estoque ignorava os opcionais e podia
+        # mostrar unidades livres que já estavam comprometidas.
+        opcionais_por_solicitacao: dict[int, dict[int, int]] = {}
+        opcionais_detalhe_por_solicitacao: dict[int, list[dict]] = {}
+        if ids_relevantes:
+            for row in db.query(
+                SolicitacaoOpcional.solicitacao_id,
+                SolicitacaoOpcional.opcional_id,
+                SolicitacaoOpcional.item_estoque_id,
+                SolicitacaoOpcional.nome,
+                SolicitacaoOpcional.quantidade,
+            ).filter(
+                SolicitacaoOpcional.empresa_id == empresa_id,
+                SolicitacaoOpcional.solicitacao_id.in_(list(ids_relevantes)),
+            ).all():
+                sid = int(row.solicitacao_id)
+                qtd = max(0, int(row.quantidade or 0))
+                if not qtd:
+                    continue
+                rid = int(row.item_estoque_id) if row.item_estoque_id else None
+                opcionais_detalhe_por_solicitacao.setdefault(sid, []).append({
+                    "opcional_id": int(row.opcional_id) if row.opcional_id else None,
+                    "nome": row.nome or "Opcional",
+                    "quantidade": qtd,
+                    "item_estoque_id": rid,
+                    "controla_estoque": rid is not None,
+                })
+                if rid is not None:
+                    quantidades = opcionais_por_solicitacao.setdefault(sid, {})
+                    quantidades[rid] = quantidades.get(rid, 0) + qtd
+
         # Requisitos padrão e efetivos por contrato, calculados em memória.
         padrao_por_solicitacao: dict[int, dict[int, int]] = {}
         efetivo_por_solicitacao: dict[int, dict[int, int]] = {}
@@ -6477,6 +6524,8 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
                 qtd_produto = max(1, int(ri.get("quantidade") or 1))
                 for recurso_id, qtd_por_unidade in mapa_produtos.get(pid, {}).items():
                     padrao[recurso_id] = padrao.get(recurso_id, 0) + (qtd_produto * qtd_por_unidade)
+            for rid, qtd in opcionais_por_solicitacao.get(sid, {}).items():
+                padrao[rid] = padrao.get(rid, 0) + qtd
             efetivo = dict(padrao)
             ajustes = ajustes_por_solicitacao.get(sid, {})
             # Mantém a mesma regra da versão anterior: o ajuste só substitui um
@@ -6578,9 +6627,16 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
                 linhas_recursos = []
             conflitos_produtos = [linha for linha in linhas_produtos if linha["conflito"]]
             conflitos_recursos = [linha for linha in linhas_recursos if linha["conflito"]]
+            # O card mostra TODOS os opcionais do contrato, inclusive os sem
+            # vínculo físico. Os recursos já incluem os opcionais que consomem
+            # estoque; exibir as duas linhas não significa somar duas vezes.
+            opcionais_card = sorted(opcionais_detalhe_por_solicitacao.get(sid, []),
+                                    key=lambda x: (x["nome"].casefold(), x["opcional_id"] or 0))
             resultado[sid] = {
                 "produtos": linhas_produtos,
                 "recursos": linhas_recursos,
+                "opcionais": opcionais_card,
+                "opcionais_sem_estoque": [op for op in opcionais_card if not op["controla_estoque"]],
                 "conflitos_produtos": conflitos_produtos,
                 "conflitos_recursos": conflitos_recursos,
                 "conflitos": conflitos_produtos + conflitos_recursos,
@@ -7850,7 +7906,6 @@ def _snapshot_pedido_vitrine(pedido: dict) -> dict:
     frete = pedido.get("frete") if isinstance(pedido.get("frete"), dict) else {}
     return {
         "data_evento": str(data_evento or ""),
-        "modo_direto": bool(pedido.get("modo_direto")),
         "tipo_evento": _normalizar_tipo_evento_vitrine(str(pedido.get("tipo_evento") or "residencial")),
         "hora_inicio": str(hora_inicio or ""),
         "retirada_mesmo_dia": bool(pedido.get("retirada_mesmo_dia")),
@@ -7911,7 +7966,7 @@ def _composicao_oportunidade(oportunidade: VitrineOportunidade) -> dict:
     horas = round(float(snap.get("valor_horas_adicionais") or 0), 2)
     frete = snap.get("frete") if isinstance(snap.get("frete"), dict) else {}
     frete_valor = round(float(frete.get("valor") or 0), 2)
-    total = round(max(equipamentos - desconto, 0) + horas + frete_valor, 2)
+    total = _total_pedido_frete_unico(equipamentos, desconto, horas, frete_valor)
     return {
         "equipamentos": equipamentos, "desconto": desconto,
         "cupom_codigo": str(snap.get("cupom_codigo") or ""),
@@ -7968,7 +8023,7 @@ def _pedido_oportunidade_para_contexto(db: Session, empresa: Empresa, oportunida
         "desconto": round(float(snap.get("desconto") or 0), 2),
         "possui_sob_consulta": bool(snap.get("possui_sob_consulta")),
         "frete": frete,
-        "total": round(max(float(snap.get("subtotal") or 0) - float(snap.get("desconto") or 0), 0) + float(frete.get("valor") or 0), 2),
+        "total": _total_pedido_frete_unico(snap.get("subtotal"), snap.get("desconto"), 0, frete.get("valor")),
         "total_sob_consulta": bool(snap.get("total_sob_consulta")),
     }
 
@@ -9013,7 +9068,6 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     valor_horas_adicionais = _valor_horas_adicionais_empresa(empresa, horas_adicionais)
     return {
         "data_evento": data_obj,
-        "modo_direto": bool(bruto.get("modo_direto")),
         "responsavel_token": str(bruto.get("responsavel_token") or "").strip(),
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
@@ -9051,7 +9105,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         },
         # No pré-contrato, `total` é a base sem horas extras; o JS soma as horas escolhidas
         # para permitir que o cliente revise a retirada sem duplicar o valor.
-        "total": round(max(total - desconto, 0) + frete_valor, 2),
+        "total": _total_pedido_frete_unico(total, desconto, 0, frete_valor),
         "total_sob_consulta": bool(possui_sob_consulta or frete_consulta),
     }
 
@@ -9801,12 +9855,23 @@ def _resolver_responsavel_link_vitrine(db: Session, empresa: Empresa, u: str = "
     return _token_responsavel_vitrine(db, empresa, r)
 
 
-def _links_usuarios_vitrine(request: Request, db: Session, empresa: Empresa) -> list[dict]:
-    opcoes = _responsaveis_vitrine_disponiveis(db, empresa)
-    tokens = [reg["token"] for reg in opcoes]
-    return [{**reg, "codigo": (codigo := _codigo_curto_responsavel_vitrine(reg["token"], tokens)),
-             "link": url_publica(request, f"/e/{empresa.slug}?u={codigo}")}
-            for reg in opcoes if _codigo_curto_responsavel_vitrine(reg["token"], tokens)]
+def _vitrine_link_do_usuario(request: Request, db: Session, empresa: Empresa) -> tuple[str, str]:
+    """Link pessoal da sessão autenticada, nunca de outro atendente.
+
+    Se faltar WhatsApp válido, não oferece atalho para a vitrine genérica:
+    isso evita que um contrato seja enviado para o número errado.
+    """
+    token, nome, telefone = _identidade_link_pre_contrato(request, db, empresa)
+    if not token or not celular_brasileiro_valido(telefone):
+        return "", ""
+    disponiveis = _responsaveis_vitrine_disponiveis(db, empresa)
+    tokens = [reg["token"] for reg in disponiveis]
+    codigo = _codigo_curto_responsavel_vitrine(token, tokens)
+    if not codigo:
+        return "", ""
+    link = url_publica(request, f"/e/{empresa.slug}?u={codigo}")
+    mensagem = f"Confira os modelos disponíveis e faça sua reserva na vitrine da {empresa.nome}:\n{link}"
+    return link, f"https://api.whatsapp.com/send?text={quote(mensagem, safe='')}"
 
 
 def _url_pre_contrato_pessoal(request: Request, db: Session, empresa: Empresa) -> tuple[str, str, str]:
@@ -9824,9 +9889,6 @@ def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Emp
     perfil_usuario_valor = usuario.usuario if tipo == "usuario" else (empresa.usuario_admin or request.session.get("usuario_sistema") or "")
     perfil_telefone = (usuario.telefone or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_telefone", "") or "")
     perfil_email = (getattr(usuario, "email", "") or "") if tipo == "usuario" else (getattr(empresa, "pre_contrato_responsavel_email", "") or "")
-    token_pessoal, _, whatsapp_pessoal = _identidade_link_pre_contrato(request, db, empresa)
-    outros_tokens = [x["token"] for x in _responsaveis_vitrine_disponiveis(db, empresa)]
-    codigo_pessoal = _codigo_curto_responsavel_vitrine(token_pessoal, outros_tokens) if whatsapp_pessoal and token_pessoal else ""
     return templates.TemplateResponse("admin/perfil.html", {
         "request": request,
         "empresa": empresa,
@@ -9834,7 +9896,6 @@ def perfil_usuario(request: Request, db: Session = Depends(get_db), empresa: Emp
         "perfil_usuario": perfil_usuario_valor,
         "perfil_telefone": perfil_telefone,
         "perfil_email": perfil_email,
-        "link_pessoal_vitrine": url_publica(request, f"/e/{empresa.slug}?u={codigo_pessoal}") if codigo_pessoal else "",
         "erro": request.query_params.get("erro"),
         "sucesso": request.query_params.get("sucesso"),
     })
@@ -9942,15 +10003,12 @@ def alterar_senha_salvar(
 @app.get("/painel/empresa", response_class=HTMLResponse)
 def cadastro_empresa_guiado(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     _garantir_tipos_evento_padrao(db, empresa)
-    if not _token_vitrine_direta(empresa):
-        empresa.vitrine_link_direto_token = secrets.token_urlsafe(24)[:48]
-        db.commit()
-        db.refresh(empresa)
+    link_usuario, link_whatsapp = _vitrine_link_do_usuario(request, db, empresa)
     return templates.TemplateResponse("admin/empresa_guiada.html", {
         "request": request,
         "empresa": empresa,
-        "link_publico": url_publica(request, f"/e/{empresa.slug}"),
-        "link_direto": url_publica(request, f"/e/{empresa.slug}/direto/{empresa.vitrine_link_direto_token}"),
+        "vitrine_url": link_usuario,
+        "vitrine_compartilhar_whatsapp": link_whatsapp,
         "salvo": request.query_params.get("salvo", ""),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
         "duracoes_tipo_evento": _duracoes_tipos_evento_empresa(db, empresa),
@@ -10282,17 +10340,12 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
             "bairro": str(frete.get("bairro") or ""),
         })
     _garantir_tokens_responsaveis_vitrine(db, empresa)
-    opcoes_responsaveis = _responsaveis_vitrine_disponiveis(db, empresa)
-    pessoal_token, pessoal_nome, pessoal_telefone = _identidade_link_pre_contrato(request, db, empresa)
-    links_usuarios = _links_usuarios_vitrine(request, db, empresa)
-    codigo_pessoal = _codigo_curto_responsavel_vitrine(pessoal_token, [r["token"] for r in opcoes_responsaveis]) if pessoal_telefone else ""
+    link_usuario, link_whatsapp = _vitrine_link_do_usuario(request, db, empresa)
     return templates.TemplateResponse("admin/vitrine.html", {
         "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
         "oportunidades": oportunidades,
-        "link_publico": url_publica(request, f"/e/{empresa.slug}"),
-        "link_pessoal_vitrine": url_publica(request, f"/e/{empresa.slug}?u={codigo_pessoal}") if codigo_pessoal else "",
-        "links_usuarios_vitrine": links_usuarios,
-        "responsaveis_vitrine": opcoes_responsaveis,
+        "vitrine_url": link_usuario,
+        "vitrine_compartilhar_whatsapp": link_whatsapp,
         "salvo": request.query_params.get("salvo", ""),
         "erro": request.query_params.get("erro", ""),
     })
@@ -10350,7 +10403,7 @@ def atender_oportunidade_vitrine(
     solicitacao.valor_desconto = desconto_snap
     solicitacao.valor_horas_adicionais = horas_snap
     solicitacao.valor_frete = frete_valor_snap
-    solicitacao.valor = round(max(subtotal_snap - desconto_snap, 0) + horas_snap + frete_valor_snap, 2)
+    solicitacao.valor = _total_pedido_frete_unico(subtotal_snap, desconto_snap, horas_snap, frete_valor_snap)
     # Marcadores técnicos serviam ao fluxo antigo; não devem poluir o contrato.
     solicitacao.observacoes = ""
     oportunidade.status = "convertida"
@@ -19096,6 +19149,188 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
     return resumo
 
 
+def _resumo_quantidades_operacao(estoque_total, na_rua, saidas_dia, a_preparar):
+    """Saldo físico projetado sem contabilizar retornos futuros como já disponíveis."""
+    total = max(0, int(estoque_total or 0))
+    fora = max(0, int(na_rua or 0))
+    saidas = max(0, int(saidas_dia or 0))
+    preparar = max(0, int(a_preparar or 0))
+    loja = max(0, total - fora)
+    return {
+        "total": total, "na_rua": fora, "na_loja": loja,
+        "saidas_dia": saidas, "a_preparar": preparar,
+        "saldo_apos_saida": max(0, loja - preparar),
+        "falta": max(0, preparar - loja),
+        "divergencia_fisica": max(0, fora - total),
+    }
+
+
+@app.get("/painel/reservas/consumo-estoque", response_class=HTMLResponse)
+def relatorio_estoque_operacao(
+        request: Request,
+        data: str = "",
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    """Conciliação somente leitura: entregas reais pendentes de retorno e saídas da data.
+
+    A quantidade cadastrada é o patrimônio físico total. A situação 'na rua'
+    decorre da conclusão da entrega sem retirada concluída, independentemente
+    da data do evento ou da data planejada da retirada.
+    """
+    try:
+        dia = date.fromisoformat(data) if data else date.today()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Data inválida; use AAAA-MM-DD")
+
+    hoje = date.today()
+    recursos_db = _itens_estoque_empresa(db, empresa.id, somente_ativos=False)
+    produtos_db = db.query(ProdutoServico).filter(
+        ProdutoServico.empresa_id == empresa.id
+    ).order_by(ProdutoServico.nome.asc()).all()
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+
+    # As operações históricas concluídas formam o que está efetivamente na rua AGORA.
+    # Contratos cancelados depois de entregues continuam em rua até concluir a retirada.
+    concluidas = db.query(Agenda.solicitacao_id, Agenda.tipo_evento).filter(
+        Agenda.empresa_id == empresa.id,
+        Agenda.data <= hoje,
+        Agenda.tipo_evento.in_(("entrega", "retirada")),
+        Agenda.status_operacional == "concluido",
+    ).all()
+    entregues = {int(sid) for sid, tipo in concluidas if tipo == "entrega"}
+    devolvidos = {int(sid) for sid, tipo in concluidas if tipo == "retirada"}
+    ids_rua = entregues - devolvidos
+
+    agenda_dia = db.query(Agenda).join(
+        Solicitacao, Agenda.solicitacao_id == Solicitacao.id
+    ).filter(
+        Agenda.empresa_id == empresa.id,
+        Agenda.data == dia,
+        Agenda.tipo_evento == "entrega",
+        Solicitacao.status.in_(STATUS_CONTRATO_APROVADO),
+    ).all()
+    ids_saidas = {int(a.solicitacao_id) for a in agenda_dia}
+    ids_preparar = {int(a.solicitacao_id) for a in agenda_dia if a.status_operacional != "concluido"}
+    ids_considerados = ids_rua | ids_saidas
+
+    contratos_por_id = {}
+    ajustes = {}
+    if ids_considerados:
+        contratos_por_id = {int(c.id): c for c in db.query(Solicitacao).options(
+            selectinload(Solicitacao.itens),
+            selectinload(Solicitacao.opcionais_contrato),
+            joinedload(Solicitacao.cliente),
+        ).filter(Solicitacao.empresa_id == empresa.id, Solicitacao.id.in_(ids_considerados)).all()}
+        for a in db.query(SolicitacaoRecurso).filter(
+            SolicitacaoRecurso.empresa_id == empresa.id,
+            SolicitacaoRecurso.solicitacao_id.in_(ids_considerados),
+        ).all():
+            ajustes.setdefault(int(a.solicitacao_id), {})[int(a.item_estoque_id)] = max(0, int(a.quantidade or 0))
+
+    por_contrato = {}
+    avisos = []
+    cadastro_opcionais = {int(op.id): op for op in db.query(OpcionalEmpresa).filter(
+        OpcionalEmpresa.empresa_id == empresa.id,
+    ).all()}
+    recursos_cadastrados = {int(r.id): r for r in recursos_db}
+    avisos_cadastro = []
+    for opc in sorted(cadastro_opcionais.values(), key=lambda op: (op.nome or "").casefold()):
+        if not opc.ativo:
+            continue
+        rid = int(opc.item_estoque_id) if opc.item_estoque_id else None
+        if rid is None:
+            avisos_cadastro.append({"nome": opc.nome, "mensagem": "Sem vínculo de estoque no cadastro; verificar se é intencional."})
+        elif rid not in recursos_cadastrados or not recursos_cadastrados[rid].ativo:
+            avisos_cadastro.append({"nome": opc.nome, "mensagem": "Recurso de estoque vinculado ausente ou inativo."})
+    for sid, contrato in contratos_por_id.items():
+        produtos = {}
+        for item in (contrato.itens or []):
+            if item.produto_id:
+                pid = int(item.produto_id)
+                produtos[pid] = produtos.get(pid, 0) + max(1, int(item.quantidade or 1))
+        padrao = _requisitos_solicitacao_padrao(contrato, mapa)
+        efetivo = dict(padrao)
+        for rid, qtd in ajustes.get(sid, {}).items():
+            if rid in padrao:
+                efetivo[rid] = qtd
+                if qtd != padrao[rid]:
+                    avisos.append({"contrato": sid, "mensagem": f"Ajuste manual de recurso #{rid}: padrão {padrao[rid]}, aplicado {qtd}."})
+        for opc in (contrato.opcionais_contrato or []):
+            if not opc.item_estoque_id:
+                avisos.append({"contrato": sid, "mensagem": f"Opcional '{opc.nome}' sem recurso vinculado no contrato: {int(opc.quantidade or 0)} unidade(s) não entram no estoque."})
+            elif int(opc.item_estoque_id) not in recursos_cadastrados:
+                avisos.append({"contrato": sid, "mensagem": f"Opcional '{opc.nome}' aponta para recurso não cadastrado neste estoque."})
+            elif not recursos_cadastrados[int(opc.item_estoque_id)].ativo:
+                avisos.append({"contrato": sid, "mensagem": f"Opcional '{opc.nome}' aponta para recurso inativo."})
+            if opc.opcional_id and int(opc.opcional_id) in cadastro_opcionais:
+                atual = cadastro_opcionais[int(opc.opcional_id)]
+                rid_atual = int(atual.item_estoque_id) if atual.item_estoque_id else None
+                rid_contrato = int(opc.item_estoque_id) if opc.item_estoque_id else None
+                if rid_atual != rid_contrato:
+                    avisos.append({"contrato": sid, "mensagem": f"Opcional '{opc.nome}' tem vínculo no contrato diferente do cadastro atual; conferir sem alterar histórico automaticamente."})
+        por_contrato[sid] = {"produtos": produtos, "recursos": efetivo, "contrato": contrato}
+
+    def _soma(ids, nome):
+        totais = {}
+        for sid in ids:
+            for codigo, qtd in por_contrato.get(sid, {}).get(nome, {}).items():
+                totais[codigo] = totais.get(codigo, 0) + int(qtd)
+        return totais
+
+    totais = {
+        "produtos_rua": _soma(ids_rua, "produtos"),
+        "produtos_dia": _soma(ids_saidas, "produtos"),
+        "produtos_preparar": _soma(ids_preparar, "produtos"),
+        "recursos_rua": _soma(ids_rua, "recursos"),
+        "recursos_dia": _soma(ids_saidas, "recursos"),
+        "recursos_preparar": _soma(ids_preparar, "recursos"),
+    }
+
+    def _linhas(itens, tipo):
+        linhas = []
+        for item in itens:
+            codigo = int(item.id)
+            total = item.quantidade_estoque if tipo == "recursos" else item.quantidade_disponivel
+            valores = _resumo_quantidades_operacao(
+                total,
+                totais[f"{tipo}_rua"].get(codigo, 0),
+                totais[f"{tipo}_dia"].get(codigo, 0),
+                totais[f"{tipo}_preparar"].get(codigo, 0),
+            )
+            linhas.append({"id": codigo, "nome": item.nome, "ativo": bool(item.ativo), **valores})
+        return linhas
+
+    linhas_produtos = _linhas(produtos_db, "produtos")
+    linhas_recursos = _linhas(recursos_db, "recursos")
+    # Contratos com consumos em recursos removidos merecem conferência manual.
+    ids_recursos = {int(r.id) for r in recursos_db}
+    for sid, info in por_contrato.items():
+        for rid, qtd in info["recursos"].items():
+            if rid not in ids_recursos and qtd:
+                avisos.append({"contrato": sid, "mensagem": f"Recurso #{rid} não encontrado no cadastro (consumo {qtd})."})
+
+    contratos = []
+    for sid in sorted(ids_considerados):
+        info = por_contrato.get(sid)
+        if not info:
+            continue
+        contrato = info["contrato"]
+        contratos.append({
+            "id": sid,
+            "cliente": contrato.cliente.nome if getattr(contrato, "cliente", None) else f"Contrato #{sid}",
+            "na_rua": sid in ids_rua, "saida_dia": sid in ids_saidas, "a_preparar": sid in ids_preparar,
+        })
+
+    return templates.TemplateResponse("admin/operacao_consumo_estoque.html", {
+        "request": request, "empresa": empresa, "data_consulta": dia,
+        "produtos": linhas_produtos, "recursos": linhas_recursos,
+        "contratos": contratos, "avisos": avisos, "avisos_cadastro": avisos_cadastro,
+        "controle_estoque": _empresa_modulo_ativo(empresa, "recursos"),
+        "hoje": hoje,
+    }, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/painel/agenda/consumo-estoque", response_class=HTMLResponse)
 def agenda_consumo_estoque(
         request: Request,
@@ -19603,46 +19838,14 @@ def assumir_comunicacao_operacao(
     return {"ok": True, "responsavel": solicitacao.responsavel_operacao}
 
 
-def _token_vitrine_direta(empresa: Empresa) -> str:
-    token = str(getattr(empresa, "vitrine_link_direto_token", "") or "").strip()
-    return token
-
-
-def _vitrine_direta_sessao_valida(request: Request, empresa: Empresa) -> bool:
-    dados = request.session.get(f"vitrine_direta_{empresa.slug}") or {}
-    token = str(dados.get("token") or "")
-    expira = float(dados.get("expira") or 0)
-    esperado = _token_vitrine_direta(empresa)
-    if not token or not esperado or expira < time_module.time():
-        request.session.pop(f"vitrine_direta_{empresa.slug}", None)
-        return False
-    return hmac.compare_digest(token, esperado)
-
-
-def _autorizar_vitrine_direta(request: Request, empresa: Empresa, token: str) -> bool:
-    esperado = _token_vitrine_direta(empresa)
-    informado = str(token or "").strip()
-    if not esperado or not informado or not hmac.compare_digest(esperado, informado):
-        return False
-    request.session[f"vitrine_direta_{empresa.slug}"] = {
-        "token": informado,
-        "expira": time_module.time() + 4 * 60 * 60,
-    }
-    return True
-
-
 @app.get("/e/{slug}/direto/{token}", response_class=HTMLResponse)
 def portal_empresa_direto(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
+    """Compatibilidade: antigo link não permite mais burlar o fluxo da empresa."""
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or not _autorizar_vitrine_direta(request, empresa, token):
-        raise HTTPException(404, "Link direto inválido")
-    return templates.TemplateResponse("publico/vitrine_inicio.html", {
-        "request": request,
-        "empresa": empresa,
-        "hoje": date.today().isoformat(),
-        "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
-        "modo_direto": True,
-    })
+    esperado = str(getattr(empresa, "vitrine_link_direto_token", "") or "") if empresa else ""
+    if not esperado or not hmac.compare_digest(esperado, str(token or "")):
+        raise HTTPException(404, "Link inválido")
+    return RedirectResponse(f"/e/{slug}", status_code=303)
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)
@@ -19650,15 +19853,13 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
-    direto = _vitrine_direta_sessao_valida(request, empresa)
-    if not getattr(empresa, "vitrine_ativa", True) and not direto:
+    if not getattr(empresa, "vitrine_ativa", True):
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
         "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
-        "modo_direto": direto,
         "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
     })
 
@@ -19680,8 +19881,7 @@ def vitrine_publica(
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
         raise HTTPException(404, "Empresa não encontrada")
-    direto = _vitrine_direta_sessao_valida(request, empresa)
-    if not getattr(empresa, "vitrine_ativa", True) and not direto:
+    if not getattr(empresa, "vitrine_ativa", True):
         return RedirectResponse(f"/e/{slug}/identificar", status_code=303)
     try:
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -19726,7 +19926,7 @@ def vitrine_publica(
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento], "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id), "itens": itens,
         "categorias": categorias, "erro": request.query_params.get("erro", ""),
         "cupons_ativos": bool(_empresa_modulo_ativo(empresa, "cupons")),
-        "fluxo_vitrine": "direto",
+        "fluxo_vitrine": str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower(),
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
@@ -19827,7 +20027,7 @@ def _estado_partilha_validado(data):
 @app.post("/e/{slug}/vitrine/compartilhar")
 async def vitrine_gerar_link_compartilhamento(slug: str, request: Request, db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     if int(request.headers.get("content-length") or 0) > 20000:
         return JSONResponse({"ok": False, "erro": "O compartilhamento é muito grande."}, status_code=413)
@@ -19863,7 +20063,7 @@ async def vitrine_gerar_link_compartilhamento(slug: str, request: Request, db: S
 @app.get("/e/{slug}/vitrine/buscar-cep")
 def vitrine_buscar_cep_endereco(slug: str, request: Request, uf: str = "", cidade: str = "", rua: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     uf = re.sub(r"[^A-Za-z]", "", uf).upper()
     cidade, rua = cidade.strip(), rua.strip()
@@ -19893,7 +20093,7 @@ def vitrine_buscar_cep_endereco(slug: str, request: Request, uf: str = "", cidad
 def vitrine_calcular_deslocamento(
         slug: str, request: Request, cep: str = Form(...), numero: str = Form(...), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     resultado = _calcular_frete_vitrine(empresa, cep, numero)
     return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 400)
@@ -19903,7 +20103,7 @@ def vitrine_calcular_deslocamento(
 def vitrine_validar_cupom(
         slug: str, request: Request, codigo: str = Form(""), data_evento: str = Form(""), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not _vitrine_direta_sessao_valida(request, empresa)):
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     if not _empresa_modulo_ativo(empresa, "cupons"):
         return JSONResponse({"ok": False, "erro": "Cupons não estão disponíveis nesta vitrine."}, status_code=404)
@@ -19934,8 +20134,7 @@ def vitrine_publica_reservar(
         db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
-    direto = bool(empresa and _vitrine_direta_sessao_valida(request, empresa))
-    if not empresa or (not getattr(empresa, "vitrine_ativa", True) and not direto):
+    if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
     try:
         data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
@@ -20046,7 +20245,7 @@ def vitrine_publica_reservar(
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=cupom", status_code=303)
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
-        "data_evento": data_obj.isoformat(), "modo_direto": bool(direto), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
         "responsavel_token": _token_responsavel_vitrine(db, empresa, responsavel_token),
         "whatsapp": "",
         "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
@@ -20064,7 +20263,7 @@ def vitrine_publica_reservar(
         },
     }
 
-    fluxo = "direto"  # Vitrine pública leva sempre ao cadastro, sem aprovação intermediária.
+    fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
     # Reaproveita o rascunho padrão do Connect. Quando a empresa exige análise,
     # a vitrine já grava o mesmo contrato em status pre_reserva, com os itens e a
     # composição comercial preenchidos. A aprovação apenas libera o cadastro do
@@ -20082,8 +20281,6 @@ def vitrine_publica_reservar(
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
         return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
 
-    if direto:
-        request.session.pop(f"vitrine_direta_{empresa.slug}", None)
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
 
@@ -21179,7 +21376,7 @@ def salvar_pre_cadastro(
         _aplicar_composicao_comercial(
             solicitacao, round(total_itens + total_opcionais, 2), frete_vitrine, cupom_vitrine, valor_horas_extra_vitrine
         )
-        fluxo_vitrine = "direto" if bool(pedido_vitrine.get("modo_direto")) else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool(frete_info.get("consultar")) or possui_item_sob_consulta
         solicitacao.status = "pre_reserva" if precisa_aprovacao else ("contrato_enviado" if contrato_padrao_id else "pre_reserva")
 
@@ -21204,7 +21401,7 @@ def salvar_pre_cadastro(
             if solicitacao.contrato_id:
                 return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
             return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
-        fluxo_vitrine = "direto" if bool(pedido_vitrine.get("modo_direto")) else str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
+        fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar")) or bool(pedido_vitrine.get("possui_sob_consulta"))
         if precisa_aprovacao or solicitacao.status == "pre_reserva":
             return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)

@@ -35,6 +35,13 @@
 <div class="box google-sync-status"><small><b>Google Agenda:</b> {{ request.query_params.get('google_ok') }} sincronizado(s){% if request.query_params.get('google_excluidos')|int %} · {{ request.query_params.get('google_excluidos') }} finalizado(s){% endif %}{% if request.query_params.get('google_ignorados')|int %} · {{ request.query_params.get('google_ignorados') }} ignorado(s){% endif %}{% if request.query_params.get('google_erros')|int %} · {{ request.query_params.get('google_erros') }} erro(s){% endif %}</small></div>
 {% endif %}
 
+<div class="operacao-estoque-atalho">
+  <a class="botao-mini principal" href="/painel/reservas/consumo-estoque?data={{ data_inicial }}">
+    <i class="bi bi-box-seam" aria-hidden="true"></i> Estoque do dia
+  </a>
+  <small class="texto-discreto">Total cadastrado, na rua, na loja e itens para preparar</small>
+</div>
+
 <section class="operacao-ferramentas">
     {% if empresa.google_calendar_ativo and empresa.google_calendar_operacao %}
     <form method="post" action="/painel/reservas/google-calendar/sincronizar" class="acoes google-sync-form">
@@ -170,7 +177,10 @@
                 <b>{{ item_nome }}</b>
                 {% endif %}
                 {% if ae and ae.recursos %}
-                <small class="responsaveis-operacao-mini"><b>Recursos:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.nome }} {{ r.necessario }}{% endfor %}</small>
+                <small class="responsaveis-operacao-mini"><b>Separar do estoque:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.necessario }}x {{ r.nome }}{% endfor %}</small>
+                {% endif %}
+                {% if ae and ae.opcionais %}
+                <small class="responsaveis-operacao-mini"><b>Opcionais do contrato:</b> {% for op in ae.opcionais %}{% if not loop.first %} · {% endif %}{{ op.quantidade }}x {{ op.nome }}{% if not op.controla_estoque %} (sem vínculo de estoque){% endif %}{% endfor %}</small>
                 {% endif %}
                 {% if ae and ae.tem_conflito %}
                   <small class="observacao-destaque"><b>ATENÇÃO:</b> estoque excedido neste contrato</small>

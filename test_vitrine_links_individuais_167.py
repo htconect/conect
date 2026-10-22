@@ -1,6 +1,9 @@
 """Testes de atribuição individual no Connect 1.0.167 (sem rede ou banco real)."""
 from datetime import date, time, timedelta
 from types import SimpleNamespace
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
 
 import pytest
 from sqlalchemy import create_engine
@@ -57,16 +60,17 @@ def test_geral_nunca_seleciona_junior_luiz_ou_admin():
 
 def test_link_curto_de_cada_usuario_eh_estavel_e_individual():
     db,empresa,junior,luiz=fixture_db()
-    links=app._links_usuarios_vitrine(request_for('/painel/vitrine'),db,empresa)
-    assert len(links)==3  # administrador com WhatsApp e dois usuários
-    assert len(set(x['link'] for x in links))==3
-    for reg in links:
-        assert '?u=' in reg['link']
-        assert '219' not in reg['link']
-        assert len(reg['codigo'])==8
-        assert app._token_por_codigo_curto_vitrine(db,empresa,reg['codigo'])==reg['token']
-    assert next(x for x in links if x['nome']=='Junior')['link'].endswith('?u='+junior.pre_contrato_token[:8])
-    assert next(x for x in links if x['nome']=='Luiz')['link'].endswith('?u='+luiz.pre_contrato_token[:8])
+    links=[]
+    for usuario in (junior,luiz):
+        url, compartilhar = app._vitrine_link_do_usuario(request_for('/painel/vitrine', usuario=usuario.usuario),db,empresa)
+        assert url.endswith('?u='+usuario.pre_contrato_token[:8])
+        assert '219' not in url  # número não aparece no endereço
+        codigo=parse_qs(urlparse(url).query)['u'][0]
+        assert app._token_por_codigo_curto_vitrine(db,empresa,codigo)==usuario.pre_contrato_token
+        assert url in parse_qs(urlparse(compartilhar).query)['text'][0]
+        assert urlparse(compartilhar).netloc=='api.whatsapp.com'
+        links.append(url)
+    assert len(set(links))==2
     db.close()
 
 
@@ -142,11 +146,43 @@ def test_link_legado_funciona_e_vitrine_preserva_token_do_link():
     db.close()
 
 
-def test_perfil_e_painel_vitrine_disponibilizam_copiar():
-    for pagina in ('admin/vitrine.html','admin/perfil.html'):
+def test_vitrine_exibe_somente_acesso_individual_e_compartilhar_whatsapp():
+    for pagina in ('admin/vitrine.html','admin/perfil.html','admin/empresa_guiada.html'):
         assert app.templates.get_template(pagina)
-    assert '?u=' in (open('templates/admin/vitrine.html').read() + open('app.py').read())
-    assert 'link_pessoal_vitrine' in open('templates/admin/perfil.html').read()
+    vitrine=Path('templates/admin/vitrine.html').read_text()
+    perfil=Path('templates/admin/perfil.html').read_text()
+    empresa=Path('templates/admin/empresa_guiada.html').read_text()
+    assert 'vitrine_url' in vitrine and 'vitrine_compartilhar_whatsapp' in vitrine
+    assert 'Links de todos os atendentes' not in vitrine
+    assert 'Link geral (sem atendente vinculado)' not in vitrine
+    assert 'link_pessoal_vitrine' not in perfil
+    assert 'Link direto sem aprovação' not in empresa
+    assert 'Link público:' not in Path('templates/admin/empresas.html').read_text()
+    assert 'href="{{ vitrine_url }}"' in vitrine and 'href="{{ vitrine_url }}"' in empresa
+
+
+def test_vitrine_sem_whatsapp_nao_oferece_link_generico():
+    db, empresa, junior, luiz = fixture_db()
+    junior.telefone = None
+    db.commit()
+    assert app._vitrine_link_do_usuario(request_for('/painel/vitrine',usuario='junior'), db, empresa)==('', '')
+    db.close()
+
+
+def test_link_legado_direto_nao_burla_aprovacao():
+    db, empresa, junior, luiz = fixture_db()
+    empresa.vitrine_link_direto_token='link-direto-legado'
+    empresa.vitrine_fluxo='aprovacao'
+    db.commit()
+    req=request_for('/e/karaokerj/direto/link-direto-legado')
+    response=app.portal_empresa_direto('karaokerj','link-direto-legado',req,db=db)
+    assert response.status_code==303
+    assert response.headers['location']=='/e/karaokerj'
+    assert not any(key.startswith('vitrine_direta') for key in req.session)
+    fonte=Path('app.py').read_text()
+    assert 'fluxo = "direto"  # Vitrine pública' not in fonte
+    assert '_vitrine_direta_sessao_valida' not in fonte
+    db.close()
 
 
 def test_reservas_diretas_da_vitrine_sao_marcadas_para_evitar_atribuicao_aleatoria():

@@ -34,7 +34,6 @@
           <div><label>Cidade / região principal</label><input name="cidade_atendimento" value="{{ empresa.cidade_atendimento or '' }}" placeholder="Ex.: Rio de Janeiro"></div>
           <div><label>WhatsApp comercial</label><input name="whatsapp_retorno" inputmode="tel" value="{{ empresa.whatsapp_retorno or '' }}" placeholder="(21) 99999-9999"></div>
           <div><label>Catálogo de músicas</label><input name="catalogo_musicas_url" type="url" value="{{ empresa.catalogo_musicas_url or '' }}" placeholder="https://seusite.com/catalogo"><p class="texto-ajuda">Quando preenchido, aparece para o cliente o botão <b>Ver catálogo de músicas</b>.</p></div>
-          <div><label>Link público</label><div class="slug-box"><code>{{ link_publico }}</code></div></div>
         </div>
         <div style="margin-top:16px">
           <label>Logo</label>
@@ -123,11 +122,6 @@
             <option value="aprovacao" {% if empresa.vitrine_fluxo == 'aprovacao' %}selected{% endif %}>Pedido para análise — decidir atender ou indicar</option>
           </select>
           <p class="texto-ajuda"><b>Pedido para análise:</b> o carrinho já nasce como o rascunho padrão do Connect, com equipamento, valores e dados comerciais preenchidos. Se você atender, o cliente completa o cadastro e segue para aceite e pagamento. Se indicar no LokaFest, o rascunho é cancelado e fica em Cancelados para eventual reenvio. <b>Reserva direta:</b> o cliente segue imediatamente para completar cadastro, aceite e pagamento.</p>
-          <div style="margin-top:14px;padding:13px;border:1px solid #dbe3ee;border-radius:14px;background:#f8fafc">
-            <label>Link direto sem aprovação</label>
-            <div class="slug-box" style="margin-top:7px"><code id="linkDiretoVitrine">{{ link_direto }}</code><button type="button" class="botao-secundario" id="copiarLinkDireto"><i class="bi bi-copy"></i> Copiar</button></div>
-            <p class="texto-ajuda" style="margin-bottom:0">Use com clientes recorrentes ou atendimentos que não precisam passar pela análise. É sempre o mesmo link e funciona mesmo com a vitrine pública desativada. O fluxo segue direto para cadastro, aceite e pagamento.</p>
-          </div>
         </div>
         <div class="empresa-grade" style="margin-top:12px">
           <div>
@@ -161,7 +155,7 @@
       </div>
     </section>
 
-    <div class="acoes-fixas"><span class="texto-ajuda">Você pode salvar mesmo sem terminar.</span><div style="display:flex;gap:8px"><a class="botao-secundario" href="/e/{{ empresa.slug }}" target="_blank"><i class="bi bi-eye"></i> Ver vitrine</a><button type="submit"><i class="bi bi-save"></i> Salvar rascunho</button></div></div>
+    <div class="acoes-fixas"><span class="texto-ajuda">Você pode salvar mesmo sem terminar.</span><div style="display:flex;gap:8px">{% if vitrine_url %}<a class="botao-secundario" href="{{ vitrine_url }}" target="_blank" rel="noopener"><i class="bi bi-eye"></i> Ver vitrine</a><a class="botao-secundario" href="{{ vitrine_compartilhar_whatsapp }}" target="_blank" rel="noopener" aria-label="Compartilhar minha vitrine pelo WhatsApp" title="Compartilhar minha vitrine pelo WhatsApp"><i class="bi bi-whatsapp"></i></a>{% else %}<a class="botao-secundario" href="/painel/perfil" title="Cadastre seu WhatsApp para ativar a vitrine individual"><i class="bi bi-person-gear"></i> Cadastrar WhatsApp</a>{% endif %}<button type="submit"><i class="bi bi-save"></i> Salvar rascunho</button></div></div>
   </form>
 </div>
 
@@ -190,11 +184,5 @@
  document.querySelectorAll('[data-prompt-ia]').forEach(b=>b.addEventListener('click',async()=>{const t=b.dataset.promptIa;const empresa=(nome?.value||'Sua empresa').trim();const cidade=(document.querySelector('input[name="cidade_atendimento"]')?.value||'').trim();const descricao=(desc?.value||sub?.value||'').trim();const cor1=cp?.value||'#6D4AFF',cor2=cs?.value||'#EEF0FF';let prompt='';if(t==='logo'){prompt=`Crie uma logo profissional para a empresa "${empresa}"${cidade?` que atende ${cidade}`:''}. Formato quadrado 1:1, 1200 x 1200 px, pensada para também funcionar em recorte circular. Visual moderno, legível em tamanho pequeno, com identidade própria, sem excesso de elementos e sem texto minúsculo. Paleta de referência: ${cor1} e ${cor2}. ${descricao?`Contexto da empresa: ${descricao}.`:''} Não invente telefone, preço ou informações comerciais. Entregue somente a arte da logo, centralizada e com margem segura.`}else{prompt=`Crie uma capa horizontal profissional para a vitrine da empresa "${empresa}"${cidade?` em ${cidade}`:''}. Tamanho 1400 x 617 px. ${descricao?`Contexto: ${descricao}.`:''} Use a identidade visual da empresa e, se eu anexar a logo, preserve-a sem alterar. Paleta de referência: ${cor1} e ${cor2}. A imagem deve ser comercial, moderna, limpa e legível no celular, com os elementos importantes concentrados no centro para evitar cortes. Não invente preços, telefone ou serviços. Não coloque botões nem redes sociais dentro da imagem.`}try{await navigator.clipboard.writeText(prompt);alert('Prompt copiado. Cole no ChatGPT, Gemini ou Canva e anexe a logo/foto quando necessário.')}catch(e){window.prompt('Copie este prompt:',prompt)}}));
 })();
 
-const copiarLinkDireto=document.getElementById('copiarLinkDireto');
-copiarLinkDireto?.addEventListener('click',async()=>{
-  const valor=document.getElementById('linkDiretoVitrine')?.textContent?.trim()||'';
-  if(!valor)return;
-  try{await navigator.clipboard.writeText(valor);copiarLinkDireto.innerHTML='<i class="bi bi-check2"></i> Copiado';setTimeout(()=>copiarLinkDireto.innerHTML='<i class="bi bi-copy"></i> Copiar',1600)}catch(_){window.prompt('Copie o link direto:',valor)}
-});
 </script>
 {% endblock %}

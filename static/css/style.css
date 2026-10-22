@@ -1914,3 +1914,20 @@ a.botao-whats span,.botao-whats span,.botao-whats-btn span{
 .filtro-periodo-contratos .contratos-acoes-filtros{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .filtro-periodo-contratos .contratos-acoes-filtros .botao,.filtro-periodo-contratos .contratos-acoes-filtros .botao-secundario{width:100%;min-width:0;min-height:44px;display:inline-flex;align-items:center;justify-content:center;text-align:center;box-sizing:border-box;white-space:normal;line-height:1.15;padding:9px 7px;font-size:13px}
 @media (max-width:390px){.filtro-periodo-contratos .filtros-status-agenda{gap:5px}.filtro-periodo-contratos .filtros-status-agenda label.check{padding:9px 5px;font-size:11px}}
+
+/* 1.0.170 — InfinitePay: impedir letras empilhadas por flex-shrink no celular. */
+.pagamentos-lista .linha-item-mobile.infinitepay-cobranca{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+.infinitepay-cobranca .infinitepay-principal{min-width:0;max-width:100%;overflow-wrap:break-word;word-break:normal}
+.infinitepay-cobranca .infinitepay-principal>b{display:block;line-height:1.5}
+.infinitepay-cobranca .infinitepay-valor{white-space:nowrap}
+.infinitepay-cobranca .pagamento-detalhes-consulta{min-width:0;overflow-wrap:anywhere}
+.infinitepay-cobranca .infinitepay-acoes{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.infinitepay-cobranca .infinitepay-acoes .botao,
+.infinitepay-cobranca .infinitepay-acoes button{width:auto;max-width:100%;white-space:normal;text-align:center}
+@media(max-width:640px){
+  .pagamentos-lista .linha-item-mobile.infinitepay-cobranca{grid-template-columns:minmax(0,1fr);width:100%;min-width:0}
+  .infinitepay-cobranca .infinitepay-acoes{display:grid;grid-template-columns:minmax(0,1fr)}
+  .infinitepay-cobranca .infinitepay-acoes .botao,
+  .infinitepay-cobranca .infinitepay-acoes form,
+  .infinitepay-cobranca .infinitepay-acoes button{width:100%;max-width:100%;min-width:0}
+}

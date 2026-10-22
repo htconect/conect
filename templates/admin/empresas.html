@@ -235,7 +235,6 @@
   <div class="card">
     <h3>{{ e.nome }}</h3>
     <p><b>Usuário:</b> {{ e.usuario_admin or '-' }}</p>
-    <p><b>Link público:</b> <a href="/e/{{ e.slug }}">/e/{{ e.slug }}</a></p>
     <p><b>Status:</b> {{ "Ativa" if e.ativa else "Inativa" }}</p>
     <p><b>Humiats:</b> {{ e.humiat_saldo or 0 }}</p>
     <a href="/admin/empresa/{{ e.id }}">Editar</a>

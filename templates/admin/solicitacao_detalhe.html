@@ -290,10 +290,22 @@
     <p class="texto-discreto">Nenhum equipamento adicionado.</p>
   {% endif %}
 
+  {% if analise_estoque.opcionais %}
+  <div class="box" style="margin-top:14px">
+    <h3>Opcionais para separar</h3>
+    <p class="texto-discreto">Todos os opcionais do contrato, inclusive os que não consomem estoque.</p>
+    {% for op in analise_estoque.opcionais %}
+    <div style="padding:6px 0;border-bottom:1px solid #e2e8f0">
+      <b>{{ op.quantidade }}x {{ op.nome }}</b>
+      {% if not op.controla_estoque %}<small class="texto-discreto" style="display:block">Sem vínculo de estoque neste contrato — confira se está correto.</small>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if empresa.modulo_recursos_ativo and recursos_contrato %}
   <div class="box" id="estoque-recursos-contrato" style="margin-top:14px">
     <h3>Estoque utilizado</h3>
-    <p class="texto-discreto">Os valores padrão vêm dos equipamentos registrados. Você pode desmarcar ou alterar a quantidade somente neste contrato.</p>
+    <p class="texto-discreto">Os valores padrão incluem equipamentos e opcionais vinculados ao estoque. As quantidades dos opcionais já estão somadas aos recursos abaixo. Você pode ajustar o consumo somente neste contrato.</p>
     <form method="post" action="/painel/solicitacao/{{ item.id }}/recursos">
       {% for recurso in recursos_contrato %}
       <div class="linha" style="align-items:end;border-bottom:1px solid rgba(127,127,127,.18);padding:9px 0">
@@ -486,9 +498,9 @@
     <p class="texto-discreto">Cobranças abertas são liberadas automaticamente após {{ infinitepay_ttl_horas }}h. Cancelar aqui libera uma nova cobrança sem apagar o histórico.</p>
     <div class="pagamentos-lista">
       {% for c in cobrancas_infinitepay %}
-      <div class="linha-item-mobile pagamento-consulta">
-        <div>
-          <b>R$ {{ ((c.valor_centavos or 0) / 100)|moeda_br }} · {{ {'sinal':'Sinal','integral':'Valor do contrato','restante':'Saldo'}.get(c.tipo_pagamento, c.tipo_pagamento) }}</b>
+      <div class="linha-item-mobile pagamento-consulta infinitepay-cobranca">
+        <div class="infinitepay-principal">
+          <b><span class="infinitepay-valor">R$ {{ ((c.valor_centavos or 0) / 100)|moeda_br }}</span> · {{ {'sinal':'Sinal','integral':'Valor do contrato','restante':'Saldo'}.get(c.tipo_pagamento, c.tipo_pagamento) }}</b>
           <small>InfinitePay · {{ c.status.replace('_',' ') }}</small>
           <div class="pagamento-detalhes-consulta">
             <span><strong>Pedido:</strong> {{ c.order_nsu }}</span>
@@ -498,13 +510,15 @@
           </div>
         </div>
         {% if c.status == 'AGUARDANDO_PAGAMENTO' %}
-        {% if c.checkout_url and c.checkout_url.startswith('https://') %}
-        <a class="botao secundario" href="{{ c.checkout_url }}" target="_blank" rel="noopener noreferrer">Abrir InfinitePay</a>
-        <a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/reenviar-link" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i> Reenviar link ao cliente</a>
-        {% endif %}
-        <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
-          <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
-        </form>
+        <div class="infinitepay-acoes">
+          {% if c.checkout_url and c.checkout_url.startswith('https://') %}
+          <a class="botao secundario" href="{{ c.checkout_url }}" target="_blank" rel="noopener noreferrer">Abrir InfinitePay</a>
+          <a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/reenviar-link" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i> Reenviar link</a>
+          {% endif %}
+          <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
+            <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
+          </form>
+        </div>
         {% endif %}
       </div>
       {% endfor %}

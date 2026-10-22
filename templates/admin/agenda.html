@@ -72,7 +72,10 @@
       </small>
       {% set ae = s.analise_estoque_view %}
       {% if ae and ae.recursos %}
-        <small class="financeiro-mini"><b>Recursos:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.nome }} {{ r.necessario }}{% endfor %}</small>
+        <small class="financeiro-mini"><b>Separar do estoque:</b> {% for r in ae.recursos if r.necessario > 0 %}{% if not loop.first %} · {% endif %}{{ r.necessario }}x {{ r.nome }}{% endfor %}</small>
+      {% endif %}
+      {% if ae and ae.opcionais %}
+        <small class="financeiro-mini"><b>Opcionais do contrato:</b> {% for op in ae.opcionais %}{% if not loop.first %} · {% endif %}{{ op.quantidade }}x {{ op.nome }}{% if not op.controla_estoque %} (sem vínculo de estoque){% endif %}{% endfor %}</small>
       {% endif %}
       {% if ae and ae.tem_conflito %}
         {% for p in ae.conflitos_produtos %}<small class="observacao-destaque"><b>ATENÇÃO — PRODUTO EXCEDIDO:</b> {{ p.nome }} · falta {{ p.falta }}</small>{% endfor %}
