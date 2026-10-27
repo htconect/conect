@@ -2107,6 +2107,16 @@ def _sinal_infinitepay_contrato(empresa: Empresa, item: Solicitacao) -> float:
         return 0.0
 
     sinal_item = max(float(getattr(item, "sinal", 0) or 0), 0.0)
+    # Nas reservas por periodo, a retirada libera o estoque no proprio dia.
+    # Por isso o numero de diarias e (retirada - entrega), sem incluir a retirada.
+    inicio = getattr(item, "data_evento", None)
+    fim = getattr(item, "retirada_data", None)
+    if (getattr(item, "retirada_obrigatoria", False)
+            and inicio is not None and fim is not None and fim > inicio):
+        # Nao muda o sinal ja congelado nos contratos anteriormente aceitos.
+        if status_contrato_aceito(getattr(item, "status", "")) and sinal_item > 0.009:
+            return min(sinal_item, total)
+        return min(100.0 * (fim - inicio).days, total)
     sinal_por_equipamento = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
     qtd_equipamentos = _quantidade_equipamentos_contrato(item)
     sinal_calculado = sinal_por_equipamento * qtd_equipamentos
@@ -2137,6 +2147,10 @@ def _valor_pagamento_manual_sugerido(empresa: Empresa, item: Solicitacao) -> flo
     if pago > 0.009:
         return round(saldo, 2)
 
+    inicio = getattr(item, "data_evento", None)
+    fim = getattr(item, "retirada_data", None)
+    if (getattr(item, "retirada_obrigatoria", False) and inicio and fim and fim > inicio):
+        return round(min(_sinal_infinitepay_contrato(empresa, item), saldo), 2)
     sinal_configurado = max(float(getattr(empresa, "infinitepay_valor_sinal", 0) or 0), 0.0)
     if sinal_configurado > 0.009 or float(getattr(item, "sinal", 0) or 0) > 0.009:
         sinal = _sinal_infinitepay_contrato(empresa, item)
@@ -8814,6 +8828,28 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
             return {"ok": False, "erro": "CEP confirmado, mas não foi possível validar a distância. Tente novamente ou entre em contato com o atendimento."}
         distancia_ida = float(distancia_ida)
 
+        # Proteção financeira: nunca cobrar um frete automático a partir de
+        # distância aproximada. O fallback linha-reta * 1,30 serve à logística,
+        # mas não representa uma rota de cobrança confiável.
+        if not str(fonte).startswith("osrm"):
+            geo_logger.error("[FRETE] rota nao confirmada origem=%s destino=%s km=%.1f fonte=%s", origem, cep, distancia_ida, fonte)
+            return {"ok": False, "erro": "Não foi possível confirmar a rota de carro para calcular o frete. Solicite cotação ao atendimento."}
+
+        # CEPs em regiões postais distintas com trajeto curto são um padrão
+        # frequente de geocodificação para o bairro errado. Conferir usando
+        # uma segunda fonte postal antes de aceitar o preço da vitrine.
+        if origem[:2] != cep[:2] and distancia_ida < 20.0:
+            ref_lat1, ref_lon1, _ = _coordenadas_cep_referencia(origem, dados_origem)
+            ref_lat2, ref_lon2, _ = _coordenadas_cep_referencia(cep, dados_destino)
+            if None in (ref_lat1, ref_lon1, ref_lat2, ref_lon2):
+                geo_logger.error("[FRETE] sem validacao geografica de percurso curto origem=%s destino=%s", origem, cep)
+                return {"ok": False, "erro": "Não foi possível validar a distância entre as regiões. Frete sob consulta."}
+            km_referencia, _, fonte_ref = _trecho_rodoviario(ref_lat1, ref_lon1, ref_lat2, ref_lon2, forcar_recalculo=True)
+            if (km_referencia is None or not str(fonte_ref).startswith("osrm")
+                    or abs(float(km_referencia) - distancia_ida) > max(3.0, float(km_referencia) * 0.20)):
+                geo_logger.error("[FRETE] divergencia na rota origem=%s destino=%s km=%.1f km_postal=%s fonte=%s", origem, cep, distancia_ida, km_referencia, fonte_ref)
+                return {"ok": False, "erro": "Encontramos divergência na distância do percurso. Frete sob consulta."}
+
         quantidade_km = distancia_ida * 2.0
         valor = round(quantidade_km * valor_km, 2)
         return {
@@ -10356,7 +10392,7 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
     oportunidades_db = (
         db.query(VitrineOportunidade)
-        .filter(VitrineOportunidade.empresa_id == empresa.id, VitrineOportunidade.status == "pendente")
+        .filter(VitrineOportunidade.empresa_id == empresa.id, VitrineOportunidade.status.in_(["pendente", "frete_pendente", "frete_aprovado"]))
         .order_by(VitrineOportunidade.criado_em.desc(), VitrineOportunidade.id.desc())
         .limit(50)
         .all()
@@ -10370,6 +10406,7 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
             "itens_nomes": ", ".join(str(x.get("nome") or "Item") for x in (snap.get("itens") or [])) or "Itens do pedido",
             "hora_inicio": str(snap.get("hora_inicio") or ""),
             "bairro": str(frete.get("bairro") or ""),
+            "frete_pendente": op.status == "frete_pendente", "frete_aprovado": op.status == "frete_aprovado",
         })
     _garantir_tokens_responsaveis_vitrine(db, empresa)
     link_usuario, link_whatsapp = _vitrine_link_do_usuario(request, db, empresa)
@@ -20394,6 +20431,36 @@ def vitrine_publica_reservar(
 
     whatsapp_pedido = limpar_identificador(whatsapp_pre_reserva)
     frete = _calcular_frete_vitrine(empresa, cep_frete, numero_frete)
+    if not frete.get("ok") or bool(frete.get("consultar")):
+        # Sem rota segura, guardar somente um pedido de vitrine (não criar contrato).
+        # O link público poderá ser retomado após o atendimento fixar o frete.
+        request.session[f"vitrine_pedido_{empresa.slug}"] = {
+            "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido,
+            "cupom_codigo": _normalizar_codigo_cupom(cupom_codigo),
+            "oferta_periodo": oferta_periodo,
+            "responsavel_token": _token_responsavel_vitrine(db, empresa, responsavel_token),
+            "whatsapp": "", "hora_inicio": hora_inicio_vitrine,
+            "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
+            "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
+            "frete": {"cep": _cep_limpo(cep_frete), "numero": str(numero_frete or ""),
+                      "tipo": "consultar", "valor": 0, "consultar": True,
+                      "erro_rota": str(frete.get("erro") or "Frete sem rota validada")[:240]},
+        }
+        pedido_pendente = _pedido_vitrine_sessao(request, db, empresa)
+        if not pedido_pendente:
+            raise HTTPException(409, "Não foi possível salvar o carrinho. Entre em contato com o suporte.")
+        oportunidade = _criar_oportunidade_vitrine(db, empresa, pedido_pendente, "PENDENTE-FRETE", False)
+        oportunidade.status = "frete_pendente"
+        snap = _snapshot_oportunidade(oportunidade)
+        snap["frete"]["consultar"] = True
+        snap["frete"]["erro_rota"] = str(frete.get("erro") or "Frete sem rota validada")[:240]
+        snap["oferta_periodo"] = oferta_periodo
+        snap["responsavel_token"] = _token_responsavel_vitrine(db, empresa, responsavel_token)
+        oportunidade.pedido_json = json.dumps(snap, ensure_ascii=False, separators=(",", ":"))
+        db.commit()
+        request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
+        return RedirectResponse(f"/e/{slug}/frete-pendente/{oportunidade.public_token}", status_code=303)
+
     if not frete.get("ok"):
         params = urlencode({
             "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "erro": "frete",
@@ -21246,6 +21313,8 @@ def salvar_pre_cadastro(
                 "pendente": _vitrine_pendente_aprovacao(pre_reserva_existente),
             }, status_code=409)
     pedido_vitrine = _pedido_vitrine_solicitacao(db, pre_reserva_existente) if pre_reserva_existente else _pedido_vitrine_sessao(request, db, empresa)
+    if pedido_vitrine and bool((pedido_vitrine.get("frete") or {}).get("consultar")):
+        raise HTTPException(409, "Frete pendente de validação. Entre em contato com o suporte.")
     if pedido_vitrine:
         # O mesmo endereço usado no cálculo do deslocamento segue para o rascunho do contrato.
         frete_pedido = pedido_vitrine.get("frete") or {}
@@ -21593,6 +21662,70 @@ def salvar_pre_cadastro(
         f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato",
         status_code=303,
     )
+
+
+@app.get("/e/{slug}/frete-pendente/{token}", response_class=HTMLResponse)
+def vitrine_frete_pendente(slug: str, token: str, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    op = db.query(VitrineOportunidade).filter_by(empresa_id=empresa.id, public_token=token).first() if empresa else None
+    if not op or op.status not in {"frete_pendente", "frete_aprovado"}:
+        raise HTTPException(404)
+    if op.status == "frete_aprovado":
+        return RedirectResponse(f"/e/{slug}/retomar-frete/{token}", status_code=303)
+    return HTMLResponse("""<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Frete sob consulta</title><div style='max-width:540px;margin:8vh auto;padding:24px;font:17px Arial,sans-serif;line-height:1.6'><h2>Não foi possível calcular o frete</h2><p>Não conseguimos confirmar uma rota segura para seu endereço. <b>Entre em contato com o suporte para continuar sua reserva.</b></p><p>Seu carrinho foi salvo. Após o atendimento informar o valor, você poderá continuar pelo mesmo link.</p></div></html>""")
+
+
+@app.get("/e/{slug}/retomar-frete/{token}")
+def vitrine_retomar_frete(slug: str, token: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    op = db.query(VitrineOportunidade).filter_by(empresa_id=empresa.id, public_token=token, status="frete_aprovado").first() if empresa else None
+    if not op:
+        raise HTTPException(409, "Frete ainda não liberado pelo suporte.")
+    snap = _snapshot_oportunidade(op)
+    frete = snap.get("frete") or {}
+    if frete.get("consultar") or not frete.get("aprovado_manualmente"):
+        raise HTTPException(409, "Frete não validado.")
+    itens = []
+    for it in snap.get("itens") or []:
+        itens.append({"produto_id": int(it["produto_id"]), "quantidade": int(it.get("quantidade") or 1),
+                      "opcionais": [{"opcional_id": int(o["id"]), "quantidade": int(o.get("quantidade") or 1)} for o in (it.get("opcionais") or [])]})
+    request.session[f"vitrine_pedido_{empresa.slug}"] = {
+        "data_evento": snap["data_evento"], "tipo_evento": snap["tipo_evento"], "itens": itens,
+        "cupom_codigo": snap.get("cupom_codigo") or "", "oferta_periodo": snap.get("oferta_periodo"),
+        "responsavel_token": snap.get("responsavel_token") or "", "whatsapp": "",
+        "hora_inicio": snap.get("hora_inicio") or "12:00", "retirada_mesmo_dia": bool(snap.get("retirada_mesmo_dia")),
+        "horas_adicionais": int(snap.get("horas_adicionais") or 0),
+        "valor_horas_adicionais": float(snap.get("valor_horas_adicionais") or 0),
+        "frete": frete,
+    }
+    return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
+
+
+@app.post("/painel/vitrine/oportunidade/{oportunidade_id}/aprovar-frete")
+def vitrine_aprovar_frete(oportunidade_id: int, request: Request, valor: str = Form(...),
+                         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    op = db.query(VitrineOportunidade).filter_by(id=oportunidade_id, empresa_id=empresa.id, status="frete_pendente").first()
+    if not op:
+        raise HTTPException(404)
+    try:
+        valor_limpo = str(valor).strip().replace(" ", "")
+        if "," in valor_limpo:
+            valor_limpo = valor_limpo.replace(".", "").replace(",", ".")
+        quantia = round(float(valor_limpo), 2)
+        if not math.isfinite(quantia) or quantia < 0 or quantia > 100000:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return RedirectResponse("/painel/vitrine?erro=Valor de frete inválido", status_code=303)
+    snap = _snapshot_oportunidade(op)
+    frete = snap.get("frete") or {}
+    frete.update({"valor": quantia, "tipo": "manual", "consultar": False,
+                  "aprovado_manualmente": True, "aprovado_em": agora_utc().isoformat()})
+    snap["frete"] = frete
+    snap["total_sob_consulta"] = bool(snap.get("possui_sob_consulta"))
+    op.pedido_json = json.dumps(snap, ensure_ascii=False, separators=(",", ":"))
+    op.status = "frete_aprovado"
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=frete_aprovado", status_code=303)
 
 
 @app.get("/e/{slug}/pedido-vitrine/{token}", response_class=HTMLResponse)

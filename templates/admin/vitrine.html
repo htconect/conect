@@ -55,6 +55,22 @@
           <div style="text-align:right"><small>Total apresentado</small><b style="display:block;font-size:18px">R$ {{ comp.total|moeda_br }}</b></div>
         </div>
         {% if comp.horas_adicionais > 0 %}<small>Horas adicionais: R$ {{ comp.horas_adicionais|moeda_br }}</small>{% endif %}
+        {% if op.frete_pendente %}
+        <div style="padding:12px;border:1px solid #f59e0b;border-radius:10px">
+          <b>Frete sem rota validada — não há contrato</b>
+          <p>Informe apenas o valor do frete. O endereço do cliente não será alterado.</p>
+          <form method="post" action="/painel/vitrine/oportunidade/{{ reg.id }}/aprovar-frete" style="display:flex;gap:8px;flex-wrap:wrap">
+            <input name="valor" type="text" inputmode="decimal" required placeholder="Ex.: 150,00" aria-label="Valor manual do frete">
+            <button class="botao" type="submit">Aprovar frete</button>
+          </form>
+          <small>Link do cliente: /e/{{ empresa.slug }}/frete-pendente/{{ reg.public_token }}</small>
+        </div>
+        {% elif op.frete_aprovado %}
+        <div style="padding:12px;border:1px solid #16a34a;border-radius:10px">
+          <b>Frete aprovado — envie este link ao cliente</b>
+          <a href="/e/{{ empresa.slug }}/retomar-frete/{{ reg.public_token }}" target="_blank">Retomar vitrine com frete aprovado</a>
+        </div>
+        {% else %}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <form method="post" action="/painel/vitrine/oportunidade/{{ reg.id }}/atender">
             <button class="botao largura-total btn-krj-primary" type="submit"><i class="bi bi-whatsapp"></i> Atender e enviar cadastro</button>
@@ -71,6 +87,7 @@
         <form method="post" action="/painel/vitrine/oportunidade/{{ reg.id }}/autorizar">
           <button class="botao btn-krj-ghost" type="submit"><i class="bi bi-check2-circle"></i> Registrar autorização recebida</button>
         </form>
+        {% endif %}
         {% endif %}
         {% if reg.indicado_em %}<small style="color:#2563eb">LokaFest aberto em {{ reg.indicado_em.strftime('%d/%m/%Y %H:%M') }}. O Connect não confirma o clique final em INDICAR.</small>{% endif %}
       </article>
