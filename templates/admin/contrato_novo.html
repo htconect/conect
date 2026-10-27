@@ -106,6 +106,11 @@
         <div><small>Duração</small><b id="duracaoManualTexto">—</b></div><div><small>Término</small><b id="terminoManualTexto">—</b></div><div><small>Horas adicionais</small><b id="valorHorasManualTexto">R$ 0,00</b></div>
       </div>
       {% if empresa.retirada_cortesia_proximo_dia %}<div style="padding:10px 12px;border-radius:12px;background:#ecfdf3;border:1px solid #a7f3d0;color:#067647;margin-bottom:10px"><b>Cortesia:</b> retirada no próximo dia.</div><label class="check"><input id="retiradaMesmoDiaManual" type="checkbox" name="retirada_mesmo_dia" value="1" {% if form.retirada_mesmo_dia %}checked{% endif %}> Preciso que retire no mesmo dia</label>{% else %}<input type="hidden" name="retirada_mesmo_dia" value="1">{% endif %}
+      <div style="margin-top:12px">
+        <label for="retiradaDataPeriodo">Data da retirada obrigatória (opcional)</label>
+        <input id="retiradaDataPeriodo" type="date" name="retirada_data" value="{{ form.retirada_data or '' }}">
+        <small class="texto-discreto">Para vários dias, informe a data da busca. O estoque fica reservado até o dia anterior; a data da retirada volta a ficar disponível.</small>
+      </div>
       <div id="horasExtrasManual" style="margin-top:10px" {% if empresa.retirada_cortesia_proximo_dia and not form.retirada_mesmo_dia %}hidden{% endif %}>
         <b>Adicionar horas?</b><div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button type="button" class="botao-secundario" id="menosHoraManual">−</button><strong id="qtdHorasManual">{{ form.horas_adicionais_manual or 0 }}</strong><button type="button" class="botao-secundario" id="maisHoraManual">+ 1 hora</button></div>
         <input type="hidden" name="horas_adicionais_manual" id="horasAdicionaisManual" value="{{ form.horas_adicionais_manual or 0 }}">
