@@ -36,7 +36,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy.orm import Session, joinedload, selectinload, make_transient_to_detached
-from sqlalchemy import func, text, inspect, or_, case
+from sqlalchemy import func, text, inspect, or_, and_, case
 from sqlalchemy.exc import IntegrityError
 
 from config import (
@@ -4559,6 +4559,19 @@ def _validar_hora_retirada_obrigatoria(empresa: Empresa, horario: str, termino: 
 
 
 
+def _data_retirada_manual(data_evento: date, valor: str) -> date | None:
+    """Data opcional: um dia posterior ocupa estoque até a véspera da retirada."""
+    if not str(valor or "").strip():
+        return None
+    try:
+        resultado = date.fromisoformat(str(valor).strip())
+    except ValueError:
+        raise ValueError("Data de retirada inválida.")
+    if resultado < data_evento:
+        raise ValueError("A retirada não pode ser anterior à data do evento.")
+    return resultado
+
+
 def criar_ou_atualizar_retirada_obrigatoria(db: Session, item: Solicitacao):
     """
     Cria o card de BUSCA antes da entrega ser concluída quando o cliente exigiu retirada.
@@ -4623,8 +4636,11 @@ def sincronizar_datas_operacao_com_contrato(
     if not mudou and not corrigir_existentes:
         return 0, 0
     if retirada_obrigatoria_ativa(item) and (mudou or corrigir_existentes):
-        # Retirada obrigatória sempre ocorre na mesma data do novo contrato.
-        item.retirada_data = item.data_evento
+        # Mantém o período negociado quando a data principal muda.
+        if not item.retirada_data or item.retirada_data <= (data_anterior or item.data_evento):
+            item.retirada_data = item.data_evento
+        elif mudou and data_anterior and item.retirada_data < item.data_evento:
+            item.retirada_data += item.data_evento - data_anterior
 
     eventos = db.query(Agenda).filter_by(
         empresa_id=item.empresa_id, solicitacao_id=item.id
@@ -6280,7 +6296,15 @@ def _reservas_ativas_na_data(db: Session, empresa_id: int, data_consulta: date, 
         db.query(Solicitacao)
         .options(selectinload(Solicitacao.itens), selectinload(Solicitacao.opcionais_contrato))
         .filter(Solicitacao.empresa_id == empresa_id)
-        .filter(Solicitacao.data_evento == data_consulta)
+        .filter(Solicitacao.data_evento <= data_consulta)
+        .filter(or_(
+            and_(Solicitacao.retirada_data != None,
+                 Solicitacao.retirada_data > Solicitacao.data_evento,
+                 Solicitacao.retirada_data > data_consulta),
+            and_(or_(Solicitacao.retirada_data == None,
+                     Solicitacao.retirada_data <= Solicitacao.data_evento),
+                 Solicitacao.data_evento == data_consulta),
+        ))
         .filter(Solicitacao.status.in_(list(STATUS_ESTOQUE_RESERVANTES)))
     )
     if excluir_solicitacao_id:
@@ -6374,7 +6398,10 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
             )
             .filter(
                 Solicitacao.empresa_id == empresa_id,
-                Solicitacao.data_evento.in_(list(datas)),
+                Solicitacao.data_evento <= max(datas),
+                or_(Solicitacao.data_evento.in_(list(datas)),
+                    and_(Solicitacao.retirada_data != None,
+                         Solicitacao.retirada_data > min(datas))),
                 Solicitacao.status.in_(list(STATUS_ESTOQUE_RESERVANTES)),
             )
             .all()
@@ -7830,8 +7857,8 @@ def _criar_pre_reserva_vitrine(
         duracao_contratada_minutos=duracao_base,
         horas_adicionais=horas_adicionais, valor_horas_adicionais=valor_horas_adicionais,
         cortesia_retirada=cortesia_retirada,
-        retirada_obrigatoria=retirada_mesmo_dia,
-        retirada_data=(pedido["data_evento"] if retirada_mesmo_dia else None),
+        retirada_obrigatoria=True if pedido.get("oferta_periodo") else retirada_mesmo_dia,
+        retirada_data=(date.fromisoformat(pedido["oferta_periodo"]["retirada_data"]) if pedido.get("oferta_periodo") else (pedido["data_evento"] if retirada_mesmo_dia else None)),
         retirada_hora=(fim_pedido if retirada_mesmo_dia else None),
     )
     db.add(item)
@@ -8822,14 +8849,14 @@ def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) ->
 
 
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
-                          tipo_evento: str = "residencial", apenas_disponibilidade: bool = False) -> list[dict]:
+                          tipo_evento: str = "residencial", apenas_disponibilidade: bool = False, ignorar_bloqueio: bool = False) -> list[dict]:
     """Vitrine completa ou verificação leve de estoque da reserva.
 
     A conferência final precisa de disponibilidade, não de fotos, preços e
     opcionais já escolhidos. Essas consultas continuam no catálogo público.
     """
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
-    bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_consulta)
+    bloqueio_data = None if ignorar_bloqueio else _bloqueio_data_empresa(db, empresa.id, data_consulta)
     if not apenas_disponibilidade:
         _garantir_categorias_vitrine_existentes(db, empresa)
         _garantir_tipos_evento_padrao(db, empresa)
@@ -9013,6 +9040,10 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
         duracao_maxima = max(duracao_maxima, duracao_item)
         sob_consulta = bool(preco.get("sob_consulta"))
         valor_unitario = 0.0 if sob_consulta else max(float(preco.get("valor") or 0), 0.0)
+        oferta = bruto.get("oferta_periodo")
+        if isinstance(oferta, dict) and int(oferta.get("produto_id") or 0) == produto_id:
+            valor_unitario = float(oferta["valor"])
+            sob_consulta = False
         valor_base_total = round(valor_unitario * quantidade, 2)
         opcionais_escolhidos = []
         total_opcionais = 0.0
@@ -9068,6 +9099,7 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
     valor_horas_adicionais = _valor_horas_adicionais_empresa(empresa, horas_adicionais)
     return {
         "data_evento": data_obj,
+        "oferta_periodo": bruto.get("oferta_periodo"),
         "responsavel_token": str(bruto.get("responsavel_token") or "").strip(),
         "tipo_evento": tipo_evento,
         "tipo_evento_nome": TIPOS_EVENTO_VITRINE[tipo_evento],
@@ -10349,6 +10381,54 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
         "salvo": request.query_params.get("salvo", ""),
         "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/painel/vitrine/periodo")
+def criar_link_vitrine_periodo(
+    request: Request, produto_id: int = Form(...), data_evento: str = Form(...),
+    retirada_data: str = Form(...), valor: str = Form(...),
+    tipo_evento: str = Form("residencial"),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    """Oferta particular: reaproveita o produto e a vitrine padrão, sem produto duplicado."""
+    try:
+        inicio = date.fromisoformat(data_evento)
+        fim = date.fromisoformat(retirada_data)
+        preco = round(texto_para_float(valor), 2)
+        produto = db.get(ProdutoServico, produto_id)
+        if not produto or produto.empresa_id != empresa.id or not produto.ativo or not produto.vitrine_ativo:
+            raise ValueError("Selecione um equipamento ativo na vitrine.")
+        if inicio < date.today() or fim <= inicio or (fim - inicio).days > 45:
+            raise ValueError("A retirada deve ser posterior à entrega (máximo 45 dias).")
+        if preco < 0 or preco > 1000000:
+            raise ValueError("Preço inválido.")
+        tipo = _normalizar_tipo_evento_vitrine(tipo_evento)
+        # A data bloqueada comercialmente não impede um link individual.
+        # Estoque físico continua obrigatório em todos os dias anteriores à retirada.
+        for delta in range((fim - inicio).days):
+            dia = inicio + timedelta(days=delta)
+            disponiveis = _itens_vitrine_publica(db, empresa, dia, tipo, apenas_disponibilidade=True, ignorar_bloqueio=True)
+            reg = next((x for x in disponiveis if int(x["produto"].id) == produto_id), None)
+            if not reg or int(reg.get("disponiveis") or 0) < 1:
+                raise ValueError(f"Sem estoque de {produto.nome} em {dia.strftime('%d/%m/%Y')}.")
+        link_usuario, _ = _vitrine_link_do_usuario(request, db, empresa)
+        from urllib.parse import urlparse, parse_qs
+        par = parse_qs(urlparse(link_usuario).query)
+        token = _resolver_responsavel_link_vitrine(db, empresa, u=(par.get("u") or [""])[0], r=(par.get("r") or [""])[0])
+        codigo = secrets.token_urlsafe(9)
+        estado = {"empresa": empresa.slug, "data_evento": inicio.isoformat(),
+                  "tipo_evento": tipo, "responsavel_token": token,
+                  "oferta_periodo": {"produto_id": produto_id, "retirada_data": fim.isoformat(),
+                                     "valor": preco}}
+        db.add(VitrineCompartilhamento(empresa_id=empresa.id, codigo=codigo,
+               pedido_json=json.dumps(estado, ensure_ascii=False)))
+        db.commit()
+        from urllib.parse import quote as quote_url
+        url = str(request.base_url).rstrip("/") + f"/e/{quote_url(empresa.slug, safe='')}/s/{codigo}"
+        return RedirectResponse("/painel/vitrine?link_periodo=" + quote_url(url, safe=""), status_code=303)
+    except (ValueError, TypeError) as exc:
+        from urllib.parse import quote as quote_url
+        return RedirectResponse("/painel/vitrine?erro=" + quote_url(str(exc), safe=""), status_code=303)
 
 
 @app.post("/painel/vitrine/responsavel")
@@ -13225,7 +13305,7 @@ def atualizar_retirada_obrigatoria_reserva(
         nova_hora = _validar_hora_retirada_obrigatoria(empresa, retirada_hora, item.hora_fim)
     except ValueError as exc:
         return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}?erro={quote(str(exc))}", status_code=303)
-    item.retirada_data = item.data_evento
+    item.retirada_data = item.retirada_data or item.data_evento
     item.retirada_hora = nova_hora
     if busca:
         hora_anterior = busca.hora_inicio
@@ -13669,8 +13749,9 @@ async def preparar_contrato(
             item.valor_horas_adicionais = 0.0
         item.hora_fim = somar_minutos(item.hora_inicio, item.duracao_contratada_minutos + horas_pagantes * 60)
         if retirada_obrigatoria_ativa(item):
-            item.retirada_data = item.data_evento
-            item.retirada_hora = item.hora_fim
+            if not item.retirada_data or item.retirada_data <= item.data_evento:
+                item.retirada_data = item.data_evento
+                item.retirada_hora = item.hora_fim
 
     # Salvar não significa aceitar nem enviar.
     # Antes do aceite, o contrato continua como rascunho até o usuário liberar o envio.
@@ -14287,7 +14368,7 @@ def contrato_novo_salvar(
         horas_adicionais_manual = 0
     duracao_total = duracao_base + horas_adicionais_manual * 60
     fim_calculado = somar_minutos(inicio_obj, duracao_total)
-    if retirada_mesmo_dia_bool:
+    if retirada_mesmo_dia_bool and not (retirada_data and retirada_data > data_evento):
         limite = _hora_maxima_retirada_empresa(empresa)
         inicio_min = inicio_obj.hour * 60 + inicio_obj.minute
         fim_min = inicio_min + duracao_total
@@ -14296,11 +14377,21 @@ def contrato_novo_salvar(
             return render_erro(f"A retirada no mesmo dia ultrapassa o limite de {limite.strftime('%H:%M')}.")
     valor_horas_manual = _valor_horas_adicionais_empresa(empresa, horas_adicionais_manual) if retirada_mesmo_dia_bool else 0.0
     retirada_obrigatoria_bool = retirada_mesmo_dia_bool
-    retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
+    try:
+        data_personalizada = _data_retirada_manual(data_evento_obj, retirada_data)
+    except ValueError as exc:
+        return render_erro(str(exc))
+    if data_personalizada and data_personalizada > data_evento_obj:
+        retirada_obrigatoria_bool = True
+        retirada_mesmo_dia_bool = False
+        horas_adicionais_manual = 0
+        valor_horas_manual = 0.0
+    retirada_data_obj = data_personalizada or (data_evento_obj if retirada_obrigatoria_bool else None)
     if retirada_obrigatoria_bool:
         try:
             retirada_hora_obj = _validar_hora_retirada_obrigatoria(
-                empresa, retirada_hora or fim_calculado.strftime("%H:%M"), fim_calculado
+                empresa, retirada_hora or fim_calculado.strftime("%H:%M"),
+                fim_calculado if retirada_data_obj == data_evento_obj else None
             )
         except ValueError as exc:
             return render_erro(str(exc))
@@ -14645,15 +14736,22 @@ def salvar_solicitacao_completa(
         horas_adicionais_manual = 0
     duracao_total = duracao_base + horas_adicionais_manual * 60
     fim_calculado = somar_minutos(inicio_obj, duracao_total)
-    if retirada_obrigatoria_bool:
+    if retirada_obrigatoria_bool and not (retirada_data and retirada_data > data_evento):
         limite = _hora_maxima_retirada_empresa(empresa)
         fim_min = inicio_obj.hour * 60 + inicio_obj.minute + duracao_total
         if fim_min >= 24 * 60 or fim_min > limite.hour * 60 + limite.minute:
             return render_erro(f"A retirada no mesmo dia ultrapassa o limite de {limite.strftime('%H:%M')}.")
-    retirada_data_obj = data_evento_obj if retirada_obrigatoria_bool else None
+    try:
+        data_personalizada = _data_retirada_manual(data_evento_obj, retirada_data)
+    except ValueError as exc:
+        return render_erro(str(exc))
+    if data_personalizada and data_personalizada > data_evento_obj:
+        retirada_obrigatoria_bool = True
+        horas_adicionais_manual = 0
+    retirada_data_obj = data_personalizada or (data_evento_obj if retirada_obrigatoria_bool else None)
     if retirada_obrigatoria_bool:
         try:
-            retirada_hora_obj = _validar_hora_retirada_obrigatoria(empresa, retirada_hora or fim_calculado.strftime("%H:%M"), fim_calculado)
+            retirada_hora_obj = _validar_hora_retirada_obrigatoria(empresa, retirada_hora or fim_calculado.strftime("%H:%M"), fim_calculado if retirada_data_obj == data_evento_obj else None)
         except ValueError as exc:
             return render_erro(str(exc))
     else:
@@ -19890,7 +19988,32 @@ def vitrine_publica(
     if data_obj < date.today():
         return RedirectResponse(f"/e/{slug}?erro=data", status_code=303)
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
-    itens = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)
+    itens = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento, ignorar_bloqueio=bool(isinstance(estado_partilha_direto, dict) and estado_partilha_direto.get("oferta_periodo")))
+    oferta_periodo = None
+    if isinstance(estado_partilha_direto, dict) and estado_partilha_direto.get("codigo_periodo"):
+        oferta = estado_partilha_direto.get("oferta_periodo") or {}
+        try:
+            fim = date.fromisoformat(str(oferta.get("retirada_data")))
+            pid = int(oferta.get("produto_id"))
+            preco = float(oferta.get("valor"))
+            if fim <= data_obj or (fim - data_obj).days > 45 or preco < 0:
+                raise ValueError("Intervalo inválido")
+            # Consulta a cada dia, sem subtrair o equipamento no dia da retirada.
+            for delta in range((fim - data_obj).days):
+                dia = data_obj + timedelta(days=delta)
+                disponiveis_dia = _itens_vitrine_publica(db, empresa, dia, tipo_evento, apenas_disponibilidade=True, ignorar_bloqueio=True)
+                dados = next((x for x in disponiveis_dia if int(x["produto"].id) == pid), None)
+                if not dados or int(dados.get("disponiveis") or 0) <= 0:
+                    raise ValueError("Estoque insuficiente no período")
+            itens = [x for x in itens if int(x["produto"].id) == pid]
+            if not itens:
+                raise ValueError("Equipamento indisponível")
+            itens[0]["preco"] = preco
+            itens[0]["sob_consulta"] = False
+            oferta_periodo = {"produto_id": pid, "retirada_data": fim.isoformat(), "valor": preco,
+                              "codigo": estado_partilha_direto["codigo_periodo"]}
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(409, "Esta oferta não possui estoque disponível em todo o período. Solicite outro link.")
     nomes_presentes = {str(reg.get("categoria") or "Outros").casefold() for reg in itens}
     categorias = [c.nome for c in _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True) if c.nome.casefold() in nomes_presentes]
     if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
@@ -19932,7 +20055,8 @@ def vitrine_publica(
         "frete_inicial": frete_inicial,
         "estado_compartilhado": estado_compartilhado,
         "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
-        "bloqueio_data": bloqueio_data,
+        "bloqueio_data": None if oferta_periodo else bloqueio_data,
+        "oferta_periodo": oferta_periodo,
     })
 
 
@@ -19942,11 +20066,14 @@ def vitrine_compartilhada_curta(slug: str, codigo: str, request: Request, db: Se
     if not empresa or not re.fullmatch(r"[A-Za-z0-9_-]{10,24}", codigo):
         raise HTTPException(404)
     registro = db.query(VitrineCompartilhamento).filter_by(empresa_id=empresa.id, codigo=codigo).first()
-    if not registro or registro.criado_em and registro.criado_em < datetime.utcnow() - timedelta(days=30):
+    if not registro or registro.criado_em and registro.criado_em < datetime.utcnow() - timedelta(days=180):
         raise HTTPException(404, "Este link expirou. Peça um novo compartilhamento.")
     try:
         salvo = json.loads(registro.pedido_json)
         estado = _estado_partilha_validado(salvo)
+        if isinstance(salvo.get("oferta_periodo"), dict):
+            estado["oferta_periodo"] = salvo["oferta_periodo"]
+            estado["codigo_periodo"] = codigo
         dia = str(salvo.get("data_evento") or "")
         tipo = _normalizar_tipo_evento_vitrine(salvo.get("tipo_evento") or "residencial")
         token = _token_responsavel_vitrine(db, empresa, salvo.get("responsavel_token") or "")
@@ -20130,7 +20257,7 @@ def vitrine_publica_reservar(
         cep_frete: str = Form(""), numero_frete: str = Form(""), cupom_codigo: str = Form(""),
         hora_inicio_vitrine: str = Form(""), retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais_vitrine: int = Form(0),
         whatsapp_pre_reserva: str = Form(""), autoriza_parceiros: Optional[str] = Form(None),
-        responsavel_token: str = Form(""),
+        responsavel_token: str = Form(""), codigo_periodo: str = Form(""),
         db: Session = Depends(get_db),
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -20141,9 +20268,36 @@ def vitrine_publica_reservar(
     except Exception:
         return RedirectResponse(f"/e/{slug}", status_code=303)
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
-    if _bloqueio_data_empresa(db, empresa.id, data_obj):
+    oferta_periodo = None
+    if codigo_periodo:
+        registro = db.query(VitrineCompartilhamento).filter_by(empresa_id=empresa.id, codigo=codigo_periodo).first()
+        if not registro:
+            raise HTTPException(404, "Oferta não encontrada")
+        salvo = json.loads(registro.pedido_json)
+        oferta_periodo = salvo.get("oferta_periodo")
+        if not isinstance(oferta_periodo, dict) or salvo.get("data_evento") != data_obj.isoformat():
+            raise HTTPException(400, "Oferta inválida")
+        if _normalizar_tipo_evento_vitrine(salvo.get("tipo_evento")) != tipo_evento:
+            raise HTTPException(400, "Tipo da oferta inválido")
+    if not oferta_periodo and _bloqueio_data_empresa(db, empresa.id, data_obj):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=data_bloqueada", status_code=303)
-    itens_disponiveis = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento)
+    itens_disponiveis = _itens_vitrine_publica(db, empresa, data_obj, tipo_evento, ignorar_bloqueio=bool(oferta_periodo))
+    if oferta_periodo:
+        pid_oferta = int(oferta_periodo["produto_id"])
+        fim_oferta = date.fromisoformat(oferta_periodo["retirada_data"])
+        if fim_oferta <= data_obj or (fim_oferta-data_obj).days > 45:
+            raise HTTPException(400, "Período inválido")
+        for delta in range((fim_oferta-data_obj).days):
+            dia = data_obj + timedelta(days=delta)
+            dados_dia = _itens_vitrine_publica(db, empresa, dia, tipo_evento, apenas_disponibilidade=True, ignorar_bloqueio=True)
+            registro_dia = next((x for x in dados_dia if int(x["produto"].id) == pid_oferta), None)
+            if not registro_dia or int(registro_dia.get("disponiveis") or 0) < 1:
+                raise HTTPException(409, "Sem estoque para todo o período")
+        itens_disponiveis = [x for x in itens_disponiveis if int(x["produto"].id) == pid_oferta]
+        if not itens_disponiveis:
+            raise HTTPException(409, "Equipamento indisponível")
+        itens_disponiveis[0]["preco"] = float(oferta_periodo["valor"])
+        itens_disponiveis[0]["sob_consulta"] = False
     disponiveis = {int(reg["produto"].id): int(reg["disponiveis"]) for reg in itens_disponiveis}
     vitrine_por_produto = {int(reg["produto"].id): reg for reg in itens_disponiveis}
     opcionais_por_produto: dict[int, list[dict]] = {}
@@ -20171,6 +20325,8 @@ def vitrine_publica_reservar(
         if limite <= 0 or qtd > limite:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=indisponivel", status_code=303)
         pedido.append({"produto_id": pid, "quantidade": qtd, "opcionais": opcionais_por_produto.get(pid, [])})
+    if oferta_periodo and (len(pedido) != 1 or pedido[0]["produto_id"] != int(oferta_periodo["produto_id"]) or pedido[0]["quantidade"] != 1):
+        raise HTTPException(400, "A oferta possui um equipamento fixo")
     if not pedido:
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
 
@@ -20199,7 +20355,17 @@ def vitrine_publica_reservar(
                     necessarios[rid] = necessarios.get(rid, 0) + int(opcional["quantidade"])
         if any(qtd > int(saldos.get(rid, 0)) for rid, qtd in necessarios.items()):
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=estoque_opcional", status_code=303)
+        if oferta_periodo:
+            for delta in range((fim_oferta-data_obj).days):
+                dia = data_obj + timedelta(days=delta)
+                ocupados = _comprometimento_recursos_data(db, empresa.id, dia)
+                estoque = {e.id: e for e in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+                if any(qtd > max(0, int(estoque[rid].quantidade_estoque or 0)-int(ocupados.get(rid,0)))
+                       for rid, qtd in necessarios.items() if rid in estoque):
+                    raise HTTPException(409, "Opcionais sem estoque em parte do período")
 
+    if oferta_periodo:
+        hora_inicio_vitrine = "12:00"
     if not hora_meia_em_meia_valida(hora_inicio_vitrine):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=hora", status_code=303)
     inicio_vitrine = datetime.strptime(hora_inicio_vitrine, "%H:%M").time()
@@ -20210,13 +20376,13 @@ def vitrine_publica_reservar(
             duracao_base_vitrine = max(duracao_base_vitrine, int(vitrine_reg.get("duracao_minutos") or 0))
     duracao_base_vitrine = max(60, int(duracao_base_vitrine or _duracao_base_empresa_tipo(db, empresa, tipo_evento)))
     cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
-    retirada_mesmo_dia_vitrine = bool(retirada_mesmo_dia) if cortesia_configurada else True
-    horas_extra_vitrine = max(0, min(24, int(horas_adicionais_vitrine or 0)))
+    retirada_mesmo_dia_vitrine = (True if oferta_periodo else (bool(retirada_mesmo_dia) if cortesia_configurada else True))
+    horas_extra_vitrine = 0 if oferta_periodo else max(0, min(24, int(horas_adicionais_vitrine or 0)))
     if cortesia_configurada and not retirada_mesmo_dia_vitrine:
         horas_extra_vitrine = 0
     valor_horas_extra_vitrine = _valor_horas_adicionais_empresa(empresa, horas_extra_vitrine)
     fim_vitrine = somar_minutos(inicio_vitrine, duracao_base_vitrine + horas_extra_vitrine * 60)
-    if retirada_mesmo_dia_vitrine:
+    if retirada_mesmo_dia_vitrine and not oferta_periodo:
         limite = _hora_maxima_retirada_empresa(empresa)
         minutos_fim = fim_vitrine.hour * 60 + fim_vitrine.minute
         minutos_inicio = inicio_vitrine.hour * 60 + inicio_vitrine.minute
@@ -20246,6 +20412,7 @@ def vitrine_publica_reservar(
 
     request.session[f"vitrine_pedido_{empresa.slug}"] = {
         "data_evento": data_obj.isoformat(), "tipo_evento": tipo_evento, "itens": pedido, "cupom_codigo": cupom.codigo if cupom else "",
+        "oferta_periodo": oferta_periodo,
         "responsavel_token": _token_responsavel_vitrine(db, empresa, responsavel_token),
         "whatsapp": "",
         "hora_inicio": hora_inicio_vitrine, "retirada_mesmo_dia": retirada_mesmo_dia_vitrine,
@@ -21213,11 +21380,21 @@ def salvar_pre_cadastro(
             for reg in _itens_vitrine_publica(
                 db, empresa, data_obj, pedido_vitrine.get("tipo_evento", "residencial"),
                 apenas_disponibilidade=True,
+                ignorar_bloqueio=bool(pedido_vitrine.get("oferta_periodo")),
             )
         }
         for reg in pedido_vitrine["itens"]:
             if int(reg["quantidade"]) > max(0, disponibilidade_atual.get(int(reg["produto_id"]), 0)):
                 return render_erro("vitrine_indisponivel")
+        oferta_cadastro = pedido_vitrine.get("oferta_periodo")
+        if oferta_cadastro:
+            fim_cadastro = date.fromisoformat(oferta_cadastro["retirada_data"])
+            for delta in range((fim_cadastro - data_obj).days):
+                dia = data_obj + timedelta(days=delta)
+                saldos = _itens_vitrine_publica(db, empresa, dia, pedido_vitrine.get("tipo_evento", "residencial"), apenas_disponibilidade=True, ignorar_bloqueio=True)
+                reg = next((r for r in saldos if int(r["produto"].id) == int(oferta_cadastro["produto_id"])), None)
+                if not reg or int(reg["disponiveis"] or 0) < 1:
+                    return render_erro("vitrine_indisponivel")
     q_rascunho = (
         db.query(Solicitacao)
         .join(Cliente, Solicitacao.cliente_id == Cliente.id)
@@ -21268,7 +21445,7 @@ def salvar_pre_cadastro(
         duracao_total_vitrine = duracao_base_vitrine + horas_extra_vitrine * 60
         minutos_inicio = inicio_obj.hour * 60 + inicio_obj.minute
         minutos_fim = minutos_inicio + duracao_total_vitrine
-        if retirada_mesmo_dia_vitrine:
+        if retirada_mesmo_dia_vitrine and not pedido_vitrine.get("oferta_periodo"):
             limite = _hora_maxima_retirada_empresa(empresa)
             minutos_limite = limite.hour * 60 + limite.minute
             if minutos_fim >= 24 * 60 or minutos_fim > minutos_limite:
@@ -21327,7 +21504,11 @@ def salvar_pre_cadastro(
         solicitacao.valor_horas_adicionais = round(valor_horas_extra_vitrine, 2)
         solicitacao.cortesia_retirada = bool(cortesia_retirada_vitrine)
         solicitacao.hora_fim = fim_obj
-        if retirada_mesmo_dia_vitrine:
+        if pedido_vitrine.get("oferta_periodo"):
+            solicitacao.retirada_obrigatoria = True
+            solicitacao.retirada_data = date.fromisoformat(pedido_vitrine["oferta_periodo"]["retirada_data"])
+            solicitacao.retirada_hora = None
+        elif retirada_mesmo_dia_vitrine:
             solicitacao.retirada_obrigatoria = True
             solicitacao.retirada_data = data_obj
             solicitacao.retirada_hora = fim_obj
@@ -22070,8 +22251,9 @@ def salvar_dados_contrato_cliente(
         duracao_total = duracao_snapshot + max(0, int(getattr(item, "horas_adicionais", 0) or 0)) * 60
         item.hora_fim = somar_minutos(item.hora_inicio, duracao_total)
         if retirada_obrigatoria_ativa(item):
-            item.retirada_data = item.data_evento
-            item.retirada_hora = item.hora_fim
+            if not item.retirada_data or item.retirada_data <= item.data_evento:
+                item.retirada_data = item.data_evento
+                item.retirada_hora = item.hora_fim
     item.bairro = bairro.strip()
     item.local = endereco.strip() or local.strip()
     item.local_numero = numero.strip()
@@ -22126,7 +22308,9 @@ def aceitar_contrato(
 
     itens_reserva_lista = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
     itens_reserva = len(itens_reserva_lista)
-    if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
+    if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0 and not (
+        item.retirada_obrigatoria and item.retirada_data and item.retirada_data > item.data_evento
+    ):
         # Uma única regra de horário vale para vitrine e contrato: empresa/tipo define o período base;
         # o item somente pode ampliar esse período. No aceite o cliente confirma retirada e horas pagas.
         duracao_base = _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)

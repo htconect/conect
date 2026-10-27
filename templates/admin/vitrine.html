@@ -17,7 +17,16 @@
 
   {% if erro %}<div class="box aviso" style="margin-bottom:16px">{{ erro }}</div>{% endif %}
 
-  <div class="vitrine-cards">
+  <section class="painel-card" style="margin:0 0 18px"><header><div><h2>Reserva por período · link personalizado</h2><p>Mesmo equipamento, valor fechado e retirada em outra data. Frete e opcionais seguem normalmente.</p></div></header><div class="painel-corpo">
+{% if request.query_params.get('link_periodo') %}<div style="padding:12px;background:#e9fff4;border-radius:12px;margin-bottom:12px;overflow-wrap:anywhere"><b>Link criado:</b> <a href="{{ request.query_params.get('link_periodo') }}" target="_blank" rel="noopener">Abrir vitrine personalizada</a><input style="width:100%;margin-top:8px" readonly onclick="this.select()" value="{{ request.query_params.get('link_periodo') }}"></div>{% endif %}
+<form action="/painel/vitrine/periodo" method="post" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+<label style="flex:2;min-width:190px">Equipamento<br><select name="produto_id" required style="width:100%;min-height:42px">{% for p in produtos if p.ativo and p.vitrine_ativo %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></label>
+<label>Entrega<br><input type="date" name="data_evento" min="{{ request.query_params.get('hoje', '') }}" required style="min-height:42px"></label>
+<label>Retirada<br><input type="date" name="retirada_data" required style="min-height:42px"></label>
+<label>Valor fechado R$<br><input type="number" name="valor" min="0" step="0.01" required placeholder="750,00" style="max-width:130px;min-height:42px"></label>
+<label>Tipo<br><select name="tipo_evento" style="min-height:42px"><option value="residencial">Residencial</option><option value="empresa">Empresa</option></select></label>
+<button class="botao" type="submit" style="min-height:42px">Criar link</button></form></div></section>
+<div class="vitrine-cards">
     <div class="vitrine-kpi"><small>Status</small><strong>{{ 'Publicada' if empresa.vitrine_ativa else 'Desativada' }}</strong></div>
     <div class="vitrine-kpi"><small>Produtos e serviços ativos</small><strong>{{ produtos|selectattr('vitrine_ativo')|list|length }}</strong></div>
     <div class="vitrine-kpi"><small>Frete / deslocamento</small><strong>{% if empresa.frete_tipo == 'fixo' %}Fixo{% elif empresa.frete_tipo == 'km' %}Por KM{% else %}Sob consulta{% endif %}</strong></div>
