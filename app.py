@@ -22308,44 +22308,44 @@ def aceitar_contrato(
 
     itens_reserva_lista = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
     itens_reserva = len(itens_reserva_lista)
-    if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0 and not (
-        item.retirada_obrigatoria and item.retirada_data and item.retirada_data > item.data_evento
-    ):
-        # Uma única regra de horário vale para vitrine e contrato: empresa/tipo define o período base;
-        # o item somente pode ampliar esse período. No aceite o cliente confirma retirada e horas pagas.
-        duracao_base = _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)
-        cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
-        mesmo_dia = bool(retirada_mesmo_dia) if cortesia_configurada else True
-        try:
-            horas_extras = max(0, min(24, int(horas_adicionais_aceite or 0)))
-        except Exception:
-            horas_extras = 0
-        if cortesia_configurada and not mesmo_dia:
-            horas_extras = 0
-        duracao_total = duracao_base + horas_extras * 60
-        if not item.hora_inicio:
-            return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=retirada", status_code=303)
-        if mesmo_dia:
-            limite = _hora_maxima_retirada_empresa(empresa)
-            fim_min = item.hora_inicio.hour * 60 + item.hora_inicio.minute + duracao_total
-            limite_min = limite.hour * 60 + limite.minute
-            if fim_min >= 24 * 60 or fim_min > limite_min:
+    if item.status in ["aguardando_aceite", "contrato_enviado"] and item.contrato_id and itens_reserva > 0:
+        reserva_periodo = bool(item.retirada_obrigatoria and item.retirada_data and item.retirada_data > item.data_evento)
+        if not reserva_periodo:
+            # Uma única regra de horário vale para vitrine e contrato: empresa/tipo define o período base;
+            # o item somente pode ampliar esse período. No aceite o cliente confirma retirada e horas pagas.
+            duracao_base = _duracao_contrato_solicitacao(db, empresa, item, itens_reserva_lista)
+            cortesia_configurada = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+            mesmo_dia = bool(retirada_mesmo_dia) if cortesia_configurada else True
+            try:
+                horas_extras = max(0, min(24, int(horas_adicionais_aceite or 0)))
+            except Exception:
+                horas_extras = 0
+            if cortesia_configurada and not mesmo_dia:
+                horas_extras = 0
+            duracao_total = duracao_base + horas_extras * 60
+            if not item.hora_inicio:
                 return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=retirada", status_code=303)
-        fim_obj = somar_minutos(item.hora_inicio, duracao_total)
-        valor_horas = _valor_horas_adicionais_empresa(empresa, horas_extras) if mesmo_dia else 0.0
-        item.duracao_contratada_minutos = duracao_base
-        item.horas_adicionais = horas_extras
-        item.valor_horas_adicionais = valor_horas
-        item.cortesia_retirada = bool(cortesia_configurada and not mesmo_dia)
-        item.hora_fim = fim_obj
-        item.retirada_obrigatoria = mesmo_dia
-        item.retirada_data = item.data_evento if mesmo_dia else None
-        item.retirada_hora = fim_obj if mesmo_dia else None
-        comp_atual = composicao_valores_contrato(item)
-        cupom_atual = _cupom_valido_ou_snapshot(db, empresa.id, getattr(item, "cupom_codigo", "") or "", item)
-        _aplicar_composicao_comercial(
-            item, comp_atual["equipamentos"], comp_atual["frete"], cupom_atual, valor_horas
-        )
+            if mesmo_dia:
+                limite = _hora_maxima_retirada_empresa(empresa)
+                fim_min = item.hora_inicio.hour * 60 + item.hora_inicio.minute + duracao_total
+                limite_min = limite.hour * 60 + limite.minute
+                if fim_min >= 24 * 60 or fim_min > limite_min:
+                    return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=retirada", status_code=303)
+            fim_obj = somar_minutos(item.hora_inicio, duracao_total)
+            valor_horas = _valor_horas_adicionais_empresa(empresa, horas_extras) if mesmo_dia else 0.0
+            item.duracao_contratada_minutos = duracao_base
+            item.horas_adicionais = horas_extras
+            item.valor_horas_adicionais = valor_horas
+            item.cortesia_retirada = bool(cortesia_configurada and not mesmo_dia)
+            item.hora_fim = fim_obj
+            item.retirada_obrigatoria = mesmo_dia
+            item.retirada_data = item.data_evento if mesmo_dia else None
+            item.retirada_hora = fim_obj if mesmo_dia else None
+            comp_atual = composicao_valores_contrato(item)
+            cupom_atual = _cupom_valido_ou_snapshot(db, empresa.id, getattr(item, "cupom_codigo", "") or "", item)
+            _aplicar_composicao_comercial(
+                item, comp_atual["equipamentos"], comp_atual["frete"], cupom_atual, valor_horas
+            )
 
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):

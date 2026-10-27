@@ -107,9 +107,13 @@
     <summary>Dados da locação</summary>
     <div class="secao-corpo">
       <p><b>Data:</b> {{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }}</p>
+      {% if item.retirada_obrigatoria and item.retirada_data and item.retirada_data > item.data_evento %}
+      <p><b>Retirada obrigatória:</b> {{ item.retirada_data.strftime('%d/%m/%Y') }}</p>
+      {% else %}
       <p><b>Horário:</b> {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</p>
       {% if duracao_base_aceite_rotulo %}<p><b>Período contratado:</b> {{ duracao_base_aceite_rotulo }}{% if item.horas_adicionais %} + {{ item.horas_adicionais }} {{ 'hora adicional' if item.horas_adicionais == 1 else 'horas adicionais' }}{% endif %}</p>{% elif item.duracao_contratada_minutos %}<p><b>Período contratado:</b> {{ (item.duracao_contratada_minutos / 60)|int }} {{ 'hora' if (item.duracao_contratada_minutos / 60)|int == 1 else 'horas' }}</p>{% endif %}
       {% if item.cortesia_retirada %}<div style="padding:11px 12px;border-radius:12px;background:#ecfdf3;border:1px solid #a7f3d0;color:#067647;margin:8px 0"><b>Cortesia:</b> após o período contratado, aproveite o equipamento por mais tempo. A retirada será realizada no próximo dia.</div>{% elif item.retirada_obrigatoria and item.retirada_hora %}<p><b>Retirada no mesmo dia:</b> {{ item.retirada_hora.strftime('%H:%M') }}</p>{% endif %}
+      {% endif %}
       <p><b>Local:</b> {{ item.local_nome or '-' }}</p>
       <p><b>Endereço:</b> {{ endereco_rota_solicitacao(item) or '-' }}</p>
       {% if endereco_evento.complemento %}<p><b>Complemento:</b> {{ endereco_evento.complemento }}</p>{% endif %}
@@ -161,6 +165,9 @@
     <div class="box">
       <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/editar">Editar meus dados</a>
       <form method="post" action="/e/{{ empresa.slug }}/aceitar/{{ item.public_token }}" class="aceite-final" data-loading-title="Registrando seu aceite" data-loading-text="Estamos salvando seu aceite. Depois você poderá decidir se deseja seguir para a etapa de pagamento." data-loading-status-url="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}">
+        {% if item.retirada_obrigatoria and item.retirada_data and item.retirada_data > item.data_evento %}
+        <div class="horario-aceite-box"><b>Retirada obrigatória em {{ item.retirada_data.strftime('%d/%m/%Y') }}</b><p class="texto-discreto">Data definida na reserva. Não é necessário escolher horários ou alterar a retirada.</p></div>
+        {% else %}
         <div class="horario-aceite-box" id="horarioAceiteBox"
              data-inicio="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}"
              data-base-minutos="{{ duracao_base_aceite }}"
@@ -192,6 +199,7 @@
             <div id="erroHorarioAceite" class="erro-horario-aceite" hidden>O horário máximo de retirada no mesmo dia foi atingido.</div>
           </div>
         </div>
+        {% endif %}
         {% if erro_retirada %}<div class="erro-horario-aceite" style="margin-bottom:10px">Revise o horário de retirada. O período escolhido ultrapassa o limite permitido pela empresa.</div>{% endif %}
         <label class="check-aceite"><input id="aceiteContrato" type="checkbox" name="aceite" value="sim" required><span>Li, conferi os dados e aceito o contrato.</span></label>
         <button id="botaoAceitarContrato" class="largura-total" type="submit" disabled style="margin-top:10px">Aceitar contrato</button>
