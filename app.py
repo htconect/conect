@@ -8845,8 +8845,23 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
                 geo_logger.error("[FRETE] sem validacao geografica de percurso curto origem=%s destino=%s", origem, cep)
                 return {"ok": False, "erro": "Não foi possível validar a distância entre as regiões. Frete sob consulta."}
             km_referencia, _, fonte_ref = _trecho_rodoviario(ref_lat1, ref_lon1, ref_lat2, ref_lon2, forcar_recalculo=True)
-            if (km_referencia is None or not str(fonte_ref).startswith("osrm")
-                    or abs(float(km_referencia) - distancia_ida) > max(3.0, float(km_referencia) * 0.20)):
+            # Referência de 0 km NÃO é uma segunda rota válida. Muitos serviços
+            # postais devolvem a mesma coordenada aproximada para dois CEPs de
+            # bairros diferentes; rejeitar por causa disso bloqueava rotas reais.
+            # Conservar a rota rodoviária OSRM já validada nesses casos.
+            referencia_valida = (
+                km_referencia is not None
+                and math.isfinite(float(km_referencia))
+                and float(km_referencia) >= 0.2
+                and str(fonte_ref).startswith("osrm")
+            )
+            if not referencia_valida:
+                geo_logger.warning(
+                    "[FRETE] referencia postal inconclusiva; mantendo rota OSRM "
+                    "origem=%s destino=%s km=%.1f km_postal=%s fonte=%s",
+                    origem, cep, distancia_ida, km_referencia, fonte_ref,
+                )
+            elif abs(float(km_referencia) - distancia_ida) > max(3.0, float(km_referencia) * 0.20):
                 geo_logger.error("[FRETE] divergencia na rota origem=%s destino=%s km=%.1f km_postal=%s fonte=%s", origem, cep, distancia_ida, km_referencia, fonte_ref)
                 return {"ok": False, "erro": "Encontramos divergência na distância do percurso. Frete sob consulta."}
 
