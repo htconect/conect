@@ -54,6 +54,21 @@
 {% if empresa %}<form id="googleDisconnectForm" method="post" action="/admin/empresa/{{ empresa.id }}/google-calendar/desconectar" style="display:none"></form>{% endif %}
 
 {% if empresa %}
+<section class="adm-bloco" id="copiar-opcionais"><header><i class="bi bi-files"></i><div><h2>Copiar opcionais de outra empresa</h2><p>Reaproveita opcionais e vínculos com itens de estoque. Não copia saldos nem altera cadastros existentes.</p></div></header>
+<div class="adm-corpo">
+{% if request.query_params.get('opcionais_copiados') is not none %}<p class="cad-aviso ok" style="color:green">{{ request.query_params.get('opcionais_copiados') }} opcional(is) novo(s) copiado(s). Confira os itens de estoque e preços.</p>{% endif %}
+<form method="post" action="/admin/empresa/{{ empresa.id }}/copiar-opcionais" onsubmit="return confirm('Copiar somente opcionais que ainda não existem para {{ empresa.nome|e }}? Itens de estoque ausentes serão cadastrados com saldo zero.');">
+<label for="origem-opcionais">Copiar da empresa</label>
+<select name="origem_id" id="origem-opcionais" required>
+<option value="">Selecione a empresa de origem</option>
+{% for empresa_origem in empresas if empresa_origem.id != empresa.id %}<option value="{{ empresa_origem.id }}" {% if empresa_origem.slug == 'karaokerj' %}selected{% endif %}>{{ empresa_origem.nome }}</option>{% endfor %}
+</select>
+<p class="ajuda-linha">Somente opcionais ausentes serão criados. Vínculos usam o item equivalente do estoque da empresa de destino; itens que faltarem serão criados com quantidade zero. Produtos e estoque físico não são copiados.</p>
+<button type="submit" class="botao">Copiar opcionais e vínculos de estoque</button>
+</form></div></section>
+{% endif %}
+
+{% if empresa %}
 <div class="box usuarios-empresa-box">
   <div class="cabecalho-secao-usuarios">
     <div><p class="mini">Moeda do sistema</p><h2>Carteira Humiat</h2></div>

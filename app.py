@@ -5522,6 +5522,56 @@ def admin_editar_empresa(empresa_id: int, request: Request, db: Session = Depend
                                        "google_calendar_oauth_disponivel": _google_calendar_oauth_disponivel()})
 
 
+@app.post("/admin/empresa/{empresa_id}/copiar-opcionais")
+def admin_copiar_opcionais(
+        empresa_id: int, origem_id: int = Form(...),
+        db: Session = Depends(get_db), ok: bool = Depends(admin_geral_logado)):
+    """Copia cadastro comercial e vínculos de estoque por nome, sem copiar saldos físicos.
+
+    Não modifica itens/opcionais preexistentes; reexecutar é seguro.
+    """
+    destino = db.get(Empresa, empresa_id)
+    origem = db.get(Empresa, origem_id)
+    if not destino or not origem or origem.id == destino.id:
+        raise HTTPException(status_code=400, detail="Origem/destino inválidos")
+
+    existentes = {x.nome.strip().casefold(): x for x in db.query(OpcionalEmpresa).filter_by(empresa_id=destino.id).all()}
+    estoques_origem = {x.id: x for x in db.query(ItemProdutoServicoEstoque).filter_by(empresa_id=origem.id).all()}
+    estoques_destino = {x.nome.strip().casefold(): x for x in db.query(ItemProdutoServicoEstoque).filter_by(empresa_id=destino.id).all()}
+    novos = 0
+    try:
+        for opc in db.query(OpcionalEmpresa).filter_by(empresa_id=origem.id).order_by(OpcionalEmpresa.ordem, OpcionalEmpresa.id).all():
+            chave = opc.nome.strip().casefold()
+            if chave in existentes:
+                continue
+            recurso_destino_id = None
+            if opc.item_estoque_id:
+                recurso_origem = estoques_origem.get(opc.item_estoque_id)
+                if recurso_origem:
+                    nome_recurso = recurso_origem.nome.strip()
+                    recurso_destino = estoques_destino.get(nome_recurso.casefold())
+                    if not recurso_destino:
+                        recurso_destino = ItemProdutoServicoEstoque(
+                            empresa_id=destino.id, nome=nome_recurso,
+                            quantidade_estoque=0, ativo=recurso_origem.ativo)
+                        db.add(recurso_destino)
+                        db.flush()
+                        estoques_destino[nome_recurso.casefold()] = recurso_destino
+                    recurso_destino_id = recurso_destino.id
+            novo = OpcionalEmpresa(
+                empresa_id=destino.id, nome=opc.nome,
+                quantidade=opc.quantidade, valor=opc.valor, foto_url=opc.foto_url,
+                item_estoque_id=recurso_destino_id, ativo=opc.ativo, ordem=opc.ordem)
+            db.add(novo)
+            existentes[chave] = novo
+            novos += 1
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return RedirectResponse(f"/admin/empresa/{destino.id}?opcionais_copiados={novos}", status_code=303)
+
+
 @app.post("/admin/empresa/{empresa_id}")
 def admin_salvar_empresa(
         empresa_id: int,
