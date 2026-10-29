@@ -67,6 +67,7 @@ class Empresa(Base):
     modulo_recursos_ativo = Column(Boolean, default=False)
     modulo_opcionais_ativo = Column(Boolean, default=False)
     modulo_cupons_ativo = Column(Boolean, default=False)
+    utiliza_brinde = Column(Boolean, default=False, nullable=False)
     inteligencia_ativa = Column(Boolean, default=False)
 
     # Fluxo da vitrine: direto = cadastro da locação; aprovacao = oportunidade

@@ -2374,6 +2374,8 @@ def garantir_colunas_novas():
     if "modulo_opcionais_ativo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN modulo_opcionais_ativo BOOLEAN DEFAULT false")
         nova_col_modulo_opcionais = True
+    if "utiliza_brinde" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN utiliza_brinde BOOLEAN DEFAULT false NOT NULL")
     if "modulo_cupons_ativo" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN modulo_cupons_ativo BOOLEAN DEFAULT false")
         nova_col_modulo_cupons = True
@@ -4118,6 +4120,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_responsavel_token VARCHAR(64)",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS vitrine_responsavel_configurado BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS modulo_opcionais_ativo BOOLEAN DEFAULT false",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS utiliza_brinde BOOLEAN DEFAULT false NOT NULL",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS catalogo_musicas_url VARCHAR(500)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
@@ -4240,6 +4243,20 @@ def _garantir_colunas_v113_criticas() -> None:
                         aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """))
+                # Ativação inicial solicitada para KRJ e Viviokê. Executar somente
+                # uma vez para respeitar futuras alterações feitas no ADM.
+                primeira_ativacao_brinde = conn.execute(text("""
+                    INSERT INTO app_migrations (chave)
+                    VALUES ('20261029_ativar_brindes_krj_vivioke_v180')
+                    ON CONFLICT (chave) DO NOTHING
+                    RETURNING chave
+                """)).scalar()
+                if primeira_ativacao_brinde:
+                    conn.execute(text("""
+                        UPDATE empresas SET utiliza_brinde = true
+                        WHERE lower(trim(slug)) IN ('karaokerj', 'karaoke-rj', 'vivioke', 'vivi-oke')
+                           OR lower(trim(nome)) IN ('karaokê rj', 'karaoke rj', 'viviokê', 'vivioke')
+                    """))
                 primeira_ativacao_opcionais = conn.execute(text("""
                     INSERT INTO app_migrations (chave) VALUES ('20261006_modulo_opcionais_v126')
                     ON CONFLICT (chave) DO NOTHING
@@ -4264,6 +4281,26 @@ def _garantir_colunas_v113_criticas() -> None:
                 conn.execute(text("ALTER TABLE solicitacoes ADD COLUMN opcionais_alterados_em TIMESTAMP"))
             if "opcionais_reenvio_pendente" not in cols_sol:
                 conn.execute(text("ALTER TABLE solicitacoes ADD COLUMN opcionais_reenvio_pendente BOOLEAN NOT NULL DEFAULT false"))
+        # Mesmo comportamento para desenvolvimento SQLite (idempotente).
+        with engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS app_migrations (
+                    chave VARCHAR(160) PRIMARY KEY,
+                    aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+            novo = conn.execute(text("""
+                INSERT INTO app_migrations (chave)
+                VALUES ('20261029_ativar_brindes_krj_vivioke_v180')
+                ON CONFLICT (chave) DO NOTHING
+                RETURNING chave
+            """)).scalar()
+            if novo:
+                conn.execute(text("""
+                    UPDATE empresas SET utiliza_brinde = true
+                    WHERE lower(trim(slug)) IN ('karaokerj', 'karaoke-rj', 'vivioke', 'vivi-oke')
+                       OR lower(trim(nome)) IN ('karaokê rj', 'karaoke rj', 'viviokê', 'vivioke')
+                """))
         HistoricoOpcionalContrato.__table__.create(bind=engine, checkfirst=True)
         VitrineOportunidade.__table__.create(bind=engine, checkfirst=True)
         VitrineCompartilhamento.__table__.create(bind=engine, checkfirst=True)
@@ -5359,6 +5396,7 @@ def admin_criar_empresa(
         modulo_recursos_ativo: Optional[str] = Form(None),
         modulo_opcionais_ativo: Optional[str] = Form(None),
         modulo_cupons_ativo: Optional[str] = Form(None),
+        utiliza_brinde: Optional[str] = Form(None),
         inteligencia_ativa: Optional[str] = Form(None),
         lokafest_ativo: Optional[str] = Form(None),
         lokafest_url: str = Form(""),
@@ -5438,6 +5476,7 @@ def admin_criar_empresa(
         modulo_recursos_ativo=bool(modulo_recursos_ativo),
         modulo_opcionais_ativo=bool(modulo_opcionais_ativo),
         modulo_cupons_ativo=bool(modulo_cupons_ativo),
+        utiliza_brinde=bool(utiliza_brinde),
         inteligencia_ativa=bool(inteligencia_ativa),
         lokafest_ativo=lokafest_habilitado,
         lokafest_url=(lokafest_url.strip()[:300] or (LOKAFEST_PUBLIC_URL if lokafest_habilitado else None)),
@@ -5601,6 +5640,7 @@ def admin_salvar_empresa(
         modulo_recursos_ativo: Optional[str] = Form(None),
         modulo_opcionais_ativo: Optional[str] = Form(None),
         modulo_cupons_ativo: Optional[str] = Form(None),
+        utiliza_brinde: Optional[str] = Form(None),
         inteligencia_ativa: Optional[str] = Form(None),
         lokafest_ativo: Optional[str] = Form(None),
         lokafest_url: str = Form(""),
@@ -5681,6 +5721,7 @@ def admin_salvar_empresa(
     empresa.modulo_recursos_ativo = bool(modulo_recursos_ativo)
     empresa.modulo_opcionais_ativo = bool(modulo_opcionais_ativo)
     empresa.modulo_cupons_ativo = bool(modulo_cupons_ativo)
+    empresa.utiliza_brinde = bool(utiliza_brinde)
     empresa.inteligencia_ativa = bool(inteligencia_ativa)
     empresa.lokafest_ativo = bool(lokafest_ativo) or "LOKAFEST" in sistemas
     empresa.lokafest_url = lokafest_url.strip()[:300] or (LOKAFEST_PUBLIC_URL if empresa.lokafest_ativo else empresa.lokafest_url)
