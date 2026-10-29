@@ -8,6 +8,9 @@
 .rec-grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .rec-card{border:1px solid #dbe3ee;border-radius:16px;padding:14px;background:#fff;min-width:0}
 .rec-card .rec-campos{display:grid;grid-template-columns:minmax(0,2fr) minmax(110px,1fr);gap:10px;align-items:end}
+.rec-card.inativo{background:#f8fafc;border-style:dashed;opacity:.78}
+.rec-card .rec-toggle{margin-top:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rec-card .rec-toggle button{padding:7px 12px;font-size:13px}
 .rec-card label{display:block;margin:0 0 6px;font-weight:700}
 .rec-card input{width:100%;max-width:100%;box-sizing:border-box}
 .rec-card small{display:block;margin-top:8px}
@@ -36,18 +39,25 @@
     <form method="post" action="/painel/itens-estoque/salvar" id="formRecursos">
       <div class="rec-grade">
         {% for item in itens_estoque %}
-        <div class="rec-card">
+        <div class="rec-card{% if not item.ativo %} inativo{% endif %}">
           <input type="hidden" name="item_id" value="{{ item.id }}">
           <div class="rec-campos">
             <div><label for="nomeRecurso{{ item.id }}">Nome do item</label><input id="nomeRecurso{{ item.id }}" name="nome_recurso" maxlength="140" value="{{ item.nome }}" required autocomplete="off"></div>
             <div><label for="qtdRecurso{{ item.id }}">Quantidade</label><input id="qtdRecurso{{ item.id }}" name="quantidade_estoque" type="number" min="0" step="1" value="{{ item.quantidade_estoque or 0 }}" required></div>
           </div>
-          <small class="texto-discreto">Estoque total desse recurso</small>
+          <small class="texto-discreto">Estoque total desse recurso. Desativar não altera quantidade nem histórico.</small>
+          <div class="rec-toggle">
+            <span class="texto-discreto">{{ 'Ativo' if item.ativo else 'Desativado' }}</span>
+            <button type="submit" form="toggleRecurso{{ item.id }}" class="botao btn-krj-ghost" onclick="return confirm('{{ 'Desativar' if item.ativo else 'Reativar' }} este recurso? Os vínculos já existentes serão preservados.')">{{ 'Desativar' if item.ativo else 'Ativar' }}</button>
+          </div>
         </div>
         {% else %}<p class="texto-discreto">Nenhum recurso cadastrado.</p>{% endfor %}
       </div>
       {% if itens_estoque %}<div class="rec-acoes"><span class="rec-status" id="statusRecursos">Altere os nomes ou quantidades e salve tudo de uma vez.</span><button type="submit"><i class="bi bi-save"></i> Salvar alterações</button></div>{% endif %}
     </form>
+    {% for item in itens_estoque %}
+    <form id="toggleRecurso{{ item.id }}" method="post" action="/painel/itens-estoque/{{ item.id }}/alternar"></form>
+    {% endfor %}
     <details class="accordion interno novo-recurso">
       <summary>+ Adicionar item</summary>
       <form method="post" action="/painel/itens-estoque/novo" class="form-mobile-simples">

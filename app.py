@@ -10568,7 +10568,18 @@ def criar_link_vitrine_periodo(
         db.commit()
         from urllib.parse import quote as quote_url
         url = str(request.base_url).rstrip("/") + f"/e/{quote_url(empresa.slug, safe='')}/s/{codigo}"
-        return RedirectResponse("/painel/vitrine?link_periodo=" + quote_url(url, safe=""), status_code=303)
+        # O compartilhamento so acontece depois da gravacao bem-sucedida.
+        # Sem telefone fixo: WhatsApp permite escolher o destinatario.
+        texto_compartilhamento = (
+            f"*Reserva personalizada - {empresa.nome}*\n"
+            f"Equipamento: {produto.nome}\n"
+            f"Entrega: {inicio.strftime('%d/%m/%Y')}\n"
+            f"Retirada: {fim.strftime('%d/%m/%Y')}\n"
+            f"Tipo: {'Residencial' if tipo == 'residencial' else 'Empresa'}\n"
+            f"Valor fechado: R$ {preco:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            + f"\n\nAcesse sua reserva: {url}"
+        )
+        return RedirectResponse("https://wa.me/?text=" + quote_url(texto_compartilhamento, safe=""), status_code=303)
     except (ValueError, TypeError) as exc:
         from urllib.parse import quote as quote_url
         return RedirectResponse("/painel/vitrine?erro=" + quote_url(str(exc), safe=""), status_code=303)
@@ -11436,12 +11447,29 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
 def recursos_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
     if not _empresa_modulo_ativo(empresa, "recursos"):
         raise HTTPException(404)
-    itens_estoque = garantir_itens_estoque_padrao(db, empresa.id)
+    itens_estoque = _itens_estoque_empresa(db, empresa.id, somente_ativos=False)
     return templates.TemplateResponse("admin/recursos.html", {
         "request": request, "empresa": empresa, "itens_estoque": itens_estoque,
         "erro": request.query_params.get("erro", ""),
         "salvo": request.query_params.get("salvo", ""),
     })
+
+
+@app.post("/painel/itens-estoque/{item_id}/alternar")
+def alternar_item_estoque(
+        item_id: int,
+        db: Session = Depends(get_db),
+        empresa: Empresa = Depends(empresa_logada),
+):
+    """Desativa ou reativa somente o recurso da empresa logada, sem excluir vínculos."""
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
+    item = db.query(ItemProdutoServicoEstoque).filter_by(id=item_id, empresa_id=empresa.id).first()
+    if item is None:
+        raise HTTPException(404)
+    item.ativo = not bool(item.ativo)
+    db.commit()
+    return RedirectResponse("/painel/recursos?salvo=1", status_code=303)
 
 
 @app.post("/painel/itens-estoque/salvar")
