@@ -8891,7 +8891,14 @@ def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str) -> flo
             return None
         return min(distancias)
     except HTTPError as exc:
-        geo_logger.error("[FRETE] Google Routes API retornou HTTP %s", exc.code)
+        # Registrar somente código/status lógico; nunca chave de API ou endereço.
+        google_status = "nao_informado"
+        try:
+            error_payload = json.loads(exc.read(4096).decode("utf-8"))
+            google_status = str((error_payload.get("error") or {}).get("status") or "nao_informado")[:70]
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        geo_logger.error("[FRETE] Google Routes API HTTP %s status=%s", exc.code, google_status)
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         geo_logger.warning("[FRETE] falha na consulta de rota Google: %s", type(exc).__name__)
     return None
@@ -8931,6 +8938,9 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         }
     if tipo == "km":
         def sob_consulta(motivo: str) -> dict:
+            # Sem este aviso, a vitrine responde HTTP 200 e o Render não revela
+            # por que a API do Google nem chegou a ser consultada.
+            geo_logger.warning("[FRETE] deslocamento pendente empresa_id=%s cep_destino=%s motivo=%s", empresa.id, cep, motivo)
             # Mantém o pedido possível como frete pendente de aprovação, sem
             # permitir fechar um contrato com preço de transporte arbitrário.
             return {"ok": True, "tipo": "consultar", "consultar": True,
@@ -20600,7 +20610,7 @@ def vitrine_publica_reservar(
             "horas_adicionais": horas_extra_vitrine, "valor_horas_adicionais": valor_horas_extra_vitrine,
             "frete": {"cep": _cep_limpo(cep_frete), "numero": str(numero_frete or ""),
                       "tipo": "consultar", "valor": 0, "consultar": True,
-                      "erro_rota": str(frete.get("erro") or "Frete sem rota validada")[:240]},
+                      "erro_rota": str(frete.get("erro_rota") or frete.get("erro") or "Frete sem rota validada")[:240]},
         }
         pedido_pendente = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_pendente:
@@ -20609,7 +20619,7 @@ def vitrine_publica_reservar(
         oportunidade.status = "frete_pendente"
         snap = _snapshot_oportunidade(oportunidade)
         snap["frete"]["consultar"] = True
-        snap["frete"]["erro_rota"] = str(frete.get("erro") or "Frete sem rota validada")[:240]
+        snap["frete"]["erro_rota"] = str(frete.get("erro_rota") or frete.get("erro") or "Frete sem rota validada")[:240]
         snap["oferta_periodo"] = oferta_periodo
         snap["responsavel_token"] = _token_responsavel_vitrine(db, empresa, responsavel_token)
         oportunidade.pedido_json = json.dumps(snap, ensure_ascii=False, separators=(",", ":"))

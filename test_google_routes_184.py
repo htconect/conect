@@ -61,3 +61,43 @@ def test_share_periodo_frontend_conserva_link_original():
 def test_migracao_coluna_origem_no_startup_leve():
     import inspect
     assert 'frete_endereco_origem' in inspect.getsource(app._garantir_colunas_v113_criticas)
+
+
+def test_sem_endereco_loja_avisa_motivo_sem_usar_google(caplog):
+    from types import SimpleNamespace
+    empresa = SimpleNamespace(
+        id=42, frete_tipo='km', frete_cep_origem='20725000',
+        frete_endereco_origem='', frete_valor_km=1.5,
+    )
+    destino = {'logradouro': 'Rua Jorge Kuraiem Filho', 'bairro': 'Guaratiba',
+               'cidade': 'Rio de Janeiro', 'estado': 'RJ'}
+    with patch.object(app, '_dados_cep_brasil', return_value=destino), \
+         patch.dict(os.environ, {'GOOGLE_MAPS_API_KEY': 'test-only'}), \
+         patch.object(app, '_calcular_rota_google_km') as rota:
+        retorno=app._calcular_frete_vitrine(empresa, '23042550', '4')
+    assert retorno['ok'] is True and retorno['consultar'] is True
+    assert retorno['distancia_ida_km'] is None
+    assert 'endereço completo da loja' in retorno['erro_rota']
+    assert any('deslocamento pendente empresa_id=42' in rec.message for rec in caplog.records)
+    rota.assert_not_called()
+
+
+def test_com_endereco_loja_consulta_google_sem_fallback_ou_subestimacao():
+    from types import SimpleNamespace
+    empresa = SimpleNamespace(
+        id=43, frete_tipo='km', frete_cep_origem='20725000',
+        frete_endereco_origem='Rua Exemplo, 123, Méier, Rio de Janeiro, RJ', frete_valor_km=1.5,
+    )
+    destino = {'logradouro':'Rua Jorge Kuraiem Filho','bairro':'Guaratiba',
+               'cidade':'Rio de Janeiro','estado':'RJ'}
+    with patch.object(app, '_dados_cep_brasil', return_value=destino), \
+         patch.dict(os.environ, {'GOOGLE_MAPS_API_KEY': 'test-only'}), \
+         patch.object(app, '_calcular_rota_google_km',return_value=45.5) as rota:
+        retorno=app._calcular_frete_vitrine(empresa, '23042550', '4')
+    assert retorno['tipo'] == 'km'
+    assert retorno['distancia_ida_km'] == 45.5
+    assert retorno['quantidade_km'] == 91.0
+    assert retorno['valor'] == 136.5
+    assert rota.call_count == 1
+    assert 'Rua Exemplo' in rota.call_args.args[0]
+    assert 'Jorge Kuraiem Filho' in rota.call_args.args[1]
