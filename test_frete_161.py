@@ -2,26 +2,28 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 import json
+import os
 import app
 
-EMPRESA=SimpleNamespace(id=1,frete_tipo="km",frete_cep_origem="21031700",frete_valor_km=5)
+EMPRESA=SimpleNamespace(id=1,frete_tipo="km",frete_cep_origem="21031700",frete_valor_km=5,frete_endereco_origem="Av Brasil, 1000, Rio de Janeiro, RJ")
 ORIGEM={"cidade":"Rio de Janeiro","estado":"RJ","logradouro":"Av Brasil"}
 DESTINO={"cidade":"Rio de Janeiro","estado":"RJ","logradouro":"Rua General Edgardino Pinta","bairro":"Freguesia (Ilha do Governador)"}
 DADOS=lambda cep: ORIGEM if cep=="21031700" else DESTINO if cep=="21911280" else {}
 
 
-def test_cep_valido_rota_incoerente_recupera_por_cep():
-    with patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
-         patch.object(app,"_coordenadas_cep",return_value=(-10.0,-43.0,"erro")), \
-         patch.object(app,"_coordenadas_cep_numero",return_value=(-22.79,-43.17,"ok")), \
-         patch.object(app,"_trecho_rodoviario",side_effect=[(640,22,"osrm"),(18.5,20,"osrm")]) as rota, \
-         patch.object(app,"_coordenadas_cep_referencia",side_effect=[(-22.84,-43.25,"brasilapi"),(-22.79,-43.17,"brasilapi")]):
+def test_frete_google_por_km_ida_volta():
+    with patch.dict(os.environ,{"GOOGLE_MAPS_API_KEY":"test-only"}), \
+         patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
+         patch.object(app,"_calcular_rota_google_km",return_value=47.2) as rota, \
+         patch.object(app,"_trecho_rodoviario") as osrm:
         resposta=app._calcular_frete_vitrine(EMPRESA,"21911-280","135")
-        assert resposta["ok"] is True, resposta
-        assert resposta["valor"]==185.0
-        assert resposta["distancia_ida_km"]==18.5
-        assert "cep:" in resposta["fonte"]
-        assert rota.call_count == 2
+    assert resposta["ok"], resposta
+    assert resposta["fonte"]=="google_routes"
+    assert resposta["distancia_ida_km"]==47.2
+    assert resposta["quantidade_km"]==94.4
+    assert resposta["valor"]==472.0
+    assert "135" in rota.call_args.args[1] and "Brasil" in rota.call_args.args[0]
+    osrm.assert_not_called()
 
 
 def test_cep_inexistente_nao_calcula():
@@ -31,25 +33,21 @@ def test_cep_inexistente_nao_calcula():
         rota.assert_not_called()
 
 
-def test_referencia_indisponivel_nao_fabrica_frete():
-    with patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
-         patch.object(app,"_coordenadas_cep",return_value=(-10.0,-43.0,"erro")), \
-         patch.object(app,"_coordenadas_cep_numero",return_value=(-22.79,-43.17,"ok")), \
-         patch.object(app,"_trecho_rodoviario",return_value=(640,22,"osrm")), \
-         patch.object(app,"_coordenadas_cep_referencia",return_value=(None,None,"indisponivel")):
-        r=app._calcular_frete_vitrine(EMPRESA,"21911-280","135")
-        assert not r["ok"] and "CEP confirmado" in r["erro"]
+def test_google_indisponivel_nao_fabrica_frete():
+    with patch.dict(os.environ,{"GOOGLE_MAPS_API_KEY":"test-only"}), \
+         patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
+         patch.object(app,"_calcular_rota_google_km",return_value=None):
+        resposta=app._calcular_frete_vitrine(EMPRESA,"21911-280","135")
+    assert resposta["ok"] and resposta["consultar"] and resposta["valor"]==0 and resposta["erro_rota"]
 
 
-def test_frete_normal_sem_consultas_adicionais():
-    with patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
-         patch.object(app,"_coordenadas_cep",return_value=(-22.84,-43.25,"ok")), \
-         patch.object(app,"_coordenadas_cep_numero",return_value=(-22.79,-43.17,"ok")), \
-         patch.object(app,"_trecho_rodoviario",return_value=(17,30,"osrm")), \
-         patch.object(app,"_coordenadas_cep_referencia") as referencia:
-        r=app._calcular_frete_vitrine(EMPRESA,"21911-280","135")
-        assert r["ok"] and r["valor"]==170
-        referencia.assert_not_called()
+def test_google_nao_configurado_nao_usa_osrm():
+    with patch.dict(os.environ,{"GOOGLE_MAPS_API_KEY":""}), \
+         patch.object(app,"_dados_cep_brasil",side_effect=DADOS), \
+         patch.object(app,"_trecho_rodoviario") as osrm:
+        resposta=app._calcular_frete_vitrine(EMPRESA,"21911-280","135")
+    assert resposta["ok"] and resposta["consultar"] and "Google" in resposta["erro_rota"]
+    osrm.assert_not_called()
 
 
 def test_referencia_municipio_divergente_recusada():

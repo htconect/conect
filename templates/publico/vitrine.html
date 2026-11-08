@@ -83,7 +83,7 @@
 <div class="vitrine-topo">
   <div><p>{{ empresa.nome }}</p><h1>Escolha o que você quer</h1><div class="vitrine-links">{% if empresa.catalogo_musicas_url %}<a class="catalogo-musicas-link" href="{{ empresa.catalogo_musicas_url }}" target="_blank" rel="noopener"><i class="bi bi-music-note-list"></i> Ver catálogo de músicas</a>{% endif %}</div><input {% if oferta_periodo %}hidden{% endif %} id="alterarDataInput" class="alterar-data-input" type="date" min="{{ hoje }}" value="{{ data_evento.isoformat() }}" aria-label="Escolher nova data"></div>
   <div class="pill-grupo"><button type="button" class="data-pill abrir-calendario" {% if oferta_periodo %}hidden{% endif %} aria-label="Alterar data"><i class="bi bi-calendar-check"></i> {{ data_evento.strftime('%d/%m/%Y') }} <i class="bi bi-pencil"></i></button><label class="data-pill" for="alterarTipoEvento" {% if oferta_periodo %}hidden{% endif %}><i class="bi bi-people"></i><select id="alterarTipoEvento" aria-label="Tipo de evento" style="border:0;background:transparent;color:inherit;font:inherit;font-weight:inherit;max-width:135px"><option value="residencial" {% if tipo_evento == "residencial" %}selected{% endif %}>Residencial</option><option value="empresa" {% if tipo_evento == "empresa" %}selected{% endif %}>Empresa</option></select></label></div>
-  <button type="button" {% if oferta_periodo %}hidden{% endif %} id="compartilharVitrine" class="vitrine-share-whatsapp" data-iconizado="1" aria-label="Compartilhar escolhas da vitrine pelo WhatsApp" title="Compartilhar pelo WhatsApp"><i class="bi bi-whatsapp" aria-hidden="true"></i></button>
+  <button type="button" id="compartilharVitrine" class="vitrine-share-whatsapp" data-iconizado="1" aria-label="Compartilhar escolhas da vitrine pelo WhatsApp" title="Compartilhar pelo WhatsApp"><i class="bi bi-whatsapp" aria-hidden="true"></i></button>
 </div>
 <div class="tipo-evento-msg" style="margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--cliente-suave);color:var(--cliente-cor);font-size:.86rem;font-weight:750">{{ (mensagens_tipo_evento|default({})).get(tipo_evento, "") }}</div>
 <div class="guia-vitrine" id="guiaVitrine" aria-live="polite" aria-atomic="true">
@@ -371,6 +371,16 @@
  }
  function avisoPartilha(mensagem,erro=false){if(!feedbackPartilha)return;feedbackPartilha.hidden=false;feedbackPartilha.textContent=mensagem;feedbackPartilha.style.color=erro?'#b42318':'#067647'}
  botaoCompartilhar?.addEventListener('click',async()=>{
+    if(OFERTA_PERIODO){
+      // Uma oferta por período já tem código e preço fechado. Reutilizar a
+      // URL personalizada (não criar outra partilha sem o período).
+      const url=window.location.origin+window.location.pathname;
+      const msg='Confira sua reserva por período e continue pelo Conect:\n'+url;
+      const alvo='https://api.whatsapp.com/send?text='+encodeURIComponent(msg);
+      const aba=window.open(alvo,'_blank','noopener');
+      if(!aba)window.location.assign(alvo);
+      return;
+    }
     // Abre a aba durante o gesto do usuário para não ser bloqueada após a requisição.
     // No celular o endereço wa.me aciona o WhatsApp; no desktop abre o WhatsApp Web.
     const abaWhatsApp=window.open('about:blank','_blank');

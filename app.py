@@ -2358,6 +2358,8 @@ def garantir_colunas_novas():
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_valor_km FLOAT DEFAULT 0")
     if "frete_cep_origem" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN frete_cep_origem VARCHAR(20)")
+    if "frete_endereco_origem" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN frete_endereco_origem VARCHAR(300)")
     nova_col_modulo_equipes = False
     nova_col_modulo_recursos = False
     nova_col_modulo_opcionais = False
@@ -4122,6 +4124,7 @@ def _garantir_colunas_v113_criticas() -> None:
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS modulo_opcionais_ativo BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS utiliza_brinde BOOLEAN DEFAULT false NOT NULL",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS catalogo_musicas_url VARCHAR(500)",
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS frete_endereco_origem VARCHAR(300)",
         "ALTER TABLE tipos_evento_empresa ADD COLUMN IF NOT EXISTS duracao_minutos INTEGER",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_modo VARCHAR(20) DEFAULT 'padrao' NOT NULL",
         "ALTER TABLE produto_precos_evento ADD COLUMN IF NOT EXISTS horas_adicionais INTEGER DEFAULT 0 NOT NULL",
@@ -5406,6 +5409,7 @@ def admin_criar_empresa(
         frete_valor_fixo: str = Form("0"),
         frete_valor_km: str = Form("0"),
         frete_cep_origem: str = Form(""),
+        frete_endereco_origem: str = Form(""),
         vitrine_ativa: Optional[str] = Form(None),
         vitrine_fluxo: str = Form("direto"),
         vitrine_titulo: str = Form(""),
@@ -5484,6 +5488,7 @@ def admin_criar_empresa(
         frete_valor_fixo=max(texto_para_float(frete_valor_fixo), 0),
         frete_valor_km=max(texto_para_float(frete_valor_km), 0),
         frete_cep_origem=_cep_limpo(frete_cep_origem) or None,
+        frete_endereco_origem=frete_endereco_origem.strip()[:300] or None,
         frete_multiplicador_km=2,
         vitrine_ativa=bool(vitrine_ativa),
         vitrine_fluxo=fluxo,
@@ -5650,6 +5655,7 @@ def admin_salvar_empresa(
         frete_valor_fixo: str = Form("0"),
         frete_valor_km: str = Form("0"),
         frete_cep_origem: str = Form(""),
+        frete_endereco_origem: str = Form(""),
         vitrine_ativa: Optional[str] = Form(None),
         vitrine_fluxo: str = Form("direto"),
         vitrine_titulo: str = Form(""),
@@ -5730,6 +5736,7 @@ def admin_salvar_empresa(
     empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
     empresa.frete_valor_km = max(texto_para_float(frete_valor_km), 0)
     empresa.frete_cep_origem = _cep_limpo(frete_cep_origem) or None
+    empresa.frete_endereco_origem = frete_endereco_origem.strip()[:300] or None
     empresa.frete_multiplicador_km = 2
 
     empresa.vitrine_ativa = bool(vitrine_ativa)
@@ -8837,6 +8844,59 @@ def _coordenadas_cep_referencia(cep: str, dados_cep: dict | None = None):
     return None, None, "referencia_indisponivel"
 
 
+def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str) -> float | None:
+    """Consulta rotas REAIS do Google para automóvel; sem fallback de menor precisão.
+
+    A menor distância entre as alternativas trafegáveis serve de referência para
+    a tarifa por km. Não enviar a chave ao navegador, URL ou aos logs.
+    """
+    chave = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    if not chave or not origem_endereco or not destino_endereco:
+        return None
+    com_transito = os.getenv("GOOGLE_MAPS_ROUTES_TRAFFIC_AWARE", "true").strip().lower() in {"true", "1", "yes", "on"}
+    corpo = {
+        "origin": {"address": origem_endereco},
+        "destination": {"address": destino_endereco},
+        "travelMode": "DRIVE",
+        "routingPreference": "TRAFFIC_AWARE" if com_transito else "TRAFFIC_UNAWARE",
+        "computeAlternativeRoutes": True,
+        "regionCode": "br",
+        "languageCode": "pt-BR",
+        "units": "METRIC",
+    }
+    req = UrlRequest(
+        "https://routes.googleapis.com/directions/v2:computeRoutes",
+        data=json.dumps(corpo, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-Goog-Api-Key": chave,
+                 "X-Goog-FieldMask": "routes.distanceMeters,routes.routeLabels,geocodingResults.origin.placeId,geocodingResults.destination.placeId,geocodingResults.origin.partialMatch,geocodingResults.destination.partialMatch"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=10) as resposta:
+            retorno = json.loads(resposta.read(65536).decode("utf-8"))
+        geocodificados = retorno.get("geocodingResults") or {}
+        origem_geo = geocodificados.get("origin") or {}
+        destino_geo = geocodificados.get("destination") or {}
+        # O Google às vezes encontra apenas parte da rua/número informado.
+        # Um CEP ou bairro aproximado jamais pode fundamentar cobrança por km.
+        if (not origem_geo.get("placeId") or not destino_geo.get("placeId")
+                or origem_geo.get("partialMatch") or destino_geo.get("partialMatch")):
+            geo_logger.error("[FRETE] Google retornou local não confirmado/endereçamento parcial")
+            return None
+        distancias = [float(r["distanceMeters"]) / 1000.0 for r in retorno.get("routes", [])
+                      if isinstance(r, dict) and isinstance(r.get("distanceMeters"), (float, int))
+                      and 200 <= r["distanceMeters"] <= 20000000]
+        if not distancias:
+            geo_logger.error("[FRETE] Google retornou resposta sem rota válida")
+            return None
+        return min(distancias)
+    except HTTPError as exc:
+        geo_logger.error("[FRETE] Google Routes API retornou HTTP %s", exc.code)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        geo_logger.warning("[FRETE] falha na consulta de rota Google: %s", type(exc).__name__)
+    return None
+
+
 def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: str = "") -> dict:
     # Não truncar CEPs longos: um CEP com 9 dígitos não pode virar outro CEP válido.
     cep = re.sub(r"\D", "", str(cep_destino or ""))
@@ -8870,102 +8930,50 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
             "valor_km": None, **extra_endereco,
         }
     if tipo == "km":
-        origem = _cep_limpo(getattr(empresa, "frete_cep_origem", "") or "")
+        def sob_consulta(motivo: str) -> dict:
+            # Mantém o pedido possível como frete pendente de aprovação, sem
+            # permitir fechar um contrato com preço de transporte arbitrário.
+            return {"ok": True, "tipo": "consultar", "consultar": True,
+                    "cep": cep, "numero": numero, "valor": 0.0,
+                    "distancia_ida_km": None, "quantidade_km": None, "valor_km": None,
+                    "erro_rota": motivo, "fonte": "google_routes_indisponivel",
+                    **extra_endereco}
+
+        origem_cep = _cep_limpo(getattr(empresa, "frete_cep_origem", "") or "")
+        origem_endereco = str(getattr(empresa, "frete_endereco_origem", "") or "").strip()
         valor_km = max(float(getattr(empresa, "frete_valor_km", 0) or 0), 0.0)
-        if len(origem) != 8 or valor_km <= 0:
-            return {"ok": False, "erro": "O cálculo por KM ainda não foi configurado pela empresa."}
-        dados_origem = _dados_cep_brasil(origem)
-        mesma_cidade = bool(
-            dados_origem and dados_destino
-            and str(dados_origem.get("cidade") or "").strip().casefold() == str(dados_destino.get("cidade") or "").strip().casefold()
-            and str(dados_origem.get("estado") or "").strip().upper() == str(dados_destino.get("estado") or "").strip().upper()
-        )
-        lat1, lon1, _ = _coordenadas_cep(origem, f"frete-origem-{empresa.id}")
-        lat2, lon2, _ = _coordenadas_cep_numero(cep, numero, f"frete-destino-{empresa.id}")
-        distancia_ida = None
-        fonte = "sem_rota"
-        if None not in (lat1, lon1, lat2, lon2):
-            distancia_ida, _minutos, fonte = _trecho_rodoviario(lat1, lon1, lat2, lon2)
+        if len(origem_cep) != 8 or valor_km <= 0:
+            return sob_consulta("Configure o CEP de origem e o valor por KM da empresa.")
+        if not origem_endereco or len(origem_endereco) < 12:
+            return sob_consulta("Cadastre o endereço completo da loja, incluindo número, nas configurações.")
+        if not os.getenv("GOOGLE_MAPS_API_KEY", "").strip():
+            return sob_consulta("A integração Google Maps Routes API não está configurada.")
 
-        # Distância zero entre CEPs diferentes indica rota/coordinate inválida.
-        # Isso acontece quando o geocodificador aponta a origem e o destino
-        # ao mesmo ponto; não significa frete grátis.
-        def rota_incoerente(km):
-            return (km is None or not math.isfinite(float(km))
-                    or float(km) < 0.2
-                    or (mesma_cidade and float(km) > 300.0))
-        if rota_incoerente(distancia_ida):
-            geo_logger.warning("[FRETE] rota suspeita origem=%s destino=%s km=%s fonte=%s", origem, cep, distancia_ida, fonte)
-            ref_lat1, ref_lon1, ref_fonte1 = _coordenadas_cep_referencia(origem, dados_origem)
-            ref_lat2, ref_lon2, ref_fonte2 = _coordenadas_cep_referencia(cep, dados_destino)
-            # Mistura fonte original e referência para corrigir mesmo quando
-            # somente uma das duas coordenadas está equivocada.
-            tentativas = (
-                (ref_lat1, ref_lon1, lat2, lon2, "origem_postal"),
-                (lat1, lon1, ref_lat2, ref_lon2, "destino_postal"),
-                (ref_lat1, ref_lon1, ref_lat2, ref_lon2, "ambos_postais"),
-            )
-            for a, b, c, d, origem_fonte in tentativas:
-                if None in (a, b, c, d):
-                    continue
-                novo_km, _minutos, nova_fonte = _trecho_rodoviario(a, b, c, d, forcar_recalculo=True)
-                if not rota_incoerente(novo_km):
-                    distancia_ida = float(novo_km)
-                    fonte = f"{nova_fonte};{origem_fonte}:{ref_fonte1}+{ref_fonte2}"
-                    geo_logger.info("[FRETE] rota refeita origem=%s destino=%s km=%.1f fonte=%s", origem, cep, distancia_ida, fonte)
-                    break
-        if rota_incoerente(distancia_ida):
-            geo_logger.error("[FRETE] nenhum percurso confiável origem=%s destino=%s km=%s", origem, cep, distancia_ida)
-            return {"ok": False, "erro": "CEP confirmado, mas não foi possível validar a distância. Tente novamente ou entre em contato com o atendimento."}
-        distancia_ida = float(distancia_ida)
-
-        # Proteção financeira: nunca cobrar um frete automático a partir de
-        # distância aproximada. O fallback linha-reta * 1,30 serve à logística,
-        # mas não representa uma rota de cobrança confiável.
-        if not str(fonte).startswith("osrm"):
-            geo_logger.error("[FRETE] rota nao confirmada origem=%s destino=%s km=%.1f fonte=%s", origem, cep, distancia_ida, fonte)
-            return {"ok": False, "erro": "Não foi possível confirmar a rota de carro para calcular o frete. Solicite cotação ao atendimento."}
-
-        # CEPs em regiões postais distintas com trajeto curto são um padrão
-        # frequente de geocodificação para o bairro errado. Conferir usando
-        # uma segunda fonte postal antes de aceitar o preço da vitrine.
-        if origem[:2] != cep[:2] and distancia_ida < 20.0:
-            ref_lat1, ref_lon1, _ = _coordenadas_cep_referencia(origem, dados_origem)
-            ref_lat2, ref_lon2, _ = _coordenadas_cep_referencia(cep, dados_destino)
-            if None in (ref_lat1, ref_lon1, ref_lat2, ref_lon2):
-                geo_logger.error("[FRETE] sem validacao geografica de percurso curto origem=%s destino=%s", origem, cep)
-                return {"ok": False, "erro": "Não foi possível validar a distância entre as regiões. Frete sob consulta."}
-            km_referencia, _, fonte_ref = _trecho_rodoviario(ref_lat1, ref_lon1, ref_lat2, ref_lon2, forcar_recalculo=True)
-            # Referência de 0 km NÃO é uma segunda rota válida. Muitos serviços
-            # postais devolvem a mesma coordenada aproximada para dois CEPs de
-            # bairros diferentes; rejeitar por causa disso bloqueava rotas reais.
-            # Conservar a rota rodoviária OSRM já validada nesses casos.
-            referencia_valida = (
-                km_referencia is not None
-                and math.isfinite(float(km_referencia))
-                and float(km_referencia) >= 0.2
-                and str(fonte_ref).startswith("osrm")
-            )
-            if not referencia_valida:
-                geo_logger.warning(
-                    "[FRETE] referencia postal inconclusiva; mantendo rota OSRM "
-                    "origem=%s destino=%s km=%.1f km_postal=%s fonte=%s",
-                    origem, cep, distancia_ida, km_referencia, fonte_ref,
-                )
-            elif abs(float(km_referencia) - distancia_ida) > max(3.0, float(km_referencia) * 0.20):
-                geo_logger.error("[FRETE] divergencia na rota origem=%s destino=%s km=%.1f km_postal=%s fonte=%s", origem, cep, distancia_ida, km_referencia, fonte_ref)
-                return {"ok": False, "erro": "Encontramos divergência na distância do percurso. Frete sob consulta."}
-
-        quantidade_km = distancia_ida * 2.0
-        valor = round(quantidade_km * valor_km, 2)
+        # CEP de origem + número cadastrado e endereço completo do destino são
+        # enviados diretamente ao Google, sem Nominatim/OSRM e sem coordenadas
+        # aproximadas que poderiam resultar em subcobrança.
+        destino_endereco = ", ".join(x for x in [
+            dados_destino.get("logradouro"), numero, dados_destino.get("bairro"),
+            dados_destino.get("cidade"), dados_destino.get("estado"),
+            f"CEP {cep[:5]}-{cep[5:]}", "Brasil",
+        ] if x)
+        origem_google = f"{origem_endereco}, CEP {origem_cep[:5]}-{origem_cep[5:]}, Brasil"
+        distancia_ida = _calcular_rota_google_km(origem_google, destino_endereco)
+        if distancia_ida is None or not math.isfinite(distancia_ida) or distancia_ida < 0.2:
+            return sob_consulta("Não foi possível confirmar a rota no Google Maps. O frete precisa de aprovação manual.")
+        # Corrigir o endereço cadastrado em vez de aceitar trajetos claramente
+        # incoerentes. Não existe limite para destinos de outras cidades.
+        if (str(dados_destino.get("cidade") or "").strip().casefold() == str(_dados_cep_brasil(origem_cep).get("cidade") or "").strip().casefold()
+                and distancia_ida > 300):
+            geo_logger.error("[FRETE] rota Google anormalmente longa empresa=%s destino=%s", empresa.id, cep)
+            return sob_consulta("Distância incompatível com o destino. O frete precisa de aprovação manual.")
+        quantidade_km = round(distancia_ida * 2.0, 1)
+        valor = round((distancia_ida * 2.0) * valor_km, 2)
         return {
             "ok": True, "tipo": "km", "cep": cep, "numero": numero, "valor": valor,
-            "distancia_ida_km": round(distancia_ida, 1),
-            "quantidade_km": round(quantidade_km, 1),
-            "valor_km": round(valor_km, 2),
-            # Compatibilidade com a tela antiga: distancia_km passa a representar a ida.
-            "distancia_km": round(distancia_ida, 1),
-            "fonte": fonte, **extra_endereco,
+            "distancia_ida_km": round(distancia_ida, 1), "quantidade_km": quantidade_km,
+            "valor_km": round(valor_km, 2), "distancia_km": round(distancia_ida, 1),
+            "fonte": "google_routes", **extra_endereco,
         }
     return {
         "ok": True, "tipo": "consultar", "cep": cep, "numero": numero, "valor": 0.0,
@@ -10214,6 +10222,7 @@ async def salvar_cadastro_empresa_guiado(
         frete_valor_fixo: str = Form("0"),
         frete_valor_km: str = Form("0"),
         frete_cep_origem: str = Form(""),
+        frete_endereco_origem: str = Form(""),
         frete_multiplicador_km: str = Form("2"),
         vitrine_ativa: Optional[str] = Form(None),
         vitrine_fluxo: str = Form("direto"),
@@ -10267,6 +10276,7 @@ async def salvar_cadastro_empresa_guiado(
     empresa.frete_valor_fixo = max(texto_para_float(frete_valor_fixo), 0)
     empresa.frete_valor_km = max(texto_para_float(frete_valor_km), 0)
     empresa.frete_cep_origem = _cep_limpo(frete_cep_origem) or None
+    empresa.frete_endereco_origem = frete_endereco_origem.strip()[:300] or None
     # Regra padrão do Connect: o deslocamento por KM sempre cobra ida + volta.
     empresa.frete_multiplicador_km = 2.0
 
@@ -10579,7 +10589,11 @@ def criar_link_vitrine_periodo(
             f"Valor fechado: R$ {preco:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             + f"\n\nAcesse sua reserva: {url}"
         )
-        return RedirectResponse("https://wa.me/?text=" + quote_url(texto_compartilhamento, safe=""), status_code=303)
+        whatsapp_url = "https://api.whatsapp.com/send?text=" + quote_url(texto_compartilhamento, safe="")
+        return templates.TemplateResponse("admin/compartilhar_periodo.html", {
+            "request": request, "empresa": empresa, "whatsapp_url": whatsapp_url,
+            "url_periodo": url, "texto_compartilhamento": texto_compartilhamento,
+        })
     except (ValueError, TypeError) as exc:
         from urllib.parse import quote as quote_url
         return RedirectResponse("/painel/vitrine?erro=" + quote_url(str(exc), safe=""), status_code=303)

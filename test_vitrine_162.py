@@ -1,13 +1,14 @@
 """Testes locais sem acesso à internet para compartilhamento, CEP e frete."""
 import asyncio
 import json
+import os
 from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import urlparse, parse_qs
 import app
 
-EMPRESA=SimpleNamespace(id=1, slug='karaokerj',ativa=True,vitrine_ativa=True,frete_tipo='km',frete_cep_origem='21031700',frete_valor_km=1.5)
+EMPRESA=SimpleNamespace(id=1, slug='karaokerj',ativa=True,vitrine_ativa=True,frete_tipo='km',frete_cep_origem='21031700',frete_valor_km=1.5,frete_endereco_origem='Av Brasil, 1000, Rio de Janeiro, RJ')
 DADOS=lambda cep:{'cidade':'Rio de Janeiro','estado':'RJ','logradouro':'Rua','bairro':'Freguesia'} if cep in ('21031700','21911280') else {}
 
 def _db():
@@ -60,23 +61,21 @@ def test_compartilhamento_selecoes_nao_dados_pessoais():
     assert 'whatsapp' not in original and 'nome' not in original and 'cpf' not in original
 
 def test_frete_zero_nao_confirma_sem_rota():
-    with patch.object(app,'_dados_cep_brasil',side_effect=DADOS),\
-         patch.object(app,'_coordenadas_cep',return_value=(-22.8,-43.2,'origem')),\
-         patch.object(app,'_coordenadas_cep_numero',return_value=(-22.8,-43.2,'destino')),\
-         patch.object(app,'_trecho_rodoviario',return_value=(0,3,'osrm')),\
-         patch.object(app,'_coordenadas_cep_referencia',return_value=(None,None,'erro')):
+    with patch.dict(os.environ,{"GOOGLE_MAPS_API_KEY":"test-only"}), \
+         patch.object(app,'_dados_cep_brasil',side_effect=DADOS), \
+         patch.object(app,'_calcular_rota_google_km',return_value=0):
         resultado=app._calcular_frete_vitrine(EMPRESA,'21911-280','135')
-    assert resultado['ok'] is False and 'distância' in resultado['erro']
+    assert resultado['ok'] is True and resultado['consultar'] and 'Google' in resultado['erro_rota']
 
-def test_frete_zero_recupera_referencia_postal():
-    with patch.object(app,'_dados_cep_brasil',side_effect=DADOS),\
-         patch.object(app,'_coordenadas_cep',return_value=(-22.8,-43.2,'origem')),\
-         patch.object(app,'_coordenadas_cep_numero',return_value=(-22.8,-43.2,'destino')),\
-         patch.object(app,'_trecho_rodoviario',side_effect=[(0,3,'osrm'),(15.1,31,'osrm')]),\
-         patch.object(app,'_coordenadas_cep_referencia',side_effect=[(-22.84,-43.25,'postal'),(-22.79,-43.17,'postal')]):
+
+def test_frete_google_alternativo_valor_real():
+    with patch.dict(os.environ,{"GOOGLE_MAPS_API_KEY":"test-only"}), \
+         patch.object(app,'_dados_cep_brasil',side_effect=DADOS), \
+         patch.object(app,'_calcular_rota_google_km',return_value=46.5):
         resultado=app._calcular_frete_vitrine(EMPRESA,'21911-280','135')
-    assert resultado['ok'] and resultado['distancia_ida_km']==15.1
-    assert resultado['quantidade_km']==30.2
+    assert resultado['ok'] and resultado['distancia_ida_km']==46.5
+    assert resultado['quantidade_km']==93.0
+    assert resultado['valor']==139.5
 
 if __name__=='__main__':
     for k,v in sorted(globals().copy().items()):

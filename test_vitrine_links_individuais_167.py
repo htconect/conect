@@ -141,7 +141,7 @@ def test_link_legado_funciona_e_vitrine_preserva_token_do_link():
         cupons_ativos=False,fluxo_vitrine='direto',hoje=date.today().isoformat(),
         whatsapp_inicial='',cep_inicial='',numero_inicial='',frete_inicial=None,
         estado_compartilhado=None,responsavel_vitrine_token=junior.pre_contrato_token,
-        bloqueio_data=None,mensagens_tipo_evento={},
+        bloqueio_data=None,mensagens_tipo_evento={},oferta_periodo=None,
     )
     db.close()
 

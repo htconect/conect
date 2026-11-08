@@ -19,7 +19,7 @@
 
   <section class="painel-card" style="margin:0 0 18px"><header><div><h2>Reserva por período · link personalizado</h2><p>Mesmo equipamento, valor fechado e retirada em outra data. Frete e opcionais seguem normalmente.</p></div></header><div class="painel-corpo">
 {% if request.query_params.get('link_periodo') %}<div style="padding:12px;background:#e9fff4;border-radius:12px;margin-bottom:12px;overflow-wrap:anywhere"><b>Link criado:</b> <a href="{{ request.query_params.get('link_periodo') }}" target="_blank" rel="noopener">Abrir vitrine personalizada</a><input style="width:100%;margin-top:8px" readonly onclick="this.select()" value="{{ request.query_params.get('link_periodo') }}"></div>{% endif %}
-<form action="/painel/vitrine/periodo" method="post" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+<form action="/painel/vitrine/periodo" method="post" target="_blank" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
 <label style="flex:2;min-width:190px">Equipamento<br><select name="produto_id" required style="width:100%;min-height:42px">{% for p in produtos if p.ativo and p.vitrine_ativo %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></label>
 <label>Entrega<br><input type="date" name="data_evento" min="{{ request.query_params.get('hoje', '') }}" required style="min-height:42px"></label>
 <label>Retirada<br><input type="date" name="retirada_data" required style="min-height:42px"></label>

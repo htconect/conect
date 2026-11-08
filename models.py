@@ -58,6 +58,8 @@ class Empresa(Base):
     frete_valor_fixo = Column(Float, default=0)
     frete_valor_km = Column(Float, default=0)
     frete_cep_origem = Column(String(20), nullable=True)
+    # Endereço de partida completo (rua, número, município/UF), usado pela Routes API.
+    frete_endereco_origem = Column(String(300), nullable=True)
     # Mantido para compatibilidade histórica; a regra atual cobra ida + volta (2x).
     frete_multiplicador_km = Column(Float, default=2)
 

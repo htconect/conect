@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Compartilhar reserva pelo WhatsApp</title>
+<style>body{font-family:system-ui,Arial,sans-serif;background:#f4f7fb;color:#17304c;padding:26px}main{max-width:640px;margin:8vh auto;background:white;padding:26px;border-radius:16px;box-shadow:0 8px 24px #1426411c}a.botao,button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:9px;padding:13px 18px;background:#128c53;color:white;font-weight:700;text-decoration:none;cursor:pointer;margin:8px 8px 8px 0}a.secundario{color:#174ea6;background:#e9f1ff}input{width:100%;box-sizing:border-box;padding:11px;margin:9px 0 14px;border:1px solid #ccd5e1;border-radius:8px}</style></head>
+<body><main>
+<h1>Reserva personalizada criada</h1>
+<p>O link foi salvo. O WhatsApp será aberto para selecionar o destinatário; caso não abra, use o botão abaixo.</p>
+<a class="botao" id="abrirWhatsApp" href="{{ whatsapp_url }}" rel="noopener">Compartilhar pelo WhatsApp</a>
+<p>Você também pode copiar o link personalizado:</p>
+<input id="linkPeriodo" aria-label="Link personalizado" value="{{ url_periodo }}" readonly onclick="this.select()">
+<button type="button" onclick="navigator.clipboard?.writeText(document.getElementById('linkPeriodo').value).then(()=>{this.textContent='Link copiado'}).catch(()=>document.getElementById('linkPeriodo').select())">Copiar link</button>
+<a class="botao secundario" href="{{ url_periodo }}" target="_blank" rel="noopener">Ver reserva</a>
+</main><script>window.addEventListener('load',()=>{setTimeout(()=>{window.location.assign({{ whatsapp_url|tojson }})},150)});</script></body></html>
