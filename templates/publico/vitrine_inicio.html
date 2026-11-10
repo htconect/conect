@@ -23,6 +23,7 @@
 #reservaInicio .pular-etapa{width:100%;background:#fff;color:var(--cliente-cor);border:1px solid var(--cliente-cor);border-radius:13px;min-height:46px;margin-top:8px;font-weight:700}
 #reservaInicio .pedido-anterior{padding:12px 0;border-bottom:1px solid var(--cliente-borda)}
 #reservaInicio [data-repetir-pedido]{background:var(--cliente-cor)}
+.inicio-hero .destino-anterior{margin:6px 0;color:#465569;max-width:none;overflow-wrap:anywhere}
 </style>
 {% endblock %}
 {% block scripts_extra %}<script>(()=>{
@@ -87,8 +88,9 @@
     {% for pedido in pedidos_recentes %}<div class="pedido-anterior">
       <strong>Pedido de {{ pedido.data }}</strong>
       {% if pedido.linhas %}<ul>{% for linha in pedido.linhas %}<li>{{ linha }}</li>{% endfor %}</ul>
-      <button type="button" data-repetir-pedido="{{ pedido.id }}">Repetir este pedido</button>
       {% else %}<p>Sem equipamento registrado.</p>{% endif %}
+      <p class="destino-anterior"><strong>Entrega:</strong> {{ pedido.endereco or 'Endereço não registrado neste pedido.' }}</p>
+      {% if pedido.linhas %}<button type="button" data-repetir-pedido="{{ pedido.id }}">Repetir este pedido</button>{% endif %}
     </div>{% endfor %}
     <button type="button" id="pular" class="pular-etapa">Não, começar do zero</button>
     {% else %}<h2>Já alugou conosco?</h2>

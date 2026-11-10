@@ -20325,6 +20325,21 @@ def _ultimo_por_cpf(db, empresa, ids):
                Solicitacao.id.desc()).first()
 
 
+def _endereco_resumo_pedido(pedido, completo):
+    rua = (pedido.local or "").strip()
+    numero = (pedido.local_numero or "").strip()
+    cep = re.sub(r"\D", "", pedido.local_cep or "")
+    # O campo legado pode conter número e complemento junto ao logradouro.
+    if not completo:
+        rua = re.split(r"[,;\n]|\s+[-–]\s+|\s+n[º°.]?\s*\d", rua, maxsplit=1, flags=re.I)[0]
+        rua = re.sub(r"\s+\d+[a-zA-Z]?\s*$", "", rua)
+    partes = [rua, numero if completo else "", pedido.local_complemento if completo else "",
+              pedido.bairro, pedido.local_cidade, pedido.local_estado]
+    if len(cep) == 8:
+        partes.append(f"CEP {cep[:5]}-{cep[5:]}")
+    return " · ".join(str(p).strip() for p in partes if p and str(p).strip())
+
+
 def _historico_repeticao(db, empresa, reconhecido, cadastro):
     if reconhecido:
         ids = [reconhecido.cliente_id]
@@ -20357,7 +20372,7 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
         if resumo:
             resumo.extend(f"{max(1, op.quantidade or 1)} × {op.nome} (opcional)" for op in anterior.opcionais_contrato if op.nome)
         pedidos_recentes.append({"id": anterior.id, "data": anterior.data_evento.strftime("%d/%m/%Y"),
-                                "linhas": resumo})
+                                "linhas": resumo, "endereco": _endereco_resumo_pedido(anterior, bool(reconhecido))})
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
         "pedidos_recentes": pedidos_recentes, "cadastro_cpf": cadastro, "reconhecido": reconhecido, "request": request,
         "empresa": empresa,
