@@ -8,6 +8,12 @@
 @media(max-width:560px){.inicio-vitrine{margin-top:0}.inicio-hero{min-height:calc(100svh - 104px);min-height:570px;border-radius:24px;padding:92px 20px 22px}.inicio-medalhao{width:94px;height:94px}}
 .tipo-cartoes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px}.tipo-cartao{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:16px 8px;border:2px solid var(--cliente-borda);border-radius:14px;background:#fff;cursor:pointer;text-align:center}.tipo-cartao i{font-size:25px;color:var(--cliente-cor)}.tipo-cartao span{font-weight:850}.tipo-cartao small{font-size:.72rem;color:var(--cliente-muted)}.tipo-cartao:has(input:checked){background:var(--cliente-suave);border-color:var(--cliente-cor);box-shadow:0 0 0 1px var(--cliente-cor)}.tipo-cartao-link{text-decoration:none;color:inherit}.tipo-cartao-link:hover{border-color:var(--cliente-cor);background:var(--cliente-suave)}.tipo-cartao input{position:absolute;opacity:0;width:1px;height:1px}.tipo-cartao:focus-within{outline:2px solid var(--cliente-cor);outline-offset:2px}.inicio-form .tipo-cartao{display:flex;flex-direction:column;gap:5px;min-width:0;min-height:100px;padding:10px 4px;align-items:center;justify-content:center}.inicio-form .tipo-cartao i{display:block;font-size:24px;line-height:1.2}.inicio-form .tipo-cartao span{display:block;width:100%;font-size:.78rem;line-height:1.25;overflow-wrap:anywhere}.inicio-form .tipo-cartao small{display:block;width:100%;line-height:1.3;font-size:.68rem;overflow-wrap:break-word}.inicio-form button[type=submit]:disabled{background:#a6aec4!important;cursor:not-allowed;opacity:.7}.inicio-form button[type=submit]:not(:disabled){background:var(--cliente-cor)}
 .inicio-form .connect-orientador{margin:0 0 15px}.inicio-guia-campo{border-radius:14px!important}
+.inicio-vitrine,.inicio-hero,.inicio-form,.inicio-form *{box-sizing:border-box;min-width:0}
+.inicio-vitrine,.inicio-form,.inicio-form form{width:100%;max-width:100%}
+.inicio-form input[type=date]{max-width:100%;width:100%;appearance:none;-webkit-appearance:none}
+.inicio-form .atalho-data{display:grid;place-items:center;position:relative;overflow:hidden;width:100%;min-height:44px;background:var(--cliente-cor);border-radius:12px;color:white}
+.inicio-form .atalho-data input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.inicio-form [hidden]{display:none!important}
 </style>
 {% endblock %}
 {% block scripts_extra %}
@@ -22,6 +28,8 @@
  function validarInicio(){
    const temData=!!dataEvento?.value,temTipo=!!document.querySelector('input[name=tipo_evento]:checked');
    if(botaoCatalogo)botaoCatalogo.disabled=!(temData&&temTipo);
+   document.getElementById('atalhoData').hidden=temData;
+   if(acao)acao.hidden=!temData;
    const passo=!temData?1:2;
    if(etapa)etapa.textContent='Passo '+passo+' de 2';
    if(titulo)titulo.textContent=!temData?'Escolha a data do seu evento':(!temTipo?'O que você procura?':'Tudo pronto para entrar!');
@@ -37,6 +45,8 @@
  function formatCep(v){v=(v||'').replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v}
  document.querySelectorAll('input[name=tipo_evento]').forEach(el=>el.addEventListener('change',atualizarMensagem));
  cep?.addEventListener('input',()=>{cep.value=formatCep(cep.value)});
+ const toque=document.getElementById('dataToque');
+ toque.addEventListener('change',()=>{dataEvento.value=toque.value;validarInicio()});
  atualizarMensagem();validarInicio();
 })();
 </script>
@@ -51,27 +61,28 @@
     <h1>{{ empresa.vitrine_titulo or 'Vamos encontrar as opções certas para o seu evento.' }}</h1>
     <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível para você.' }}</p>
     {% if empresa.vitrine_descricao %}<p class="inicio-desc">{{ empresa.vitrine_descricao }}</p>{% endif %}
-    {% if reconhecido %}
-    <div class="inicio-form"><strong>Olá, {{ reconhecido.cliente.nome.split()[0] if reconhecido.cliente and reconhecido.cliente.nome else 'cliente' }}!</strong>
+    <div class="inicio-form">    {% if reconhecido %}
+    <div><strong>Olá, {{ reconhecido.cliente.nome.split()[0] if reconhecido.cliente and reconhecido.cliente.nome else 'cliente' }}!</strong>
     {% if reconhecido.contrato_id and reconhecido.itens and empresa.modulo_opcionais_ativo and reconhecido.data_evento.isoformat() >= hoje and reconhecido.status not in ['cancelada','cancelado_cliente','rejeitada','aguardando_nova_data'] %}
     <p><a href="/e/{{ empresa.slug }}/contrato/{{ reconhecido.public_token }}/opcionais">Editar opcionais do pedido de {{ reconhecido.data_evento.strftime('%d/%m/%Y') }}</a></p>{% endif %}
     <form method="post" action="/e/{{ empresa.slug }}/esquecer-cliente"><button>Esquecer este aparelho</button></form></div>
+    {% elif cadastro_cpf %}
+    <p>Cadastro reconhecido neste aparelho.</p><form method="post" action="/e/{{ empresa.slug }}/esquecer-cliente"><button>Esquecer este aparelho</button></form>
     {% else %}
-    <details class="inicio-form" {% if request.query_params.get('identificacao') %}open{% endif %}><summary>Já alugou conosco? Carregar último pedido</summary>
-    {% if request.query_params.get('identificacao') %}<p>Confira o WhatsApp e o documento usados na reserva anterior.</p>{% endif %}
     <form method="post" action="/e/{{ empresa.slug }}/reconhecer-cliente"><input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
-    <label>WhatsApp cadastrado<input name="telefone" type="tel" required autocomplete="tel"></label>
-    <label>CPF ou CNPJ<input name="documento" inputmode="numeric" required maxlength="18"></label>
-    <button>Carregar pedido e lembrar neste aparelho</button></form></details>{% endif %}
-    <form class="inicio-form" method="get" action="/e/{{ empresa.slug }}/vitrine" data-loading-title="Montando seu catálogo" data-loading-text="Aguarde. Estamos verificando disponibilidade e aplicando os valores do seu evento.">
+    <label for="cpfInicio">Já alugou conosco? Carregue seu pedido pelo CPF</label>
+    <input id="cpfInicio" name="documento" inputmode="numeric" maxlength="14" required placeholder="Seu CPF">
+    {% if request.query_params.get('identificacao') %}<p role="alert">Confira o CPF cadastrado nesta locadora ou continue escolhendo a data.</p>{% endif %}
+    <button>Carregar e lembrar neste aparelho</button></form>{% endif %}
+    <form method="get" action="/e/{{ empresa.slug }}/vitrine" data-loading-title="Montando seu catálogo" data-loading-text="Aguarde. Estamos verificando disponibilidade e aplicando os valores do seu evento.">
       <input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
       <div class="connect-orientador" id="inicioGuia" aria-live="polite">
  <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Preparando sua festa</span><span id="inicioEtapa" class="connect-orientador-numero">Passo 1 de 2</span><button class="connect-orientador-x" id="inicioFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
  <h2 id="inicioTitulo"></h2><p id="inicioTexto"></p>
  <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span></div>
- <div class="connect-orientador-acoes"><button type="button" id="inicioAcao"></button><button type="button" class="orientador-secundario" id="inicioProximo" hidden></button></div>
+ <div class="connect-orientador-acoes"><label id="atalhoData" class="atalho-data">Escolher data<input id="dataToque" type="date" min="{{ hoje }}" aria-label="Escolher data do evento"></label><button type="button" id="inicioAcao" hidden></button><button type="button" class="orientador-secundario" id="inicioProximo" hidden></button></div>
 </div><button type="button" class="connect-orientador-reabrir" id="inicioReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
-      {% if reconhecido %}<input type="hidden" name="repetir" value="1"><strong>Novo pedido com os itens anteriores</strong>{% endif %}
+      {% if reconhecido or cadastro_cpf %}<input type="hidden" name="repetir" value="1"><strong>Novo pedido com os itens anteriores</strong>{% endif %}
       <label for="dataEvento">Data do evento</label>
       <input id="dataEvento" name="data_evento" type="date" min="{{ hoje }}" required>
       <label style="margin-top:10px">O que você procura?</label>
@@ -83,7 +94,7 @@
       <div id="tipoEventoMensagem" class="tipo-evento-msg"></div>
       <button type="submit" id="verCatalogoBtn" disabled><i class="bi bi-box-arrow-in-right"></i> Entrar na vitrine</button>
     </form>
-    <p class="inicio-tempo"><i class="bi bi-clock"></i> Leva menos de 1 minuto para montar seu pedido</p>
+    </div><p class="inicio-tempo"><i class="bi bi-clock"></i> Leva menos de 1 minuto para montar seu pedido</p>
   </section>
 </div>
 {% endblock %}

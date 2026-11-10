@@ -20185,37 +20185,52 @@ def _lembrar_resposta(resposta, db, empresa, pedido=None):
                             path=caminho, secure=SESSION_COOKIE_SECURE, httponly=True, samesite="lax")
     else:
         resposta.delete_cookie(chave, path=caminho)
+    resposta.delete_cookie(f"conect_cpf_{empresa.id}", path=caminho)
     resposta.headers["Cache-Control"] = "private, no-store"
     return resposta
 
 
+def _cadastro_vitrine_cpf(request, empresa, db):
+    token = request.cookies.get(f"conect_cpf_{empresa.id}")
+    if not token:
+        return None
+    try:
+        eid, cid = URLSafeTimedSerializer(SECRET_KEY, salt="vitrine-itens").loads(token, max_age=180 * 86400)
+    except (BadSignature, ValueError, TypeError):
+        return None
+    return db.query(Cliente).filter_by(empresa_id=empresa.id, id=cid).first() if eid == empresa.id else None
+
+
 @app.post("/e/{slug}/reconhecer-cliente")
-def reconhecer_cliente_vitrine(slug: str, request: Request, telefone: str = Form(""),
-                              documento: str = Form(""), r: str = Form(""), db: Session = Depends(get_db)):
+def reconhecer_cliente_vitrine(slug: str, request: Request, documento: str = Form(""),
+                              r: str = Form(""), db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa or not empresa.vitrine_ativa:
         raise HTTPException(404)
-    tel = limpar_identificador(telefone)
-    if len(tel) == 13 and tel.startswith("55"):
-        tel = tel[2:]
     doc = limpar_identificador(documento)
-    candidatos = db.query(Cliente).filter(Cliente.empresa_id == empresa.id,
-        or_(Cliente.telefone == tel, Cliente.identificador == tel)).all() if len(tel) == 11 else []
-    ids = [c.id for c in candidatos if len(doc) in (11, 14)
-           and doc in (limpar_identificador(c.cpf or ""), limpar_identificador(c.cnpj or ""))]
-    pedido = db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id,
-        Solicitacao.cliente_id.in_(ids),
-        or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any()),
-        ~Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
-    ).order_by(Solicitacao.id.desc()).first() if ids else None
+    cpf = func.replace(func.replace(func.trim(Cliente.cpf), ".", ""), "-", "")
+    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, cpf == doc).all() if cpf_valido(doc) else []
     params = {"r": r}
-    if not pedido:
+    cliente = None
+    if clientes:
+        pedido = _ultimo_por_cpf(db, empresa, [c.id for c in clientes])
+        cliente = next((c for c in clientes if pedido and c.id == pedido.cliente_id), clientes[0])
+    else:
         params["identificacao"] = "falhou"
-    resposta = RedirectResponse(f"/e/{slug}?" + urlencode(params), status_code=303)
-    if pedido:
-        request.session[f"ultimo_pedido_{empresa.id}"] = pedido.id
-        return _lembrar_resposta(resposta, db, empresa, pedido)
+    resposta = RedirectResponse(f"/e/{slug}?" + urlencode(params), status_code=303,
+                                headers={"Cache-Control": "private, no-store"})
+    if cliente:
+        token = URLSafeTimedSerializer(SECRET_KEY, salt="vitrine-itens").dumps([empresa.id, cliente.id])
+        resposta.set_cookie(f"conect_cpf_{empresa.id}", token, max_age=180 * 86400, path=f"/e/{slug}",
+                            secure=SESSION_COOKIE_SECURE, httponly=True, samesite="lax")
     return resposta
+
+
+def _ultimo_por_cpf(db, empresa, ids):
+    return db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cliente_id.in_(ids), or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any()),
+        ~Solicitacao.status.in_(["cancelada","cancelado_cliente","rejeitada"])
+    ).order_by(Solicitacao.id.desc()).first()
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)
@@ -20227,7 +20242,7 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
     reconhecido = _pedido_reconhecido(db, empresa, request)
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
-        "reconhecido": reconhecido, "request": request,
+        "cadastro_cpf": _cadastro_vitrine_cpf(request, empresa, db), "reconhecido": reconhecido, "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
@@ -20293,6 +20308,12 @@ def vitrine_publica(
         categorias.append("Outros")
 
     ultimo = _pedido_reconhecido(db, empresa, request)
+    somente_itens = False
+    if not ultimo:
+        cadastro_cpf = _cadastro_vitrine_cpf(request, empresa, db)
+        if cadastro_cpf:
+            ultimo = _ultimo_por_cpf(db, empresa, [cadastro_cpf.id])
+            somente_itens = True
     ultimo_id = ultimo.id if ultimo else None
     repetindo = False
     estado_compartilhado = estado_partilha_direto
@@ -20306,7 +20327,7 @@ def vitrine_publica(
     if ultimo_id and request.query_params.get("repetir") == "1" and not estado_compartilhado:
         ultimo = db.query(Solicitacao).filter_by(id=ultimo_id, empresa_id=empresa.id).first()
         if ultimo:
-            if ultimo.data_evento == data_obj and ultimo.contrato_id and ultimo.status not in {
+            if not somente_itens and ultimo.data_evento == data_obj and ultimo.contrato_id and ultimo.status not in {
                 "cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"
             }:
                 return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, ultimo)}", status_code=303)
@@ -20320,9 +20341,9 @@ def vitrine_publica(
                     alvo = produtos[0]
                 if alvo and opc.opcional_id:
                     alvo["opcionais"].append({"id": opc.opcional_id, "q": opc.quantidade})
-            estado_compartilhado = {"produtos": produtos, "cep": ultimo.local_cep,
-                                     "numero": ultimo.local_numero,
-                                     "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio else ""}
+            estado_compartilhado = {"produtos": produtos, "cep": "" if somente_itens else ultimo.local_cep,
+                                     "numero": "" if somente_itens else ultimo.local_numero,
+                                     "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio and not somente_itens else ""}
             repetindo = True
     if estado_compartilhado:
         cep = estado_compartilhado.get("cep") or cep
