@@ -19,7 +19,7 @@
 
   <section class="painel-card" style="margin:0 0 18px"><header><div><h2>Reserva por período · link personalizado</h2><p>Mesmo equipamento, valor fechado e retirada em outra data. Para incluir o frete, informe CEP e número. O cupom também é opcional.</p></div></header><div class="painel-corpo">
 {% if request.query_params.get('link_periodo') %}<div style="padding:12px;background:#e9fff4;border-radius:12px;margin-bottom:12px;overflow-wrap:anywhere"><b>Link criado:</b> <a href="{{ request.query_params.get('link_periodo') }}" target="_blank" rel="noopener">Abrir vitrine personalizada</a><input style="width:100%;margin-top:8px" readonly onclick="this.select()" value="{{ request.query_params.get('link_periodo') }}"></div>{% endif %}
-<form action="/painel/vitrine/periodo" method="post" target="_blank" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+<form id="ofertaPeriodo" action="/painel/vitrine/periodo" method="post" target="_blank" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
 <label style="flex:2;min-width:190px">Equipamento<br><select name="produto_id" required style="width:100%;min-height:42px">{% for p in produtos if p.ativo and p.vitrine_ativo %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}</select></label>
 <label>Entrega<br><input type="date" name="data_evento" min="{{ request.query_params.get('hoje', '') }}" required style="min-height:42px"></label>
 <label>Retirada<br><input type="date" name="retirada_data" required style="min-height:42px"></label>
@@ -28,7 +28,34 @@
 <label>CEP de entrega (opcional)<br><input name="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" pattern="[0-9]{5}-?[0-9]{3}" style="min-height:42px;width:135px"></label>
 <label>Número<br><input name="numero" maxlength="30" placeholder="Nº" style="min-height:42px;width:90px"></label>
 {% if empresa.modulo_cupons_ativo %}<label>Cupom (opcional)<br><input name="cupom" maxlength="40" placeholder="Código do cupom" style="min-height:42px;width:155px"></label>{% endif %}
-<button class="botao" type="submit" style="min-height:42px"><i class="bi bi-whatsapp" aria-hidden="true"></i> Compartilhar pelo WhatsApp</button></form></div></section>
+<button class="botao" type="submit" style="min-height:42px"><i class="bi bi-whatsapp" aria-hidden="true"></i> Compartilhar pelo WhatsApp</button><p id="saldoPeriodo" role="status" style="flex-basis:100%;margin:4px 0">Selecione as datas para consultar o estoque.</p></form><script>
+(()=>{
+ const form=document.getElementById('ofertaPeriodo'), aviso=document.getElementById('saldoPeriodo');
+ const btn=form.querySelector('[type=submit]'), campos=form.elements;
+ let atual=0, controle;
+ async function consultar(){
+   const versao=++atual;
+   controle?.abort(); btn.disabled=true;
+   const entrega=campos.data_evento.value, retirada=campos.retirada_data.value;
+   if(!entrega||!retirada){aviso.textContent='Selecione as datas para consultar o estoque.';return}
+   if(retirada<=entrega){aviso.textContent='A retirada precisa ser posterior à entrega.';return}
+   controle=new AbortController();
+   aviso.textContent='Consultando disponibilidade do período…';
+   try{
+     const params=new URLSearchParams({entrega,retirada,produto_id:campos.produto_id.value,tipo:campos.tipo_evento.value});
+     const resp=await fetch('/painel/vitrine/periodo/disponibilidade?'+params,{signal:controle.signal,cache:'no-store'});
+     const info=await resp.json();
+     if(versao!==atual)return;
+     if(!resp.ok||!Number.isInteger(info.quantidade))throw Error(info.erro||'Não foi possível consultar o estoque.');
+     btn.disabled=info.quantidade<1;
+     aviso.textContent=btn.disabled ? 'Esgotado em '+info.dia+' · 0 disponíveis para o período.' :
+        'Disponíveis para todo o período: '+info.quantidade+'.';
+   }catch(erro){if(versao===atual)aviso.textContent=erro.message+' Altere as datas ou atualize a página para tentar novamente.'}
+ }
+ for(const nome of ['produto_id','data_evento','retirada_data','tipo_evento'])campos[nome].addEventListener('change',consultar);
+ consultar();
+})();
+</script></div></section>
 <div class="vitrine-cards">
     <div class="vitrine-kpi"><small>Status</small><strong>{{ 'Publicada' if empresa.vitrine_ativa else 'Desativada' }}</strong></div>
     <div class="vitrine-kpi"><small>Produtos e serviços ativos</small><strong>{{ produtos|selectattr('vitrine_ativo')|list|length }}</strong></div>

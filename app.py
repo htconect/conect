@@ -9094,6 +9094,9 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
     reservas_do_dia = _reservas_ativas_na_data(db, empresa.id, data_consulta)
     alugado_por_produto: dict[int, int] = {}
     for reserva in reservas_do_dia:
+        if reserva.produto_id and not any(ri.produto_id for ri in reserva.itens):
+            pid = reserva.produto_id
+            alugado_por_produto[pid] = alugado_por_produto.get(pid, 0) + 1
         for ri in reserva.itens:
             if not ri.produto_id:
                 continue
@@ -10589,6 +10592,31 @@ def _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado
     return linhas
 
 
+def _saldo_vitrine_periodo(db, empresa, produto_id, inicio, fim, tipo):
+    if inicio < date.today() or not 1 <= (fim - inicio).days <= 45:
+        raise ValueError("Escolha um período válido de até 45 dias, com retirada após a entrega.")
+    minimo, dia_limite = None, inicio
+    for delta in range((fim - inicio).days):
+        dia = inicio + timedelta(days=delta)
+        itens = _itens_vitrine_publica(db, empresa, dia, tipo, apenas_disponibilidade=True, ignorar_bloqueio=True)
+        saldo = next((int(reg["disponiveis"]) for reg in itens if reg["produto"].id == produto_id), 0)
+        if minimo is None or saldo < minimo:
+            minimo, dia_limite = saldo, dia
+        if minimo == 0:
+            break
+    return minimo, dia_limite
+
+
+@app.get("/painel/vitrine/periodo/disponibilidade")
+def consultar_saldo_periodo(produto_id: int, entrega: date, retirada: date, tipo: str = "residencial",
+                           db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    try:
+        saldo, dia = _saldo_vitrine_periodo(db, empresa, produto_id, entrega, retirada, tipo)
+    except ValueError as exc:
+        return JSONResponse({"erro": str(exc)}, status_code=400)
+    return JSONResponse({"quantidade": saldo, "dia": dia.strftime("%d/%m")}, headers={"Cache-Control": "no-store"})
+
+
 @app.post("/painel/vitrine/periodo")
 def criar_link_vitrine_periodo(
     request: Request, produto_id: int = Form(...), data_evento: str = Form(...),
@@ -10612,12 +10640,9 @@ def criar_link_vitrine_periodo(
         tipo = _normalizar_tipo_evento_vitrine(tipo_evento)
         # A data bloqueada comercialmente não impede um link individual.
         # Estoque físico continua obrigatório em todos os dias anteriores à retirada.
-        for delta in range((fim - inicio).days):
-            dia = inicio + timedelta(days=delta)
-            disponiveis = _itens_vitrine_publica(db, empresa, dia, tipo, apenas_disponibilidade=True, ignorar_bloqueio=True)
-            reg = next((x for x in disponiveis if int(x["produto"].id) == produto_id), None)
-            if not reg or int(reg.get("disponiveis") or 0) < 1:
-                raise ValueError(f"Sem estoque de {produto.nome} em {dia.strftime('%d/%m/%Y')}.")
+        saldo, dia_limite = _saldo_vitrine_periodo(db, empresa, produto_id, inicio, fim, tipo)
+        if saldo < 1:
+            raise ValueError(f"Sem estoque de {produto.nome} em {dia_limite.strftime('%d/%m/%Y')}.")
         link_usuario, _ = _vitrine_link_do_usuario(request, db, empresa)
         from urllib.parse import urlparse, parse_qs
         par = parse_qs(urlparse(link_usuario).query)
