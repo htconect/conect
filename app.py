@@ -10556,11 +10556,45 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     })
 
 
+def _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado):
+    campos = _estado_partilha_validado({"cep": cep, "numero": numero, "cupom": cupom})
+    if bool(campos.get("cep")) != bool(campos.get("numero")):
+        raise ValueError("Informe CEP e número juntos ou deixe ambos em branco.")
+    linhas = []
+    desconto = 0.0
+    if campos.get("cupom"):
+        valido = _cupom_valido(db, empresa.id, campos["cupom"]) if _empresa_modulo_ativo(empresa, "cupons") else None
+        if not valido:
+            raise ValueError("Cupom inválido ou vencido. Corrija o código ou deixe o campo em branco.")
+        desconto = _calcular_desconto_cupom(preco, valido)
+        estado["cupom"] = campos["cupom"]
+        linhas.append(f"Desconto ({campos['cupom']}): − R$ {moeda_br(desconto)}")
+    valor_frete = None
+    if campos.get("cep"):
+        frete = _calcular_frete_vitrine(empresa, campos["cep"], campos["numero"])
+        if not frete.get("ok"):
+            raise ValueError(frete.get("erro") or "Confira o endereço ou deixe o frete para depois.")
+        estado.update(cep=campos["cep"], numero=campos["numero"])
+        linhas.append("Entrega em: " + frete["endereco_formatado"])
+        if frete.get("distancia_ida_km") is not None:
+            linhas.append(f"Loja → cliente: {frete['distancia_ida_km']} km")
+        if not frete.get("consultar"):
+            valor_frete = float(frete["valor"])
+    if valor_frete is None:
+        linhas.append("Frete: sob consulta" if campos.get("cep") else "Frete: a calcular")
+        linhas.append(f"Subtotal sem frete: R$ {moeda_br(preco - desconto)}")
+    else:
+        linhas.append(f"Frete: R$ {moeda_br(valor_frete)}")
+        linhas.append(f"Total: R$ {moeda_br(preco - desconto + valor_frete)}")
+    return linhas
+
+
 @app.post("/painel/vitrine/periodo")
 def criar_link_vitrine_periodo(
     request: Request, produto_id: int = Form(...), data_evento: str = Form(...),
     retirada_data: str = Form(...), valor: str = Form(...),
     tipo_evento: str = Form("residencial"),
+    cep: str = Form(""), numero: str = Form(""), cupom: str = Form(""),
     db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
     """Oferta particular: reaproveita o produto e a vitrine padrão, sem produto duplicado."""
@@ -10593,6 +10627,7 @@ def criar_link_vitrine_periodo(
                   "tipo_evento": tipo, "responsavel_token": token,
                   "oferta_periodo": {"produto_id": produto_id, "retirada_data": fim.isoformat(),
                                      "valor": preco}}
+        extras = _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado)
         db.add(VitrineCompartilhamento(empresa_id=empresa.id, codigo=codigo,
                pedido_json=json.dumps(estado, ensure_ascii=False)))
         db.commit()
@@ -10607,7 +10642,7 @@ def criar_link_vitrine_periodo(
             f"Retirada: {fim.strftime('%d/%m/%Y')}\n"
             f"Tipo: {'Residencial' if tipo == 'residencial' else 'Empresa'}\n"
             f"Valor fechado: R$ {preco:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            + f"\n\nAcesse sua reserva: {url}"
+            + "\n" + "\n".join(extras) + f"\n\nAcesse sua reserva: {url}"
         )
         whatsapp_url = "https://api.whatsapp.com/send?text=" + quote_url(texto_compartilhamento, safe="")
         return templates.TemplateResponse("admin/compartilhar_periodo.html", {
