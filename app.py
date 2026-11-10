@@ -20190,6 +20190,17 @@ def _lembrar_resposta(resposta, db, empresa, pedido=None):
     return resposta
 
 
+def _clientes_cpf_vitrine(db, empresa_id, documento):
+    # O identificador legado pode conter o CPF quando o campo próprio está vazio.
+    def normalizado(coluna):
+        return func.replace(func.replace(func.replace(func.trim(coluna), ".", ""), "-", ""), " ", "")
+    cpf = normalizado(Cliente.cpf)
+    return db.query(Cliente).filter(
+        Cliente.empresa_id == empresa_id,
+        or_(cpf == documento, and_(func.coalesce(cpf, "") == "", normalizado(Cliente.identificador) == documento)),
+    ).all() if cpf_valido(documento) else []
+
+
 def _cadastro_vitrine_cpf(request, empresa, db):
     token = request.cookies.get(f"conect_cpf_{empresa.id}")
     if not token:
@@ -20208,8 +20219,7 @@ def reconhecer_cliente_vitrine(slug: str, request: Request, documento: str = For
     if not empresa or not empresa.vitrine_ativa:
         raise HTTPException(404)
     doc = limpar_identificador(documento)
-    cpf = func.replace(func.replace(func.trim(Cliente.cpf), ".", ""), "-", "")
-    clientes = db.query(Cliente).filter(Cliente.empresa_id == empresa.id, cpf == doc).all() if cpf_valido(doc) else []
+    clientes = _clientes_cpf_vitrine(db, empresa.id, doc)
     params = {"r": r}
     cliente = None
     if clientes:
@@ -20235,6 +20245,8 @@ def _recuperar_itens_vitrine(pedido, catalogo):
     if not linhas and pedido.produto_id:
         linhas.append((pedido.produto_id, "", 1))
     produtos, avisos, referencias = {}, [], {}
+    if not linhas:
+        avisos.append("Encontramos a reserva, mas ela não registra qual equipamento foi alugado. Escolha um modelo no catálogo.")
     for pid, nome, qtd in linhas:
         reg = por_id.get(pid)
         if not reg:
@@ -20263,10 +20275,14 @@ def _recuperar_itens_vitrine(pedido, catalogo):
 
 
 def _ultimo_por_cpf(db, empresa, ids):
-    return db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id,
-        Solicitacao.cliente_id.in_(ids), or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any()),
-        ~Solicitacao.status.in_(["cancelada","cancelado_cliente","rejeitada"])
-    ).order_by(Solicitacao.id.desc()).first()
+    # O histórico serve para copiar itens para um novo carrinho, inclusive
+    # quando as reservas anteriores foram encerradas ou canceladas.
+    tem_equipamento = or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any())
+    encerrada = Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
+    return db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id, Solicitacao.cliente_id.in_(ids)
+    ).order_by(case((tem_equipamento, 0), else_=1), case((encerrada, 1), else_=0),
+               Solicitacao.id.desc()).first()
 
 
 @app.get("/e/{slug}", response_class=HTMLResponse)
@@ -20348,10 +20364,9 @@ def vitrine_publica(
     if not ultimo:
         cadastro_cpf = _cadastro_vitrine_cpf(request, empresa, db)
         if cadastro_cpf:
-            doc = limpar_identificador(cadastro_cpf.cpf or "")
-            ids = db.query(Cliente.id).filter(Cliente.empresa_id == empresa.id,
-                func.replace(func.replace(func.trim(Cliente.cpf), ".", ""), "-", "") == doc)
-            ultimo = _ultimo_por_cpf(db, empresa, [row.id for row in ids] if doc else [cadastro_cpf.id])
+            doc = limpar_identificador(cadastro_cpf.cpf or cadastro_cpf.identificador or "")
+            clientes = _clientes_cpf_vitrine(db, empresa.id, doc)
+            ultimo = _ultimo_por_cpf(db, empresa, [c.id for c in clientes] or [cadastro_cpf.id])
             somente_itens = True
     ultimo_id = ultimo.id if ultimo else None
     nomes_repeticao, avisos_repeticao = [], []

@@ -20,6 +20,7 @@
 #cal .mes{display:grid;grid-template-columns:44px 1fr 44px;align-items:center;text-align:center}#mesNome{text-transform:capitalize}
 #dias{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}#cal button{color:inherit;background:var(--cliente-suave);min-height:40px;margin:2px 0;padding:0}#cal button:disabled{opacity:.35}
 #reservaInicio details{font-size:.85rem;color:var(--cliente-muted);margin:12px 0}
+#reservaInicio .pular-etapa{width:100%;background:#fff;color:var(--cliente-cor);border:1px solid var(--cliente-cor);border-radius:13px;min-height:46px;margin-top:8px;font-weight:700}
 </style>
 {% endblock %}
 {% block scripts_extra %}<script>(()=>{
@@ -77,7 +78,7 @@
     <label for="cpfInicio">CPF cadastrado</label>
     <input id="cpfInicio" name="documento" inputmode="numeric" maxlength="14" required placeholder="Seu CPF">
     {% if request.query_params.get('identificacao') %}<p role="alert">Confira o CPF cadastrado nesta locadora ou continue escolhendo a data.</p>{% endif %}
-    <button>Carregar meu pedido</button></form><button type="button" class="link" id="pular">Continuar sem carregar pedido</button></section>
+    <button>Carregar meu pedido</button></form><button type="button" class="pular-etapa" id="pular">Pular esta etapa</button></section>
     {% if reconhecido or cadastro_cpf %}<details><summary>Cadastro reconhecido</summary>{% if reconhecido %}
     <div><strong>Olá, {{ reconhecido.cliente.nome.split()[0] if reconhecido.cliente and reconhecido.cliente.nome else 'cliente' }}!</strong>
     {% if reconhecido.contrato_id and reconhecido.itens and empresa.modulo_opcionais_ativo and reconhecido.data_evento.isoformat() >= hoje and reconhecido.status not in ['cancelada','cancelado_cliente','rejeitada','aguardando_nova_data'] %}
