@@ -22271,6 +22271,15 @@ def vitrine_retomar_frete(slug: str, token: str, request: Request, db: Session =
     return RedirectResponse(f"/e/{slug}/pre-contrato?vitrine=1", status_code=303)
 
 
+@app.post("/painel/vitrine/oportunidade/{oportunidade_id}/descartar-frete")
+def descartar_pendencia_frete(oportunidade_id: int, db: Session = Depends(get_db),
+                              empresa: Empresa = Depends(empresa_logada)):
+    db.execute(text("""UPDATE vitrine_oportunidades SET status = 'cancelada'
+        WHERE id = :id AND empresa_id = :empresa AND status = 'frete_pendente'"""), {"id": oportunidade_id, "empresa": empresa.id})
+    db.commit()
+    return RedirectResponse("/painel/vitrine", status_code=303)
+
+
 @app.post("/painel/vitrine/oportunidade/{oportunidade_id}/aprovar-frete")
 def vitrine_aprovar_frete(oportunidade_id: int, request: Request, valor: str = Form(...),
                          db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):

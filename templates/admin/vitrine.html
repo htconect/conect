@@ -60,11 +60,14 @@
         {% if comp.horas_adicionais > 0 %}<small>Horas adicionais: R$ {{ comp.horas_adicionais|moeda_br }}</small>{% endif %}
         {% if op.frete_pendente %}
         <div style="padding:12px;border:1px solid #f59e0b;border-radius:10px">
-          <b>Frete sem rota validada — não há contrato</b>
+          <b>Frete pendente de confirmação</b>
           <p>Informe apenas o valor do frete. O endereço do cliente não será alterado.</p>
           <form method="post" action="/painel/vitrine/oportunidade/{{ reg.id }}/aprovar-frete" style="display:flex;gap:8px;flex-wrap:wrap">
             <input name="valor" type="text" inputmode="decimal" required placeholder="Ex.: 150,00" aria-label="Valor manual do frete">
             <button class="botao" type="submit">Aprovar frete</button>
+          </form>
+          <form method="post" action="/painel/vitrine/oportunidade/{{ reg.id }}/descartar-frete" onsubmit="return confirm('Retirar esta pendência da lista? O contrato já feito será preservado.')">
+            <button type="submit" class="botao btn-krj-ghost">Descartar pendência</button>
           </form>
           <small>Link do cliente: /e/{{ empresa.slug }}/frete-pendente/{{ reg.public_token }}</small>
         </div>
