@@ -20236,6 +20236,32 @@ def reconhecer_cliente_vitrine(slug: str, request: Request, documento: str = For
     return resposta
 
 
+NUMERO_ENTREGA_ANTERIOR = "Mesmo endereço"
+
+
+def _frete_reutilizado(db, empresa, request, cep, numero):
+    if numero != NUMERO_ENTREGA_ANTERIOR:
+        return _calcular_frete_vitrine(empresa, cep, numero)
+    pedido_id = request.session.get(f"destino_repetido_{empresa.id}")
+    pedido = db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=pedido_id).first() if pedido_id else None
+    cadastro = _cadastro_vitrine_cpf(request, empresa, db)
+    if not pedido or not cadastro or not _mesmo_cadastro_repetido(pedido.cliente, cadastro):
+        raise HTTPException(409, "Selecione novamente o endereço da entrega.")
+    destino = _destino_repetir_pedido(pedido, False)
+    if destino["cep"] != _cep_limpo(cep) or not destino["numero"]:
+        raise HTTPException(409, "Informe o número do novo endereço.")
+    frete = _calcular_frete_vitrine(empresa, destino["cep"], destino["numero"])
+    if frete.get("ok"):
+        frete = {**frete, "numero": NUMERO_ENTREGA_ANTERIOR,
+                 "endereco_formatado": f"Mesmo endereço da entrega anterior · CEP {cep}"}
+    return frete
+
+
+def _mesmo_cadastro_repetido(a, b):
+    doc = limpar_identificador(a.cpf or a.identificador or "")
+    return a.id == b.id or (cpf_valido(doc) and doc == limpar_identificador(b.cpf or b.identificador or ""))
+
+
 def _destino_repetir_pedido(pedido, somente_itens):
     # O número deve vir do mesmo endereço que forneceu o CEP.
     for origem, campo_cep, campo_numero in (
@@ -20243,7 +20269,9 @@ def _destino_repetir_pedido(pedido, somente_itens):
     ):
         cep = re.sub(r"\D", "", str(getattr(origem, campo_cep, "") or ""))
         if len(cep) == 8:
-            numero = "" if somente_itens else str(getattr(origem, campo_numero, "") or "").strip()
+            numero = str(getattr(origem, campo_numero, "") or "").strip()
+            if somente_itens and numero:
+                numero = NUMERO_ENTREGA_ANTERIOR
             return {"cep": cep, "numero": numero}
     return {"cep": "", "numero": ""}
 
@@ -20297,6 +20325,19 @@ def _ultimo_por_cpf(db, empresa, ids):
                Solicitacao.id.desc()).first()
 
 
+def _historico_repeticao(db, empresa, reconhecido, cadastro):
+    if reconhecido:
+        ids = [reconhecido.cliente_id]
+    elif cadastro:
+        doc = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
+        ids = [c.id for c in _clientes_cpf_vitrine(db, empresa.id, doc)] or [cadastro.id]
+    else:
+        return []
+    return db.query(Solicitacao).filter(
+        Solicitacao.empresa_id == empresa.id, Solicitacao.cliente_id.in_(ids)
+    ).order_by(Solicitacao.criado_em.desc(), Solicitacao.id.desc()).limit(3).all()
+
+
 @app.get("/e/{slug}", response_class=HTMLResponse)
 def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -20306,13 +20347,8 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
     reconhecido = _pedido_reconhecido(db, empresa, request)
     cadastro = _cadastro_vitrine_cpf(request, empresa, db) if not reconhecido else None
-    anterior = reconhecido
-    if cadastro:
-        doc = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
-        clientes = _clientes_cpf_vitrine(db, empresa.id, doc)
-        anterior = _ultimo_por_cpf(db, empresa, [c.id for c in clientes] or [cadastro.id])
-    resumo = []
-    if anterior:
+    pedidos_recentes = []
+    for anterior in _historico_repeticao(db, empresa, reconhecido, cadastro):
         resumo = [f"{max(1, linha.quantidade or 1)} × {linha.nome}" for linha in anterior.itens if linha.nome]
         if not resumo and anterior.produto_id:
             equipamento = db.get(ProdutoServico, anterior.produto_id)
@@ -20320,8 +20356,10 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
                 resumo.append(f"1 × {equipamento.nome}")
         if resumo:
             resumo.extend(f"{max(1, op.quantidade or 1)} × {op.nome} (opcional)" for op in anterior.opcionais_contrato if op.nome)
+        pedidos_recentes.append({"id": anterior.id, "data": anterior.data_evento.strftime("%d/%m/%Y"),
+                                "linhas": resumo})
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
-        "resumo_anterior": resumo, "cadastro_cpf": cadastro, "reconhecido": reconhecido, "request": request,
+        "pedidos_recentes": pedidos_recentes, "cadastro_cpf": cadastro, "reconhecido": reconhecido, "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
@@ -20387,14 +20425,18 @@ def vitrine_publica(
         categorias.append("Outros")
 
     ultimo = _pedido_reconhecido(db, empresa, request)
-    somente_itens = False
-    if not ultimo:
-        cadastro_cpf = _cadastro_vitrine_cpf(request, empresa, db)
-        if cadastro_cpf:
-            doc = limpar_identificador(cadastro_cpf.cpf or cadastro_cpf.identificador or "")
-            clientes = _clientes_cpf_vitrine(db, empresa.id, doc)
-            ultimo = _ultimo_por_cpf(db, empresa, [c.id for c in clientes] or [cadastro_cpf.id])
-            somente_itens = True
+    somente_itens = ultimo is None
+    cadastro = _cadastro_vitrine_cpf(request, empresa, db) if somente_itens else None
+    escolhido = request.query_params.get("pedido_base")
+    if escolhido and request.query_params.get("repetir") == "1":
+        candidatos = _historico_repeticao(db, empresa, ultimo, cadastro)
+        ultimo = next((p for p in candidatos if str(p.id) == escolhido), None)
+        if ultimo is None:
+            return RedirectResponse(f"/e/{slug}", status_code=303)
+    elif somente_itens and cadastro:
+        doc = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
+        ids = [c.id for c in _clientes_cpf_vitrine(db, empresa.id, doc)] or [cadastro.id]
+        ultimo = _ultimo_por_cpf(db, empresa, ids)
     ultimo_id = ultimo.id if ultimo else None
     nomes_repeticao, avisos_repeticao = [], []
     repetindo = False
@@ -20417,7 +20459,9 @@ def vitrine_publica(
             nomes_repeticao = [f"{p['q']}× {r['produto'].nome}" for p in produtos for r in itens
                                if r["produto"].id == p["id"]]
             estado_compartilhado = {"produtos": produtos, **_destino_repetir_pedido(ultimo, somente_itens),
-                                     "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio and not somente_itens else ""}
+                                      "hora": ""}
+            if somente_itens:
+                request.session[f"destino_repetido_{empresa.id}"] = ultimo.id
             repetindo = True
     if estado_compartilhado:
         cep = estado_compartilhado.get("cep") or cep
@@ -20431,7 +20475,7 @@ def vitrine_publica(
     numero_inicial = str(numero or "").strip()[:30]
     frete_inicial = None
     if len(cep_inicial) == 8 and numero_inicial:
-        calculado = _calcular_frete_vitrine(empresa, cep_inicial, numero_inicial)
+        calculado = _frete_reutilizado(db, empresa, request, cep_inicial, numero_inicial)
         if calculado.get("ok"):
             frete_inicial = calculado
 
@@ -20622,7 +20666,7 @@ def vitrine_calcular_deslocamento(
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
-    resultado = _calcular_frete_vitrine(empresa, cep, numero)
+    resultado = _frete_reutilizado(db, empresa, request, cep, numero)
     return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 400)
 
 
@@ -20812,7 +20856,7 @@ def vitrine_publica_reservar(
 
     whatsapp_pedido = limpar_identificador(whatsapp_pre_reserva)
     frete = _aplicar_frete_manual_cliente(
-        _calcular_frete_vitrine(empresa, cep_frete, numero_frete), frete_manual)
+        _frete_reutilizado(db, empresa, request, cep_frete, numero_frete), frete_manual)
     if not frete.get("ok") or bool(frete.get("consultar")):
         # Sem rota segura, guardar somente um pedido de vitrine (não criar contrato).
         # O link público poderá ser retomado após o atendimento fixar o frete.
@@ -20879,12 +20923,15 @@ def vitrine_publica_reservar(
         },
     }
 
+    if numero_frete == NUMERO_ENTREGA_ANTERIOR:
+        request.session[f"origem_entrega_carrinho_{empresa.id}"] = request.session.get(f"destino_repetido_{empresa.id}")
+
     fluxo = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
     # Reaproveita o rascunho padrão do Connect. Quando a empresa exige análise,
     # a vitrine já grava o mesmo contrato em status pre_reserva, com os itens e a
     # composição comercial preenchidos. A aprovação apenas libera o cadastro do
     # cliente; não existe um fluxo paralelo de oportunidade.
-    if fluxo == "aprovacao":
+    if fluxo == "aprovacao" and numero_frete != NUMERO_ENTREGA_ANTERIOR:
         pedido_ctx = _pedido_vitrine_sessao(request, db, empresa)
         if not pedido_ctx:
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=selecione", status_code=303)
@@ -21766,6 +21813,21 @@ def salvar_pre_cadastro(
         if pre_reserva_existente:
             contexto_erro["pre_reserva_token"] = pre_reserva_existente.public_token
         return templates.TemplateResponse("publico/cadastro.html", contexto_erro, status_code=400)
+
+    if pedido_vitrine and numero == NUMERO_ENTREGA_ANTERIOR:
+        origem_id = request.session.get(f"origem_entrega_carrinho_{empresa.id}")
+        origem = db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=origem_id).first()
+        if not origem or not cpf_limpo or cpf_limpo != limpar_identificador(origem.cliente.cpf or origem.cliente.identificador or ""):
+            return render_erro("cadastro_confirmacao")
+        tels = [limpar_identificador(valor or "").removeprefix("55") if len(limpar_identificador(valor or "")) == 13
+                else limpar_identificador(valor or "") for valor in (origem.cliente.telefone, telefone)]
+        if not tels[0] or tels[0] != tels[1]:
+            return render_erro("cadastro_confirmacao")
+        destino = _destino_repetir_pedido(origem, False)
+        if destino["cep"] != _cep_limpo(cep) or not destino["numero"]:
+            raise HTTPException(409, "Revise o endereço de entrega na vitrine.")
+        numero = destino["numero"]
+        pedido_vitrine["frete"]["numero"] = numero
 
     if not celular_brasileiro_valido(telefone):
         return render_erro("whatsapp_invalido")
