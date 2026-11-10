@@ -86,6 +86,10 @@
   <button type="button" id="compartilharVitrine" class="vitrine-share-whatsapp" data-iconizado="1" aria-label="Compartilhar escolhas da vitrine pelo WhatsApp" title="Compartilhar pelo WhatsApp"><i class="bi bi-whatsapp" aria-hidden="true"></i></button>
 </div>
 <div class="tipo-evento-msg" style="margin:0 0 12px;padding:10px 14px;border-radius:12px;background:var(--cliente-suave);color:var(--cliente-cor);font-size:.86rem;font-weight:750">{{ (mensagens_tipo_evento|default({})).get(tipo_evento, "") }}</div>
+{% if nomes_repeticao or avisos_repeticao %}<section class="box" aria-label="Resultado da busca do último pedido">
+{% if nomes_repeticao %}<strong>Equipamentos carregados no carrinho</strong><ul>{% for nome in nomes_repeticao %}<li>{{ nome }}</li>{% endfor %}</ul>{% endif %}
+{% for aviso in avisos_repeticao %}<p>{{ aviso }}</p>{% endfor %}
+</section>{% endif %}
 <div class="guia-vitrine" id="guiaVitrine" aria-live="polite" aria-atomic="true">
   <div class="guia-vitrine-conteudo">
     <div class="guia-vitrine-sobre"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Seu próximo passo <span class="guia-vitrine-etapa" id="guiaEtapa">Passo 3 de 6</span><button type="button" class="connect-orientador-x" id="vitrineFechar" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
@@ -98,7 +102,7 @@
 <button type="button" class="connect-orientador-reabrir" id="vitrineReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
 <p id="partilhaFeedback" class="vitrine-share-feedback" role="status" aria-live="polite" hidden></p>
 {% if tem_ultimo and not oferta_periodo and not estado_compartilhado %}<div class="box"><a class="botao" href="?data_evento={{ data_evento.isoformat() }}&amp;tipo_evento={{ tipo_evento }}&amp;r={{ responsavel_vitrine_token or '' }}&amp;repetir=1">Repetir meu último pedido</a><form method="post" action="/e/{{ empresa.slug }}/esquecer-cliente"><button class="botao-secundario">Esquecer meu cadastro neste aparelho</button></form></div>{% endif %}
-{% if repetindo %}<p class="vitrine-aviso">Confira os itens disponíveis, o endereço e os valores para a data escolhida.</p>{% endif %}
+
 <div id="freteManualAviso" hidden class="vitrine-aviso">Favor solicitar o valor do frete ao locador. <button type="button" class="botao-secundario" id="informarFreteManual">Informar valor do frete</button></div><div class="catalogo-entrega" id="catalogoEntrega"><div class="catalogo-entrega-info"><b id="catalogoFreteTitulo">{% if frete_inicial %}Deslocamento {% if frete_inicial.consultar %}sob consulta{% else %}calculado{% endif %}{% else %}Deslocamento ainda não calculado{% endif %}</b><small id="catalogoEndereco">{% if frete_inicial %}{{ frete_inicial.endereco_formatado or ('CEP ' ~ cep_inicial ~ ' · nº ' ~ numero_inicial) }}{% else %}Informe CEP e número agora ou calcule o frete no carrinho depois.{% endif %}</small></div><strong id="catalogoFreteValor">{% if frete_inicial %}{% if frete_inicial.consultar %}Sob consulta{% else %}R$ {{ frete_inicial.valor|moeda_br }}{% endif %}{% else %}A calcular{% endif %}</strong><button type="button" class="botao-secundario" id="alterarDadosCatalogo">{% if frete_inicial %}Alterar frete{% else %}Calcular frete{% endif %}</button></div>
 {% if bloqueio_data %}<div class="vitrine-aviso"><b>Data indisponível para reservas.</b>{% if bloqueio_data.descricao %} {{ bloqueio_data.descricao }}.{% endif %} Você pode continuar vendo o catálogo e escolher outra data.</div>{% endif %}
 {% if erro == 'data_bloqueada' %}<div class="vitrine-aviso">Esta data está bloqueada para novas reservas. Escolha outra data para continuar.</div>{% endif %}

@@ -20226,6 +20226,42 @@ def reconhecer_cliente_vitrine(slug: str, request: Request, documento: str = For
     return resposta
 
 
+def _recuperar_itens_vitrine(pedido, catalogo):
+    por_id = {r["produto"].id: r for r in catalogo}
+    por_nome = {}
+    for reg in catalogo:
+        por_nome.setdefault(reg["produto"].nome.strip().casefold(), []).append(reg)
+    linhas = [(i.produto_id, i.nome, i.quantidade) for i in pedido.itens]
+    if not linhas and pedido.produto_id:
+        linhas.append((pedido.produto_id, "", 1))
+    produtos, avisos, referencias = {}, [], {}
+    for pid, nome, qtd in linhas:
+        reg = por_id.get(pid)
+        if not reg:
+            iguais = por_nome.get((nome or "").strip().casefold(), [])
+            reg = iguais[0] if len(iguais) == 1 else None
+        if not reg or not reg["disponiveis"]:
+            avisos.append("Um equipamento anterior está indisponível para esta data ou fora do catálogo.")
+            continue
+        chave = reg["produto"].id
+        alvo = produtos.setdefault(chave, {"id": chave, "q": 0, "opcionais": []})
+        if pid:
+            referencias[pid] = chave
+        desejado = alvo["q"] + max(1, int(qtd or 1))
+        alvo["q"] = min(desejado, reg["disponiveis"])
+        if desejado > alvo["q"]:
+            avisos.append("A quantidade foi ajustada ao estoque da data.")
+    for opc in pedido.opcionais_contrato:
+        candidatos = [p for p in produtos.values()
+                      if (not opc.produto_id or referencias.get(opc.produto_id) == p["id"])
+                      and any(o["id"] == opc.opcional_id for o in por_id[p["id"]].get("opcionais", []))]
+        if candidatos:
+            candidatos[0]["opcionais"].append({"id": opc.opcional_id, "q": 1})
+        else:
+            avisos.append("Um opcional anterior não está disponível para esta seleção.")
+    return list(produtos.values()), list(dict.fromkeys(avisos))
+
+
 def _ultimo_por_cpf(db, empresa, ids):
     return db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id,
         Solicitacao.cliente_id.in_(ids), or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any()),
@@ -20312,9 +20348,13 @@ def vitrine_publica(
     if not ultimo:
         cadastro_cpf = _cadastro_vitrine_cpf(request, empresa, db)
         if cadastro_cpf:
-            ultimo = _ultimo_por_cpf(db, empresa, [cadastro_cpf.id])
+            doc = limpar_identificador(cadastro_cpf.cpf or "")
+            ids = db.query(Cliente.id).filter(Cliente.empresa_id == empresa.id,
+                func.replace(func.replace(func.trim(Cliente.cpf), ".", ""), "-", "") == doc)
+            ultimo = _ultimo_por_cpf(db, empresa, [row.id for row in ids] if doc else [cadastro_cpf.id])
             somente_itens = True
     ultimo_id = ultimo.id if ultimo else None
+    nomes_repeticao, avisos_repeticao = [], []
     repetindo = False
     estado_compartilhado = estado_partilha_direto
     if not estado_compartilhado and partilha and len(partilha) <= 16000:
@@ -20331,16 +20371,9 @@ def vitrine_publica(
                 "cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"
             }:
                 return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, ultimo)}", status_code=303)
-            produtos = [{"id": linha.produto_id, "q": linha.quantidade, "opcionais": []}
-                        for linha in ultimo.itens if linha.produto_id]
-            if not produtos and ultimo.produto_id:
-                produtos.append({"id": ultimo.produto_id, "q": 1, "opcionais": []})
-            for opc in ultimo.opcionais_contrato:
-                alvo = next((p for p in produtos if p["id"] == opc.produto_id), None)
-                if not alvo and produtos and not opc.produto_id:
-                    alvo = produtos[0]
-                if alvo and opc.opcional_id:
-                    alvo["opcionais"].append({"id": opc.opcional_id, "q": opc.quantidade})
+            produtos, avisos_repeticao = _recuperar_itens_vitrine(ultimo, itens)
+            nomes_repeticao = [f"{p['q']}× {r['produto'].nome}" for p in produtos for r in itens
+                               if r["produto"].id == p["id"]]
             estado_compartilhado = {"produtos": produtos, "cep": "" if somente_itens else ultimo.local_cep,
                                      "numero": "" if somente_itens else ultimo.local_numero,
                                      "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio and not somente_itens else ""}
@@ -20361,6 +20394,12 @@ def vitrine_publica(
         if calculado.get("ok"):
             frete_inicial = calculado
 
+    tentou_repetir = request.query_params.get("repetir") == "1" and not oferta_periodo
+    if tentou_repetir and not ultimo:
+        avisos_repeticao = ["Nenhum pedido anterior com equipamento foi encontrado para este cadastro nesta locadora. Escolha o equipamento abaixo."]
+    if tentou_repetir:
+        logger.info("[VITRINE] repetir empresa=%s pedido_encontrado=%s produtos_carregados=%s avisos=%s",
+                    empresa.id, bool(ultimo), len(nomes_repeticao), len(avisos_repeticao))
     bloqueio_data = _bloqueio_data_empresa(db, empresa.id, data_obj)
     return templates.TemplateResponse("publico/vitrine.html", {
         "request": request, "empresa": empresa, "data_evento": data_obj, "tipo_evento": tipo_evento,
@@ -20371,6 +20410,7 @@ def vitrine_publica(
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
+        "nomes_repeticao": nomes_repeticao, "avisos_repeticao": avisos_repeticao,
         "estado_compartilhado": estado_compartilhado, "repetindo": repetindo, "tem_ultimo": bool(ultimo_id),
         "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
         "bloqueio_data": None if oferta_periodo else bloqueio_data,
