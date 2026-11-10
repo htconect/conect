@@ -480,4 +480,10 @@ function selecionarMetodoInfinite(botao){
 function fecharAbaReserva(){conectFecharAba(document.getElementById('avisoFecharPagamento')?'avisoFecharPagamento':'avisoFechar');}
 function fecharPaginaReserva(){fecharAbaReserva();}
 </script>
+{% if empresa.vitrine_ativa and item.public_token %}
+<form class="box" method="post" action="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}/nova-reserva">
+  <button type="submit" class="botao">Nova reserva com meu cadastro</button>
+  <small>Usar meu cadastro e lembrar neste aparelho.</small>
+</form>
+{% endif %}
 {% endblock %}

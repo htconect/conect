@@ -14351,7 +14351,29 @@ def api_publico_carregar_cadastro(slug: str, request: Request, telefone: str = F
         empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
         cadastro = _cadastro_vitrine_cpf(request, empresa, db) if empresa else None
         if cadastro:
-            documento = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
+            doc = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
+            origem = db.query(Solicitacao).filter_by(empresa_id=empresa.id,
+                id=request.session.get(f"origem_entrega_carrinho_{empresa.id}")).first()
+            pessoas = _clientes_cpf_vitrine(db, empresa.id, doc)
+            if origem:
+                pessoas.sort(key=lambda c: c.id != origem.cliente_id)
+            def celular(valor):
+                numero = limpar_identificador(valor or "")
+                return numero[2:] if numero.startswith("55") and len(numero) == 13 else numero
+            tel = celular(telefone)
+            pessoa = next((c for c in pessoas if len(tel) == 11 and tel == celular(c.telefone or c.identificador)), None)
+            if pessoa:
+                request.session[f"cadastro_confirmado_{empresa.id}"] = pessoa.id
+                dados = {k: getattr(pessoa, k, None) or "" for k in
+                         ("nome", "cpf", "cnpj", "email", "telefone", "como_conheceu")}
+                dados["cpf"] = dados["cpf"] or doc
+                dados["data_nascimento"] = pessoa.data_nascimento.isoformat() if pessoa.data_nascimento else ""
+                destino = {}
+                if origem and origem.cliente_id == pessoa.id:
+                    destino = _destino_repetir_pedido(origem, False)
+                return JSONResponse({"confirmado": True, "cliente": dados, "destino": destino},
+                                    headers={"Cache-Control": "private, no-store"})
+            return JSONResponse({"confirmado": False}, headers={"Cache-Control": "no-store"})
     return api_publico_cliente_por_telefone(slug, telefone, documento, db)
 
 
@@ -20848,7 +20870,7 @@ def vitrine_publica_reservar(
 
     if oferta_periodo:
         hora_inicio_vitrine = "12:00"
-    if not hora_meia_em_meia_valida(hora_inicio_vitrine):
+    if not hora_meia_em_meia_valida(hora_inicio_vitrine) or not ("08:00" <= hora_inicio_vitrine <= "22:00"):
         return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=hora", status_code=303)
     inicio_vitrine = datetime.strptime(hora_inicio_vitrine, "%H:%M").time()
     duracao_base_vitrine = 0
@@ -21652,12 +21674,21 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
             }
             if not cliente and not identificador and not erro:
                 anterior = _pedido_reconhecido(db, empresa, request)
-                if anterior and anterior.cliente:
-                    pessoa = anterior.cliente
+                pessoa = anterior.cliente if anterior else None
+                if not pessoa:
+                    cadastro = _cadastro_vitrine_cpf(request, empresa, db)
+                    confirmado = request.session.get(f"cadastro_confirmado_{empresa.id}")
+                    if cadastro and _equipe_autorizada_abrir_legado(request, empresa):
+                        pessoa = cadastro
+                    elif cadastro and confirmado:
+                        candidato = db.query(Cliente).filter_by(empresa_id=empresa.id, id=confirmado).first()
+                        if candidato and _mesmo_cadastro_repetido(candidato, cadastro):
+                            pessoa = candidato
+                if pessoa:
                     for campo in ("telefone", "cpf", "cnpj", "email", "nome", "data_nascimento", "como_conheceu"):
                         form[campo] = getattr(pessoa, campo, None) or ""
                     form["tipo_pessoa"] = "juridica" if pessoa.cnpj else "fisica"
-                    if anterior.local_cep == form["cep"] and anterior.local_numero == form["numero"]:
+                    if anterior and anterior.local_cep == form["cep"] and anterior.local_numero == form["numero"]:
                         form["complemento"] = anterior.local_complemento or ""
                     contexto["cliente"] = pessoa
                     contexto["lembrado"] = True
@@ -21721,6 +21752,7 @@ def esquecer_cliente(slug: str, request: Request, db: Session = Depends(get_db))
         raise HTTPException(404)
     request.session.pop(f"ultimo_pedido_{empresa.id}", None)
     request.session.pop(f"vitrine_pedido_{slug}", None)
+    request.session.pop(f"cadastro_confirmado_{empresa.id}", None)
     return _lembrar_resposta(RedirectResponse(f"/e/{slug}", status_code=303), db, empresa)
 
 
@@ -21952,7 +21984,7 @@ def salvar_pre_cadastro(
     )
     db.flush()
 
-    if not hora_meia_em_meia_valida(hora_inicio):
+    if not hora_meia_em_meia_valida(hora_inicio) or not ("08:00" <= hora_inicio <= "22:00"):
         return render_erro("hora_invalida")
     if pedido_vitrine:
         disponibilidade_atual = {
@@ -22648,6 +22680,17 @@ async def salvar_opcionais_cliente(slug: str, solicitacao_id: str, request: Requ
         descricao="; ".join(descricoes)[:500], valor_anterior=anterior, valor_novo=total_novo, valor_pago=pago))
     db.commit()
     return RedirectResponse(base_url+"?salvo=1", status_code=303)
+
+
+@app.post("/e/{slug}/contrato/{referencia}/nova-reserva")
+def nova_reserva_pelo_contrato(slug: str, referencia: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    item = _solicitacao_publica_por_ref(db, empresa, referencia)
+    if not item or not empresa.vitrine_ativa or not item.cliente_id:
+        raise HTTPException(404)
+    request.session.pop(f"vitrine_pedido_{slug}", None)
+    request.session[f"ultimo_pedido_{empresa.id}"] = item.id
+    return _lembrar_resposta(RedirectResponse(f"/e/{slug}", status_code=303), db, empresa, item)
 
 
 @app.get("/e/{slug}/contrato/{solicitacao_id}", response_class=HTMLResponse)
