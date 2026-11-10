@@ -220,9 +220,14 @@
   </div>
 
   <div class="dados-reserva-lista">
+    {% if item.retirada_obrigatoria and item.retirada_data and item.data_evento and item.retirada_data > item.data_evento %}
+    {% set dias = (item.retirada_data-item.data_evento).days %}
+    <p><small>Período da locação</small><b>{{ dias }} dia{{ 's' if dias != 1 else '' }} · Entrega {{ item.data_evento.strftime('%d/%m/%Y') }} às {{ item.hora_inicio.strftime('%H:%M') }} · Retirada {{ item.retirada_data.strftime('%d/%m/%Y') }}{% if item.retirada_hora %} às {{ item.retirada_hora.strftime('%H:%M') }}{% endif %}</b></p>
+    {% else %}
     <p><small>Data e horário</small><b>{{ item.data_evento.strftime('%d/%m/%Y') if item.data_evento else '-' }} · {{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '-' }}{% if item.hora_fim %} às {{ item.hora_fim.strftime('%H:%M') }}{% endif %}</b></p>
     {% if empresa.mostrar_mensagem_hora_fim and (empresa.mensagem_hora_fim or mensagens.hora_fim) %}
       <p class="box aviso">{{ empresa.mensagem_hora_fim or mensagens.hora_fim }}</p>
+    {% endif %}
     {% endif %}
     {% set referencia_evento = endereco_referencia_solicitacao(item) %}
     {% set endereco_evento = dados_endereco_solicitacao(item) %}

@@ -12585,7 +12585,7 @@ def solicitacoes(
     inicio = _data_filtro(data_inicial)
     fim = _data_filtro(data_final)
     if inicio:
-        q = q.filter(Solicitacao.data_evento >= inicio)
+        q = q.filter(_agenda_desde(inicio) if request.query_params.get("locacao") == "1" else Solicitacao.data_evento >= inicio)
     if fim:
         q = q.filter(Solicitacao.data_evento <= fim)
 
@@ -19477,12 +19477,30 @@ def google_calendar_sincronizar_mes(
     return RedirectResponse(f"/painel/agenda?{parametros}", status_code=303)
 
 
+def _dias_locacao_agenda(item, inicio, fim):
+    if not (item.retirada_obrigatoria and item.retirada_data and item.data_evento
+            and item.retirada_data > item.data_evento):
+        return
+    total = (item.retirada_data - item.data_evento).days
+    dia = max(inicio, item.data_evento)
+    while dia <= fim and dia < item.retirada_data:
+        yield dia, (dia - item.data_evento).days + 1, total
+        dia += timedelta(days=1)
+
+
+def _agenda_desde(inicio):
+    return or_(Solicitacao.data_evento >= inicio, and_(
+        Solicitacao.retirada_obrigatoria.is_(True), Solicitacao.retirada_data > inicio,
+        ~Solicitacao.status.in_(["cancelada","cancelado_cliente","rejeitada","aguardando_nova_data","vitrine_pre_reserva"])
+    ))
+
+
 def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_mes: date) -> dict:
     """Resumo leve para o calendário mensal de Contratos e Operação."""
     resumo = {}
     solicitacoes = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
-        Solicitacao.data_evento >= inicio_mes,
+        _agenda_desde(inicio_mes),
         Solicitacao.data_evento <= fim_mes,
     ).all()
     status_cancelados = {"cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data", "vitrine_pre_reserva"}
@@ -19494,6 +19512,14 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
         dia = resumo.setdefault(chave, {"contratos": 0, "contratos_pendentes": 0, "operacoes": 0, "entregas_pendentes": 0, "retiradas_pendentes": 0})
         if (item.status or "") not in status_cancelados:
             dia["contratos"] += 1
+            for data_uso, numero, total in _dias_locacao_agenda(item, inicio_mes, fim_mes):
+                uso = resumo.setdefault(data_uso.isoformat(), {"contratos": 0, "contratos_pendentes": 0,
+                    "operacoes": 0, "entregas_pendentes": 0, "retiradas_pendentes": 0})
+                if numero > 1:
+                    uso["contratos"] += 1
+                rotulo = f"Dia {numero}/{total}"
+                if rotulo not in uso.setdefault("periodos", []):
+                    uso["periodos"].append(rotulo)
             pendente = (item.status or "") in status_pendentes
             if empresa.exige_sinal and not pendente and (item.sinal or 0) > 0 and (item.valor_pago or 0) <= 0.009:
                 pendente = True
@@ -19935,7 +19961,7 @@ def agenda(
 
     q = db.query(Solicitacao).filter_by(empresa_id=empresa.id)
     if data_inicial:
-        q = q.filter(Solicitacao.data_evento >= datetime.strptime(data_inicial, "%Y-%m-%d").date())
+        q = q.filter(_agenda_desde(datetime.strptime(data_inicial, "%Y-%m-%d").date()))
     if data_final:
         q = q.filter(Solicitacao.data_evento <= datetime.strptime(data_final, "%Y-%m-%d").date())
 

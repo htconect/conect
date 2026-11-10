@@ -54,7 +54,7 @@
       {% if celula %}
         {% set r = celula.resumo %}
         {% if modo == 'contratos' %}
-          {% set destino = '/painel/solicitacoes?data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&ativos=1&credito=1&cancelados=1' %}
+          {% set destino = '/painel/solicitacoes?locacao=1&data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&ativos=1&credito=1&cancelados=1' %}
         {% else %}
           {% set destino = '/painel/reservas?data_inicial=' ~ celula.data.isoformat() ~ '&data_final=' ~ celula.data.isoformat() ~ '&mostrar_entregas=1&mostrar_retiradas=1' %}
         {% endif %}
@@ -63,6 +63,7 @@
           {% if celula.bloqueios %}<span class="agenda-badge bloqueio"><i class="bi bi-calendar-x"></i> <span>Bloqueado{% if celula.bloqueios[0].descricao %} · {{ celula.bloqueios[0].descricao }}{% endif %}</span></span>{% endif %}
           {% if modo == 'contratos' %}
             {% if r.contratos %}<span class="agenda-badge"><i class="bi bi-file-earmark-text"></i> {{ r.contratos }} <span>contrato{% if r.contratos != 1 %}s{% endif %}</span></span>{% endif %}
+            {% for periodo in r.periodos %}<span class="agenda-badge">{{ periodo }}</span>{% endfor %}
             {% if r.contratos_pendentes %}<span class="agenda-badge pendencia"><i class="bi bi-exclamation-circle"></i> {{ r.contratos_pendentes }} <span>pendência{% if r.contratos_pendentes != 1 %}s{% endif %}</span></span>{% endif %}
             {% if not r.contratos %}<span class="agenda-vazio-msg">Sem contratos</span>{% endif %}
           {% else %}
@@ -77,7 +78,7 @@
   </div>
 
   <div class="agenda-rodape">
-    {% if modo == 'contratos' %}<a href="/painel/solicitacoes?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&ativos=1&credito=1&cancelados=1">Abrir lista do mês →</a>{% else %}<a href="/painel/reservas?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&mostrar_entregas=1&mostrar_retiradas=1">Abrir operação do mês →</a>{% endif %}
+    {% if modo == 'contratos' %}<a href="/painel/solicitacoes?locacao=1&data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&ativos=1&credito=1&cancelados=1">Abrir lista do mês →</a>{% else %}<a href="/painel/reservas?data_inicial={{ referencia.isoformat() }}&data_final={{ fim_mes.isoformat() }}&mostrar_entregas=1&mostrar_retiradas=1">Abrir operação do mês →</a>{% endif %}
   </div>
 </div>
 {% endblock %}

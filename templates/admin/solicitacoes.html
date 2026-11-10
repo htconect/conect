@@ -33,7 +33,12 @@
   {% set eh_credito = s.status == "aguardando_nova_data" %}
   {% set eh_cancelado = s.status in ["cancelada", "cancelado_cliente", "rejeitada"] %}
   <a class="linha-agenda {{ classe_alerta_contrato(s.status) }}{% if eh_credito %} agenda-credito{% elif eh_cancelado %} agenda-cancelado{% endif %}" href="/painel/solicitacao/{{ s.id }}">
-    <div class="data-agenda">{{ s.data_evento.strftime('%d/%m') if s.data_evento else '-' }}</div>
+    {% set dias = (s.retirada_data - s.data_evento).days if s.retirada_obrigatoria and s.retirada_data and s.data_evento else 0 %}
+    {% set exibida = s.data_evento %}
+    {% if dias > 0 and data_inicial and s.data_evento.isoformat() < data_inicial|string < s.retirada_data.isoformat() %}
+      {% set exibida = s.data_evento.fromisoformat(data_inicial|string) %}
+    {% endif %}
+    <div class="data-agenda">{{ exibida.strftime('%d/%m') if exibida else '-' }}{% if dias > 0 %}<small style="display:block">Dia {{ (exibida-s.data_evento).days+1 }}/{{ dias }}</small>{% endif %}</div>
     <div class="info-agenda">
       <b>{{ s.hora_inicio.strftime('%H:%M') if s.hora_inicio else '-' }} · {{ s.cliente.nome if s.cliente else 'Cliente' }}</b>
       <small>

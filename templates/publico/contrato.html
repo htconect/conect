@@ -40,6 +40,11 @@
 {% endmacro %}
 
 <div class="fluxo-publico">
+{% if item.retirada_obrigatoria and item.retirada_data and item.data_evento and item.retirada_data > item.data_evento %}
+{% set dias = (item.retirada_data-item.data_evento).days %}
+<p class="box"><strong>Locação de {{ dias }} dia{{ 's' if dias != 1 else '' }}</strong> · Entrega {{ item.data_evento.strftime('%d/%m/%Y') }} · Retirada {{ item.retirada_data.strftime('%d/%m/%Y') }}</p>
+{% endif %}
+
 {% if empresa.modulo_opcionais_ativo and item.status not in ['cancelado_cliente','cancelada','rejeitada','aguardando_nova_data'] and item.contrato_id %}
   <div class="box" style="padding:14px;margin-bottom:14px;background:#f0fdf4;border:1px solid #86efac;border-radius:14px">
     <b>✨ Deixe sua festa ainda mais completa!</b>
