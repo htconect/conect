@@ -29,7 +29,7 @@
   {% if erro == 'hora_invalida' %}Horário inválido. Use horários de 30 em 30 minutos, como 14:00 ou 14:30.{% endif %}
   {% if erro == 'whatsapp_invalido' %}Informe um WhatsApp brasileiro válido no formato (DD) 9XXXX-XXXX.{% endif %}
   {% if erro == 'responsavel_whatsapp_invalido' %}Informe um WhatsApp brasileiro válido para o responsável no local.{% endif %}
-  {% if erro == 'rascunho_duplicado' %}Seu contrato já foi informado para este telefone nesta data. Leia o contrato quando receber. Caso precise alterar alguma informação, chame a empresa pelo WhatsApp.{% endif %}
+  {% if erro == 'rascunho_duplicado' %}Já existe uma reserva para este CPF nesta data. Para alterar o horário, os equipamentos ou os opcionais, fale com a locadora pelo WhatsApp.{% endif %}
   {% if erro == 'email_obrigatorio' %}Informe seu e-mail para continuar.{% endif %}
   {% if erro == 'email_invalido' %}Informe um e-mail válido.{% endif %}
   {% if erro == 'vitrine_indisponivel' %}Uma das opções escolhidas não está mais disponível nesta data. Volte à vitrine e escolha novamente.{% endif %}
@@ -57,6 +57,7 @@
   {% if pre_reserva_token is defined and pre_reserva_token %}<input type="hidden" name="pre_reserva_token" value="{{ pre_reserva_token }}">{% endif %}
   {% if not (modo_edicao_contrato is defined and modo_edicao_contrato) %}<input type="hidden" name="responsavel_token" value="{{ responsavel_token or '' }}">{% endif %}
 
+{% if not modo_edicao_contrato %}<label><input type="checkbox" name="lembrar_cliente" value="sim" {% if lembrar_marcado|default(true) %}checked{% endif %}> Lembrar meu cadastro e meu último pedido neste aparelho</label>{% endif %}
 <div class="connect-orientador" id="cadastroGuia" aria-live="polite">
  <div class="connect-orientador-cab"><span><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i> Preencha seu contrato</span><span id="cadastroEtapa" class="connect-orientador-numero">Passo 1 de 4</span><button class="connect-orientador-x" id="cadastroFechar" type="button" aria-label="Fechar orientações" title="Fechar orientações"><span aria-hidden="true" style="font-size:1.45rem;line-height:1">×</span></button></div>
  <h2 id="cadastroTitulo"></h2><p id="cadastroTexto"></p>
@@ -77,8 +78,8 @@
       <div id="statusBuscaClientePublico" role="status" aria-live="polite" class="texto-discreto" style="margin-top:7px">Se for seu primeiro aluguel, continue preenchendo normalmente.</div>
     </div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
     <div class="linha">
-      <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" checked onchange="alternarPessoa()"> Pessoa física</label>
-      <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" onchange="alternarPessoa()"> Pessoa jurídica</label>
+      <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" {% if not (lembrado and cliente.cnpj) %}checked{% endif %} onchange="alternarPessoa()"> Pessoa física</label>
+      <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" {% if lembrado and cliente.cnpj %}checked{% endif %} onchange="alternarPessoa()"> Pessoa jurídica</label>
     </div>
 
     <div id="area-fisica">
@@ -88,7 +89,7 @@
     </div>
 
     <div id="area-juridica" style="display:none">
-      <label>Razão social / nome da empresa *</label><input name="nome_empresa" oninput="document.querySelector('input[name=nome]').value=this.value">
+      <label>Razão social / nome da empresa *</label><input name="nome_empresa" value="{{ cliente.nome if lembrado and cliente.cnpj else "" }}" oninput="document.querySelector('input[name=nome]').value=this.value">
       <label>CNPJ *</label><input id="cnpjClientePublico" name="cnpj" inputmode="numeric" value="{{ form.cnpj if form is defined else cliente.cnpj if cliente else '' }}">
     </div>
 

@@ -20159,6 +20159,65 @@ def portal_empresa_direto(slug: str, token: str, request: Request, db: Session =
     return RedirectResponse(f"/e/{slug}", status_code=303)
 
 
+def _pedido_reconhecido(db, empresa, request):
+    chave = f"ultimo_pedido_{empresa.id}"
+    token = request.cookies.get(f"conect_cliente_{empresa.id}")
+    if token and len(token) <= 1024:
+        try:
+            empresa_id, pedido_id, marca = URLSafeTimedSerializer(SECRET_KEY, salt="cliente-vitrine").loads(token, max_age=180 * 86400)
+            if empresa_id == empresa.id:
+                pedido = db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=pedido_id).first()
+                if pedido and pedido.public_token and hmac.compare_digest(marca, hashlib.sha256(pedido.public_token.encode()).hexdigest()):
+                    return pedido
+        except (BadSignature, ValueError, TypeError):
+            pass
+    anterior = request.session.get(chave)
+    return db.query(Solicitacao).filter_by(empresa_id=empresa.id, id=anterior).first() if anterior else None
+
+
+def _lembrar_resposta(resposta, db, empresa, pedido=None):
+    chave = f"conect_cliente_{empresa.id}"
+    caminho = f"/e/{empresa.slug}"
+    if pedido:
+        marca = hashlib.sha256(_ref_publica(db, pedido).encode()).hexdigest()
+        token = URLSafeTimedSerializer(SECRET_KEY, salt="cliente-vitrine").dumps([empresa.id, pedido.id, marca])
+        resposta.set_cookie(chave, token, max_age=180 * 86400,
+                            path=caminho, secure=SESSION_COOKIE_SECURE, httponly=True, samesite="lax")
+    else:
+        resposta.delete_cookie(chave, path=caminho)
+    resposta.headers["Cache-Control"] = "private, no-store"
+    return resposta
+
+
+@app.post("/e/{slug}/reconhecer-cliente")
+def reconhecer_cliente_vitrine(slug: str, request: Request, telefone: str = Form(""),
+                              documento: str = Form(""), r: str = Form(""), db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa or not empresa.vitrine_ativa:
+        raise HTTPException(404)
+    tel = limpar_identificador(telefone)
+    if len(tel) == 13 and tel.startswith("55"):
+        tel = tel[2:]
+    doc = limpar_identificador(documento)
+    candidatos = db.query(Cliente).filter(Cliente.empresa_id == empresa.id,
+        or_(Cliente.telefone == tel, Cliente.identificador == tel)).all() if len(tel) == 11 else []
+    ids = [c.id for c in candidatos if len(doc) in (11, 14)
+           and doc in (limpar_identificador(c.cpf or ""), limpar_identificador(c.cnpj or ""))]
+    pedido = db.query(Solicitacao).filter(Solicitacao.empresa_id == empresa.id,
+        Solicitacao.cliente_id.in_(ids),
+        or_(Solicitacao.produto_id.isnot(None), Solicitacao.itens.any()),
+        ~Solicitacao.status.in_(["cancelada", "cancelado_cliente", "rejeitada"])
+    ).order_by(Solicitacao.id.desc()).first() if ids else None
+    params = {"r": r}
+    if not pedido:
+        params["identificacao"] = "falhou"
+    resposta = RedirectResponse(f"/e/{slug}?" + urlencode(params), status_code=303)
+    if pedido:
+        request.session[f"ultimo_pedido_{empresa.id}"] = pedido.id
+        return _lembrar_resposta(resposta, db, empresa, pedido)
+    return resposta
+
+
 @app.get("/e/{slug}", response_class=HTMLResponse)
 def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -20166,13 +20225,14 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
         raise HTTPException(404, "Empresa não encontrada")
     if not getattr(empresa, "vitrine_ativa", True):
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
+    reconhecido = _pedido_reconhecido(db, empresa, request)
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
-        "request": request,
+        "reconhecido": reconhecido, "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
         "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
-    })
+    }, headers={"Cache-Control": "private, no-store"})
 
 
 @app.get("/e/{slug}/identificar", response_class=HTMLResponse)
@@ -20232,6 +20292,9 @@ def vitrine_publica(
     if any(str(reg.get("categoria") or "").casefold() == "outros" for reg in itens) and "Outros" not in categorias:
         categorias.append("Outros")
 
+    ultimo = _pedido_reconhecido(db, empresa, request)
+    ultimo_id = ultimo.id if ultimo else None
+    repetindo = False
     estado_compartilhado = estado_partilha_direto
     if not estado_compartilhado and partilha and len(partilha) <= 16000:
         try:
@@ -20240,6 +20303,27 @@ def vitrine_publica(
                 estado_compartilhado = _estado_partilha_validado(compartilhado)
         except (BadSignature, SignatureExpired, ValueError, TypeError, AttributeError):
             pass
+    if ultimo_id and request.query_params.get("repetir") == "1" and not estado_compartilhado:
+        ultimo = db.query(Solicitacao).filter_by(id=ultimo_id, empresa_id=empresa.id).first()
+        if ultimo:
+            if ultimo.data_evento == data_obj and ultimo.contrato_id and ultimo.status not in {
+                "cancelada", "cancelado_cliente", "rejeitada", "aguardando_nova_data"
+            }:
+                return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, ultimo)}", status_code=303)
+            produtos = [{"id": linha.produto_id, "q": linha.quantidade, "opcionais": []}
+                        for linha in ultimo.itens if linha.produto_id]
+            if not produtos and ultimo.produto_id:
+                produtos.append({"id": ultimo.produto_id, "q": 1, "opcionais": []})
+            for opc in ultimo.opcionais_contrato:
+                alvo = next((p for p in produtos if p["id"] == opc.produto_id), None)
+                if not alvo and produtos and not opc.produto_id:
+                    alvo = produtos[0]
+                if alvo and opc.opcional_id:
+                    alvo["opcionais"].append({"id": opc.opcional_id, "q": opc.quantidade})
+            estado_compartilhado = {"produtos": produtos, "cep": ultimo.local_cep,
+                                     "numero": ultimo.local_numero,
+                                     "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio else ""}
+            repetindo = True
     if estado_compartilhado:
         cep = estado_compartilhado.get("cep") or cep
         numero = estado_compartilhado.get("numero") or numero
@@ -20266,7 +20350,7 @@ def vitrine_publica(
         "hoje": date.today().isoformat(),
         "whatsapp_inicial": whatsapp_inicial, "cep_inicial": cep_inicial, "numero_inicial": numero_inicial,
         "frete_inicial": frete_inicial,
-        "estado_compartilhado": estado_compartilhado,
+        "estado_compartilhado": estado_compartilhado, "repetindo": repetindo, "tem_ultimo": bool(ultimo_id),
         "responsavel_vitrine_token": _resolver_responsavel_link_vitrine(db, empresa, u=u, r=r),
         "bloqueio_data": None if oferta_periodo else bloqueio_data,
         "oferta_periodo": oferta_periodo,
@@ -21397,6 +21481,17 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
                 "endereco": frete.get("logradouro") or "", "bairro": frete.get("bairro") or "",
                 "cidade": frete.get("cidade") or "", "estado": frete.get("estado") or "",
             }
+            if not cliente and not identificador and not erro:
+                anterior = _pedido_reconhecido(db, empresa, request)
+                if anterior and anterior.cliente:
+                    pessoa = anterior.cliente
+                    for campo in ("telefone", "cpf", "cnpj", "email", "nome", "data_nascimento", "como_conheceu"):
+                        form[campo] = getattr(pessoa, campo, None) or ""
+                    form["tipo_pessoa"] = "juridica" if pessoa.cnpj else "fisica"
+                    if anterior.local_cep == form["cep"] and anterior.local_numero == form["numero"]:
+                        form["complemento"] = anterior.local_complemento or ""
+                    contexto["cliente"] = pessoa
+                    contexto["lembrado"] = True
     if form is not None:
         contexto["form"] = form
     return contexto
@@ -21448,6 +21543,16 @@ def pre_contrato_cliente_responsavel(slug: str, responsavel_token: str, request:
                                       _contexto_pre_contrato_publico(db, empresa, request, erro=erro, responsavel_token=responsavel_token))
 
 
+@app.post("/e/{slug}/esquecer-cliente")
+def esquecer_cliente(slug: str, request: Request, db: Session = Depends(get_db)):
+    empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+    if not empresa:
+        raise HTTPException(404)
+    request.session.pop(f"ultimo_pedido_{empresa.id}", None)
+    request.session.pop(f"vitrine_pedido_{slug}", None)
+    return _lembrar_resposta(RedirectResponse(f"/e/{slug}", status_code=303), db, empresa)
+
+
 @app.get("/e/{slug}/pre-contrato", response_class=HTMLResponse)
 def pre_contrato_cliente(slug: str, request: Request, erro: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
@@ -21489,7 +21594,7 @@ def salvar_pre_cadastro(
         data_evento: str = Form(...), hora_inicio: str = Form(...), observacoes: str = Form(""),
         como_conheceu: str = Form(""), acao: str = Form("salvar"), responsavel_token: str = Form(""),
         retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais_vitrine: int = Form(0),
-        pre_reserva_token: str = Form(""), db: Session = Depends(get_db)
+        lembrar_cliente: str = Form(""), pre_reserva_token: str = Form(""), db: Session = Depends(get_db)
 ):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa:
@@ -21552,6 +21657,7 @@ def salvar_pre_cadastro(
             cliente=None, identificador=ident, cliente_encontrado=bool(cliente_encontrado),
             cpf_confirmacao="", form=form_data
         )
+        contexto_erro["lembrar_marcado"] = lembrar_cliente == "sim"
         contexto_erro["campos_cfg"] = campos_empresa
         if pedido_vitrine:
             contexto_erro["vitrine_pedido"] = pedido_vitrine
@@ -21580,9 +21686,36 @@ def salvar_pre_cadastro(
         return render_erro("email_obrigatorio")
     if email_limpo and not _email_basico_valido(email_limpo):
         return render_erro("email_invalido")
+    data_obj = pedido_vitrine["data_evento"] if pedido_vitrine else date.fromisoformat(data_evento)
+    # Serializa dois envios públicos da mesma empresa/data até gravar a reserva.
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(:empresa, :dia)"),
+                   {"empresa": empresa.id, "dia": data_obj.toordinal()})
+    elif db.get_bind().dialect.name == "sqlite":
+        db.execute(text("UPDATE empresas SET id = id WHERE id = :empresa"), {"empresa": empresa.id})
+
+    duplicada = db.execute(text("""
+        SELECT 1 FROM solicitacoes s JOIN clientes c ON c.id = s.cliente_id
+        WHERE s.empresa_id = :empresa AND s.data_evento = :dia
+          AND s.id <> :atual
+          AND coalesce(s.status, '') NOT IN ('cancelada','cancelado_cliente','rejeitada','aguardando_nova_data')
+          AND :cpf <> '' AND :cpf = replace(replace(replace(trim(coalesce(c.cpf,'')),'.',''),'-',''),' ','')
+        LIMIT 1
+    """), {"empresa": empresa.id, "dia": data_obj, "atual": pre_reserva_existente.id if pre_reserva_existente else -1,
+           "cpf": cpf_limpo}).first()
+    if duplicada:
+        return render_erro("rascunho_duplicado")
+
     # Não permite que apenas o conhecimento do telefone altere um cadastro existente.
     # Se já houver CPF/CNPJ salvo, o mesmo documento precisa acompanhar a reserva.
     cliente = pre_reserva_existente.cliente if pre_reserva_existente else db.query(Cliente).filter_by(empresa_id=empresa.id, identificador=ident).first()
+    # Documentos diferentes podem compartilhar o WhatsApp sem compartilhar o cadastro.
+    if cpf_limpo and not pre_reserva_existente:
+        ident = cpf_limpo
+        cliente = db.query(Cliente).filter(
+            Cliente.empresa_id == empresa.id,
+            or_(Cliente.cpf == cpf_limpo, Cliente.identificador == cpf_limpo),
+        ).first()
     candidatos_telefone = []
     if telefone_limpo:
         candidatos_telefone = db.query(Cliente).filter(
@@ -21600,7 +21733,7 @@ def salvar_pre_cadastro(
         documento_salvo = limpar_identificador(cliente.cpf) or limpar_identificador(cliente.cnpj)
         if documento_salvo and documento_salvo != documento_informado:
             return render_erro("cadastro_confirmacao")
-    elif candidatos_telefone:
+    elif candidatos_telefone and not cpf_limpo:
         # Cadastro encontrado pelo WhatsApp: só reutiliza automaticamente se não houver
         # documento antigo; havendo documento, exige a confirmação correspondente.
         protegido = next((c for c in candidatos_telefone if limpar_identificador(c.cpf) or limpar_identificador(c.cnpj)), None)
@@ -21631,15 +21764,11 @@ def salvar_pre_cadastro(
         db, empresa.id, cliente.id, endereco, numero, complemento, bairro, cidade, estado, cep,
         apelido=local_nome,
     )
-    db.commit()
-    db.refresh(cliente)
+    db.flush()
 
     if not hora_meia_em_meia_valida(hora_inicio):
         return render_erro("hora_invalida")
-    data_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
     if pedido_vitrine:
-        # A data escolhida na vitrine é a referência da reserva. O cliente não precisa escolhê-la novamente.
-        data_obj = pedido_vitrine["data_evento"]
         disponibilidade_atual = {
             int(reg["produto"].id): int(reg["disponiveis"])
             for reg in _itens_vitrine_publica(
@@ -21660,21 +21789,6 @@ def salvar_pre_cadastro(
                 reg = next((r for r in saldos if int(r["produto"].id) == int(oferta_cadastro["produto_id"])), None)
                 if not reg or int(reg["disponiveis"] or 0) < 1:
                     return render_erro("vitrine_indisponivel")
-    q_rascunho = (
-        db.query(Solicitacao)
-        .join(Cliente, Solicitacao.cliente_id == Cliente.id)
-        .filter(
-            Solicitacao.empresa_id == empresa.id,
-            Solicitacao.data_evento == data_obj,
-            Solicitacao.status.in_(["reserva", "pre_reserva", "contrato_enviado", "aguardando_aceite", "vitrine_aprovada"]),
-            Cliente.telefone == (telefone_limpo or telefone)
-        )
-    )
-    if pre_reserva_existente:
-        q_rascunho = q_rascunho.filter(Solicitacao.id != pre_reserva_existente.id)
-    rascunho_existente = q_rascunho.first()
-    if rascunho_existente:
-        return render_erro("rascunho_duplicado")
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
     # Se o cliente entrou pelo link pessoal do atendente, a negociação já nasce
     # vinculada a esse responsável. O link genérico continua existindo como fallback.
@@ -21838,6 +21952,15 @@ def salvar_pre_cadastro(
 
     db.commit()
     db.refresh(solicitacao)
+    if lembrar_cliente == "sim":
+        request.session[f"ultimo_pedido_{empresa.id}"] = solicitacao.id
+    else:
+        request.session.pop(f"ultimo_pedido_{empresa.id}", None)
+
+
+    def continuar(url):
+        resposta = RedirectResponse(url, status_code=303)
+        return _lembrar_resposta(resposta, db, empresa, solicitacao if lembrar_cliente == "sim" else None)
 
     if pedido_vitrine:
         request.session.pop(f"vitrine_pedido_{empresa.slug}", None)
@@ -21845,19 +21968,16 @@ def salvar_pre_cadastro(
         # validação acabou. Não volta para análise: segue exatamente o fluxo direto.
         if pre_reserva_existente and _vitrine_origem(solicitacao):
             if solicitacao.contrato_id:
-                return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
-            return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
+                return continuar(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}")
+            return continuar(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}")
         fluxo_vitrine = str(getattr(empresa, "vitrine_fluxo", "direto") or "direto").strip().lower()
         precisa_aprovacao = fluxo_vitrine == "aprovacao" or bool((pedido_vitrine.get("frete") or {}).get("consultar")) or bool(pedido_vitrine.get("possui_sob_consulta"))
         if precisa_aprovacao or solicitacao.status == "pre_reserva":
-            return RedirectResponse(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}", status_code=303)
-        return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}", status_code=303)
+            return continuar(f"/e/{slug}/pedido/{_ref_publica(db, solicitacao)}")
+        return continuar(f"/e/{slug}/contrato/{_ref_publica(db, solicitacao)}")
 
     # Fluxo legado sem vitrine: preserva o pré-contrato por WhatsApp.
-    return RedirectResponse(
-        f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato",
-        status_code=303,
-    )
+    return continuar(f"/e/{slug}/confirmar-whatsapp/{_ref_publica(db, solicitacao)}?tipo=pre_contrato")
 
 
 @app.get("/e/{slug}/frete-pendente/{token}", response_class=HTMLResponse)

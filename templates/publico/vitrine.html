@@ -97,6 +97,8 @@
 </div>
 <button type="button" class="connect-orientador-reabrir" id="vitrineReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
 <p id="partilhaFeedback" class="vitrine-share-feedback" role="status" aria-live="polite" hidden></p>
+{% if tem_ultimo and not oferta_periodo and not estado_compartilhado %}<div class="box"><a class="botao" href="?data_evento={{ data_evento.isoformat() }}&amp;tipo_evento={{ tipo_evento }}&amp;r={{ responsavel_vitrine_token or '' }}&amp;repetir=1">Repetir meu último pedido</a><form method="post" action="/e/{{ empresa.slug }}/esquecer-cliente"><button class="botao-secundario">Esquecer meu cadastro neste aparelho</button></form></div>{% endif %}
+{% if repetindo %}<p class="vitrine-aviso">Confira os itens disponíveis, o endereço e os valores para a data escolhida.</p>{% endif %}
 <div id="freteManualAviso" hidden class="vitrine-aviso">Favor solicitar o valor do frete ao locador. <button type="button" class="botao-secundario" id="informarFreteManual">Informar valor do frete</button></div><div class="catalogo-entrega" id="catalogoEntrega"><div class="catalogo-entrega-info"><b id="catalogoFreteTitulo">{% if frete_inicial %}Deslocamento {% if frete_inicial.consultar %}sob consulta{% else %}calculado{% endif %}{% else %}Deslocamento ainda não calculado{% endif %}</b><small id="catalogoEndereco">{% if frete_inicial %}{{ frete_inicial.endereco_formatado or ('CEP ' ~ cep_inicial ~ ' · nº ' ~ numero_inicial) }}{% else %}Informe CEP e número agora ou calcule o frete no carrinho depois.{% endif %}</small></div><strong id="catalogoFreteValor">{% if frete_inicial %}{% if frete_inicial.consultar %}Sob consulta{% else %}R$ {{ frete_inicial.valor|moeda_br }}{% endif %}{% else %}A calcular{% endif %}</strong><button type="button" class="botao-secundario" id="alterarDadosCatalogo">{% if frete_inicial %}Alterar frete{% else %}Calcular frete{% endif %}</button></div>
 {% if bloqueio_data %}<div class="vitrine-aviso"><b>Data indisponível para reservas.</b>{% if bloqueio_data.descricao %} {{ bloqueio_data.descricao }}.{% endif %} Você pode continuar vendo o catálogo e escolher outra data.</div>{% endif %}
 {% if erro == 'data_bloqueada' %}<div class="vitrine-aviso">Esta data está bloqueada para novas reservas. Escolha outra data para continuar.</div>{% endif %}
@@ -444,8 +446,8 @@
      check.checked=true;q.disabled=false;q.value=String(Math.max(1,Math.min(Number(item.q)||1,limite)));
      card.classList.add('selecionado');add?.classList.add('selecionado');if(add)add.textContent='Adicionado ✓';
      (item.opcionais||[]).forEach(op=>{
-       const linha=[...card.querySelectorAll('.opcional-publico')].find(r=>Number(r.querySelector('input[name="opcional_id"]')?.value)===Number(op.id));
-       if(!linha)return;
+       const linha=[...card.querySelectorAll('.opcional-publico')].find(r=>Number(r.dataset.produtoId)===Number(item.id)&&Number(r.querySelector('input[name="opcional_id"]')?.value)===Number(op.id));
+       if(!linha){faltando++;return}
        const opcCheck=linha.querySelector('.opcional-check'),opcQtd=linha.querySelector('.opcional-qtd');
        opcCheck.checked=true;opcQtd.value=String(Math.max(1,Math.min(99,Number(op.q)||1)));
      });

@@ -51,6 +51,18 @@
     <h1>{{ empresa.vitrine_titulo or 'Vamos encontrar as opções certas para o seu evento.' }}</h1>
     <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível para você.' }}</p>
     {% if empresa.vitrine_descricao %}<p class="inicio-desc">{{ empresa.vitrine_descricao }}</p>{% endif %}
+    {% if reconhecido %}
+    <div class="inicio-form"><strong>Olá, {{ reconhecido.cliente.nome.split()[0] if reconhecido.cliente and reconhecido.cliente.nome else 'cliente' }}!</strong>
+    {% if reconhecido.contrato_id and reconhecido.itens and empresa.modulo_opcionais_ativo and reconhecido.data_evento.isoformat() >= hoje and reconhecido.status not in ['cancelada','cancelado_cliente','rejeitada','aguardando_nova_data'] %}
+    <p><a href="/e/{{ empresa.slug }}/contrato/{{ reconhecido.public_token }}/opcionais">Editar opcionais do pedido de {{ reconhecido.data_evento.strftime('%d/%m/%Y') }}</a></p>{% endif %}
+    <form method="post" action="/e/{{ empresa.slug }}/esquecer-cliente"><button>Esquecer este aparelho</button></form></div>
+    {% else %}
+    <details class="inicio-form" {% if request.query_params.get('identificacao') %}open{% endif %}><summary>Já alugou conosco? Carregar último pedido</summary>
+    {% if request.query_params.get('identificacao') %}<p>Confira o WhatsApp e o documento usados na reserva anterior.</p>{% endif %}
+    <form method="post" action="/e/{{ empresa.slug }}/reconhecer-cliente"><input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
+    <label>WhatsApp cadastrado<input name="telefone" type="tel" required autocomplete="tel"></label>
+    <label>CPF ou CNPJ<input name="documento" inputmode="numeric" required maxlength="18"></label>
+    <button>Carregar pedido e lembrar neste aparelho</button></form></details>{% endif %}
     <form class="inicio-form" method="get" action="/e/{{ empresa.slug }}/vitrine" data-loading-title="Montando seu catálogo" data-loading-text="Aguarde. Estamos verificando disponibilidade e aplicando os valores do seu evento.">
       <input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
       <div class="connect-orientador" id="inicioGuia" aria-live="polite">
@@ -59,12 +71,13 @@
  <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span></div>
  <div class="connect-orientador-acoes"><button type="button" id="inicioAcao"></button><button type="button" class="orientador-secundario" id="inicioProximo" hidden></button></div>
 </div><button type="button" class="connect-orientador-reabrir" id="inicioReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
+      {% if reconhecido %}<input type="hidden" name="repetir" value="1"><strong>Novo pedido com os itens anteriores</strong>{% endif %}
       <label for="dataEvento">Data do evento</label>
       <input id="dataEvento" name="data_evento" type="date" min="{{ hoje }}" required>
       <label style="margin-top:10px">O que você procura?</label>
       <div class="tipo-cartoes" role="radiogroup" aria-label="Tipo de evento">
-        <label class="tipo-cartao"><input type="radio" name="tipo_evento" value="residencial"><i class="bi bi-house-heart"></i><span>Residencial</span><small>Festas e reuniões</small></label>
-        <label class="tipo-cartao"><input type="radio" name="tipo_evento" value="empresa"><i class="bi bi-building"></i><span>Empresa</span><small>Eventos corporativos</small></label>
+        <label class="tipo-cartao"><input type="radio" name="tipo_evento" value="residencial" {% if reconhecido and (reconhecido.tipo_evento_comercial or "residencial") == "residencial" %}checked{% endif %}><i class="bi bi-house-heart"></i><span>Residencial</span><small>Festas e reuniões</small></label>
+        <label class="tipo-cartao"><input type="radio" name="tipo_evento" value="empresa" {% if reconhecido and (reconhecido.tipo_evento_comercial or "residencial") == "empresa" %}checked{% endif %}><i class="bi bi-building"></i><span>Empresa</span><small>Eventos corporativos</small></label>
         {% if empresa.catalogo_musicas_url %}<a class="tipo-cartao tipo-cartao-link" href="{{ empresa.catalogo_musicas_url }}" target="_blank" rel="noopener noreferrer" aria-label="Abrir catálogo virtual de músicas"><i class="bi bi-music-note-list"></i><span>Catálogo virtual</span><small>Ver músicas</small></a>{% endif %}
       </div>
       <div id="tipoEventoMensagem" class="tipo-evento-msg"></div>
