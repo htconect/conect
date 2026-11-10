@@ -1,5 +1,5 @@
 {% extends "publico/base_cliente.html" %}
-{% block conteudo %}
+{% block conteudo %}<style>.cab-secao{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}.cab-secao h2{margin:0}.cab-secao a{display:inline-flex;align-items:center;min-height:36px;padding:2px 10px;border:1px solid currentColor;border-radius:8px;color:var(--cliente-cor);font-weight:700;text-decoration:none}.secao-form[id]{scroll-margin-top:18px}</style>
 <style>
 .aviso-horario-contrato{margin-top:10px;border:2px solid currentColor;padding:14px 16px;border-radius:12px}
 .aviso-horario-contrato strong{display:block;font-size:1.08rem;margin-bottom:6px}
@@ -26,7 +26,7 @@
   {% if erro == 'cpf_cnpj' %}Informe CPF ou CNPJ, nunca os dois.{% endif %}
   {% if erro == 'cpf_invalido' %}CPF inválido. Confira os números informados.{% endif %}
   {% if erro == 'cnpj_invalido' %}CNPJ inválido. Confira os números informados.{% endif %}
-  {% if erro == 'hora_invalida' %}Horário inválido. Use horários de 30 em 30 minutos, como 14:00 ou 14:30.{% endif %}
+  {% if erro == 'hora_invalida' %}Horário inválido. Escolha um horário entre 08:00 e 22:00, em intervalos de 30 minutos.{% endif %}
   {% if erro == 'whatsapp_invalido' %}Informe um WhatsApp brasileiro válido no formato (DD) 9XXXX-XXXX.{% endif %}
   {% if erro == 'responsavel_whatsapp_invalido' %}Informe um WhatsApp brasileiro válido para o responsável no local.{% endif %}
   {% if erro == 'rascunho_duplicado' %}Já existe uma reserva para este CPF nesta data. Para alterar o horário, os equipamentos ou os opcionais, fale com a locadora pelo WhatsApp.{% endif %}
@@ -64,8 +64,7 @@
  <div class="connect-orientador-barras" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
  <div class="connect-orientador-acoes"><button type="button" id="cadastroAcao"></button><button type="button" class="orientador-secundario" id="cadastroProximo" hidden></button></div>
 </div><button type="button" class="connect-orientador-reabrir" id="cadastroReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
-  <section class="secao-form">
-    <h2>1. Quem está reservando?</h2>
+  <section class="secao-form" id="secaoCadastro1" tabindex="-1"><header class="cab-secao"><h2>1. Quem está reservando?</h2><a href="#secaoCadastro2">Próxima seção →</a></header>
     <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" autocomplete="tel" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
     <div class="aviso-whatsapp-proprio" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff7df;border:1px solid #f0d27a;font-weight:600;line-height:1.4;">
       <strong>Importante:</strong> utilize o seu próprio WhatsApp. Este número será usado para identificar sua reserva e receber as confirmações do contrato. <strong>Não informe o WhatsApp de outra pessoa.</strong>
@@ -103,8 +102,7 @@
     </select>
   </section>
 
-  <section class="secao-form">
-    <h2>2. Endereço do evento</h2>
+  <section class="secao-form" id="secaoCadastro2" tabindex="-1"><header class="cab-secao"><h2>2. Endereço do evento</h2><a href="#secaoCadastro3">Próxima seção →</a></header>
     <p class="texto-discreto">Escolha onde este evento será realizado. O endereço fica vinculado somente a esta reserva.</p>
     <div id="enderecosEncontradosPublico" class="enderecos-encontrados" hidden></div>
     <div id="camposNovoEnderecoPublico">
@@ -127,11 +125,10 @@
     </div>
   </section>
 
-  <section class="secao-form">
-    <h2>3. Evento</h2>
+  <section class="secao-form" id="secaoCadastro3" tabindex="-1"><header class="cab-secao"><h2>3. Evento</h2><a href="#secaoCadastro4">Próxima seção →</a></header>
     <div class="grid duas">
       <div><label>Data do evento *</label>{% if vitrine_pedido is defined and vitrine_pedido %}<div class="box" style="padding:12px;margin:0"><b>{{ vitrine_pedido.data_evento.strftime('%d/%m/%Y') }}</b></div><input name="data_evento" type="hidden" value="{{ vitrine_pedido.data_evento.isoformat() }}">{% else %}<input name="data_evento" type="date" value="{{ form.data_evento if form is defined else '' }}" required>{% endif %}</div>
-      <div><label>Hora de início *</label><select id="horaInicioPreContrato" name="hora_inicio" required><option value="">Escolha um horário</option>{% for i in range(48) %}{% set hh = '%02d:%02d'|format(i // 2, (i % 2) * 30) %}<option value="{{ hh }}" {% if form is defined and form.hora_inicio == hh %}selected{% endif %}>{{ hh }}</option>{% endfor %}</select></div>
+      <div><label>Hora de início *</label><select id="horaInicioPreContrato" name="hora_inicio" required>{% with horario_selecionado=form.hora_inicio if form is defined else "" %}{% include "publico/horarios_inicio.html" %}{% endwith %}</select></div>
     </div>
     <p class="texto-discreto">Use horários de 30 em 30 minutos, por exemplo 14:00 ou 14:30.</p>
     {% if vitrine_pedido is defined and vitrine_pedido %}
@@ -181,8 +178,7 @@
     </select>
   </section>
 
-  <section class="secao-form">
-    <h2>4. Responsável no local</h2>
+  <section class="secao-form" id="secaoCadastro4" tabindex="-1"><header class="cab-secao"><h2>4. Responsável no local</h2><a href="#botaoContinuarContrato">Ir para concluir ↓</a></header>
     <label class="check" style="display:flex;gap:9px;align-items:center;margin:10px 0"><input id="contratanteResponsavelPublico" type="checkbox" checked> Sou o responsável no local (usar meus dados)</label>
     <p class="texto-discreto">Nome e WhatsApp são obrigatórios. Se outra pessoa receber o equipamento, desmarque a opção e informe o contato dela.</p>
     <div class="grid duas">
@@ -252,6 +248,8 @@ async function consultarClientePublico(){
    if(!r.ok)throw Error('consulta indisponível');const d=await r.json();
    if(!d.confirmado){if(st)st.textContent='Cadastro não localizado ou documento diferente do cadastrado. Confira os números ou continue preenchendo.';return;}
    if((document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'').slice(-11)!==tel)return;
+   const numeroEvento=document.getElementById('numeroEventoPublico');
+   if(numeroEvento?.value==='Mesmo endereço' && d.destino?.numero)numeroEvento.value=d.destino.numero;
    const c=d.cliente||{};
    if(c.cnpj){const radio=document.querySelector('input[name="tipo_pessoa"][value="juridica"]');if(radio){radio.checked=true;typeof alternarPessoa==='function'&&alternarPessoa();}}
    [['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj],['dataNascimentoPublico',c.data_nascimento]].forEach(([id,v])=>{const el=document.getElementById(id);if(el&&v){el.value=v;if(id!=='dataNascimentoPublico'){el.readOnly=true;el.classList.add('campo-travado');}}});
@@ -268,7 +266,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  if(CPF_DA_VITRINE){
    const campo=document.getElementById('telefoneClientePublico');
    const carregar=()=>{if((campo.value||'').replace(/\D/g,'').length>=11)consultarClientePublico()};
-   campo.addEventListener('change',carregar);carregar();
+   let espera;campo.addEventListener('input',()=>{clearTimeout(espera);espera=setTimeout(carregar,350)});carregar();
  }
  const mesmo=document.getElementById('contratanteResponsavelPublico');
  const nomeLocal=document.getElementById('nomeResponsavelLocalPublico'),telLocal=document.getElementById('telefoneResponsavelLocalPublico');

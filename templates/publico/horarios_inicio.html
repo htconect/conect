@@ -1,0 +1,1 @@
+<option value="">Escolha um horário</option>{% for hora in range(8,23) %}{% for minuto in ([0] if hora == 22 else [0,30]) %}{% set hh = '%02d:%02d'|format(hora,minuto) %}<option value="{{ hh }}"{% if horario_selecionado|default('') == hh %} selected{% endif %}>{{ hh }}</option>{% endfor %}{% endfor %}
