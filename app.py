@@ -21685,8 +21685,9 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
                         if candidato and _mesmo_cadastro_repetido(candidato, cadastro):
                             pessoa = candidato
                 if pessoa:
-                    for campo in ("telefone", "cpf", "cnpj", "email", "nome", "data_nascimento", "como_conheceu"):
+                    for campo in ("telefone", "cpf", "cnpj", "email", "nome", "como_conheceu"):
                         form[campo] = getattr(pessoa, campo, None) or ""
+                    form["data_nascimento"] = pessoa.data_nascimento.isoformat() if pessoa.data_nascimento else ""
                     form["tipo_pessoa"] = "juridica" if pessoa.cnpj else "fisica"
                     if anterior and anterior.local_cep == form["cep"] and anterior.local_numero == form["numero"]:
                         form["complemento"] = anterior.local_complemento or ""
