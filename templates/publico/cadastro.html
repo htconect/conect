@@ -66,17 +66,17 @@
 </div><button type="button" class="connect-orientador-reabrir" id="cadastroReabrir" hidden><i class="bi bi-lightbulb"></i> Mostrar orientações</button>
   <section class="secao-form">
     <h2>1. Quem está reservando?</h2>
-    <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
+    <label>WhatsApp *</label><input id="telefoneClientePublico" name="telefone" autocomplete="tel" inputmode="tel" placeholder="(21) 99999-9999" value="{{ form.telefone if form is defined else cliente.telefone if cliente else '' }}" required>
     <div class="aviso-whatsapp-proprio" style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff7df;border:1px solid #f0d27a;font-weight:600;line-height:1.4;">
       <strong>Importante:</strong> utilize o seu próprio WhatsApp. Este número será usado para identificar sua reserva e receber as confirmações do contrato. <strong>Não informe o WhatsApp de outra pessoa.</strong>
     </div>
-    <div class="carregar-cadastro" style="margin:10px 0;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc">
-      <strong>Já é cliente?</strong><p class="texto-discreto" style="margin:5px 0 9px">Digite o seu WhatsApp e confirme seu CPF ou CNPJ para aproveitar os dados cadastrados.</p>
+    {% if lembrado %}<p>Cadastro carregado. Confira os dados abaixo.</p>{% else %}<div class="carregar-cadastro" style="margin:10px 0;padding:12px;border:1px solid #dbe3ee;border-radius:12px;background:#f8fafc">
+      {% if cpf_reconhecido %}<strong>CPF reconhecido na vitrine</strong><p>Confirme seu WhatsApp acima para preencher os dados do contrato.</p>{% else %}<strong>Já é cliente?</strong><p class="texto-discreto" style="margin:5px 0 9px">Digite o seu WhatsApp e confirme seu CPF ou CNPJ para aproveitar os dados cadastrados.</p>
       <label for="documentoConfirmacaoPublico">CPF ou CNPJ já cadastrado</label>
-      <input id="documentoConfirmacaoPublico" inputmode="numeric" autocomplete="off" placeholder="Somente para confirmar seu cadastro" maxlength="18" type="text">
+      <input id="documentoConfirmacaoPublico" inputmode="numeric" autocomplete="off" placeholder="Somente para confirmar seu cadastro" maxlength="18" type="text">{% endif %}
       <button id="btnCarregarCadastroPublico" type="button" class="botao-secundario" style="margin-top:8px">Carregar cadastro</button>
-      <div id="statusBuscaClientePublico" role="status" aria-live="polite" class="texto-discreto" style="margin-top:7px">Se for seu primeiro aluguel, continue preenchendo normalmente.</div>
-    </div><p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
+      <div id="statusBuscaClientePublico" role="status" aria-live="polite" class="texto-discreto" style="margin-top:7px">{% if not cpf_reconhecido %}Se for seu primeiro aluguel, continue preenchendo normalmente.{% endif %}</div>
+    </div>{% endif %}<p class="texto-discreto">Escolha uma opção. CPF e CNPJ nunca são preenchidos juntos.</p>
     <div class="linha">
       <label class="check"><input type="radio" name="tipo_pessoa" value="fisica" {% if not (lembrado and cliente.cnpj) %}checked{% endif %} onchange="alternarPessoa()"> Pessoa física</label>
       <label class="check"><input type="radio" name="tipo_pessoa" value="juridica" {% if lembrado and cliente.cnpj %}checked{% endif %} onchange="alternarPessoa()"> Pessoa jurídica</label>
@@ -236,13 +236,14 @@ function atualizarResponsavelLocalPublico(){
  const nomeCliente=(juridica?document.querySelector('input[name="nome_empresa"]')?.value:document.getElementById('nomeClientePublico')?.value)||'';
  if(nome)nome.value=nomeCliente;if(telefone)telefone.value=document.getElementById('telefoneClientePublico')?.value||'';
 }
+const CPF_DA_VITRINE={{ "true" if cpf_reconhecido else "false" }};
 async function consultarClientePublico(){
  let tel=(document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'');
  if(tel.startsWith('55')&&tel.length===13)tel=tel.slice(2);
  const st=document.getElementById('statusBuscaClientePublico');
  if(tel.length!==11||tel[2]!=='9'){if(st)st.textContent='Informe um WhatsApp válido antes de carregar o cadastro.';return;}
  const documento=documentoClientePublico();
- if(documento.length!==11&&documento.length!==14){if(st)st.textContent='Informe o CPF completo (11 dígitos) ou CNPJ (14 dígitos) para confirmar com segurança.';document.getElementById('documentoConfirmacaoPublico')?.focus();return;}
+ if(!CPF_DA_VITRINE&&documento.length!==11&&documento.length!==14){if(st)st.textContent='Informe o CPF completo (11 dígitos) ou CNPJ (14 dígitos) para confirmar com segurança.';document.getElementById('documentoConfirmacaoPublico')?.focus();return;}
  const btn=document.getElementById('btnCarregarCadastroPublico');if(btn)btn.disabled=true;
  if(st)st.textContent='Consultando seu cadastro...';
  try{
@@ -250,6 +251,7 @@ async function consultarClientePublico(){
    const r=await fetch('/e/{{ empresa.slug }}/api/clientes/carregar-cadastro',{method:'POST',headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded'},body:dados,cache:'no-store'});
    if(!r.ok)throw Error('consulta indisponível');const d=await r.json();
    if(!d.confirmado){if(st)st.textContent='Cadastro não localizado ou documento diferente do cadastrado. Confira os números ou continue preenchendo.';return;}
+   if((document.getElementById('telefoneClientePublico')?.value||'').replace(/\D/g,'').slice(-11)!==tel)return;
    const c=d.cliente||{};
    if(c.cnpj){const radio=document.querySelector('input[name="tipo_pessoa"][value="juridica"]');if(radio){radio.checked=true;typeof alternarPessoa==='function'&&alternarPessoa();}}
    [['nomeClientePublico',c.nome],['cpfClientePublico',c.cpf],['cnpjClientePublico',c.cnpj],['dataNascimentoPublico',c.data_nascimento]].forEach(([id,v])=>{const el=document.getElementById(id);if(el&&v){el.value=v;if(id!=='dataNascimentoPublico'){el.readOnly=true;el.classList.add('campo-travado');}}});
@@ -263,6 +265,11 @@ async function consultarClientePublico(){
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('btnCarregarCadastroPublico')?.addEventListener('click',consultarClientePublico);
+ if(CPF_DA_VITRINE){
+   const campo=document.getElementById('telefoneClientePublico');
+   const carregar=()=>{if((campo.value||'').replace(/\D/g,'').length>=11)consultarClientePublico()};
+   campo.addEventListener('change',carregar);carregar();
+ }
  const mesmo=document.getElementById('contratanteResponsavelPublico');
  const nomeLocal=document.getElementById('nomeResponsavelLocalPublico'),telLocal=document.getElementById('telefoneResponsavelLocalPublico');
  const nome=document.getElementById('nomeClientePublico'),telefone=document.getElementById('telefoneClientePublico');

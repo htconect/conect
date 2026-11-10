@@ -14345,8 +14345,13 @@ def api_publico_cliente_por_telefone(slug: str, telefone: str, documento: str = 
 
 
 @app.post("/e/{slug}/api/clientes/carregar-cadastro")
-def api_publico_carregar_cadastro(slug: str, telefone: str = Form(""), documento: str = Form(""), db: Session = Depends(get_db)):
+def api_publico_carregar_cadastro(slug: str, request: Request, telefone: str = Form(""), documento: str = Form(""), db: Session = Depends(get_db)):
     """Busca cadastro apenas com WhatsApp + CPF/CNPJ completo, sem documento na URL."""
+    if not documento:
+        empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
+        cadastro = _cadastro_vitrine_cpf(request, empresa, db) if empresa else None
+        if cadastro:
+            documento = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
     return api_publico_cliente_por_telefone(slug, telefone, documento, db)
 
 
@@ -21656,6 +21661,8 @@ def _contexto_pre_contrato_publico(db: Session, empresa: Empresa, request: Reque
                         form["complemento"] = anterior.local_complemento or ""
                     contexto["cliente"] = pessoa
                     contexto["lembrado"] = True
+    if pedido_vitrine and not contexto.get("cliente"):
+        contexto["cpf_reconhecido"] = bool(_cadastro_vitrine_cpf(request, empresa, db))
     if form is not None:
         contexto["form"] = form
     return contexto
