@@ -20236,6 +20236,18 @@ def reconhecer_cliente_vitrine(slug: str, request: Request, documento: str = For
     return resposta
 
 
+def _destino_repetir_pedido(pedido, somente_itens):
+    # O número deve vir do mesmo endereço que forneceu o CEP.
+    for origem, campo_cep, campo_numero in (
+        (pedido, "local_cep", "local_numero"), (pedido.cliente, "cep", "numero")
+    ):
+        cep = re.sub(r"\D", "", str(getattr(origem, campo_cep, "") or ""))
+        if len(cep) == 8:
+            numero = "" if somente_itens else str(getattr(origem, campo_numero, "") or "").strip()
+            return {"cep": cep, "numero": numero}
+    return {"cep": "", "numero": ""}
+
+
 def _recuperar_itens_vitrine(pedido, catalogo):
     por_id = {r["produto"].id: r for r in catalogo}
     por_nome = {}
@@ -20293,8 +20305,23 @@ def portal_empresa(slug: str, request: Request, r: str = "", u: str = "", db: Se
     if not getattr(empresa, "vitrine_ativa", True):
         return templates.TemplateResponse("publico/identificar.html", {"request": request, "empresa": empresa})
     reconhecido = _pedido_reconhecido(db, empresa, request)
+    cadastro = _cadastro_vitrine_cpf(request, empresa, db) if not reconhecido else None
+    anterior = reconhecido
+    if cadastro:
+        doc = limpar_identificador(cadastro.cpf or cadastro.identificador or "")
+        clientes = _clientes_cpf_vitrine(db, empresa.id, doc)
+        anterior = _ultimo_por_cpf(db, empresa, [c.id for c in clientes] or [cadastro.id])
+    resumo = []
+    if anterior:
+        resumo = [f"{max(1, linha.quantidade or 1)} × {linha.nome}" for linha in anterior.itens if linha.nome]
+        if not resumo and anterior.produto_id:
+            equipamento = db.get(ProdutoServico, anterior.produto_id)
+            if equipamento and equipamento.empresa_id == empresa.id:
+                resumo.append(f"1 × {equipamento.nome}")
+        if resumo:
+            resumo.extend(f"{max(1, op.quantidade or 1)} × {op.nome} (opcional)" for op in anterior.opcionais_contrato if op.nome)
     return templates.TemplateResponse("publico/vitrine_inicio.html", {
-        "cadastro_cpf": _cadastro_vitrine_cpf(request, empresa, db), "reconhecido": reconhecido, "request": request,
+        "resumo_anterior": resumo, "cadastro_cpf": cadastro, "reconhecido": reconhecido, "request": request,
         "empresa": empresa,
         "hoje": date.today().isoformat(),
         "mensagens_tipo_evento": _mensagens_tipos_evento_empresa(db, empresa.id),
@@ -20389,8 +20416,7 @@ def vitrine_publica(
             produtos, avisos_repeticao = _recuperar_itens_vitrine(ultimo, itens)
             nomes_repeticao = [f"{p['q']}× {r['produto'].nome}" for p in produtos for r in itens
                                if r["produto"].id == p["id"]]
-            estado_compartilhado = {"produtos": produtos, "cep": "" if somente_itens else ultimo.local_cep,
-                                     "numero": "" if somente_itens else ultimo.local_numero,
+            estado_compartilhado = {"produtos": produtos, **_destino_repetir_pedido(ultimo, somente_itens),
                                      "hora": ultimo.hora_inicio.strftime("%H:%M") if ultimo.hora_inicio and not somente_itens else ""}
             repetindo = True
     if estado_compartilhado:

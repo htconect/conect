@@ -21,6 +21,7 @@
 #dias{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;text-align:center}#cal button{color:inherit;background:var(--cliente-suave);min-height:40px;margin:2px 0;padding:0}#cal button:disabled{opacity:.35}
 #reservaInicio details{font-size:.85rem;color:var(--cliente-muted);margin:12px 0}
 #reservaInicio .pular-etapa{width:100%;background:#fff;color:var(--cliente-cor);border:1px solid var(--cliente-cor);border-radius:13px;min-height:46px;margin-top:8px;font-weight:700}
+#reservaInicio #repetirSim{background:var(--cliente-cor)}
 </style>
 {% endblock %}
 {% block scripts_extra %}<script>(()=>{
@@ -55,7 +56,12 @@
  el('antes').onclick=()=>{mes.setMonth(mes.getMonth()-1);exibirMes()};
  el('depois').onclick=()=>{mes.setMonth(mes.getMonth()+1);exibirMes()};
  el('alterar').onclick=()=>{etapa(2);abrir()};
- el('pular').onclick=()=>{etapa(2);el('abrir').focus()};
+ function escolherPedido(repetir){
+   el('decisaoRepetir').value=repetir?'1':'0';
+   etapa(2);el('abrir').focus();
+ }
+ el('pular').onclick=()=>escolherPedido(false);
+ if(el('repetirSim'))el('repetirSim').onclick=()=>escolherPedido(true);
  const mensagens={{ mensagens_tipo_evento|tojson }};
  function tipo(){const escolha=document.querySelector('[name=tipo_evento]:checked');el('verCatalogoBtn').disabled=!escolha;el('tipoEventoMensagem').textContent=mensagens[escolha?.value]||''}
  document.querySelectorAll('[name=tipo_evento]').forEach(r=>r.onchange=tipo);
@@ -71,14 +77,18 @@
     <h1>{{ empresa.vitrine_titulo or 'Vamos encontrar as opções certas para o seu evento.' }}</h1>
     <p>{{ empresa.vitrine_subtitulo or 'Primeiro a data. Depois, mostramos somente o que está disponível para você.' }}</p>
     {% if empresa.vitrine_descricao %}<p class="inicio-desc">{{ empresa.vitrine_descricao }}</p>{% endif %}
-    <div class="inicio-form" id="reservaInicio" data-inicial="{{ 2 if reconhecido or cadastro_cpf else 1 }}">
+    <div class="inicio-form" id="reservaInicio" data-inicial="{{ 2 if (reconhecido or cadastro_cpf) and not resumo_anterior else 1 }}">
     <small id="passo" aria-live="polite"></small><div class="progresso" aria-hidden="true"><i></i><i></i><i></i></div>
-    <section id="identidade"><h2>Já alugou conosco?</h2>
+    <section id="identidade">{% if resumo_anterior %}<h2>Quer repetir seu último pedido?</h2>
+    <ul>{% for linha in resumo_anterior %}<li>{{ linha }}</li>{% endfor %}</ul>
+    <button type="button" id="repetirSim">Sim, repetir pedido</button>
+    <button type="button" id="pular" class="pular-etapa">Não, começar do zero</button>
+    {% else %}<h2>Já alugou conosco?</h2>
     <form method="post" action="/e/{{ empresa.slug }}/reconhecer-cliente"><input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
     <label for="cpfInicio">CPF cadastrado</label>
     <input id="cpfInicio" name="documento" inputmode="numeric" maxlength="14" required placeholder="Seu CPF">
     {% if request.query_params.get('identificacao') %}<p role="alert">Confira o CPF cadastrado nesta locadora ou continue escolhendo a data.</p>{% endif %}
-    <button>Carregar meu pedido</button></form><button type="button" class="pular-etapa" id="pular">Pular esta etapa</button></section>
+    <button>Consultar meu último pedido</button></form><button type="button" class="pular-etapa" id="pular">Pular esta etapa</button>{% endif %}</section>
     {% if reconhecido or cadastro_cpf %}<details><summary>Cadastro reconhecido</summary>{% if reconhecido %}
     <div><strong>Olá, {{ reconhecido.cliente.nome.split()[0] if reconhecido.cliente and reconhecido.cliente.nome else 'cliente' }}!</strong>
     {% if reconhecido.contrato_id and reconhecido.itens and empresa.modulo_opcionais_ativo and reconhecido.data_evento.isoformat() >= hoje and reconhecido.status not in ['cancelada','cancelado_cliente','rejeitada','aguardando_nova_data'] %}
@@ -89,7 +99,7 @@
 {% endif %}</details>{% endif %}
     <form method="get" action="/e/{{ empresa.slug }}/vitrine">
     <input type="hidden" name="r" value="{{ responsavel_vitrine_token or '' }}">
-    {% if reconhecido or cadastro_cpf %}<input type="hidden" name="repetir" value="1">{% endif %}
+    <input type="hidden" id="decisaoRepetir" name="repetir" value="0">
     <input type="hidden" id="dataEvento" name="data_evento">
     <section id="data"><h2>Qual é a data do evento?</h2>
     <button type="button" id="abrir" aria-expanded="false" aria-controls="cal">Escolher data</button>
