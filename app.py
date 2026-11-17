@@ -45,7 +45,7 @@ from config import (
 )
 from database import Base, engine, get_db, SessionLocal
 from performance_monitor import PerformanceMiddleware, install_sql_monitor, perf_stage, recent_records, monitor_status, clear_records, performance_summary
-from models import Agenda, BloqueioData, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, VitrineCompartilhamento, VitrineOportunidade, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
+from models import Agenda, BloqueioData, BloqueioProduto, CampoEmpresa, CampoGlobal, Cliente, EnderecoCliente, Contrato, Cupom, Empresa, EquipamentoCliente, Pagamento, Equipe, UsuarioEquipe, VitrineCategoria, VitrineCompartilhamento, VitrineOportunidade, TipoEventoEmpresa, ProdutoPrecoEvento, ProdutoOpcional, OpcionalEmpresa, ProdutoOpcionalExclusao, \
     ProdutoServico, ProdutoFoto, MidiaImagem, ReservaItem, Solicitacao, UsuarioEmpresa, ContaFinanceira, LancamentoBanco, \
     LancamentoManualFinanceiro, VinculoRepasseBanco, VinculoTituloFinanceiro, VinculoOrganizaFinanceiro, HumiatMovimento, HumiatCompra, InfinitePayTaxa, InfinitePayCobranca, VeiculoLogistico, ConfiguracaoRotaInteligente, RotaInteligente, RotaInteligenteParada, VeiculoPerfilCarga, ItemProdutoServicoEstoque, ProdutoServicoRecurso, SolicitacaoRecurso, SolicitacaoOpcional, HistoricoOpcionalContrato, EvolucaoFinanceiraHistorico, EvolucaoVendasHistorico, PausaOperacional
 from seed import inicializar_dados
@@ -4510,6 +4510,9 @@ def _iniciar_migracao_lokafest_v118_em_background() -> None:
 
 @app.on_event("startup")
 def startup():
+    # Tabela própria, sem alterar bloqueios gerais nem contratos existentes.
+    # A manutenção ampla continua opcional; esta tabela é necessária para o recurso.
+    BloqueioProduto.__table__.create(bind=engine, checkfirst=True)
     # Migração estrutural mínima: somente colunas novas desta versão.
     _garantir_colunas_v113_criticas()
     _iniciar_migracao_duracoes_v116_em_background()
@@ -9018,6 +9021,51 @@ def _bloqueio_data_empresa(db: Session, empresa_id: int, data_consulta: date) ->
     return resultado
 
 
+def _bloqueios_produtos_na_data(db: Session, empresa_id: int, data_consulta: date) -> dict[int, BloqueioProduto]:
+    """Uma consulta por data; bloqueios de equipamento nunca são ignorados por link especial."""
+    if not data_consulta:
+        return {}
+    chave = ("bloqueios_produtos_http", int(empresa_id), data_consulta)
+    pendente = any(isinstance(obj, BloqueioProduto) for grupo in (db.new, db.dirty, db.deleted) for obj in grupo)
+    if not pendente and chave in db.info:
+        return db.info[chave]
+    bloqueios = db.query(BloqueioProduto).filter(
+        BloqueioProduto.empresa_id == empresa_id,
+        BloqueioProduto.ativo.is_(True),
+        BloqueioProduto.data_inicio <= data_consulta,
+        BloqueioProduto.data_fim >= data_consulta,
+    ).order_by(BloqueioProduto.data_inicio.asc(), BloqueioProduto.id.asc()).all()
+    mapa = {int(row.produto_id): row for row in bloqueios}
+    if not pendente:
+        db.info[chave] = mapa
+    return mapa
+
+
+def _bloqueio_produto_periodo(db: Session, empresa_id: int, produto_id: int,
+                             inicio: date, fim_exclusivo: date) -> BloqueioProduto | None:
+    """Retirada libera o produto no dia da retirada; inicio está incluído."""
+    if not inicio or not fim_exclusivo or fim_exclusivo <= inicio:
+        return None
+    return db.query(BloqueioProduto).filter(
+        BloqueioProduto.empresa_id == empresa_id,
+        BloqueioProduto.produto_id == produto_id,
+        BloqueioProduto.ativo.is_(True),
+        BloqueioProduto.data_inicio < fim_exclusivo,
+        BloqueioProduto.data_fim >= inicio,
+    ).order_by(BloqueioProduto.data_inicio.asc(), BloqueioProduto.id.asc()).first()
+
+
+def _erro_bloqueio_produto(db: Session, empresa_id: int, produto: ProdutoServico | None,
+                           data_consulta: date) -> str | None:
+    if not produto or not data_consulta:
+        return None
+    bloqueio = _bloqueios_produtos_na_data(db, empresa_id, data_consulta).get(int(produto.id))
+    if bloqueio:
+        detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
+        return f"{produto.nome} está bloqueado para aluguel em {data_consulta:%d/%m/%Y}{detalhe}."
+    return None
+
+
 def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
                           tipo_evento: str = "residencial", apenas_disponibilidade: bool = False, ignorar_bloqueio: bool = False) -> list[dict]:
     """Vitrine completa ou verificação leve de estoque da reserva.
@@ -9027,6 +9075,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
     """
     tipo_evento = _normalizar_tipo_evento_vitrine(tipo_evento)
     bloqueio_data = None if ignorar_bloqueio else _bloqueio_data_empresa(db, empresa.id, data_consulta)
+    bloqueios_produto = _bloqueios_produtos_na_data(db, empresa.id, data_consulta)
     if not apenas_disponibilidade:
         _garantir_categorias_vitrine_existentes(db, empresa)
         _garantir_tipos_evento_padrao(db, empresa)
@@ -9125,7 +9174,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
             )
         else:
             disponiveis = disponivel_fisico
-        if bloqueio_data:
+        if bloqueio_data or int(produto.id) in bloqueios_produto:
             disponiveis = 0
 
         if apenas_disponibilidade:
@@ -10529,6 +10578,10 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias}
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
     produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
+    bloqueios_produtos = (db.query(BloqueioProduto)
+                         .filter(BloqueioProduto.empresa_id == empresa.id,
+                                 BloqueioProduto.ativo.is_(True), BloqueioProduto.data_fim >= date.today())
+                         .order_by(BloqueioProduto.data_inicio.asc(), BloqueioProduto.id.asc()).all())
     oportunidades_db = (
         db.query(VitrineOportunidade)
         .filter(VitrineOportunidade.empresa_id == empresa.id, VitrineOportunidade.status.in_(["pendente", "frete_pendente", "frete_aprovado"]))
@@ -10551,12 +10604,52 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     link_usuario, link_whatsapp = _vitrine_link_do_usuario(request, db, empresa)
     return templates.TemplateResponse("admin/vitrine.html", {
         "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
+        "bloqueios_produtos": bloqueios_produtos, "hoje_iso": date.today().isoformat(),
         "oportunidades": oportunidades,
         "vitrine_url": link_usuario,
         "vitrine_compartilhar_whatsapp": link_whatsapp,
         "salvo": request.query_params.get("salvo", ""),
         "erro": request.query_params.get("erro", ""),
     })
+
+
+@app.post("/painel/vitrine/bloqueios-produtos")
+def criar_bloqueio_produto(
+    produto_id: int = Form(...), data_inicio: str = Form(...), data_fim: str = Form(...),
+    descricao: str = Form(""), db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    produto = db.get(ProdutoServico, produto_id)
+    if not produto or produto.empresa_id != empresa.id:
+        raise HTTPException(404, "Equipamento não encontrado nesta empresa.")
+    try:
+        inicio = date.fromisoformat(data_inicio)
+        fim = date.fromisoformat(data_fim)
+    except (ValueError, TypeError):
+        return RedirectResponse("/painel/vitrine?erro=" + quote("Informe datas válidas."), status_code=303)
+    if inicio > fim or fim < date.today():
+        return RedirectResponse("/painel/vitrine?erro=" + quote("Confira o período do bloqueio."), status_code=303)
+    if (fim - inicio).days > 366:
+        return RedirectResponse("/painel/vitrine?erro=" + quote("O bloqueio pode ter até 366 dias."), status_code=303)
+    db.add(BloqueioProduto(
+        empresa_id=empresa.id, produto_id=produto.id, data_inicio=inicio, data_fim=fim,
+        descricao=(descricao or "").strip()[:160] or None, ativo=True,
+    ))
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=bloqueio#bloqueios-equipamentos", status_code=303)
+
+
+@app.post("/painel/vitrine/bloqueios-produtos/{bloqueio_id}/excluir")
+def excluir_bloqueio_produto(
+    bloqueio_id: int, db: Session = Depends(get_db),
+    empresa: Empresa = Depends(empresa_logada),
+):
+    bloqueio = db.query(BloqueioProduto).filter_by(id=bloqueio_id, empresa_id=empresa.id).first()
+    if not bloqueio:
+        raise HTTPException(404)
+    db.delete(bloqueio)
+    db.commit()
+    return RedirectResponse("/painel/vitrine?salvo=desbloqueio#bloqueios-equipamentos", status_code=303)
 
 
 def _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado):
@@ -13809,7 +13902,13 @@ def salvar_cliente_local_solicitacao(
     cliente.bairro = bairro.strip()
 
     if data_evento:
-        item.data_evento = datetime.strptime(data_evento, "%Y-%m-%d").date()
+        nova_data = datetime.strptime(data_evento, "%Y-%m-%d").date()
+        if nova_data != data_anterior_contrato:
+            bloqueios_dia = _bloqueios_produtos_na_data(db, empresa.id, nova_data)
+            for ri in item.itens or []:
+                if ri.produto_id and int(ri.produto_id) in bloqueios_dia:
+                    raise HTTPException(409, f"{ri.nome} está bloqueado para aluguel em {nova_data:%d/%m/%Y}.")
+        item.data_evento = nova_data
     if hora_inicio:
         item.hora_inicio = datetime.strptime(hora_inicio, "%H:%M").time()
     item.hora_fim = datetime.strptime(hora_fim, "%H:%M").time() if hora_fim else None
@@ -13898,6 +13997,18 @@ async def preparar_contrato(
         (int(ri.produto_id), max(1, int(ri.quantidade or 1)))
         for ri in list(item.itens or []) if ri.produto_id
     )
+    # Um contrato existente não é cancelado retroativamente. Porém, trocar
+    # a data ou acrescentar um equipamento deve respeitar os bloqueios atuais.
+    bloqueios_dia = _bloqueios_produtos_na_data(db, empresa.id, item.data_evento)
+    ids_anteriores = {pid for pid, _ in assinatura_anterior}
+    for pid_str in produto_ids:
+        if not str(pid_str).isdigit():
+            continue
+        pid = int(pid_str)
+        if pid in bloqueios_dia and (item.data_evento != data_anterior_contrato or pid not in ids_anteriores):
+            produto_bloqueado = db.get(ProdutoServico, pid)
+            nome = produto_bloqueado.nome if produto_bloqueado else "Equipamento"
+            raise HTTPException(409, f"{nome} está bloqueado para aluguel em {item.data_evento:%d/%m/%Y}.")
     assinatura_nova = []
 
     # Regrava os itens da reserva para permitir vários produtos/serviços.
@@ -14639,6 +14750,9 @@ def contrato_novo_salvar(
         raise HTTPException(404)
     if modo_criacao == "manual" and not produto:
         return render_erro("No contrato manual, informe pelo menos um item principal.")
+    erro_produto = _erro_bloqueio_produto(db, empresa.id, produto, data_evento_obj)
+    if not cadastro_cliente and erro_produto:
+        return render_erro(erro_produto)
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
     tipo_evento_comercial = _normalizar_tipo_evento_vitrine(tipo_evento_comercial)
@@ -15010,6 +15124,10 @@ def salvar_solicitacao_completa(
 
     inicio_obj = datetime.strptime(hora_inicio, "%H:%M").time()
     data_evento_obj = datetime.strptime(data_evento, "%Y-%m-%d").date()
+    if produto and (data_evento_obj != item.data_evento or int(produto.id) != int(item.produto_id or 0)):
+        erro_produto = _erro_bloqueio_produto(db, empresa.id, produto, data_evento_obj)
+        if erro_produto:
+            return render_erro(erro_produto)
     if data_evento_obj != item.data_evento:
         bloqueio = _bloqueio_data_empresa(db, empresa.id, data_evento_obj)
         if bloqueio:
@@ -15349,6 +15467,9 @@ def criar_pre_reserva_rapida(
     if bloqueio:
         detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
         return RedirectResponse(f"/painel/cliente/{cliente.id}?erro={quote('Data bloqueada na Agenda' + detalhe)}", status_code=303)
+    erro_produto = _erro_bloqueio_produto(db, empresa.id, produto, data_evento_obj)
+    if erro_produto:
+        return RedirectResponse(f"/painel/cliente/{cliente.id}?erro={quote(erro_produto)}", status_code=303)
     tipo_evento_rapido = "residencial"
     duracao_rapida = (_duracao_vitrine_produto(db, empresa, produto, tipo_evento_rapido)
                       if produto else _duracao_base_empresa_tipo(db, empresa, tipo_evento_rapido))
@@ -19185,6 +19306,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
 
     itens = []
     produto_selecionado = None
+    bloqueios_produto_dia = _bloqueios_produtos_na_data(db, empresa.id, data_consulta)
     for produto in produtos:
         total = max(0, int(produto.quantidade_disponivel or 0))
         alugados = max(0, int(alugado_por_produto.get(produto.id, 0)))
@@ -19196,6 +19318,9 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             comprometido_recursos,
             disponivel_fisico,
         )
+        bloqueio_produto = bloqueios_produto_dia.get(int(produto.id))
+        if bloqueio_produto:
+            disponiveis = 0
         conflito_produto = alugados > total
         conflito_recursos = any(
             detalhe["comprometido"] > detalhe["estoque_total"] for detalhe in recursos_detalhes
@@ -19211,6 +19336,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
         )
         dados = {
             "produto": produto,
+            "bloqueio_produto": bloqueio_produto,
             "total": total,
             "alugados": alugados,
             "disponivel_fisico": disponivel_fisico,
@@ -19276,7 +19402,12 @@ def api_estoque_produto(
         )
     else:
         disponiveis, recursos = disponivel_fisico, []
+    bloqueio_produto = _bloqueios_produtos_na_data(db, empresa.id, data_consulta).get(int(produto.id))
+    if bloqueio_produto:
+        disponiveis = 0
     return JSONResponse({
+        "bloqueado": bool(bloqueio_produto),
+        "motivo_bloqueio": (bloqueio_produto.descricao or "") if bloqueio_produto else "",
         "produto_id": produto.id,
         "produto": produto.nome,
         "data": data_consulta.isoformat(),

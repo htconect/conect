@@ -871,6 +871,23 @@ class BloqueioData(Base):
     empresa = relationship("Empresa")
 
 
+class BloqueioProduto(Base):
+    """Impedimento de novas locações de um modelo por intervalo de datas (inclusive)."""
+    __tablename__ = "bloqueios_produto"
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    produto_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_inicio = Column(Date, nullable=False, index=True)
+    data_fim = Column(Date, nullable=False, index=True)
+    descricao = Column(String(160), nullable=True)
+    ativo = Column(Boolean, nullable=False, default=True)
+    criado_em = Column(DateTime, server_default=func.now(), nullable=False)
+
+    produto = relationship("ProdutoServico")
+    empresa = relationship("Empresa")
+
+
 class Agenda(Base):
     __tablename__ = "agenda"
 

@@ -5,6 +5,7 @@
   <p class="mini">Locação</p>
   <h1>Disponibilidade</h1>
   <p class="texto-discreto">Escolha a data e veja rapidamente o que pode ser alugado.</p>
+  <p><a href="/painel/vitrine#bloqueios-equipamentos">Gerenciar bloqueios de equipamentos por data</a></p>
 </section>
 
 <form method="get" class="box consulta-data">
@@ -16,6 +17,9 @@
 <section class="card detalhe-disponibilidade">
   <a class="voltar" href="/painel/disponibilidade?data={{ data_consulta.isoformat() }}">← Todos os itens</a>
   <h2>{{ produto_selecionado.produto.nome }}</h2>
+  {% if produto_selecionado.bloqueio_produto %}
+    <div class="box aviso"><b>Bloqueado para novos aluguéis nesta data.</b> {{ produto_selecionado.bloqueio_produto.descricao or '' }} <a href="/painel/vitrine#bloqueios-equipamentos">Gerenciar bloqueios</a></div>
+  {% endif %}
   <div class="resumo-disponibilidade">
     <div><small>Total</small><b>{{ produto_selecionado.total }}</b></div>
     <div><small>Alugados</small><b>{{ produto_selecionado.alugados }}</b></div>
@@ -89,6 +93,7 @@
     <div>
       <b>{{ item.produto.nome }}</b>
       <small>{{ item.disponiveis }} disponível(is) · {{ item.alugados }} alugado(s)</small>
+      {% if item.bloqueio_produto %}<small><b>Aluguel bloqueado nesta data</b>{% if item.bloqueio_produto.descricao %} · {{ item.bloqueio_produto.descricao }}{% endif %}</small>{% endif %}
       {% if item.conflito_produto %}<small><b>ATENÇÃO — PRODUTO EXCEDIDO</b></small>{% endif %}{% if item.conflito_recursos %}<small><b>ATENÇÃO — RECURSO EXCEDIDO</b></small>{% elif item.limitado_recursos %}<small>Limitado por recurso de estoque</small>{% endif %}
     </div>
     <strong>{% if item.status == 'disponivel' %}<i class="bi bi-check-circle status-disponivel"></i>{% elif item.status == 'atencao' %}<i class="bi bi-exclamation-circle status-atencao"></i>{% elif item.status == 'conflito' %}<i class="bi bi-exclamation-triangle status-conflito"></i>{% else %}<i class="bi bi-x-circle status-indisponivel"></i>{% endif %}</strong>
