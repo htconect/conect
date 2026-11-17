@@ -43,6 +43,7 @@
         <summary aria-label="Abrir menu"><i class="bi bi-list"></i></summary>
         <div class="menu-topo-card">
           <a href="/painel/vitrine"><i class="bi bi-shop"></i> Vitrine pública</a>
+          {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('agenda') or request.session.get('acessos', {}).get('cadastros') %}<a href="/painel/bloqueios"><i class="bi bi-calendar-x"></i> Bloqueios</a>{% endif %}
           <a href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i> Contratos</a>
           {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('buscar_cliente') %}<a href="/painel/clientes"><i class="bi bi-search"></i> Buscar cliente</a>{% endif %}
           <strong>Cadastros</strong>
@@ -94,6 +95,7 @@
     <a class="{% if request.url.path == '/painel' %}ativo{% endif %}" href="/painel"><i class="bi bi-grid-1x2-fill"></i><span>Início</span></a>
     <a class="{% if request.url.path == '/painel/vitrine' %}ativo{% endif %}" href="/painel/vitrine"><i class="bi bi-shop"></i><span>Vitrine pública</span></a>
     <a class="{% if request.url.path.startswith('/painel/disponibilidade') %}ativo{% endif %}" href="/painel/disponibilidade"><i class="bi bi-calendar3"></i><span>Disponibilidade</span></a>
+    {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('agenda') or request.session.get('acessos', {}).get('cadastros') %}<a class="{% if request.url.path == '/painel/bloqueios' %}ativo{% endif %}" href="/painel/bloqueios"><i class="bi bi-calendar-x"></i><span>Bloqueios</span></a>{% endif %}
     {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('buscar_cliente') %}<a class="{% if request.url.path.startswith('/painel/clientes') or request.url.path.startswith('/painel/cliente/') %}ativo{% endif %}" href="/painel/clientes"><i class="bi bi-search"></i><span>Buscar cliente</span></a>{% endif %}
     <a class="{% if request.url.path.startswith('/painel/solicitacoes') or request.url.path.startswith('/painel/solicitacao/') or request.url.path.startswith('/painel/contrato-novo') %}ativo{% endif %}" href="/painel/solicitacoes"><i class="bi bi-file-earmark-check"></i><span>Contratos</span></a>
     <a class="{% if request.url.path.startswith('/painel/agenda') %}ativo{% endif %}" href="/painel/agenda"><i class="bi bi-calendar3-week"></i><span>Agenda</span></a>

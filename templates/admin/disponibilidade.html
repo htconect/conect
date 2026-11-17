@@ -5,7 +5,7 @@
   <p class="mini">Locação</p>
   <h1>Disponibilidade</h1>
   <p class="texto-discreto">Escolha a data e veja rapidamente o que pode ser alugado.</p>
-  <p><a href="/painel/vitrine#bloqueios-equipamentos">Gerenciar bloqueios de equipamentos por data</a></p>
+  <p><a href="/painel/bloqueios#equipamentos">Gerenciar bloqueios de equipamentos por data</a></p>
 </section>
 
 <form method="get" class="box consulta-data">
@@ -18,7 +18,7 @@
   <a class="voltar" href="/painel/disponibilidade?data={{ data_consulta.isoformat() }}">← Todos os itens</a>
   <h2>{{ produto_selecionado.produto.nome }}</h2>
   {% if produto_selecionado.bloqueio_produto %}
-    <div class="box aviso"><b>Bloqueado para novos aluguéis nesta data.</b> {{ produto_selecionado.bloqueio_produto.descricao or '' }} <a href="/painel/vitrine#bloqueios-equipamentos">Gerenciar bloqueios</a></div>
+    <div class="box aviso"><b>Bloqueado para novos aluguéis nesta data.</b> {{ produto_selecionado.bloqueio_produto.descricao or '' }} <a href="/painel/bloqueios#equipamentos">Gerenciar bloqueios</a></div>
   {% endif %}
   <div class="resumo-disponibilidade">
     <div><small>Total</small><b>{{ produto_selecionado.total }}</b></div>

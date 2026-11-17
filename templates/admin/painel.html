@@ -97,6 +97,12 @@ document.addEventListener('DOMContentLoaded', function(){
         <span><i class="bi bi-calendar3"></i></span>
         <div><b>Disponibilidade</b><small>Consultar por data</small></div>
     </a>
+    {% if request.session.get('acesso_total') or request.session.get('acessos', {}).get('agenda') or request.session.get('acessos', {}).get('cadastros') %}
+    <a class="cartao-acao" href="/painel/bloqueios">
+        <span><i class="bi bi-calendar-x"></i></span>
+        <div><b>Bloqueios</b><small>Datas gerais ou equipamento específico</small></div>
+    </a>
+    {% endif %}
     <a class="cartao-acao" href="/painel/clientes">
         <span><i class="bi bi-person"></i></span>
         <div><b>Buscar cliente</b><small>CPF ou telefone</small></div>

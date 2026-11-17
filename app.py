@@ -69,6 +69,10 @@ class ControleAcessoMiddleware:
             if session.get("empresa_id") and not session.get("acesso_total"):
                 area = self.area_da_rota(path)
                 acessos = session.get("acessos") or {}
+                if path == "/painel/bloqueios" and not (acessos.get("agenda") or acessos.get("cadastros")):
+                    response = RedirectResponse("/painel/acesso-negado?area=agenda", status_code=303)
+                    await response(scope, receive, send)
+                    return
                 if area and not acessos.get(area, False):
                     response = RedirectResponse(f"/painel/acesso-negado?area={area}", status_code=303)
                     await response(scope, receive, send)
@@ -78,6 +82,8 @@ class ControleAcessoMiddleware:
     @staticmethod
     def area_da_rota(path: str):
         # A permissão protege o módulo de destino. Pendências e dados exibidos no painel continuam visíveis.
+        if path == "/painel/bloqueios":
+            return None  # Acesso por agenda OU cadastros (controle na middleware).
         if path == "/painel/agenda" or path.startswith("/painel/agenda/"):
             return "agenda"
         if path == "/painel/reservas" or path.startswith("/painel/reservas/"):
@@ -10578,10 +10584,6 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias}
     produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
     produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
-    bloqueios_produtos = (db.query(BloqueioProduto)
-                         .filter(BloqueioProduto.empresa_id == empresa.id,
-                                 BloqueioProduto.ativo.is_(True), BloqueioProduto.data_fim >= date.today())
-                         .order_by(BloqueioProduto.data_inicio.asc(), BloqueioProduto.id.asc()).all())
     oportunidades_db = (
         db.query(VitrineOportunidade)
         .filter(VitrineOportunidade.empresa_id == empresa.id, VitrineOportunidade.status.in_(["pendente", "frete_pendente", "frete_aprovado"]))
@@ -10604,10 +10606,46 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     link_usuario, link_whatsapp = _vitrine_link_do_usuario(request, db, empresa)
     return templates.TemplateResponse("admin/vitrine.html", {
         "request": request, "empresa": empresa, "produtos": produtos, "categorias": categorias,
-        "bloqueios_produtos": bloqueios_produtos, "hoje_iso": date.today().isoformat(),
+        "hoje_iso": date.today().isoformat(),
         "oportunidades": oportunidades,
         "vitrine_url": link_usuario,
         "vitrine_compartilhar_whatsapp": link_whatsapp,
+        "salvo": request.query_params.get("salvo", ""),
+        "erro": request.query_params.get("erro", ""),
+    })
+
+
+@app.get("/painel/bloqueios", response_class=HTMLResponse)
+def painel_bloqueios(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    """Central única, mantendo os dois tipos de bloqueio independentes.
+
+    Bloqueios gerais usam a tabela antiga da agenda; individuais usam
+    bloqueios_produto. O escopo de cada empresa é respeitado em ambas.
+    """
+    acessos = request.session.get("acessos") or {}
+    acesso_total = bool(request.session.get("acesso_total"))
+    pode_geral = acesso_total or bool(acessos.get("agenda"))
+    pode_equipamentos = acesso_total or bool(acessos.get("cadastros"))
+    if not (pode_geral or pode_equipamentos):
+        raise HTTPException(403, "Sem permissão para gerenciar bloqueios.")
+    hoje = date.today()
+    bloqueios_gerais = (db.query(BloqueioData)
+        .filter(BloqueioData.empresa_id == empresa.id,
+                BloqueioData.ativo.is_(True), BloqueioData.data_fim >= hoje)
+        .order_by(BloqueioData.data_inicio.asc(), BloqueioData.id.asc()).all()) if pode_geral else []
+    bloqueios_produtos = (db.query(BloqueioProduto)
+        .options(selectinload(BloqueioProduto.produto))
+        .filter(BloqueioProduto.empresa_id == empresa.id,
+                BloqueioProduto.ativo.is_(True), BloqueioProduto.data_fim >= hoje)
+        .order_by(BloqueioProduto.data_inicio.asc(), BloqueioProduto.id.asc()).all()) if pode_equipamentos else []
+    produtos = (db.query(ProdutoServico)
+        .filter(ProdutoServico.empresa_id == empresa.id, ProdutoServico.ativo.is_(True))
+        .order_by(ProdutoServico.nome.asc()).all()) if pode_equipamentos else []
+    return templates.TemplateResponse("admin/bloqueios.html", {
+        "request": request, "empresa": empresa,
+        "pode_geral": pode_geral, "pode_equipamentos": pode_equipamentos,
+        "bloqueios_gerais": bloqueios_gerais, "bloqueios_produtos": bloqueios_produtos,
+        "produtos": produtos, "hoje_iso": hoje.isoformat(),
         "salvo": request.query_params.get("salvo", ""),
         "erro": request.query_params.get("erro", ""),
     })
@@ -10626,17 +10664,17 @@ def criar_bloqueio_produto(
         inicio = date.fromisoformat(data_inicio)
         fim = date.fromisoformat(data_fim)
     except (ValueError, TypeError):
-        return RedirectResponse("/painel/vitrine?erro=" + quote("Informe datas válidas."), status_code=303)
+        return RedirectResponse("/painel/bloqueios?erro=" + quote("Informe datas válidas.") + "#equipamentos", status_code=303)
     if inicio > fim or fim < date.today():
-        return RedirectResponse("/painel/vitrine?erro=" + quote("Confira o período do bloqueio."), status_code=303)
+        return RedirectResponse("/painel/bloqueios?erro=" + quote("Confira o período do bloqueio.") + "#equipamentos", status_code=303)
     if (fim - inicio).days > 366:
-        return RedirectResponse("/painel/vitrine?erro=" + quote("O bloqueio pode ter até 366 dias."), status_code=303)
+        return RedirectResponse("/painel/bloqueios?erro=" + quote("O bloqueio pode ter até 366 dias.") + "#equipamentos", status_code=303)
     db.add(BloqueioProduto(
         empresa_id=empresa.id, produto_id=produto.id, data_inicio=inicio, data_fim=fim,
         descricao=(descricao or "").strip()[:160] or None, ativo=True,
     ))
     db.commit()
-    return RedirectResponse("/painel/vitrine?salvo=bloqueio#bloqueios-equipamentos", status_code=303)
+    return RedirectResponse("/painel/bloqueios?salvo=equipamento#equipamentos", status_code=303)
 
 
 @app.post("/painel/vitrine/bloqueios-produtos/{bloqueio_id}/excluir")
@@ -10649,7 +10687,7 @@ def excluir_bloqueio_produto(
         raise HTTPException(404)
     db.delete(bloqueio)
     db.commit()
-    return RedirectResponse("/painel/vitrine?salvo=desbloqueio#bloqueios-equipamentos", status_code=303)
+    return RedirectResponse("/painel/bloqueios?salvo=removeu_equipamento#equipamentos", status_code=303)
 
 
 def _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado):
@@ -20214,8 +20252,7 @@ def criar_bloqueio_data(
         descricao=(descricao or "").strip()[:160] or None, ativo=True,
     ))
     db.commit()
-    destino = request.headers.get("referer") or f"/painel/agenda?mes={inicio.strftime('%Y-%m')}"
-    return RedirectResponse(destino, status_code=303)
+    return RedirectResponse("/painel/bloqueios?salvo=geral#gerais", status_code=303)
 
 
 @app.post("/painel/agenda/bloqueios/{bloqueio_id}/excluir")
@@ -20226,7 +20263,7 @@ def excluir_bloqueio_data(
         raise HTTPException(404)
     db.delete(bloqueio)
     db.commit()
-    return RedirectResponse(request.headers.get("referer") or "/painel/agenda", status_code=303)
+    return RedirectResponse("/painel/bloqueios?salvo=removeu_geral#gerais", status_code=303)
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/responsavel-retirada")

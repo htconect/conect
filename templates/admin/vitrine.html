@@ -17,34 +17,7 @@
 
   {% if erro %}<div class="box aviso" style="margin-bottom:16px">{{ erro }}</div>{% endif %}
 
-  <section class="painel-card" id="bloqueios-equipamentos" style="margin:0 0 18px">
-    <header><div><h2>Bloquear aluguel de equipamento por data</h2><p>Impeça novas reservas de um modelo entre duas datas, sem bloquear os demais. Os contratos existentes são preservados.</p></div></header>
-    <div class="painel-corpo">
-      {% if salvo == 'bloqueio' %}<p role="status" style="color:#047857;font-weight:600">Bloqueio criado com sucesso.</p>{% elif salvo == 'desbloqueio' %}<p role="status" style="color:#047857;font-weight:600">Bloqueio removido.</p>{% endif %}
-      <form method="post" action="/painel/vitrine/bloqueios-produtos" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:14px">
-        <label style="flex:2;min-width:190px">Equipamento<br><select name="produto_id" required style="width:100%;min-height:42px">
-          {% for p in produtos if p.ativo %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}
-        </select></label>
-        <label>De<br><input type="date" name="data_inicio" min="{{ hoje_iso }}" value="{{ hoje_iso }}" required style="min-height:42px"></label>
-        <label>Até (inclusive)<br><input type="date" name="data_fim" min="{{ hoje_iso }}" required style="min-height:42px"></label>
-        <label style="flex:2;min-width:180px">Motivo (opcional)<br><input type="text" name="descricao" maxlength="160" placeholder="Ex.: manutenção ou evento interno" style="width:100%;min-height:42px"></label>
-        <button class="botao" type="submit" style="min-height:42px">Bloquear equipamento</button>
-      </form>
-      <p class="texto-discreto">Os dias inicial e final ficam bloqueados. Reservas por período que ocupem qualquer um desses dias também serão impedidas. A data de retirada, quando o equipamento é devolvido, não conta como ocupação.</p>
-      {% if bloqueios_produtos %}
-        <div style="display:grid;gap:8px;margin-top:14px">
-          {% for b in bloqueios_produtos %}
-            <div style="border:1px solid #dbe3ee;border-radius:12px;padding:12px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
-              <div><strong>{{ b.produto.nome if b.produto else 'Equipamento excluído' }}</strong><div>{{ b.data_inicio.strftime('%d/%m/%Y') }} até {{ b.data_fim.strftime('%d/%m/%Y') }}</div>{% if b.descricao %}<small>{{ b.descricao }}</small>{% endif %}</div>
-              <form method="post" action="/painel/vitrine/bloqueios-produtos/{{ b.id }}/excluir" onsubmit="return confirm('Liberar novamente esse equipamento para as datas informadas?')"><button type="submit" class="botao btn-krj-ghost">Remover bloqueio</button></form>
-            </div>
-          {% endfor %}
-        </div>
-      {% else %}
-        <p class="texto-discreto">Nenhum bloqueio de equipamento futuro cadastrado.</p>
-      {% endif %}
-    </div>
-  </section>
+  <p style="margin:0 0 16px"><a href="/painel/bloqueios" class="botao btn-krj-ghost"><i class="bi bi-calendar-x"></i> Gerenciar bloqueios de datas e equipamentos</a></p>
 
   <section class="painel-card" style="margin:0 0 18px"><header><div><h2>Reserva por período · link personalizado</h2><p>Mesmo equipamento, valor fechado e retirada em outra data. Para incluir o frete, informe CEP e número. O cupom também é opcional.</p></div></header><div class="painel-corpo">
 {% if request.query_params.get('link_periodo') %}<div style="padding:12px;background:#e9fff4;border-radius:12px;margin-bottom:12px;overflow-wrap:anywhere"><b>Link criado:</b> <a href="{{ request.query_params.get('link_periodo') }}" target="_blank" rel="noopener">Abrir vitrine personalizada</a><input style="width:100%;margin-top:8px" readonly onclick="this.select()" value="{{ request.query_params.get('link_periodo') }}"></div>{% endif %}

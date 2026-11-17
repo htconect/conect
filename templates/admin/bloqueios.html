@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+.bloqueios-admin{max-width:1160px;margin:0 auto;padding-bottom:18px}
+.bloqueios-topo{margin-bottom:18px}
+.bloqueios-topo h1{margin:7px 0;font-size:clamp(1.65rem,3vw,2rem)}
+.bloqueios-topo p{margin:0;color:#64748b}
+.bloqueios-escolha{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.bloqueios-atalho{display:flex;gap:12px;padding:16px;border-radius:16px;background:#fff;border:1px solid #dbe3ee;text-decoration:none;color:#0f172a;align-items:center}
+.bloqueios-atalho:hover{border-color:#60a5fa;background:#f8fbff}
+.bloqueios-atalho i{font-size:1.6rem;color:#2563eb;background:#eff6ff;border-radius:12px;padding:10px;line-height:1}
+.bloqueios-atalho strong{display:block;font-size:1rem}.bloqueios-atalho span{display:block;font-size:.86rem;color:#64748b;margin-top:3px}
+.bloqueio-card{border:1px solid #dbe3ee;border-radius:20px;background:#fff;overflow:hidden;margin-bottom:18px;scroll-margin-top:72px}
+.bloqueio-card>header{padding:18px 20px;border-bottom:1px solid #e2e8f0}
+.bloqueio-card h2{margin:0;font-size:1.25rem}.bloqueio-card>header p{margin:7px 0 0;color:#64748b;font-size:.91rem}
+.bloqueio-conteudo{padding:18px 20px}
+.bloqueio-campos{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.bloqueio-campos label{font-weight:650;display:flex;flex-direction:column;gap:5px;min-width:0}
+.bloqueio-campos input,.bloqueio-campos select{width:100%;min-height:42px;border-radius:10px}
+.bloqueio-campos .campo-completo{grid-column:1/-1}
+.bloqueio-form-acoes{display:flex;align-items:center;justify-content:flex-end}
+.bloqueio-form-acoes button{min-height:42px}
+.bloqueio-lista{display:grid;gap:10px;margin-top:18px}
+.bloqueio-item{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:13px;border-radius:12px;border:1px solid #e2e8f0;background:#f8fafc}
+.bloqueio-item strong{display:block}.bloqueio-item small{display:block;color:#64748b;margin-top:4px}
+.bloqueio-item form{margin:0}
+.bloqueios-nota{font-size:.86rem;color:#64748b;line-height:1.5;margin:14px 0 0}
+.bloqueios-vazio{font-size:.89rem;color:#64748b;margin:8px 0 0}
+.bloqueio-feedback{padding:12px 14px;border:1px solid #a7f3d0;border-radius:12px;background:#ecfdf5;color:#065f46;margin-bottom:14px;font-weight:650}
+.bloqueio-feedback.erro{border-color:#fecaca;background:#fef2f2;color:#991b1b}
+.bloqueio-selo{display:inline-block;color:#7c2d12;background:#ffedd5;border-radius:999px;padding:3px 9px;margin-top:6px;font-size:.76rem}
+@media(max-width:700px){.bloqueios-escolha,.bloqueio-campos{grid-template-columns:1fr}.bloqueio-card>header,.bloqueio-conteudo{padding:16px}.bloqueio-form-acoes button{width:100%}.bloqueio-item form,.bloqueio-item button{width:100%}}
+</style>
+{% endblock %}
+{% block conteudo %}
+<div class="bloqueios-admin">
+  <div class="bloqueios-topo">
+    <a class="voltar" href="/painel">← Início</a>
+    <h1><i class="bi bi-calendar-x"></i> Bloqueios</h1>
+    <p>Controle quando sua empresa recebe novas reservas. Escolha bloquear todas as locações ou somente um equipamento.</p>
+  </div>
+  {% if erro %}<div role="alert" class="bloqueio-feedback erro">{{ erro }}</div>{% endif %}
+  {% if salvo %}
+  <div role="status" class="bloqueio-feedback">{% if salvo == 'geral' %}Datas bloqueadas para todos os equipamentos.{% elif salvo == 'removeu_geral' %}Bloqueio geral removido.{% elif salvo == 'equipamento' %}Equipamento bloqueado nas datas selecionadas.{% elif salvo == 'removeu_equipamento' %}Bloqueio do equipamento removido.{% endif %}</div>
+  {% endif %}
+  <div class="bloqueios-escolha" aria-label="Tipos de bloqueio">
+    {% if pode_geral %}<a class="bloqueios-atalho" href="#gerais"><i class="bi bi-calendar-week"></i><div><strong>Bloqueio geral</strong><span>Para todos os equipamentos, em uma ou mais datas</span></div></a>{% endif %}
+    {% if pode_equipamentos %}<a class="bloqueios-atalho" href="#equipamentos"><i class="bi bi-box-seam"></i><div><strong>Por equipamento</strong><span>Opcional, somente para o modelo escolhido</span></div></a>{% endif %}
+  </div>
+  {% if pode_geral %}
+  <section class="bloqueio-card" id="gerais">
+    <header><h2>1. Bloquear todas as locações</h2><p>Mesmo bloqueio geral de datas que já existia na Agenda. Nenhum equipamento fica disponível para novas reservas comuns no intervalo definido.</p></header>
+    <div class="bloqueio-conteudo">
+      <form method="post" action="/painel/agenda/bloqueios">
+        <div class="bloqueio-campos">
+          <label>Data inicial <input type="date" name="data_inicio" required value="{{ hoje_iso }}"></label>
+          <label>Data final (inclusive) <input type="date" name="data_fim" required value="{{ hoje_iso }}"></label>
+          <label class="campo-completo">Motivo (opcional) <input name="descricao" type="text" maxlength="160" placeholder="Ex.: Feriado ou sem entregas"></label>
+        </div>
+        <div class="bloqueio-form-acoes"><button class="botao" type="submit"><i class="bi bi-calendar-x"></i> Bloquear todas as locações</button></div>
+      </form>
+      <p class="bloqueios-nota">Afeta toda a empresa. Não altera ou cancela contratos já existentes. Links especiais por período mantêm a exceção já existente para bloqueios gerais.</p>
+      <h3>Bloqueios gerais ativos e futuros</h3>
+      {% if bloqueios_gerais %}
+      <div class="bloqueio-lista">
+        {% for b in bloqueios_gerais %}
+        <div class="bloqueio-item">
+          <div><strong>{{ b.data_inicio.strftime('%d/%m/%Y') }} a {{ b.data_fim.strftime('%d/%m/%Y') }}</strong><span class="bloqueio-selo">Todos os equipamentos</span>{% if b.descricao %}<small>{{ b.descricao }}</small>{% endif %}</div>
+          <form method="post" action="/painel/agenda/bloqueios/{{ b.id }}/excluir" onsubmit="return confirm('Remover este bloqueio geral?')"><button type="submit" class="botao btn-krj-ghost">Remover bloqueio</button></form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<p class="bloqueios-vazio">Nenhum bloqueio geral ativo ou futuro.</p>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+  {% if pode_equipamentos %}
+  <section class="bloqueio-card" id="equipamentos">
+    <header><h2>2. Bloquear equipamento específico</h2><p>Bloqueio opcional por modelo: os demais equipamentos continuam disponíveis. Os contratos existentes são preservados.</p></header>
+    <div class="bloqueio-conteudo">
+      <form method="post" action="/painel/vitrine/bloqueios-produtos">
+        <div class="bloqueio-campos">
+          <label class="campo-completo">Equipamento
+            <select name="produto_id" required>
+              <option value="" disabled selected>Selecione um equipamento</option>
+              {% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>Data inicial <input type="date" name="data_inicio" min="{{ hoje_iso }}" value="{{ hoje_iso }}" required></label>
+          <label>Data final (inclusive) <input type="date" name="data_fim" min="{{ hoje_iso }}" required></label>
+          <label class="campo-completo">Motivo (opcional) <input name="descricao" type="text" maxlength="160" placeholder="Ex.: Manutenção ou uso próprio"></label>
+        </div>
+        <div class="bloqueio-form-acoes"><button class="botao" type="submit" {% if not produtos %}disabled{% endif %}><i class="bi bi-box-seam"></i> Bloquear equipamento</button></div>
+      </form>
+      <p class="bloqueios-nota">Os dias inicial e final ficam bloqueados. Locação por vários dias é impedida se qualquer dia de uso coincidir. A data da retirada não é considerada dia ocupado, salvo se houver outra locação iniciando nesse dia.</p>
+      <h3>Equipamentos bloqueados — ativos e futuros</h3>
+      {% if bloqueios_produtos %}
+      <div class="bloqueio-lista">
+        {% for b in bloqueios_produtos %}
+        <div class="bloqueio-item">
+          <div><strong>{{ b.produto.nome if b.produto else 'Equipamento excluído' }}</strong><span>{{ b.data_inicio.strftime('%d/%m/%Y') }} a {{ b.data_fim.strftime('%d/%m/%Y') }}</span>{% if b.descricao %}<small>{{ b.descricao }}</small>{% endif %}</div>
+          <form method="post" action="/painel/vitrine/bloqueios-produtos/{{ b.id }}/excluir" onsubmit="return confirm('Liberar novamente este equipamento para as datas informadas?')"><button type="submit" class="botao btn-krj-ghost">Remover bloqueio</button></form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}<p class="bloqueios-vazio">Nenhum equipamento com bloqueio ativo ou futuro.</p>{% endif %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

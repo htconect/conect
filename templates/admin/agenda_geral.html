@@ -16,16 +16,7 @@
     </div>
   </div>
 
-  <details class="box" style="margin:0 0 14px">
-    <summary style="cursor:pointer;font-weight:900">Bloquear datas</summary>
-    <form class="bloqueio-form" method="post" action="/painel/agenda/bloqueios" style="margin-top:12px">
-      <label><span>Data inicial</span><input type="date" name="data_inicio" required></label>
-      <label><span>Data final</span><input type="date" name="data_fim" required></label>
-      <label class="descricao"><span>Descrição (opcional)</span><input name="descricao" maxlength="160" placeholder="Ex.: Natal"></label>
-      <button type="submit" class="botao btn-krj-primary"><i class="bi bi-calendar-x"></i> Bloquear</button>
-    </form>
-    {% if bloqueios_mes %}<div class="bloqueio-lista">{% for b in bloqueios_mes %}<span class="bloqueio-chip">{{ b.data_inicio.strftime('%d/%m') }}{% if b.data_fim != b.data_inicio %} a {{ b.data_fim.strftime('%d/%m') }}{% endif %}{% if b.descricao %} · {{ b.descricao }}{% endif %}<form method="post" action="/painel/agenda/bloqueios/{{ b.id }}/excluir" onsubmit="return confirm('Excluir este bloqueio?')"><button title="Excluir" aria-label="Excluir bloqueio">×</button></form></span>{% endfor %}</div>{% endif %}
-  </details>
+  <p style="margin:0 0 14px"><a class="botao-secundario" href="/painel/bloqueios" style="text-decoration:none;display:inline-flex;align-items:center;gap:7px;padding:9px 12px"><i class="bi bi-calendar-x"></i> Gerenciar bloqueios</a></p>
 
   <div class="agenda-nav-mes">
     <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_anterior }}" aria-label="Mês anterior">‹</a>
