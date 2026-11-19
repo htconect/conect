@@ -113,7 +113,7 @@
           {% if empresa.lokafest_ativo and empresa.lokafest_url and reg.autoriza_parceiros %}
             <a class="botao largura-total btn-krj-info" href="/painel/vitrine/oportunidade/{{ reg.id }}/lokafest" target="_blank"><i class="bi bi-box-arrow-up-right"></i> Indicar no LokaFest</a>
           {% elif empresa.lokafest_ativo and empresa.lokafest_url %}
-            <a class="botao largura-total btn-krj-warning" href="/painel/vitrine/oportunidade/{{ reg.id }}/solicitar-autorizacao" target="_blank"><i class="bi bi-whatsapp"></i> Solicitar autorização</a>
+            <a class="botao largura-total btn-krj-warning" href="/painel/vitrine/oportunidade/{{ reg.id }}/solicitar-autorizacao"><i class="bi bi-whatsapp"></i> Solicitar autorização</a>
           {% else %}
             <a class="botao largura-total btn-krj-warning" href="/painel/empresa#integracoes"><i class="bi bi-gear"></i> Configurar LokaFest</a>
           {% endif %}

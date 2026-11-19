@@ -43,7 +43,7 @@
   <small>RASCUNHO DA VITRINE · LIBERADO</small>
   <b>Aguardando o cliente completar o cadastro</b>
   <p>Equipamentos e condições comerciais já estão preenchidos. O cliente completa somente os dados restantes e segue direto para aceite e pagamento.</p>
-  <a class="botao-whats largura-total" href="/painel/solicitacao/{{ item.id }}/pre-reserva/cadastro-whatsapp" target="_blank"><i class="bi bi-whatsapp"></i> Enviar / reenviar cadastro pelo WhatsApp</a>
+  <a class="botao-whats largura-total" href="/painel/solicitacao/{{ item.id }}/pre-reserva/cadastro-whatsapp"><i class="bi bi-whatsapp"></i> Enviar / reenviar cadastro pelo WhatsApp</a>
 </section>
 {% endif %}
 
@@ -83,6 +83,33 @@
           <button type="submit" class="botao-secundario">Salvar retirada</button>
         </form>
       </div>
+    {% endif %}
+    {% if item.contrato_id and tem_itens and item.status not in ['cancelada', 'cancelado_cliente', 'rejeitada', 'aguardando_nova_data'] %}
+    <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;margin-top:12px;background:#f8fafc">
+      <h3 style="margin:0 0 8px;font-size:1rem">Alterar retirada e horas extras</h3>
+      {% if item.retirada_obrigatoria and item.retirada_data and item.data_evento and item.retirada_data > item.data_evento %}
+      <p class="texto-discreto">Contrato de vários dias: utilize a edição completa para alterar o período, sem converter o aluguel em horas.</p>
+      {% else %}
+      <form method="post" action="/painel/solicitacao/{{ item.id }}/personalizar-horario"
+            id="formPersonalizarHorario" style="display:flex;flex-wrap:wrap;align-items:end;gap:12px"
+            data-inicio="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}"
+            data-base="{{ duracao_base_ajuste_horas }}"
+            data-limite="{{ empresa.retirada_hora_maxima or '22:00' }}"
+            data-primeira="{{ empresa.hora_extra_primeira_valor or 0 }}"
+            data-demais="{{ empresa.hora_extra_demais_valor or 0 }}"
+            data-total="{{ item.valor or 0 }}" data-horas-valor="{{ item.valor_horas_adicionais or 0 }}">
+        {% if empresa.retirada_cortesia_proximo_dia %}
+        <label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" id="retiradaMesmoDiaAdmin" name="retirada_mesmo_dia" value="1" {% if item.retirada_obrigatoria %}checked{% endif %}> Retirar no mesmo dia</label>
+        {% else %}<input type="hidden" name="retirada_mesmo_dia" value="1"><b>Retirada no mesmo dia</b>{% endif %}
+        <label style="margin:0">Horas adicionais
+          <input id="horasAdicionaisAdmin" type="number" name="horas_adicionais" value="{{ item.horas_adicionais or 0 }}" min="0" max="24" step="1" style="width:95px">
+        </label>
+        <span id="resumoRetiradaAdmin" class="texto-discreto" style="flex:1 1 180px">Frete preservado · limite {{ empresa.retirada_hora_maxima or '22:00' }}.</span>
+        <button id="salvarRetiradaAdmin" type="submit" class="botao-secundario">Salvar alteração</button>
+      </form>
+      <p class="texto-discreto" style="margin-top:8px">1ª hora: R$ {{ empresa.hora_extra_primeira_valor|moeda_br }} · demais: R$ {{ empresa.hora_extra_demais_valor|moeda_br }}. Atualiza o contrato e a operação, sem recalcular frete. Depois, reenvie o contrato pelo WhatsApp.</p>
+      {% endif %}
+    </div>
     {% endif %}
     <div style="margin-top:12px;font-size:.85rem">
       <strong>Responsável pelo contrato:</strong> {{ item.responsavel_contrato or 'Não definido' }}
@@ -174,13 +201,13 @@
 <section class="proxima-acao">
   <small>Próxima ação</small>
   <b>Salvar e enviar para o cliente</b>
-  <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
+  <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> {% if item.opcionais_reenvio_pendente %}Reenviar aceite atualizado{% else %}WhatsApp para aceite{% endif %}</a>
 </section>
 {% elif contrato_pendente %}
 <section class="proxima-acao aviso-acao">
   <small>Status</small>
   <b>Aguardando aceite do cliente</b>
-  <a class="botao-whats largura-total" target="_blank" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
+  <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> {% if item.opcionais_reenvio_pendente %}Reenviar aceite atualizado{% else %}WhatsApp para aceite{% endif %}</a>
 </section>
 {% elif item.status in ["cancelada", "cancelado_cliente", "rejeitada"] and vitrine_lokafest_cancelado %}
 <section class="proxima-acao aviso-acao">
@@ -201,7 +228,7 @@
   {% if item.aceite_em %}<p class="texto-discreto">Aceite registrado em {{ item.aceite_em|datahora_local }}{% if aceite_manual_ativo(item) and item.aceite_manual_por %} por {{ item.aceite_manual_por }}{% endif %}.</p>{% endif %}
   <button class="botao largura-total btn-krj-primary" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
   {% if pago > 0 or item.status != "aceite_pagamento_pendente" %}
-    <a class="botao-whats largura-total" target="_blank" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
+    <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> {% if item.opcionais_reenvio_pendente %}Enviar contrato atualizado{% else %}WhatsApp contrato{% endif %}</a>
   {% endif %}
 </section>
 {% else %}
@@ -450,14 +477,14 @@
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
       <button class="link-botao" type="button" onclick="toggleBloco('formPagamento')">Registrar pagamento</button>
       {% if usa_opcionais and item.contrato_id %}
-        <a class="link-botao" target="_blank" href="/painel/solicitacao/{{ item.id }}/whatsapp-opcionais">Enviar catálogo de opcionais</a>
+        <a class="link-botao" href="/painel/solicitacao/{{ item.id }}/whatsapp-opcionais">Enviar catálogo de opcionais</a>
       {% endif %}
       {% if item.opcionais_reenvio_pendente %}
         <strong style="color:#b45309">Contrato alterado — reenviar pelo WhatsApp</strong>
       {% endif %}
       {% if contrato_aceito and link_contrato_whatsapp %}
         {% if not fluxo_infinitepay or pago > 0 %}
-          <a class="link-botao" target="_blank" rel="noopener noreferrer" href="{{ link_contrato_whatsapp }}" onclick="setTimeout(function(){window.location.reload()}, 1500)">{% if item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
+          <a class="link-botao" rel="noopener noreferrer" href="{{ link_contrato_whatsapp }}">{% if item.opcionais_reenvio_pendente %}Enviar contrato atualizado{% elif item.contrato_enviado_em %}Reenviar contrato{% else %}Enviar contrato{% endif %}</a>
           {% if not item.contrato_enviado_em or item.opcionais_reenvio_pendente %}
           <form method="post" action="/painel/solicitacao/{{ item.id }}/contrato-enviado" style="display:inline;margin:0" onsubmit="return confirm('Você realmente enviou o contrato pelo WhatsApp?')">
             <button type="submit" class="link-botao" style="border-color:#067647;color:#067647">Contrato enviado</button>
@@ -518,7 +545,7 @@
         <div class="infinitepay-acoes">
           {% if c.checkout_url and c.checkout_url.startswith('https://') %}
           <a class="botao secundario" href="{{ c.checkout_url }}" target="_blank" rel="noopener noreferrer">Abrir InfinitePay</a>
-          <a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/reenviar-link" target="_blank" rel="noopener noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i> Reenviar link</a>
+          <a class="botao secundario" href="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/reenviar-link" rel="noopener noreferrer"><i class="bi bi-whatsapp" aria-hidden="true"></i> Reenviar link</a>
           {% endif %}
           <form method="post" action="/painel/solicitacao/{{ item.id }}/infinitepay/{{ c.id }}/cancelar" onsubmit="return confirm('Cancelar esta cobrança no Conect e liberar uma nova? O registro será preservado para auditoria.')">
             <button class="remover-item-texto" type="submit">Cancelar e liberar nova</button>
@@ -632,9 +659,9 @@
 
   {% if tem_itens %}
     <a class="botao largura-total btn-krj-info" href="{{ link_contrato_visual }}" target="_blank">Ver tela de aceite</a>
-    <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}" target="_blank"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp para aceite</a>
+    <a class="botao-whats largura-total" href="{{ link_aceite_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> {% if item.opcionais_reenvio_pendente %}Reenviar aceite atualizado{% else %}WhatsApp para aceite{% endif %}</a>
     {% if contrato_aceito %}
-      <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}" target="_blank"><i class="bi bi-whatsapp" aria-hidden="true"></i> WhatsApp contrato</a>
+      <a class="botao-whats largura-total" href="{{ link_contrato_whatsapp }}"><i class="bi bi-whatsapp" aria-hidden="true"></i> {% if item.opcionais_reenvio_pendente %}Enviar contrato atualizado{% else %}WhatsApp contrato{% endif %}</a>
       <a class="botao largura-total" href="{{ link_contrato_pdf }}" target="_blank">Gerar PDF</a>
     {% endif %}
   {% endif %}
@@ -1043,5 +1070,28 @@ document.addEventListener('change',ev=>{
   if(ev.target?.name==='produto_id'||ev.target?.name==='quantidade')queueMicrotask(()=>renderEstoqueOpcionaisAdmin());
 });
 document.addEventListener('DOMContentLoaded',()=>consultarEstoqueOpcionaisAdmin());
+</script>
+<script>
+(()=>{
+ const form=document.getElementById('formPersonalizarHorario');if(!form)return;
+ const dia=document.getElementById('retiradaMesmoDiaAdmin'),horas=document.getElementById('horasAdicionaisAdmin'),
+   resumo=document.getElementById('resumoRetiradaAdmin'),botao=document.getElementById('salvarRetiradaAdmin');
+ const minutos=t=>{const [h,m]=(t||'').split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:NaN};
+ const br=v=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v);
+ function atualizar(){
+  const mesmoDia=dia?dia.checked:true;horas.disabled=!mesmoDia;
+  const qtd=mesmoDia?Number(horas.value):0;
+  const totalMin=minutos(form.dataset.inicio)+Number(form.dataset.base||0)+qtd*60;
+  const invalido=!Number.isInteger(qtd)||qtd<0||qtd>24||!Number.isFinite(totalMin)||
+        (mesmoDia&&(totalMin>=1440||totalMin>minutos(form.dataset.limite)));
+  const valor=qtd>0?Number(form.dataset.primeira||0)+Math.max(0,qtd-1)*Number(form.dataset.demais||0):0;
+  const total=Number(form.dataset.total||0)-Number(form.dataset.horasValor||0)+valor;
+  const fim=`${String(Math.floor((totalMin%1440)/60)).padStart(2,'0')}:${String(totalMin%60).padStart(2,'0')}`;
+  resumo.textContent=invalido?`Retirada inválida. Limite ${form.dataset.limite}.`:
+    `${mesmoDia?'Retirada às '+fim:'Retirada no dia seguinte (cortesia)'} · Horas: ${br(valor)} · Total: ${br(total)} · Frete mantido`;
+  resumo.style.color=invalido?'#b42318':'';botao.disabled=invalido;
+ }
+ if(dia)dia.addEventListener('change',atualizar);horas.addEventListener('input',atualizar);atualizar();
+})();
 </script>
 {% endblock %}

@@ -18,11 +18,14 @@
     <h1 style="margin:7px 0">Catálogo de opcionais</h1>
     <p>Escolha seus adicionais com tranquilidade. Marque o que deseja incluir ou desmarque para retirar.</p>
     <p class="texto-discreto">Cada marcação inclui a quantidade cadastrada. Você pode escolher vários opcionais.</p>
-    {% if sucesso %}<div role="status" style="padding:12px;background:#dcfce7;color:#166534;border-radius:10px"><b>Escolhas salvas!</b> Nosso atendimento recebeu a pendência para reenviar o contrato atualizado, quando houver alterações.</div>{% endif %}
+    {% if sucesso %}<div role="status" style="padding:12px;background:#dcfce7;color:#166534;border-radius:10px"><b>Escolhas salvas!</b> O mesmo contrato foi atualizado. Se o valor mudou, o atendimento deverá enviar a versão atualizada pelo WhatsApp. <a href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}">Conferir contrato</a>.</div>{% endif %}
     {% if erro %}<div role="alert" style="padding:12px;background:#fee2e2;color:#991b1b;border-radius:10px;margin-top:10px">
       {% if erro == 'pago' %}Não é possível retirar esse opcional: o valor já foi pago ou a remoção supera o saldo restante.
       {% elif erro == 'estoque' %}Um opcional selecionado está sem estoque suficiente na data. Atualize sua escolha.
       {% elif erro == 'cobranca' %}Há uma cobrança em andamento. Fale com o atendimento para atualizar os opcionais antes de pagar.
+      {% elif erro == 'divergencia' %}O valor deste contrato precisa ser conferido pelo atendimento antes de adicionar ou retirar opcionais. Nenhuma alteração foi feita.
+      {% elif erro == 'horario' %}{{ request.query_params.get('detalhe') or 'O horário de retirada não é permitido.' }}
+      {% elif erro == 'retirada_concluida' %}A retirada já foi concluída e não pode ser alterada.
       {% elif erro == 'encerrado' %}Este contrato não permite mais alterações de opcionais.
       {% else %}Uma opção não está mais disponível. Confira o catálogo e tente novamente.{% endif %}</div>{% endif %}
   </div>
@@ -35,20 +38,52 @@
         <span class="extras-conteudo">
           <b>{{ opc.nome }}</b>
           <small>{{ opc.quantidade }} {{ 'unidade' if opc.quantidade == 1 else 'unidades' }} · R$ {{ opc.preco|moeda_br }}</small>
-          <span class="extras-escolha"><input type="checkbox" name="opcional_id" value="{{ opc.id }}" data-preco="{{ opc.preco }}" {% if opc.selecionado %}checked{% endif %} {% if not opc.disponivel %}disabled{% endif %}>
+          <span class="extras-escolha"><input type="checkbox" name="opcional_id" value="{{ opc.id }}" data-preco="{{ opc.preco }}" {% if opc.selecionado %}checked{% endif %} {% if not opc.disponivel %}disabled{% endif %}>{% if opc.selecionado and not opc.disponivel %}<input type="hidden" name="opcional_id" value="{{ opc.id }}">{% endif %}
           {% if not opc.disponivel %}<span style="color:#b42318">Sem estoque</span>{% elif opc.selecionado %}Incluído · retirar{% else %}Adicionar{% endif %}</span>
         </span>
       </label>
     {% else %}<p>Não há opcionais disponíveis no momento.</p>{% endfor %}
     </div>
     {% if ausentes %}<div style="margin-top:15px">{% for opc in ausentes %}<small>Já contratado: {{ opc.quantidade }}x {{ opc.nome }} (não editável pelo catálogo)</small>{% endfor %}</div>{% endif %}
+    {% if pode_alterar_retirada %}
+    <div id="ajusteRetirada" style="margin:16px 0;padding:16px;border:1px solid #cbd5e1;border-radius:13px;background:#f8fafc"
+         data-inicio="{{ item.hora_inicio.strftime('%H:%M') if item.hora_inicio else '' }}"
+         data-base="{{ duracao_base_minutos }}"
+         data-limite="{{ empresa.retirada_hora_maxima or '22:00' }}"
+         data-primeira="{{ empresa.hora_extra_primeira_valor or 0 }}"
+         data-demais="{{ empresa.hora_extra_demais_valor or 0 }}">
+      <input type="hidden" name="alterar_retirada" value="1">
+      <h3 style="margin:0 0 8px">Retirada e horas adicionais</h3>
+      <p class="texto-discreto">Você também pode alterar o dia de retirada e acrescentar horas ao equipamento já contratado, sem modificar o frete.</p>
+      {% if empresa.retirada_cortesia_proximo_dia %}
+      <label style="display:flex;align-items:center;gap:9px;margin:12px 0">
+        <input type="checkbox" name="retirada_mesmo_dia" id="retiradaMesmoDiaExtra" value="1" {% if item.retirada_obrigatoria %}checked{% endif %}>
+        <b>Preciso que retire no mesmo dia</b>
+      </label>
+      <p class="texto-discreto">Desmarcado: permanece a cortesia de retirada no dia seguinte, sem cobrança de horas adicionais.</p>
+      {% else %}
+      <input type="hidden" name="retirada_mesmo_dia" value="1"><p><b>Retirada no mesmo dia</b></p>
+      {% endif %}
+      <label for="quantidadeHorasExtra" style="display:block;margin-top:12px"><b>Horas adicionais</b> (além do período contratado)</label>
+      <input type="number" name="horas_adicionais" id="quantidadeHorasExtra" value="{{ item.horas_adicionais or 0 }}" min="0" max="24" step="1" style="max-width:150px">
+      <p class="texto-discreto" style="margin:8px 0">1ª hora: R$ {{ empresa.hora_extra_primeira_valor|moeda_br }} · demais: R$ {{ empresa.hora_extra_demais_valor|moeda_br }} cada.</p>
+      <p>Previsão de retirada: <b id="retiradaPrevistaExtra">—</b></p>
+      <p>Horas adicionais: <b id="valorHorasExtra">R$ {{ item.valor_horas_adicionais|moeda_br }}</b></p>
+      <p id="erroRetiradaExtra" role="alert" style="color:#b42318" hidden>O horário escolhido ultrapassa o limite de retirada no mesmo dia.</p>
+    </div>
+    {% else %}
+    <div class="box aviso" style="margin-top:14px">A retirada deste contrato já está definida para outra data. Para alterar esse período, fale com o atendimento.</div>
+    {% endif %}
     <div style="margin:16px 0;padding:14px;border:1px solid #cbd5e1;border-radius:13px">
       <div style="display:flex;justify-content:space-between;gap:8px"><b>Adicionais selecionados</b><strong id="totalExtras">R$ 0,00</strong></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:8px"><span>Frete contratado (não muda)</span><strong>R$ {{ item.valor_frete|moeda_br }}</strong></div>
       <p class="texto-discreto" style="font-size:13px">Total do contrato após salvar (estimado): <b id="novoTotal">R$ {{ item.valor|moeda_br }}</b></p>
       <p class="texto-discreto" style="font-size:13px">Já pago: R$ {{ pago|moeda_br }} · Saldo atual: R$ {{ saldo|moeda_br }}</p>
       <p id="bloqueioRemocao" role="alert" hidden style="color:#b42318">Não é possível remover opcionais acima do saldo a receber. Refaça sua seleção ou fale com o atendimento.</p>
     </div>
     <button type="submit" id="salvarExtras" class="largura-total">Confirmar e salvar opcionais</button>
+    <p id="salvamentoStatus" role="status" aria-live="polite" hidden style="margin:10px 0;color:#475569">Salvando suas escolhas. Não é necessário clicar novamente.</p>
+    <p id="salvamentoLento" role="status" hidden style="margin:10px 0;color:#92400e">O processamento está demorando. <a href="{{ request.url.path }}">Consultar se as escolhas foram salvas</a>. Não feche sem conferir.</p>
     <a class="botao secundario largura-total" href="/e/{{ empresa.slug }}/contrato/{{ item.public_token }}" style="margin-top:10px">Voltar ao contrato</a>
   </form>
 </div>
@@ -56,22 +91,61 @@
 (()=>{
   const form=document.getElementById('catalogoExtras'),inputs=[...form.querySelectorAll('input[name="opcional_id"]')];
   const totalOriginal={{ item.valor|tojson }}, extrasOriginal={{ subtotal_atual|tojson }}, pago={{ pago|tojson }},
-    extrasFixos={{ (ausentes|sum(attribute='valor_total'))|tojson }};
+    extrasFixos={{ (ausentes|sum(attribute='valor_total'))|tojson }},
+    valorHorasOriginal={{ (item.valor_horas_adicionais or 0)|tojson }};
+  const ajuste=document.getElementById('ajusteRetirada'),dia=document.getElementById('retiradaMesmoDiaExtra'),
+        qtdHoras=document.getElementById('quantidadeHorasExtra');
+  const mins=t=>{const [h,m]=(t||'').split(':').map(Number);return Number.isFinite(h)&&Number.isFinite(m)?h*60+m:NaN};
   const preco=el=>Number(el.dataset.preco||0);
   function formatar(v){return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(v)}
   function atualizar(){
     const extras=extrasFixos+inputs.filter(x=>x.checked).reduce((t,x)=>t+preco(x),0);
     const removido=inputs.filter(x=>x.defaultChecked&&!x.checked).reduce((t,x)=>t+preco(x),0);
-    const novo=totalOriginal-extrasOriginal+extras;
+    let horasNovas=valorHorasOriginal, horarioInvalido=false;
+    if(ajuste && qtdHoras){
+      const mesmoDia=dia ? dia.checked : true;
+      qtdHoras.disabled=!mesmoDia;
+      const quantidade=mesmoDia?Number(qtdHoras.value):0;
+      const primeira=Number(ajuste.dataset.primeira||0), demais=Number(ajuste.dataset.demais||0);
+      horasNovas=quantidade>0?primeira+Math.max(0,quantidade-1)*demais:0;
+      const minutos=mins(ajuste.dataset.inicio)+Number(ajuste.dataset.base||0)+quantidade*60;
+      const maximo=mins(ajuste.dataset.limite);
+      horarioInvalido=!Number.isInteger(quantidade)||quantidade<0||quantidade>24||
+        !Number.isFinite(minutos)||(mesmoDia&&(minutos>=1440||minutos>maximo));
+      const horario=`${String(Math.floor((minutos%1440)/60)).padStart(2,'0')}:${String(minutos%60).padStart(2,'0')}`;
+      document.getElementById('retiradaPrevistaExtra').textContent=horarioInvalido?'Horário inválido':
+        mesmoDia?`No mesmo dia, às ${horario}`:'No dia seguinte (cortesia)';
+      document.getElementById('valorHorasExtra').textContent=formatar(horasNovas);
+      document.getElementById('erroRetiradaExtra').hidden=!horarioInvalido;
+    }
+    const novo=totalOriginal-extrasOriginal+extras+horasNovas-valorHorasOriginal;
     document.getElementById('totalExtras').textContent=formatar(extras);
     document.getElementById('novoTotal').textContent=formatar(novo);
     const bloqueado=removido>Math.max(totalOriginal-pago,0)+.009 || novo+.009<pago;
     document.getElementById('bloqueioRemocao').hidden=!bloqueado;
-    document.getElementById('salvarExtras').disabled=bloqueado;
+    document.getElementById('salvarExtras').disabled=bloqueado||horarioInvalido;
   }
-  inputs.forEach(x=>x.addEventListener('change',atualizar));atualizar();
-  form.addEventListener('submit',e=>{if(document.getElementById('salvarExtras').disabled){e.preventDefault();return;}
-    const btn=document.getElementById('salvarExtras');btn.disabled=true;btn.textContent='Salvando escolhas...';});
+  inputs.forEach(x=>x.addEventListener('change',atualizar));
+  if(dia)dia.addEventListener('change',atualizar);
+  if(qtdHoras)qtdHoras.addEventListener('input',atualizar);
+  atualizar();
+  let salvando=false, avisoDemora;
+  form.addEventListener('submit',e=>{
+    const btn=document.getElementById('salvarExtras');
+    if(salvando || btn.disabled){e.preventDefault();return;}
+    salvando=true;btn.disabled=true;btn.textContent='Salvando escolhas...';
+    document.getElementById('salvamentoStatus').hidden=false;
+    avisoDemora=setTimeout(()=>{document.getElementById('salvamentoLento').hidden=false;},12000);
+  });
+  window.addEventListener('pageshow',()=>{
+    // Ao voltar pelo histórico, não deixar o botão congelado em "Salvando".
+    if(avisoDemora)clearTimeout(avisoDemora);
+    salvando=false;
+    document.getElementById('salvamentoStatus').hidden=true;
+    document.getElementById('salvamentoLento').hidden=true;
+    document.getElementById('salvarExtras').textContent='Confirmar e salvar opcionais';
+    atualizar();
+  });
 })();
 </script>
 {% endblock %}

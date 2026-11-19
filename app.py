@@ -2210,6 +2210,8 @@ def montar_mensagem_whatsapp_contrato(request: Request, empresa: Empresa, item: 
     pdf = _link_absoluto(request, 'contrato_cliente_pdf', slug=empresa.slug,
                          solicitacao_id=_ref_publica(db, item))
     linhas = _resumo_reserva_whatsapp(empresa, item, itens)
+    if item.opcionais_reenvio_pendente:
+        linhas.insert(0, "*CONTRATO ATUALIZADO — OPCIONAIS E VALORES*")
     _inserir_link_opcionais_whatsapp(linhas, request, empresa, item, db)
     mensagem_final = mensagens_empresa(empresa).get('confirmacao', '').strip()
     if mensagem_final and mensagem_final != 'Sua reserva foi efetivada com sucesso.\n\nObrigado pela confiança!':
@@ -13135,6 +13137,7 @@ def detalhe_solicitacao(solicitacao_id: int, request: Request, db: Session = Dep
                                        "vitrine_autorizou_parceiros": _vitrine_autorizou_parceiros,
                                        "cupons_ativos": cupons_ativos,
                                        "responsaveis_vitrine": _responsaveis_vitrine_disponiveis(db, empresa),
+                                       "duracao_base_ajuste_horas": int(item.duracao_contratada_minutos or 0) or _duracao_contrato_solicitacao(db, empresa, item),
                                        "pode_editar_responsavel": (lambda perfil: perfil[0] == "admin" or bool(getattr(perfil[1], "acesso_cadastros", False)))(usuario_empresa_atual(db, empresa, request))})
 
 
@@ -13681,6 +13684,50 @@ def salvar_cliente_da_solicitacao(
     db.commit()
     _sincronizar_cliente_aluguel_organiza(db, empresa, item)
     return RedirectResponse(f"/painel/solicitacao/{solicitacao_id}", status_code=303)
+
+
+@app.post("/painel/solicitacao/{solicitacao_id}/personalizar-horario")
+def personalizar_horario_solicitacao(
+    solicitacao_id: int, request: Request,
+    retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais: int = Form(0),
+    db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
+):
+    """Edição de prazo e hora extra do contrato existente, sem recalcular frete."""
+    item = db.query(Solicitacao).filter_by(id=solicitacao_id, empresa_id=empresa.id).with_for_update().first()
+    if not item:
+        raise HTTPException(404)
+    url = f"/painel/solicitacao/{item.id}"
+    if not item.contrato_id or not item.itens or item.status in {"cancelado_cliente", "cancelada", "rejeitada", "aguardando_nova_data"}:
+        return RedirectResponse(url+"?erro="+quote("Este contrato não permite editar a retirada."), status_code=303)
+    try:
+        plano = _projetar_retirada_apos_aceite(db, empresa, item, bool(retirada_mesmo_dia), horas_adicionais)
+    except ValueError as exc:
+        return RedirectResponse(url+"?erro="+quote(str(exc)), status_code=303)
+    if not _retirada_foi_alterada(item, plano):
+        return RedirectResponse(url+"?retirada_atualizada=1", status_code=303)
+    busca = db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id,
+                                      tipo_evento="retirada").first()
+    if busca and busca.status_operacional == "concluido":
+        return RedirectResponse(url+"?erro="+quote("A retirada já foi concluída."), status_code=303)
+    totais = _totais_alteracao_opcionais(item, 0, 0)
+    if totais is None:
+        return RedirectResponse(url+"?erro="+quote("Confira os valores deste contrato antes de adicionar horas. Nenhum dado foi alterado."), status_code=303)
+    valor_novo = round(totais[1] + plano["valor_horas"] - float(item.valor_horas_adicionais or 0), 2)
+    pago = float(db.query(func.coalesce(func.sum(Pagamento.valor), 0)).filter_by(
+        empresa_id=empresa.id, solicitacao_id=item.id).scalar() or 0)
+    if valor_novo + 0.009 < pago:
+        return RedirectResponse(url+"?erro="+quote("O novo valor seria menor que o total já recebido."), status_code=303)
+    if _infinitepay_habilitada(empresa) and _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id):
+        return RedirectResponse(url+"?erro="+quote("Existe uma cobrança pendente. Cancele-a antes de alterar as horas."), status_code=303)
+    anterior = float(item.valor or 0)
+    item.valor = valor_novo
+    descricao = _aplicar_retirada_apos_aceite(db, item, plano)
+    _marcar_reenvio_contrato(item)
+    usuario = str(request.session.get("usuario_nome") or request.session.get("usuario_sistema") or "Atendimento")[:80]
+    db.add(HistoricoOpcionalContrato(empresa_id=empresa.id, solicitacao_id=item.id,
+        descricao=(descricao + " por " + usuario)[:500], valor_anterior=anterior, valor_novo=valor_novo, valor_pago=pago))
+    db.commit()
+    return RedirectResponse(url+"?retirada_atualizada=1", status_code=303)
 
 
 @app.post("/painel/solicitacao/{solicitacao_id}/retirada-obrigatoria")
@@ -22832,6 +22879,145 @@ def _catalogo_opcionais_contrato(db: Session, empresa: Empresa, item: Solicitaca
             "subtotal_atual": round(sum(float(x["valor_total"]) for x in atuais), 2)}
 
 
+def _totais_alteracao_opcionais(item: Solicitacao, adicionar: float, subtrair: float) -> tuple[float, float] | None:
+    """O opcional só altera itens. Frete, descontos e horas ficam CONGELADOS.
+
+    Um total legado inconsistente não é reajustado silenciosamente: o atendimento
+    precisa revisar o contrato antes de permitir que o cliente grave outro valor.
+    Isso impede que um frete esquecido seja perpetuado por uma nova alteração.
+    """
+    equipamentos = round(float(item.valor_equipamentos or 0), 2)
+    frete = round(float(item.valor_frete or 0), 2)
+    desconto = round(float(item.valor_desconto or 0), 2)
+    horas = round(float(item.valor_horas_adicionais or 0), 2)
+    total_atual = round(float(item.valor or 0), 2)
+    total_composicao = _total_pedido_frete_unico(equipamentos, desconto, horas, frete)
+    if equipamentos < -0.009 or abs(total_atual - total_composicao) > 0.011:
+        return None
+    novos_equipamentos = round(equipamentos + adicionar - subtrair, 2)
+    if novos_equipamentos < -0.009 or novos_equipamentos + 0.009 < desconto:
+        return None
+    novo_total = round(total_atual + adicionar - subtrair, 2)
+    if abs(novo_total - _total_pedido_frete_unico(novos_equipamentos, desconto, horas, frete)) > 0.011:
+        return None
+    return novos_equipamentos, novo_total
+
+
+def _projetar_retirada_apos_aceite(db: Session, empresa: Empresa, item: Solicitacao,
+                                   mesmo_dia: bool, quantidade_horas: int) -> dict:
+    """Projeta prazo/cobrança sem consultar frete, cupom ou alterar o contrato.
+
+    O prazo do contrato de vários dias não pode ser convertido por engano
+    em um contrato de algumas horas.
+    """
+    if item.retirada_data and item.data_evento and item.retirada_data > item.data_evento:
+        raise ValueError("Este contrato tem retirada em outra data. Solicite a alteração ao atendimento.")
+    if not item.hora_inicio or not item.data_evento:
+        raise ValueError("O horário inicial do contrato precisa ser conferido pelo atendimento.")
+    try:
+        horas = int(quantidade_horas)
+    except (TypeError, ValueError):
+        raise ValueError("Quantidade de horas adicionais inválida.")
+    if horas < 0 or horas > 24:
+        raise ValueError("Escolha de 0 a 24 horas adicionais.")
+    cortesia_ativa = bool(getattr(empresa, "retirada_cortesia_proximo_dia", False))
+    mesmo_dia = bool(mesmo_dia) if cortesia_ativa else True
+    if not mesmo_dia:
+        horas = 0
+    duracao = int(getattr(item, "duracao_contratada_minutos", 0) or 0)
+    if duracao <= 0:
+        duracao = _duracao_contrato_solicitacao(db, empresa, item)
+    duracao = max(60, duracao)
+    fim_minutos = item.hora_inicio.hour * 60 + item.hora_inicio.minute + duracao + horas * 60
+    if mesmo_dia:
+        limite = _hora_maxima_retirada_empresa(empresa)
+        limite_minutos = limite.hour * 60 + limite.minute
+        if fim_minutos >= 24 * 60 or fim_minutos > limite_minutos:
+            raise ValueError(f"A retirada no mesmo dia deve ocorrer até {limite.strftime('%H:%M')}. Diminua as horas adicionais.")
+    nova_hora_fim = somar_minutos(item.hora_inicio, duracao + horas * 60)
+    return {
+        "mesmo_dia": mesmo_dia,
+        "horas": horas,
+        "valor_horas": _valor_horas_adicionais_empresa(empresa, horas) if mesmo_dia else 0.0,
+        "duracao_base": duracao,
+        "hora_fim": nova_hora_fim,
+        "retirada_data": item.data_evento if mesmo_dia else None,
+        "retirada_hora": nova_hora_fim if mesmo_dia else None,
+        "cortesia": bool(cortesia_ativa and not mesmo_dia),
+    }
+
+
+def _retirada_foi_alterada(item: Solicitacao, plano: dict) -> bool:
+    # Alteração de opcionais nunca deve sobrescrever uma retirada que o operador
+    # agendou manualmente para depois do término contratual.
+    return (bool(item.retirada_obrigatoria) != plano["mesmo_dia"]
+            or int(item.horas_adicionais or 0) != plano["horas"])
+
+
+def _sincronizar_retirada_alterada(db: Session, item: Solicitacao, descricao: str):
+    """Preserva os IDs dos cards e não perde uma busca já roteirizada.
+
+    A rota da equipe exige revisão se a retirada muda; registra aviso operacional.
+    """
+    if not contrato_aprovado_para_operacao(item):
+        return
+    entrega = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id,
+                                        tipo_evento="entrega").first()
+    busca = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id,
+                                      tipo_evento="retirada").first()
+    if not entrega:
+        criar_eventos_operacionais(db, item)
+        entrega = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id,
+                                            tipo_evento="entrega").first()
+        busca = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id,
+                                          tipo_evento="retirada").first()
+    if entrega and entrega.status_operacional != "concluido":
+        entrega.hora_fim = item.hora_fim
+    if item.retirada_obrigatoria:
+        criar_ou_atualizar_retirada_obrigatoria(db, item)
+        busca = db.query(Agenda).filter_by(empresa_id=item.empresa_id, solicitacao_id=item.id,
+                                          tipo_evento="retirada").first()
+    else:
+        data_prevista, hora_prevista = _previsao_retirada_operacional(item, entrega)
+        if busca:
+            busca.data = data_prevista
+            busca.hora_inicio = hora_prevista
+            busca.previsao_entrega = hora_prevista.strftime("%H:%M")
+        elif entrega and entrega.status_operacional == "concluido":
+            busca = _criar_ou_obter_retirada_prevista(db, item, entrega)
+    if busca:
+        quem = datetime.now().strftime("%d/%m/%Y %H:%M")
+        nota = f"[{quem}] Contrato atualizado: {descricao}. Revisar rota e equipe."
+        busca.observacoes_operacionais = ((busca.observacoes_operacionais or "") + "\n" + nota).strip()
+
+
+def _aplicar_retirada_apos_aceite(db: Session, item: Solicitacao, plano: dict):
+    item.duracao_contratada_minutos = plano["duracao_base"]
+    item.horas_adicionais = plano["horas"]
+    item.valor_horas_adicionais = plano["valor_horas"]
+    item.cortesia_retirada = plano["cortesia"]
+    item.hora_fim = plano["hora_fim"]
+    item.retirada_obrigatoria = plano["mesmo_dia"]
+    item.retirada_data = plano["retirada_data"]
+    item.retirada_hora = plano["retirada_hora"]
+    desc = (f"Retirada {'no mesmo dia' if plano['mesmo_dia'] else 'no dia seguinte (cortesia)'}; "
+            f"{plano['horas']} hora(s) adicional(is); "
+            f"término {plano['hora_fim'].strftime('%H:%M')}")
+    _sincronizar_retirada_alterada(db, item, desc)
+    return desc
+
+
+def _marcar_reenvio_contrato(item: Solicitacao):
+    item.opcionais_alterados_em = agora_utc()
+    item.opcionais_reenvio_pendente = True
+    if status_contrato_aceito(item.status):
+        item.contrato_enviado_em = None
+
+
+def _pode_mudar_retirada_apos_aceite(item: Solicitacao) -> bool:
+    return not bool(item.retirada_data and item.data_evento and item.retirada_data > item.data_evento)
+
+
 @app.get("/e/{slug}/contrato/{solicitacao_id}/opcionais", response_class=HTMLResponse)
 def opcionais_cliente(slug: str, solicitacao_id: str, request: Request,
         db: Session = Depends(get_db)):
@@ -22848,6 +23034,8 @@ def opcionais_cliente(slug: str, solicitacao_id: str, request: Request,
         empresa_id=empresa.id, solicitacao_id=item.id).scalar() or 0)
     return templates.TemplateResponse("publico/opcionais_contrato.html", {
         "request": request, "empresa": empresa, "item": item, **catalogo,
+        "pode_alterar_retirada": _pode_mudar_retirada_apos_aceite(item),
+        "duracao_base_minutos": int(item.duracao_contratada_minutos or 0) or _duracao_contrato_solicitacao(db, empresa, item),
         "pago": pago, "saldo": round(max(float(item.valor or 0)-pago, 0), 2),
         "erro": request.query_params.get("erro", ""),
         "sucesso": request.query_params.get("salvo") == "1",
@@ -22877,17 +23065,46 @@ async def salvar_opcionais_cliente(slug: str, solicitacao_id: str, request: Requ
         return RedirectResponse(base_url+"?erro=indisponivel", status_code=303)
     retirar = [x for x in atuais if x.opcional_id and int(x.opcional_id) not in selecionados]
     acrescentar = [cadastro[oid] for oid in (selecionados - atuais_ids)]
-    if not retirar and not acrescentar:
+    alterar_retirada = str(form.get("alterar_retirada", "")) == "1"
+    plano_retirada = None
+    if alterar_retirada:
+        try:
+            plano_retirada = _projetar_retirada_apos_aceite(
+                db, empresa, item, str(form.get("retirada_mesmo_dia", "")) == "1",
+                form.get("horas_adicionais", "0"))
+        except ValueError as exc:
+            return RedirectResponse(base_url+"?erro=horario&detalhe="+quote(str(exc)), status_code=303)
+    horario_mudou = bool(plano_retirada and _retirada_foi_alterada(item, plano_retirada))
+    if not retirar and not acrescentar and not horario_mudou:
         return RedirectResponse(base_url+"?salvo=1", status_code=303)
+    if horario_mudou:
+        busca_existente = db.query(Agenda).filter_by(empresa_id=empresa.id, solicitacao_id=item.id,
+            tipo_evento="retirada").first()
+        if busca_existente and busca_existente.status_operacional == "concluido":
+            return RedirectResponse(base_url+"?erro=retirada_concluida", status_code=303)
     pago = float(db.query(func.coalesce(func.sum(Pagamento.valor), 0)).filter_by(
         empresa_id=empresa.id, solicitacao_id=item.id).scalar() or 0)
     subtrair = sum(float(x.valor_total or 0) for x in retirar)
     adicionar = sum(float(o.valor or 0) * max(1, int(o.quantidade or 1)) for o in acrescentar)
+    # Só altera a parcela equipamentos/opcionais, sem recalcular o frete nem
+    # reinterpretar cupom, descontos ou horas contratadas.
+    totais_atualizados = _totais_alteracao_opcionais(item, adicionar, subtrair)
+    if totais_atualizados is None:
+        logger.warning(
+            "Alteração de opcionais bloqueada por composição divergente (empresa=%s, contrato=%s, "
+            "equipamentos=%s, desconto=%s, horas=%s, frete=%s, total=%s)",
+            empresa.id, item.id, item.valor_equipamentos, item.valor_desconto,
+            item.valor_horas_adicionais, item.valor_frete, item.valor,
+        )
+        return RedirectResponse(base_url+"?erro=divergencia", status_code=303)
+    equipamentos_novos, total_novo = totais_atualizados
+    if horario_mudou:
+        total_novo = round(total_novo + plano_retirada["valor_horas"]
+                           - float(item.valor_horas_adicionais or 0), 2)
     # Não importa quantos opcionais sejam removidos: total não pode ficar abaixo do que já foi recebido.
     # Na remoção vale também a regra explícita do saldo disponível antes da edição.
     if subtrair > max(float(item.valor or 0)-pago, 0)+0.009:
         return RedirectResponse(base_url+"?erro=pago", status_code=303)
-    total_novo = round(float(item.valor or 0) - subtrair + adicionar, 2)
     if total_novo + .009 < pago:
         return RedirectResponse(base_url+"?erro=pago", status_code=303)
     # Checkout antigo não pode permanecer ativo com valor desatualizado.
@@ -22934,12 +23151,11 @@ async def salvar_opcionais_cliente(slug: str, solicitacao_id: str, request: Requ
             item_estoque_id=int(opc.item_estoque_id) if _empresa_modulo_ativo(empresa, "recursos") and opc.item_estoque_id else None,
             nome=opc.nome, quantidade=qtd, valor_unitario=max(float(opc.valor or 0), 0), valor_total=subtotal))
     anterior = float(item.valor or 0)
-    item.valor_equipamentos = round(float(item.valor_equipamentos or 0) + adicionar - subtrair, 2)
+    item.valor_equipamentos = equipamentos_novos
     item.valor = total_novo
-    item.opcionais_alterados_em = agora_utc()
-    item.opcionais_reenvio_pendente = True
-    if status_contrato_aceito(item.status):
-        item.contrato_enviado_em = None  # reabre pendência de envio sem revogar aceite
+    if horario_mudou:
+        descricoes.append(_aplicar_retirada_apos_aceite(db, item, plano_retirada))
+    _marcar_reenvio_contrato(item)  # sem revogar aceite, frete e pagamentos anteriores
     db.add(HistoricoOpcionalContrato(empresa_id=empresa.id, solicitacao_id=item.id,
         descricao="; ".join(descricoes)[:500], valor_anterior=anterior, valor_novo=total_novo, valor_pago=pago))
     db.commit()
