@@ -8855,7 +8855,58 @@ def _coordenadas_cep_referencia(cep: str, dados_cep: dict | None = None):
     return None, None, "referencia_indisponivel"
 
 
-def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, segunda_consulta=None) -> float | None:
+
+def _rotas_parciais_conferidas_por_cep(resposta: dict, cep: str) -> list[float]:
+    """Autoriza rota parcial só após checar o destino viário contra CEP externo confirmado.
+
+    O endereço e o CEP foram previamente validados com ViaCEP. Além disso, a
+    posição de chegada informada pelo Google deve estar próxima da coordenada
+    postal fornecida independentemente por BrasilAPI/AwesomeAPI, com cidade/UF
+    conferidas por _coordenadas_cep_referencia. Nunca aceitar só partialMatch.
+    """
+    if len(_cep_limpo(cep)) != 8:
+        return []
+    geo = ((resposta.get("geocodingResults") or {}).get("destination") or {})
+    tipos = geo.get("type") or []
+    if isinstance(tipos, str):
+        tipos = [tipos]
+    tipos_permitidos = {"street_address", "premise", "subpremise", "route", "intersection", "postal_code"}
+    if not geo.get("placeId") or not geo.get("partialMatch") or not tipos_permitidos.intersection(tipos):
+        return []
+    lat_ref, lon_ref, provedor = _coordenadas_cep_referencia(cep)
+    if lat_ref is None or lon_ref is None:
+        geo_logger.warning("[FRETE] cep=%s sem coordenada postal independente para confirmar a rota parcial", cep)
+        return []
+    distancias = []
+    for rota in resposta.get("routes") or []:
+        if not isinstance(rota, dict):
+            continue
+        metros = rota.get("distanceMeters")
+        if not isinstance(metros, (int, float)) or not 200 <= metros <= 20000000:
+            continue
+        pernas = rota.get("legs") or []
+        chegada = ((pernas[-1].get("endLocation") or {}).get("latLng") or {}) if pernas and isinstance(pernas[-1], dict) else {}
+        try:
+            lat, lon = float(chegada["latitude"]), float(chegada["longitude"])
+            if not _coordenadas_validas_brasil(lat, lon):
+                continue
+            dlat = math.radians(lat - lat_ref)
+            dlon = math.radians(lon - lon_ref)
+            rad = (math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat_ref)) *
+                   math.cos(math.radians(lat)) * math.sin(dlon / 2) ** 2)
+            separacao_km = 6371.0 * 2 * math.asin(min(1.0, math.sqrt(rad)))
+            if separacao_km <= 2.5:
+                distancias.append(round(float(metros) / 1000.0, 3))
+            else:
+                geo_logger.warning("[FRETE] rota parcial distante da referencia postal cep=%s separacao_km=%.1f", cep, separacao_km)
+        except (ValueError, TypeError, KeyError, OverflowError):
+            continue
+    if distancias:
+        geo_logger.info("[FRETE] rota parcial confirmada pelo CEP cep=%s referencia=%s", cep, provedor)
+    return distancias
+
+
+def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, segunda_consulta=None, cep_destino_validado: str = "") -> float | None:
     """Consulta rotas REAIS do Google para automóvel; sem fallback de menor precisão.
 
     A menor distância entre as alternativas trafegáveis serve de referência para
@@ -8879,7 +8930,7 @@ def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, seg
         "https://routes.googleapis.com/directions/v2:computeRoutes",
         data=json.dumps(corpo, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json", "X-Goog-Api-Key": chave,
-                 "X-Goog-FieldMask": "routes.distanceMeters,routes.routeLabels,geocodingResults.origin.placeId,geocodingResults.destination.placeId,geocodingResults.origin.partialMatch,geocodingResults.destination.partialMatch"},
+                 "X-Goog-FieldMask": "routes.distanceMeters,routes.routeLabels,routes.legs.endLocation,geocodingResults.origin.placeId,geocodingResults.destination.placeId,geocodingResults.origin.partialMatch,geocodingResults.destination.partialMatch,geocodingResults.destination.type"},
         method="POST",
     )
     try:
@@ -8888,22 +8939,26 @@ def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, seg
         geocodificados = retorno.get("geocodingResults") or {}
         origem_geo = geocodificados.get("origin") or {}
         destino_geo = geocodificados.get("destination") or {}
-        # O Google às vezes encontra apenas parte da rua/número informado.
-        # Um CEP ou bairro aproximado jamais pode fundamentar cobrança por km.
-        if (not origem_geo.get("placeId") or not destino_geo.get("placeId")
-                or origem_geo.get("partialMatch") or destino_geo.get("partialMatch")):
+        # Uma correspondência parcial não é prova de que o destino está correto.
+        # Aceitar somente se a chegada no Google ficar perto do CEP validado em
+        # fonte postal independente. O ponto da loja nunca pode ser parcial.
+        origem_ok = bool(origem_geo.get("placeId")) and not origem_geo.get("partialMatch")
+        destino_ok = bool(destino_geo.get("placeId"))
+        if origem_ok and destino_ok and destino_geo.get("partialMatch"):
+            distancias = _rotas_parciais_conferidas_por_cep(retorno, cep_destino_validado)
+        elif origem_ok and destino_ok:
+            distancias = [float(r["distanceMeters"]) / 1000.0 for r in retorno.get("routes", [])
+                          if isinstance(r, dict) and isinstance(r.get("distanceMeters"), (float, int))
+                          and 200 <= r["distanceMeters"] <= 20000000]
+        else:
+            distancias = []
+        if not distancias:
             for lado, ponto in (("origem", origem_geo), ("destino", destino_geo)):
                 if not ponto.get("placeId") or ponto.get("partialMatch"):
                     geo_logger.warning("[FRETE] %s: identificador=%s parcial=%s", lado,
                                        bool(ponto.get("placeId")), bool(ponto.get("partialMatch")))
             if segunda_consulta and segunda_consulta != (origem_endereco, destino_endereco):
-                return _calcular_rota_google_km(*segunda_consulta)
-            return None
-        distancias = [float(r["distanceMeters"]) / 1000.0 for r in retorno.get("routes", [])
-                      if isinstance(r, dict) and isinstance(r.get("distanceMeters"), (float, int))
-                      and 200 <= r["distanceMeters"] <= 20000000]
-        if not distancias:
-            geo_logger.error("[FRETE] Google retornou resposta sem rota válida")
+                return _calcular_rota_google_km(*segunda_consulta, cep_destino_validado=cep_destino_validado)
             return None
         return min(distancias)
     except HTTPError as exc:
@@ -8989,7 +9044,7 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         cidade_uf = ", ".join([dados_destino["cidade"], dados_destino["estado"], "Brasil"])
         rua = dados_destino.get("logradouro")
         alternativa = (origem_endereco + ", Brasil", f"{rua}, {numero}, {cidade_uf}") if rua else None
-        distancia_ida = _calcular_rota_google_km(origem_google, destino_endereco, segunda_consulta=alternativa)
+        distancia_ida = _calcular_rota_google_km(origem_google, destino_endereco, segunda_consulta=alternativa, cep_destino_validado=cep)
         if distancia_ida is None or not math.isfinite(distancia_ida) or distancia_ida < 0.2:
             return sob_consulta("Não foi possível confirmar a rota no Google Maps. O frete precisa de aprovação manual.")
         # Corrigir o endereço cadastrado em vez de aceitar trajetos claramente
@@ -21032,22 +21087,6 @@ def vitrine_validar_cupom(
     }
 
 
-def _aplicar_frete_manual_cliente(frete: dict, valor: str) -> dict:
-    """Aceita valor informado pelo cliente somente quando o cálculo ficou sob consulta."""
-    if not frete.get("ok") or not frete.get("consultar"):
-        return frete
-    try:
-        texto = str(valor or "").strip()
-        if "," in texto:
-            texto = texto.replace(".", "").replace(",", ".")
-        quantia = round(float(texto), 2)
-        if not math.isfinite(quantia) or quantia <= 0 or quantia > 100000:
-            raise ValueError()
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Favor solicitar o valor do frete ao locador e informar um valor maior que zero.")
-    return {**frete, "valor": quantia, "tipo": "manual_cliente", "consultar": False,
-            "informado_pelo_cliente": True}
-
 
 @app.post("/e/{slug}/vitrine/reservar")
 def vitrine_publica_reservar(
@@ -21059,7 +21098,6 @@ def vitrine_publica_reservar(
         opcional_id: list[str] = Form(default=[]),
         opcional_quantidade: list[str] = Form(default=[]),
         cep_frete: str = Form(""), numero_frete: str = Form(""), cupom_codigo: str = Form(""),
-        frete_manual: str = Form(""),
         hora_inicio_vitrine: str = Form(""), retirada_mesmo_dia: Optional[str] = Form(None), horas_adicionais_vitrine: int = Form(0),
         whatsapp_pre_reserva: str = Form(""), autoriza_parceiros: Optional[str] = Form(None),
         responsavel_token: str = Form(""), codigo_periodo: str = Form(""),
@@ -21198,8 +21236,7 @@ def vitrine_publica_reservar(
             return RedirectResponse(f"/e/{slug}/vitrine?data_evento={data_obj.isoformat()}&tipo_evento={tipo_evento}&erro=retirada", status_code=303)
 
     whatsapp_pedido = limpar_identificador(whatsapp_pre_reserva)
-    frete = _aplicar_frete_manual_cliente(
-        _frete_reutilizado(db, empresa, request, cep_frete, numero_frete), frete_manual)
+    frete = _frete_reutilizado(db, empresa, request, cep_frete, numero_frete)
     if not frete.get("ok") or bool(frete.get("consultar")):
         # Sem rota segura, guardar somente um pedido de vitrine (não criar contrato).
         # O link público poderá ser retomado após o atendimento fixar o frete.
@@ -22508,7 +22545,7 @@ def vitrine_frete_pendente(slug: str, token: str, db: Session = Depends(get_db))
         raise HTTPException(404)
     if op.status == "frete_aprovado":
         return RedirectResponse(f"/e/{slug}/retomar-frete/{token}", status_code=303)
-    return HTMLResponse("""<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Frete sob consulta</title><div style='max-width:540px;margin:8vh auto;padding:24px;font:17px Arial,sans-serif;line-height:1.6'><h2>Não foi possível calcular o frete</h2><p>Não conseguimos confirmar uma rota segura para seu endereço. <b>Entre em contato com o suporte para continuar sua reserva.</b></p><p>Seu carrinho foi salvo. Após o atendimento informar o valor, você poderá continuar pelo mesmo link.</p></div></html>""")
+    return HTMLResponse("""<!doctype html><html lang='pt-BR'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Frete sob consulta</title><div style='max-width:540px;margin:8vh auto;padding:24px;font:17px Arial,sans-serif;line-height:1.6'><h2>Pedido recebido para análise do frete</h2><p>Não foi possível confirmar a rota automaticamente. <b>O valor será definido somente pela locadora.</b></p><p>Suas escolhas foram salvas, mas a reserva ainda não foi concluída. Após a aprovação do frete, você poderá continuar pelo mesmo link.</p></div></html>""")
 
 
 @app.get("/e/{slug}/retomar-frete/{token}")
@@ -22557,7 +22594,7 @@ def vitrine_aprovar_frete(oportunidade_id: int, request: Request, valor: str = F
         if "," in valor_limpo:
             valor_limpo = valor_limpo.replace(".", "").replace(",", ".")
         quantia = round(float(valor_limpo), 2)
-        if not math.isfinite(quantia) or quantia < 0 or quantia > 100000:
+        if not math.isfinite(quantia) or quantia <= 0 or quantia > 100000:
             raise ValueError()
     except (TypeError, ValueError):
         return RedirectResponse("/painel/vitrine?erro=Valor de frete inválido", status_code=303)

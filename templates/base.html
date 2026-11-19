@@ -539,12 +539,19 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
   const titulo = document.getElementById("app-loading-title");
   const texto = document.getElementById("app-loading-text");
   let timer = null;
+  let timerSeguranca = null;
 
   function mostrarCarregando(tituloMsg, textoMsg) {
     if (!overlay) return;
     if (titulo && tituloMsg) titulo.textContent = tituloMsg;
     if (texto && textoMsg) texto.textContent = textoMsg;
     clearTimeout(timer);
+    clearTimeout(timerSeguranca);
+    // Uma tela não pode permanecer bloqueada quando um navegador móvel
+    // retorna de um aplicativo externo ou cancela a navegação.
+    timerSeguranca = setTimeout(function () {
+      if (window.fecharCarregando) window.fecharCarregando();
+    }, 15000);
     timer = setTimeout(function () {
       overlay.classList.add("ativo");
       overlay.setAttribute("aria-hidden", "false");
@@ -554,27 +561,24 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
   window.mostrarCarregando = mostrarCarregando;
   window.fecharCarregando = function(){
     clearTimeout(timer);
+    clearTimeout(timerSeguranca);
     if(!overlay) return;
     overlay.classList.remove("ativo");
     overlay.setAttribute("aria-hidden", "true");
   };
 
-  function linkInternoValido(link) {
-    if (!link || link.target === "_blank" || link.hasAttribute("download")) return false;
-    if (link.dataset.noLoading === "1") return false;
-    const href = link.getAttribute("href") || "";
-    if (!href || href.startsWith("#") || href.startsWith("javascript:") || href.startsWith("mailto:") || href.startsWith("tel:")) return false;
-    try {
-      const url = new URL(href, window.location.href);
-      return url.origin === window.location.origin;
-    } catch (_) {
-      return false;
-    }
-  }
+  // Não bloquear cliques em links com a animação global.
+  // Um link interno pode responder 303 e abrir WhatsApp, InfinitePay, Waze etc.
+  // No iOS, a página original continua viva ao abrir outro aplicativo;
+  // o carregamento ficava para sempre sobre o Conect.
+  // A navegação nativa do navegador continua funcionando normalmente.
 
   document.addEventListener("submit", function (e) {
     const form = e.target;
-    if (!form || form.dataset.noLoading === "1") return;
+    if (!form || form.dataset.noLoading === "1" || e.defaultPrevented) return;
+    // Formulário direcionado a outra aba também não deve travar a atual.
+    const destino = (e.submitter && e.submitter.formTarget) || form.target || "";
+    if (destino && destino.toLowerCase() !== "_self") return;
     const msg = form.dataset.loadingText || "Atualizando informações...";
     mostrarCarregando(form.dataset.loadingTitle || "Processando solicitação", msg);
 
@@ -600,23 +604,21 @@ button:disabled, .botao:disabled, .botao[aria-disabled="true"]{transform:none!im
     }
   }, true);
 
-  document.addEventListener("click", function (e) {
-    const link = e.target.closest("a");
-    if (!linkInternoValido(link)) return;
-    mostrarCarregando(link.dataset.loadingTitle || "Abrindo tela", link.dataset.loadingText || "Carregando informações atualizadas.");
-  }, true);
-
   document.querySelectorAll("select[onchange*='submit']").forEach(function (select) {
     select.addEventListener("change", function () {
       mostrarCarregando("CONECT", "Atualizando informações...");
     });
   });
 
+  // O fechamento deve funcionar também no retorno do WhatsApp em modo app/iOS,
+  // onde nem sempre ocorre uma navegação completa (pageshow).
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") window.fecharCarregando();
+  });
+  window.addEventListener("focus", function () { window.fecharCarregando(); });
+  window.addEventListener("pagehide", function () { window.fecharCarregando(); });
   window.addEventListener("pageshow", function () {
-    if (!overlay) return;
-    clearTimeout(timer);
-    overlay.classList.remove("ativo");
-    overlay.setAttribute("aria-hidden", "true");
+    window.fecharCarregando();
     document.querySelectorAll("button[disabled][data-texto-original]").forEach(function (botao) {
       botao.disabled = false;
       botao.textContent = botao.dataset.textoOriginal;
