@@ -4128,6 +4128,12 @@ def _garantir_colunas_v113_criticas() -> None:
     mas garante que os SELECTs das tabelas principais não falhem após o deploy.
     """
     comandos_pg = [
+        # v1.0.219: novos campos do estoque compartilhado fazem parte da migração
+        # CRÍTICA de startup, não da manutenção geral (desativada no Render).
+        # Sem isso qualquer SELECT de Empresa/Produto pode gerar erro 500.
+        "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS exigir_recurso_principal BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE produtos_servicos ADD COLUMN IF NOT EXISTS eh_combo BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE itens_produto_servico_estoque ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'acessorio'",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS duracao_padrao_minutos INTEGER DEFAULT 240",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_cortesia_proximo_dia BOOLEAN DEFAULT false",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS retirada_hora_maxima VARCHAR(5) DEFAULT '22:00'",
