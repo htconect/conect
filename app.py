@@ -2286,6 +2286,10 @@ def garantir_colunas_novas():
         """)
         comandos.append("CREATE INDEX IF NOT EXISTS ix_usuarios_empresa_usuario ON usuarios_empresa (usuario)")
     cols_emp = colunas("empresas")
+    if "exigir_recurso_principal" not in cols_emp:
+        comandos.append("ALTER TABLE empresas ADD COLUMN exigir_recurso_principal BOOLEAN NOT NULL DEFAULT false")
+    if "itens_produto_servico_estoque" in tabelas and "tipo" not in colunas("itens_produto_servico_estoque"):
+        comandos.append("ALTER TABLE itens_produto_servico_estoque ADD COLUMN tipo VARCHAR(20) NOT NULL DEFAULT 'acessorio'")
     if "pix_copia_cola" not in cols_emp:
         comandos.append("ALTER TABLE empresas ADD COLUMN pix_copia_cola TEXT")
     if "pix_nome_recebedor" not in cols_emp:
@@ -2478,6 +2482,8 @@ def garantir_colunas_novas():
 
     if "produtos_servicos" in tabelas:
         cols_prod = colunas("produtos_servicos")
+        if "eh_combo" not in cols_prod:
+            comandos.append("ALTER TABLE produtos_servicos ADD COLUMN eh_combo BOOLEAN NOT NULL DEFAULT false")
         if "duracao_minutos" not in cols_prod:
             comandos.append("ALTER TABLE produtos_servicos ADD COLUMN duracao_minutos INTEGER DEFAULT 240")
         if "prazo_retirada_dias" not in cols_prod:
@@ -6346,6 +6352,15 @@ def _mapa_recursos_produtos(db: Session, empresa_id: int) -> dict[int, dict[int,
     return mapa
 
 
+def _produtos_sem_principal(db: Session, empresa_id: int) -> list[ProdutoServico]:
+    """Produtos publicados ainda sem equipamento principal físico vinculado."""
+    principais = {r.id for r in _itens_estoque_empresa(db, empresa_id) if r.tipo == "principal"}
+    mapa = _mapa_recursos_produtos(db, empresa_id)
+    return [p for p in db.query(ProdutoServico).filter_by(
+        empresa_id=empresa_id, ativo=True, vitrine_ativo=True
+    ).order_by(ProdutoServico.nome).all() if not (set(mapa.get(p.id, {})) & principais)]
+
+
 def _recursos_por_produto_view(db: Session, empresa_id: int) -> dict:
     itens_estoque = garantir_itens_estoque_padrao(db, empresa_id)
     por_id = {r.id: r for r in itens_estoque}
@@ -6385,6 +6400,13 @@ def _requisitos_solicitacao_padrao(item: Solicitacao, mapa_produtos: dict[int, d
         qtd_produto = max(1, int(ri.quantidade or 1))
         for item_estoque_id, qtd_por_unidade in mapa_produtos.get(int(ri.produto_id), {}).items():
             requisitos[item_estoque_id] = requisitos.get(item_estoque_id, 0) + (qtd_produto * qtd_por_unidade)
+    # Contratos legados podem ter o produto em solicitacoes.produto_id,
+    # sem a linha correspondente em reserva_itens.
+    if not any(getattr(ri, "produto_id", None) for ri in (getattr(item, "itens", []) or [])):
+        pid_legado = getattr(item, "produto_id", None)
+        if pid_legado:
+            for rid, qtd in mapa_produtos.get(int(pid_legado), {}).items():
+                requisitos[rid] = requisitos.get(rid, 0) + int(qtd)
     for op in list(getattr(item, "opcionais_contrato", []) or []):
         rid = getattr(op, "item_estoque_id", None)
         if not rid:
@@ -6472,6 +6494,91 @@ def _comprometimento_recursos_data(
                 continue
             totais[item_estoque_id] = totais.get(item_estoque_id, 0) + qtd
     return totais
+
+
+def _bloquear_estoque_antes_de_reservar(db: Session, empresa_id: int) -> None:
+    """No PostgreSQL, serializa reservas concorrentes dos mesmos recursos físicos.
+
+    O SELECT FOR UPDATE bloqueia as linhas existentes até o commit/rollback.
+    Funciona também em SQLite de teste (que ignora o lock).
+    """
+    db.query(ItemProdutoServicoEstoque.id).filter(
+        ItemProdutoServicoEstoque.empresa_id == empresa_id,
+    ).order_by(ItemProdutoServicoEstoque.id).with_for_update().all()
+
+
+def _validar_estoque_antes_de_confirmar(db: Session, empresa: Empresa, item: Solicitacao) -> None:
+    """Confere a composição física de um novo aceite, incluindo produtos avulsos e opcionais.
+
+    O combo só pode ser confirmado quando TODOS os recursos obrigatórios estão livres
+    durante a locação. A validação sempre exclui o próprio contrato para permitir reaceite.
+    """
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        return
+    if not item.data_evento:
+        raise HTTPException(409, "Informe a data do contrato antes de reservar equipamentos.")
+    _bloquear_estoque_antes_de_reservar(db, empresa.id)
+    db.flush()
+    itens = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all()
+    produtos_quantidades: dict[int, int] = {}
+    for linha in itens:
+        if linha.produto_id:
+            pid = int(linha.produto_id)
+            produtos_quantidades[pid] = produtos_quantidades.get(pid, 0) + max(1, int(linha.quantidade or 1))
+    if not produtos_quantidades and item.produto_id:
+        produtos_quantidades[int(item.produto_id)] = 1
+    mapa = _mapa_recursos_produtos(db, empresa.id)
+    recursos = {int(r.id): r for r in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
+    consumo: dict[int, int] = {}
+    obrigatorios_combo: dict[int, int] = {}
+    for pid, qtd_produto in produtos_quantidades.items():
+        produto = db.get(ProdutoServico, pid)
+        if not produto or produto.empresa_id != empresa.id:
+            raise HTTPException(409, "Produto da reserva não foi encontrado no estoque da empresa.")
+        vinculos = mapa.get(pid, {})
+        if bool(getattr(produto, "eh_combo", False)) and not any(
+            rid in recursos and recursos[rid].tipo == "principal" and recursos[rid].ativo for rid in vinculos
+        ):
+            raise HTTPException(409, f"Configure o equipamento principal obrigatório do combo: {produto.nome}.")
+        for rid, qtd in vinculos.items():
+            requerido = int(qtd) * qtd_produto
+            consumo[rid] = consumo.get(rid, 0) + requerido
+            if bool(getattr(produto, "eh_combo", False)):
+                obrigatorios_combo[rid] = obrigatorios_combo.get(rid, 0) + requerido
+    for opc in db.query(SolicitacaoOpcional).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all():
+        if opc.item_estoque_id and int(opc.quantidade or 0) > 0:
+            rid = int(opc.item_estoque_id)
+            consumo[rid] = consumo.get(rid, 0) + int(opc.quantidade)
+    # Ajustes operacionais não podem dispensar componentes obrigatórios do combo.
+    for ajuste in db.query(SolicitacaoRecurso).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all():
+        rid = int(ajuste.item_estoque_id)
+        if rid in consumo:
+            consumo[rid] = max(int(obrigatorios_combo.get(rid, 0)), max(0, int(ajuste.quantidade or 0)))
+    fim = item.retirada_data if item.retirada_data and item.retirada_data > item.data_evento else item.data_evento + timedelta(days=1)
+    if (fim - item.data_evento).days > 45:
+        raise HTTPException(409, "Período de reserva muito longo; revise a retirada.")
+    for deslocamento in range((fim-item.data_evento).days):
+        dia = item.data_evento + timedelta(days=deslocamento)
+        comprometido = _comprometimento_recursos_data(db, empresa.id, dia, excluir_solicitacao_id=item.id)
+        for rid, qtd in consumo.items():
+            recurso = recursos.get(rid)
+            livre = max(0, int(recurso.quantidade_estoque or 0) - int(comprometido.get(rid, 0))) if recurso and recurso.ativo else 0
+            if qtd > livre:
+                nome = recurso.nome if recurso else f"Recurso #{rid}"
+                raise HTTPException(409, f"Estoque insuficiente de {nome} em {dia:%d/%m/%Y}: necessita {qtd}, disponível {livre}.")
+    # Mesmo com recursos livres, a quantidade de um produto pode ter teto próprio.
+    for pid, qtd in produtos_quantidades.items():
+        produto = db.get(ProdutoServico, pid)
+        limite = max(0, int(produto.quantidade_disponivel or 0))
+        for deslocamento in range((fim-item.data_evento).days):
+            dia = item.data_evento + timedelta(days=deslocamento)
+            outros = sum(
+                max(1, int(ri.quantidade or 1))
+                for reserva in _reservas_ativas_na_data(db, empresa.id, dia, excluir_solicitacao_id=item.id)
+                for ri in (reserva.itens or []) if ri.produto_id and int(ri.produto_id) == pid
+            )
+            if qtd + outros > limite:
+                raise HTTPException(409, f"Produto {produto.nome} indisponível em {dia:%d/%m/%Y}.")
 
 
 def _analise_estoque_vazia() -> dict:
@@ -6821,6 +6928,9 @@ def _alugado_por_produto_data(db: Session, empresa_id: int, data_consulta: date)
     reservas = _reservas_ativas_na_data(db, empresa_id, data_consulta)
     totais: dict[int, int] = {}
     for reserva in reservas:
+        if reserva.produto_id and not any(ri.produto_id for ri in reserva.itens):
+            pid = int(reserva.produto_id)
+            totais[pid] = totais.get(pid, 0) + 1
         for ri in reserva.itens:
             if ri.produto_id:
                 totais[int(ri.produto_id)] = totais.get(int(ri.produto_id), 0) + max(1, int(ri.quantidade or 1))
@@ -6833,15 +6943,22 @@ def _limite_recursos_produto(
         itens_estoque: dict[int, ItemProdutoServicoEstoque],
         comprometido: dict[int, int],
         limite_fisico: int,
+        exigir_principal: bool = False,
 ) -> tuple[int, list[dict]]:
     limite = max(0, int(limite_fisico or 0))
     detalhes = []
+    if (exigir_principal or bool(getattr(produto, "eh_combo", False))) and not any(
+        getattr(itens_estoque.get(rid), "tipo", None) == "principal" and bool(getattr(itens_estoque.get(rid), "ativo", False))
+        for rid in recursos_produto
+    ):
+        return 0, []
     for item_estoque_id, qtd_por_unidade in recursos_produto.items():
         recurso = itens_estoque.get(item_estoque_id)
         if not recurso:
-            continue
+            # Falha fechada: composição incompleta não libera locação.
+            return 0, detalhes
         qtd_por_unidade = max(1, int(qtd_por_unidade or 1))
-        total = max(0, int(recurso.quantidade_estoque or 0))
+        total = max(0, int(recurso.quantidade_estoque or 0)) if recurso.ativo else 0
         usado = max(0, int(comprometido.get(item_estoque_id, 0)))
         livre = max(total - usado, 0)
         capacidade = livre // qtd_por_unidade
@@ -9271,6 +9388,7 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
         if usa_recursos:
             disponiveis, _detalhes = _limite_recursos_produto(
                 produto, mapa_recursos.get(produto.id, {}), itens_estoque, comprometido_recursos, disponivel_fisico,
+                exigir_principal=bool(getattr(empresa, "exigir_recurso_principal", False)),
             )
         else:
             disponiveis = disponivel_fisico
@@ -11559,6 +11677,7 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
         "request": request, "empresa": empresa, "produto": produto,
         "contratos": db.query(Contrato).filter_by(empresa_id=empresa.id, ativo=True).order_by(Contrato.nome).all(),
         "itens_estoque": itens_estoque, "usa_recursos": usa_recursos, "usa_opcionais": usa_opcionais,
+        "exigir_principal": bool(getattr(empresa, "exigir_recurso_principal", False)),
         "categorias_vitrine": _categorias_vitrine_empresa(db, empresa.id, somente_ativas=True),
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
         "tipos_evento": _tipos_evento_empresa(db, empresa.id, somente_ativos=True),
@@ -11775,9 +11894,25 @@ def recursos_painel(request: Request, db: Session = Depends(get_db), empresa: Em
     itens_estoque = _itens_estoque_empresa(db, empresa.id, somente_ativos=False)
     return templates.TemplateResponse("admin/recursos.html", {
         "request": request, "empresa": empresa, "itens_estoque": itens_estoque,
+        "sem_principal": _produtos_sem_principal(db, empresa.id),
+        "exigir_principal": bool(getattr(empresa, "exigir_recurso_principal", False)),
         "erro": request.query_params.get("erro", ""),
         "salvo": request.query_params.get("salvo", ""),
     })
+
+
+@app.post("/painel/recursos/validacao-principal")
+def configurar_validacao_principal(
+        exigir: str = Form("0"),
+        db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
+    if not _empresa_modulo_ativo(empresa, "recursos"):
+        raise HTTPException(404)
+    ativar = str(exigir).strip() == "1"
+    if ativar and _produtos_sem_principal(db, empresa.id):
+        return RedirectResponse("/painel/recursos?erro=sem-principal", status_code=303)
+    empresa.exigir_recurso_principal = ativar
+    db.commit()
+    return RedirectResponse("/painel/recursos?salvo=1", status_code=303)
 
 
 @app.post("/painel/itens-estoque/{item_id}/alternar")
@@ -11793,6 +11928,10 @@ def alternar_item_estoque(
     if item is None:
         raise HTTPException(404)
     item.ativo = not bool(item.ativo)
+    db.flush()
+    if getattr(empresa, "exigir_recurso_principal", False) and _produtos_sem_principal(db, empresa.id):
+        db.rollback()
+        return RedirectResponse("/painel/recursos?erro=sem-principal", status_code=303)
     db.commit()
     return RedirectResponse("/painel/recursos?salvo=1", status_code=303)
 
@@ -11802,6 +11941,7 @@ def salvar_itens_estoque(
         item_id: list[str] = Form(default=[]),
         quantidade_estoque: list[str] = Form(default=[]),
         nome_recurso: list[str] = Form(default=[]),
+        tipo_recurso: list[str] = Form(default=[]),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
@@ -11821,11 +11961,12 @@ def salvar_itens_estoque(
     # O formulário antigo enviava só quantidades: conservar essa compatibilidade.
     if nome_recurso and len(nome_recurso) != len(ids):
         return RedirectResponse("/painel/recursos?erro=formulario", status_code=303)
-    if len(quantidade_estoque) != len(ids):
+    if len(quantidade_estoque) != len(ids) or (tipo_recurso and len(tipo_recurso) != len(ids)):
         return RedirectResponse("/painel/recursos?erro=formulario", status_code=303)
 
     nomes = {}
     quantidades = {}
+    tipos = {}
     for pos, rid in enumerate(ids):
         nome = " ".join(str(nome_recurso[pos]).strip().split()) if nome_recurso else str(por_id[rid].nome)
         if not nome:
@@ -11838,8 +11979,12 @@ def salvar_itens_estoque(
             return RedirectResponse("/painel/recursos?erro=quantidade", status_code=303)
         if qtd < 0:
             return RedirectResponse("/painel/recursos?erro=quantidade", status_code=303)
+        tipo = str(tipo_recurso[pos] if tipo_recurso else getattr(por_id[rid], "tipo", "acessorio")).strip()
+        if tipo not in {"principal", "acessorio"}:
+            return RedirectResponse("/painel/recursos?erro=formulario", status_code=303)
         nomes[rid] = nome
         quantidades[rid] = qtd
+        tipos[rid] = tipo
 
     # Verificar também recursos omitidos/inativos para respeitar o nome único da empresa.
     nomes_finais = [nomes.get(int(recurso.id), str(recurso.nome)) for recurso in existentes]
@@ -11856,6 +12001,11 @@ def salvar_itens_estoque(
         recurso.nome = nome
     for rid, qtd in quantidades.items():
         por_id[rid].quantidade_estoque = qtd
+        por_id[rid].tipo = tipos[rid]
+    db.flush()
+    if getattr(empresa, "exigir_recurso_principal", False) and _produtos_sem_principal(db, empresa.id):
+        db.rollback()
+        return RedirectResponse("/painel/recursos?erro=sem-principal", status_code=303)
     db.commit()
     return RedirectResponse("/painel/recursos?salvo=1", status_code=303)
 
@@ -11864,6 +12014,7 @@ def salvar_itens_estoque(
 def novo_item_estoque(
         nome: str = Form(...),
         quantidade_estoque: int = Form(0),
+        tipo: str = Form("acessorio"),
         db: Session = Depends(get_db),
         empresa: Empresa = Depends(empresa_logada),
 ):
@@ -11874,6 +12025,8 @@ def novo_item_estoque(
         return RedirectResponse("/painel/recursos?erro=nome", status_code=303)
     if len(nome_limpo) > 140:
         return RedirectResponse("/painel/recursos?erro=tamanho", status_code=303)
+    if tipo not in {"principal", "acessorio"}:
+        return RedirectResponse("/painel/recursos?erro=formulario", status_code=303)
     existente = db.query(ItemProdutoServicoEstoque).filter(
         ItemProdutoServicoEstoque.empresa_id == empresa.id,
         func.lower(ItemProdutoServicoEstoque.nome) == nome_limpo.lower(),
@@ -11885,6 +12038,7 @@ def novo_item_estoque(
         empresa_id=empresa.id,
         nome=nome_limpo,
         quantidade_estoque=max(0, int(quantidade_estoque or 0)),
+        tipo=tipo,
         ativo=True,
     ))
     db.commit()
@@ -11918,6 +12072,7 @@ def salvar_produto_url(
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
+        eh_combo: bool = Form(False),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
     return salvar_produto(
@@ -11934,6 +12089,7 @@ def salvar_produto_url(
         aplicar_evento_todos=aplicar_evento_todos, utiliza_opcionais=utiliza_opcionais, opcional_catalogo_id=opcional_catalogo_id, opcional_utiliza=opcional_utiliza,
         fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
+        eh_combo=eh_combo,
         db=db, empresa=empresa,
     )
 
@@ -11964,10 +12120,18 @@ def salvar_produto(
         recurso_item_id: list[str] = Form(default=[]),
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
+        eh_combo: bool = Form(False),
         db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada),
 ):
     garantir_itens_estoque_padrao(db, empresa.id)
     _garantir_tipos_evento_padrao(db, empresa)
+    if (eh_combo or bool(getattr(empresa, "exigir_recurso_principal", False))) and str(vitrine_ativo or "").strip().lower() in {"1", "true", "on", "sim", "yes"}:
+        if not _empresa_modulo_ativo(empresa, "recursos"):
+            raise HTTPException(422, "Ative o módulo de recursos antes de publicar um combo.")
+        principais = {r.id for r in _itens_estoque_empresa(db, empresa.id) if r.tipo == "principal"}
+        selecionados = {int(rid) for i, rid in enumerate(recurso_item_id) if str(rid).isdigit() and i < len(recurso_utiliza) and str(recurso_utiliza[i]) == "1" and i < len(recurso_quantidade) and str(recurso_quantidade[i]).isdigit() and int(recurso_quantidade[i]) > 0}
+        if not (selecionados & principais):
+            raise HTTPException(422, "Vincule pelo menos um equipamento principal em Operação antes de publicar este produto.")
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
     if produto and produto.empresa_id != empresa.id:
@@ -11985,6 +12149,7 @@ def salvar_produto(
     contrato = db.get(Contrato, contrato_id_int) if contrato_id_int else None
     produto.contrato_id = contrato.id if contrato and contrato.empresa_id == empresa.id else None
     produto.quantidade_disponivel = max(0, int(quantidade_disponivel or 0))
+    produto.eh_combo = bool(eh_combo)
     produto.valor_base = texto_para_float(valor_base)
     # Campo legado mantido para compatibilidade operacional; a duração comercial
     # agora pertence à empresa/tipo de evento.
@@ -12093,6 +12258,7 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
     novo = ProdutoServico(
         empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
         descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
+        eh_combo=bool(getattr(origem, "eh_combo", False)),
         valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
         prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
         volume_logistico=origem.volume_logistico or 1, permite_interno=origem.permite_interno,
@@ -14029,6 +14195,8 @@ def atualizar_status_solicitacao(
 
     status_permitidos = ["reserva_confirmada", "aguardando_pagamento", "aguardando_nova_data", "cancelada"]
     if status in status_permitidos:
+        if status in {"reserva_confirmada", "aguardando_pagamento"}:
+            _validar_estoque_antes_de_confirmar(db, empresa, item)
         tem_itens = db.query(ReservaItem).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).count() > 0
         if status in ["reserva_confirmada", "aguardando_pagamento"] and not tem_itens:
             item.status = "pre_reserva"
@@ -14449,6 +14617,7 @@ def aceite_manual_solicitacao(
     if not motivo:
         raise HTTPException(400, "Informe o motivo do aceite manual.")
 
+    _validar_estoque_antes_de_confirmar(db, empresa, item)
     usuario = request.session.get("usuario_sistema", "Usuário")
     status_anterior = item.status or "aguardando_aceite"
     item.status = "reserva_confirmada"
@@ -19583,6 +19752,7 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             itens_estoque,
             comprometido_recursos,
             disponivel_fisico,
+            exigir_principal=bool(getattr(empresa, "exigir_recurso_principal", False)),
         )
         bloqueio_produto = bloqueios_produto_dia.get(int(produto.id))
         if bloqueio_produto:
@@ -19664,7 +19834,8 @@ def api_estoque_produto(
         )
         itens_estoque = {item.id: item for item in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
         disponiveis, recursos = _limite_recursos_produto(
-            produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico
+            produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico,
+            exigir_principal=bool(getattr(empresa, "exigir_recurso_principal", False)),
         )
     else:
         disponiveis, recursos = disponivel_fisico, []
@@ -20266,7 +20437,7 @@ def agenda_consumo_estoque(
         reservado = reservado_produtos.get(pid, 0)
         livres = max(0, total - reservado)
         if controla_recursos:
-            disponivel, limitadores = _limite_recursos_produto(produto, mapa.get(pid, {}), recursos_por_id, comprometido, livres)
+            disponivel, limitadores = _limite_recursos_produto(produto, mapa.get(pid, {}), recursos_por_id, comprometido, livres, exigir_principal=bool(getattr(empresa, "exigir_recurso_principal", False)))
         else:
             disponivel, limitadores = livres, []
         produtos.append({
@@ -23276,6 +23447,8 @@ async def salvar_opcionais_cliente(slug: str, solicitacao_id: str, request: Requ
     if _infinitepay_habilitada(empresa) and _infinitepay_cobranca_pendente_ativa(db, empresa.id, item.id):
         return RedirectResponse(base_url+"?erro=cobranca", status_code=303)
     if _empresa_modulo_ativo(empresa, "recursos"):
+        # Impede confirmações concorrentes de opcionais sobre a mesma JBL/TV.
+        _bloquear_estoque_antes_de_reservar(db, empresa.id)
         # Verifica TODOS os recursos do novo contrato, considerando outros contratos na data.
         comprometido = _comprometimento_recursos_data(db, empresa.id, item.data_evento, excluir_solicitacao_id=item.id)
         em_estoque = {int(x.id): x for x in _itens_estoque_empresa(db, empresa.id, somente_ativos=False)}
@@ -23670,6 +23843,13 @@ def aceitar_contrato(
                 item, comp_atual["equipamentos"], comp_atual["frete"], cupom_atual, valor_horas
             )
 
+        try:
+            _validar_estoque_antes_de_confirmar(db, empresa, item)
+        except HTTPException as erro:
+            if erro.status_code != 409:
+                raise
+            db.rollback()
+            return RedirectResponse(f"/e/{slug}/contrato/{_ref_publica(db, item)}?erro=estoque", status_code=303)
         item.aceite_em = agora_utc()
         if _infinitepay_habilitada(empresa):
             # O aceite confirma a reserva independentemente do pagamento.

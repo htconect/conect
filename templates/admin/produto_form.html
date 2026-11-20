@@ -97,7 +97,20 @@
       <summary><div class="produto-bloco-cab"><span class="produto-num">5</span><div><h2>Operação</h2><p>Contrato padrão e recursos usados por este item.</p></div><i class="bi bi-chevron-down seta"></i></div></summary>
       <div class="produto-corpo">
         <label>Contrato padrão deste item</label><select name="contrato_id"><option value="">Sem contrato padrão</option>{% for c in contratos %}<option value="{{ c.id }}" {% if produto and produto.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}</select>
-        {% if usa_recursos %}<div style="margin-top:18px"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><h3 style="margin:0">Recursos utilizados</h3><p class="texto-discreto">O cadastro e o estoque dos recursos ficam em uma tela separada.</p></div><a class="botao-secundario" href="/painel/recursos">Gerenciar recursos</a></div>{% for item in itens_estoque %}{% set qtd_recurso = recursos_produto.get(item.id, 0) %}<div class="recurso-linha"><div><input type="hidden" name="recurso_item_id" value="{{ item.id }}"><input type="hidden" name="recurso_utiliza" value="{{ 1 if qtd_recurso else 0 }}" class="recurso-utiliza"><label class="check" style="margin:0"><input type="checkbox" {% if qtd_recurso %}checked{% endif %} onchange="alternarRecursoProduto(this)"> {{ item.nome }}</label><small class="texto-discreto">Estoque atual: {{ item.quantidade_estoque or 0 }}</small></div><div><label>Qtd. por unidade</label><input class="recurso-quantidade" name="recurso_quantidade" type="number" min="1" value="{{ qtd_recurso if qtd_recurso else 1 }}"></div></div>{% else %}<p class="texto-discreto">Nenhum recurso cadastrado. <a href="/painel/recursos">Cadastrar recursos</a>.</p>{% endfor %}</div>{% endif %}
+        <div style="margin-top:14px;margin-bottom:12px"><label class="check"><input type="checkbox" name="eh_combo" value="1" {% if produto and produto.eh_combo %}checked{% endif %}> Este item é um combo</label><small class="texto-ajuda">Se marcado, selecione pelo menos um equipamento principal e todos os componentes obrigatórios abaixo. Cada recurso é descontado do estoque compartilhado.</small></div>
+        {% if usa_recursos %}
+        <div style="margin-top:18px">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><h3 style="margin:0">Composição física por unidade de aluguel</h3><p class="texto-discreto">Cada contrato reserva as quantidades abaixo. Modelos que usam o mesmo iPhone, Portátil ou JBL compartilham o saldo desses equipamentos.</p></div><a class="botao-secundario" href="/painel/recursos">Gerenciar estoque físico</a></div>
+          {% for tipo, titulo in [('principal', 'Equipamentos principais'), ('acessorio', 'Acessórios e outros itens')] %}
+          <h4 style="margin:16px 0 8px">{{ titulo }}</h4>
+          {% for item in itens_estoque if ((item.tipo == 'principal') == (tipo == 'principal')) %}
+            {% set qtd_recurso = recursos_produto.get(item.id, 0) %}
+            <div class="recurso-linha"><div><input type="hidden" name="recurso_item_id" value="{{ item.id }}"><input type="hidden" name="recurso_utiliza" value="{{ 1 if qtd_recurso else 0 }}" class="recurso-utiliza"><label class="check" style="margin:0"><input type="checkbox" {% if qtd_recurso %}checked{% endif %} onchange="alternarRecursoProduto(this)"> {{ item.nome }}</label><small class="texto-discreto">Estoque físico: {{ item.quantidade_estoque or 0 }}</small></div><div><label>Qtd. por locação</label><input class="recurso-quantidade" name="recurso_quantidade" type="number" min="1" value="{{ qtd_recurso if qtd_recurso else 1 }}"></div></div>
+          {% else %}<p class="texto-discreto">Sem itens nessa categoria. <a href="/painel/recursos">Cadastrar {{ 'equipamento principal' if tipo == 'principal' else 'acessório' }}</a>.</p>{% endfor %}
+          {% endfor %}
+          {% if exigir_principal %}<p class="texto-discreto"><strong>Proteção ativa:</strong> um produto publicado deve consumir ao menos um equipamento principal.</p>{% endif %}
+        </div>
+        {% else %}<p class="texto-discreto">Habilite o módulo de recursos nas configurações da empresa para controlar estoque compartilhado.</p>{% endif %}
       </div>
     </details>
 
