@@ -67,7 +67,6 @@ class Empresa(Base):
     # somente o que realmente fizer sentido para a operação.
     modulo_equipes_ativo = Column(Boolean, default=False)
     modulo_recursos_ativo = Column(Boolean, default=False)
-    exigir_recurso_principal = Column(Boolean, nullable=False, default=False)  # ativado após configurar a composição
     modulo_opcionais_ativo = Column(Boolean, default=False)
     modulo_cupons_ativo = Column(Boolean, default=False)
     utiliza_brinde = Column(Boolean, default=False, nullable=False)
@@ -377,7 +376,9 @@ class ProdutoServico(Base):
     tipo_locacao = Column(String(50), default="livre")  # livre ou horas_fixas
     horas_fixas = Column(Integer, nullable=True)
     quantidade_disponivel = Column(Integer, default=1)
-    eh_combo = Column(Boolean, nullable=False, default=False)  # exige equipamento principal quando publicado
+    eh_combo = Column(Boolean, nullable=False, default=False)
+    # Combo consome um ProdutoServico principal existente; não possui estoque próprio.
+    produto_principal_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="SET NULL"), nullable=True, index=True)
     valor_base = Column(Float, default=0)
     duracao_minutos = Column(Integer, default=240)
     prazo_retirada_dias = Column(Integer, default=1)
@@ -399,6 +400,19 @@ class ProdutoServico(Base):
     contrato = relationship("Contrato")
     fotos = relationship("ProdutoFoto", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoFoto.ordem, ProdutoFoto.id")
     opcionais = relationship("ProdutoOpcional", back_populates="produto", cascade="all, delete-orphan", order_by="ProdutoOpcional.ordem, ProdutoOpcional.id")
+
+
+class ComboProdutoPrincipal(Base):
+    """Produtos principais usados por uma unidade do combo. Nunca é um estoque separado."""
+    __tablename__ = "combo_produtos_principais"
+    __table_args__ = (UniqueConstraint("combo_id", "produto_principal_id", name="uq_combo_produto_principal"),)
+
+    id = Column(Integer, primary_key=True)
+    empresa_id = Column(Integer, ForeignKey("empresas.id"), nullable=False, index=True)
+    combo_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="CASCADE"), nullable=False, index=True)
+    produto_principal_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="RESTRICT"), nullable=False, index=True)
+    quantidade_por_combo = Column(Integer, nullable=False, default=1)
+
 
 
 class ProdutoOpcional(Base):

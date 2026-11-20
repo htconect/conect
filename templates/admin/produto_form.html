@@ -8,9 +8,9 @@
 {% endblock %}
 {% block conteudo %}
 <div class="produto-wrap">
-  <p><a class="voltar" href="/painel/produtos">← Voltar ao catálogo</a></p>
+  <p><a class="voltar" href="{{ "/painel/combos" if area_combos else "/painel/produtos" }}">← Voltar ao {{ "cadastro de combos" if area_combos else "catálogo" }}</a></p>
   <section class="produto-hero">
-    <div><small>CADASTRO DO ITEM</small><h1>{{ produto.nome if produto else 'Novo produto/serviço' }}</h1><p>Preencha por etapas. O cadastro principal fica separado dos cadastros auxiliares.</p></div>
+    <div><small>{{ 'CADASTRO DE COMBO' if area_combos else 'CADASTRO DO PRODUTO PRINCIPAL' }}</small><h1>{{ produto.nome if produto else ('Novo combo' if area_combos else 'Novo produto/serviço') }}</h1><p>{{ 'Escolha os produtos principais e os opcionais próprios do combo.' if area_combos else 'Cadastre a quantidade disponível e os opcionais deste produto.' }}</p></div>
     <div class="produto-medalhao">{% set capa_topo = ((produto.fotos|selectattr('capa')|list|first) or (produto.fotos|list|first)) if produto and produto.fotos else none %}{% if capa_topo and imagem_disponivel(capa_topo.arquivo_url) %}<img src="{{ capa_topo.miniatura_url if capa_topo.miniatura_url and imagem_disponivel(capa_topo.miniatura_url) else capa_topo.arquivo_url }}" alt="{{ produto.nome }}">{% else %}<i class="bi bi-box-seam"></i>{% endif %}</div>
   </section>
   {% if salvo %}<div class="salvo-ok"><i class="bi bi-check-circle"></i> Alterações salvas.</div>{% endif %}
@@ -65,7 +65,7 @@
       <div class="produto-corpo">
         <div class="produto-grade">
           <div><label>Preço normal</label><input name="valor_base" value="{{ (produto.valor_base|moeda_br) if produto else '0,00' }}" inputmode="decimal"></div>
-          <div><label>Quantidade disponível</label><input name="quantidade_disponivel" type="number" min="0" value="{{ produto.quantidade_disponivel if produto else 1 }}"></div>
+          <div id="quantidadeProdutoBox"><label>Estoque do produto principal</label><input name="quantidade_disponivel" type="number" min="0" value="{{ produto.quantidade_disponivel if produto and not produto.eh_combo else 1 }}"><small class="texto-ajuda">Somente o produto principal tem quantidade própria. A capacidade do combo é calculada.</small></div>
         </div>
         <section class="preco-evento-card" id="preco-por-evento">
           <div class="preco-evento-topo"><div><h3>Preço e horas adicionais por tipo de evento</h3><p class="texto-discreto">O preço pode variar por tipo de evento. O horário base vem da empresa; aqui o item apenas pode acrescentar horas.</p></div><label class="preco-evento-toggle"><input id="precoPorEventoAtivo" type="checkbox" name="preco_por_tipo_evento" value="1" {% if produto and produto.preco_por_tipo_evento %}checked{% endif %}><span id="precoPorEventoTexto">{{ 'Ligado' if produto and produto.preco_por_tipo_evento else 'Desligado' }}</span></label></div>
@@ -97,18 +97,36 @@
       <summary><div class="produto-bloco-cab"><span class="produto-num">5</span><div><h2>Operação</h2><p>Contrato padrão e recursos usados por este item.</p></div><i class="bi bi-chevron-down seta"></i></div></summary>
       <div class="produto-corpo">
         <label>Contrato padrão deste item</label><select name="contrato_id"><option value="">Sem contrato padrão</option>{% for c in contratos %}<option value="{{ c.id }}" {% if produto and produto.contrato_id == c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}</select>
-        <div style="margin-top:14px;margin-bottom:12px"><label class="check"><input type="checkbox" name="eh_combo" value="1" {% if produto and produto.eh_combo %}checked{% endif %}> Este item é um combo</label><small class="texto-ajuda">Se marcado, selecione pelo menos um equipamento principal e todos os componentes obrigatórios abaixo. Cada recurso é descontado do estoque compartilhado.</small></div>
+        <div class="combo-tipo-bloco">
+          {% if area_combos %}
+          <input type="hidden" name="eh_combo" value="1">
+          <h3>Composição do combo</h3>
+          <p class="texto-discreto">Selecione um ou mais produtos principais já cadastrados. Cada combo consome as quantidades indicadas, além <strong>somente dos seus próprios opcionais obrigatórios</strong>.</p>
+          {% for principal in produtos_principais %}
+            {% set qtd = componentes_combo.get(principal.id, 0) %}
+            <div class="combo-principal-linha" data-principal-id="{{ principal.id }}" style="display:grid;grid-template-columns:minmax(0,1fr) 115px;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid #e5e7eb">
+              <label class="check" style="margin:0"><input type="checkbox" data-combo-check {% if qtd %}checked{% endif %}> {{ principal.nome }} <small>({{ principal.quantidade_disponivel or 0 }} disponíveis no cadastro)</small></label>
+              <div><label style="font-size:12px">Unidades</label><input type="number" data-combo-qtd min="1" max="100" value="{{ qtd or 1 }}" style="width:100%"></div>
+            </div>
+          {% else %}
+            <p class="texto-ajuda">Cadastre primeiro um produto principal em Produtos e Serviços.</p>
+          {% endfor %}
+          <div id="comboCamposPost"></div>
+          <small class="texto-ajuda">Exemplo: Portátil + Fliperama + Just Dance: marque os três com quantidade 1. Se faltar qualquer um, o combo fica indisponível. Os opcionais do produto principal não são herdados.</small>
+          {% else %}
+          <h3>Produto principal</h3>
+          <p class="texto-discreto">Este produto possui estoque próprio e seus opcionais. Para criar uma combinação de dois ou mais produtos, use a área exclusiva de Combos.</p>
+          <a class="botao-secundario" href="/painel/combos">Ir para Combos</a>
+          {% endif %}
+        </div>
         {% if usa_recursos %}
         <div style="margin-top:18px">
-          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><h3 style="margin:0">Composição física por unidade de aluguel</h3><p class="texto-discreto">Cada contrato reserva as quantidades abaixo. Modelos que usam o mesmo iPhone, Portátil ou JBL compartilham o saldo desses equipamentos.</p></div><a class="botao-secundario" href="/painel/recursos">Gerenciar estoque físico</a></div>
-          {% for tipo, titulo in [('principal', 'Equipamentos principais'), ('acessorio', 'Acessórios e outros itens')] %}
-          <h4 style="margin:16px 0 8px">{{ titulo }}</h4>
-          {% for item in itens_estoque if ((item.tipo == 'principal') == (tipo == 'principal')) %}
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><h3 style="margin:0">Itens e opcionais obrigatórios deste produto</h3><p class="texto-discreto">Cada produto consome somente os itens marcados aqui. O combo NÃO herda os opcionais do produto principal. Exemplo: Jukebox Pro → 1 Jukebox + 2 JBLs marcadas abaixo.</p></div><a class="botao-secundario" href="/painel/recursos">Gerenciar estoque dos opcionais</a></div>
+          {% for item in itens_estoque %}
             {% set qtd_recurso = recursos_produto.get(item.id, 0) %}
             <div class="recurso-linha"><div><input type="hidden" name="recurso_item_id" value="{{ item.id }}"><input type="hidden" name="recurso_utiliza" value="{{ 1 if qtd_recurso else 0 }}" class="recurso-utiliza"><label class="check" style="margin:0"><input type="checkbox" {% if qtd_recurso %}checked{% endif %} onchange="alternarRecursoProduto(this)"> {{ item.nome }}</label><small class="texto-discreto">Estoque físico: {{ item.quantidade_estoque or 0 }}</small></div><div><label>Qtd. por locação</label><input class="recurso-quantidade" name="recurso_quantidade" type="number" min="1" value="{{ qtd_recurso if qtd_recurso else 1 }}"></div></div>
-          {% else %}<p class="texto-discreto">Sem itens nessa categoria. <a href="/painel/recursos">Cadastrar {{ 'equipamento principal' if tipo == 'principal' else 'acessório' }}</a>.</p>{% endfor %}
-          {% endfor %}
-          {% if exigir_principal %}<p class="texto-discreto"><strong>Proteção ativa:</strong> um produto publicado deve consumir ao menos um equipamento principal.</p>{% endif %}
+          {% else %}<p class="texto-discreto">Nenhum recurso cadastrado. <a href="/painel/recursos">Gerenciar estoque dos opcionais</a>.</p>{% endfor %}
+
         </div>
         {% else %}<p class="texto-discreto">Habilite o módulo de recursos nas configurações da empresa para controlar estoque compartilhado.</p>{% endif %}
       </div>
@@ -119,7 +137,7 @@
       <div class="produto-corpo"><div class="publicacao-cards"><label class="publicacao-card"><input type="radio" name="vitrine_ativo" value="1" {% if not produto or produto.vitrine_ativo is not sameas false %}checked{% endif %}><b><i class="bi bi-check-circle"></i> Ativo</b><small>Aparece na vitrine e pode ser reservado.</small></label><label class="publicacao-card"><input type="radio" name="vitrine_ativo" value="0" {% if produto and produto.vitrine_ativo is sameas false %}checked{% endif %}><b><i class="bi bi-file-earmark"></i> Rascunho</b><small>Fica salvo, mas não aparece aos clientes.</small></label></div></div>
     </section>
 
-    <div class="acoes-fixas"><span class="texto-ajuda" id="statusSalvarProduto">Você pode salvar e continuar depois.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><a class="botao-secundario" href="/painel/produtos">Cancelar</a>{% if produto %}<button class="botao-secundario" type="submit" form="formProduto" name="aplicar_evento_todos" value="1" onclick="return confirm('Aplicar as configurações de preço e horas adicionais por tipo de evento deste item a todos os itens ativos da empresa?')"><i class="bi bi-copy"></i> Aplicar a todos os itens</button>{% endif %}<button id="salvarProduto" type="submit" form="formProduto"><i class="bi bi-save"></i> Salvar alterações</button></div></div>
+    <div class="acoes-fixas"><span class="texto-ajuda" id="statusSalvarProduto">Você pode salvar e continuar depois.</span><div style="display:flex;gap:8px;flex-wrap:wrap"><a class="botao-secundario" href="{{ "/painel/combos" if area_combos else "/painel/produtos" }}">Cancelar</a>{% if produto %}<button class="botao-secundario" type="submit" form="formProduto" name="aplicar_evento_todos" value="1" onclick="return confirm('Aplicar as configurações de preço e horas adicionais por tipo de evento deste item a todos os itens ativos da empresa?')"><i class="bi bi-copy"></i> Aplicar a todos os itens</button>{% endif %}<button id="salvarProduto" type="submit" form="formProduto"><i class="bi bi-save"></i> Salvar alterações</button></div></div>
   </form>
   {% if produto %}
     {# Formulários de ação ficam FORA do formulário principal. Formulário dentro de formulário é HTML inválido e fazia Salvar/Capa/Excluir falharem de forma intermitente. #}
@@ -167,6 +185,27 @@
 })();
 (function(){const ativo=document.getElementById('precoPorEventoAtivo'),conteudo=document.getElementById('precoEventoConteudo'),desligado=document.getElementById('precoEventoDesligado'),texto=document.getElementById('precoPorEventoTexto');function atualizarBloco(){const ligado=!!ativo?.checked;if(conteudo)conteudo.hidden=!ligado;if(desligado)desligado.hidden=ligado;if(texto)texto.textContent=ligado?'Ligado':'Desligado'}ativo?.addEventListener('change',atualizarBloco);document.querySelectorAll('[data-preco-evento-row]').forEach(row=>{const modo=row.querySelector('.preco-evento-modo'),input=row.querySelector('.preco-evento-input'),status=row.querySelector('.preco-evento-status'),hm=row.querySelector('.preco-evento-horas-modo'),hb=row.querySelector('.preco-evento-horas-box');function atualizarLinha(){const valor=modo?.value||'normal';if(input)input.hidden=valor!=='especifico';if(status){status.hidden=valor==='especifico';status.textContent=valor==='consulta'?'Sob consulta':'Segue o preço principal.'}if(hb)hb.hidden=(hm?.value||'padrao')!=='adicionar'}modo?.addEventListener('change',atualizarLinha);hm?.addEventListener('change',atualizarLinha);atualizarLinha()});atualizarBloco()})();
 (function(){const liga=document.getElementById('utilizaOpcionais'),conteudo=document.getElementById('opcionaisConteudo');function atualizar(){if(conteudo)conteudo.hidden=!liga?.checked}liga?.addEventListener('change',atualizar);document.querySelectorAll('.opcional-utiliza-check').forEach(c=>c.addEventListener('change',()=>{const h=c.closest('.opcional-uso-toggle')?.querySelector('.opcional-utiliza-hidden');if(h)h.value=c.checked?'1':'0'}));atualizar()})();
+(function(){
+ const form=document.getElementById('formProduto'),destino=document.getElementById('comboCamposPost');
+ const isCombo=!!destino;
+ if(isCombo){
+   document.getElementById('quantidadeProdutoBox')?.setAttribute('hidden','');
+   form?.addEventListener('submit',e=>{
+     destino.innerHTML='';let validos=0;
+     document.querySelectorAll('[data-principal-id]').forEach(row=>{
+       const marcado=row.querySelector('[data-combo-check]'),quantidade=row.querySelector('[data-combo-qtd]');
+       if(!marcado?.checked)return;
+       const n=Number(quantidade?.value);
+       if(!Number.isInteger(n)||n<1||n>100){e.preventDefault();e.stopImmediatePropagation();alert('Quantidade de produto principal inválida.');return}
+       for(const [name,value] of [['combo_principal_id',row.dataset.principalId],['combo_principal_quantidade',String(n)]]){
+         const hidden=document.createElement('input');hidden.type='hidden';hidden.name=name;hidden.value=value;destino.appendChild(hidden)
+       }
+       validos++;
+     });
+     if(!validos){e.preventDefault();e.stopImmediatePropagation();alert('Marque ao menos um produto principal para este combo.');}
+   },true)
+ }
+})();
 function alternarRecursoProduto(check){const linha=check.closest('.recurso-linha');const hidden=linha.querySelector('.recurso-utiliza');const qtd=linha.querySelector('.recurso-quantidade');hidden.value=check.checked?'1':'0';if(check.checked&&(!qtd.value||Number(qtd.value)<1))qtd.value='1'}
 document.querySelectorAll('.produto-passos a').forEach(a=>a.addEventListener('click',()=>{const el=document.querySelector(a.getAttribute('href'));if(el&&el.tagName==='DETAILS')el.open=true}));
 const formProduto=document.getElementById('formProduto'),botaoSalvar=document.getElementById('salvarProduto'),statusSalvar=document.getElementById('statusSalvarProduto');formProduto?.addEventListener('submit',()=>{if(botaoSalvar){botaoSalvar.disabled=true;botaoSalvar.innerHTML='<span class="spinner-border spinner-border-sm"></span> Salvando...'}if(statusSalvar)statusSalvar.textContent='Salvando alterações...'});

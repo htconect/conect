@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block conteudo %}
+<div style="max-width:1100px;margin:0 auto;padding-bottom:36px">
+  <section style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:24px;border-radius:18px;background:#123f87;color:#fff;margin-bottom:18px">
+    <div><small>CADASTRO EXCLUSIVO</small><h1 style="color:#fff;margin:4px 0">Combos</h1><p style="margin:0">Uma combinação consome os produtos principais selecionados e seus próprios opcionais. Não tem estoque próprio.</p></div>
+    <a class="botao" href="/painel/combo/novo"><i class="bi bi-plus-lg"></i> Novo combo</a>
+  </section>
+  <p><a href="/painel/produtos">Produtos principais</a> · <a href="/painel/opcionais">Opcionais</a></p>
+  {% for combo in combos %}
+  <article style="border:1px solid #dbe3ee;border-radius:14px;padding:16px;margin-bottom:12px;background:#fff;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+    <div><h3 style="margin:0 0 6px">{{ combo.nome }}</h3>
+    <p style="margin:0;color:#475569">{% if detalhes.get(combo.id) %}{{ detalhes[combo.id]|join(' + ') }}{% else %}<strong>Configurar produtos principais</strong>{% endif %}</p>
+    <small>{{ 'Publicado na vitrine' if combo.vitrine_ativo else 'Fora da vitrine' }} · Sem estoque independente</small></div>
+    <a class="botao-secundario" href="/painel/combo/{{ combo.id }}"><i class="bi bi-pencil"></i> Editar combo</a>
+  </article>
+  {% else %}
+  <div style="padding:28px;border:1px dashed #cbd5e1;border-radius:14px;text-align:center">Nenhum combo cadastrado. Crie o primeiro usando os produtos principais já existentes.</div>
+  {% endfor %}
+</div>
+{% endblock %}

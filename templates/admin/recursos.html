@@ -26,7 +26,7 @@
 {% block conteudo %}
 <div class="rec-wrap">
   <section class="rec-hero">
-    <div><small>CADASTRO</small><h1>Estoque físico</h1><p>Cadastre as máquinas principais e os acessórios que compõem cada modelo. Um equipamento compartilhado tem um único saldo para todos os combos.</p></div>
+    <div><small>CADASTRO</small><h1>Estoque dos itens e opcionais</h1><p>O estoque dos produtos principais fica em Produtos e Serviços. Aqui são controlados os componentes adicionais que cada produto consome.</p></div>
     <a class="botao btn-krj-ghost" href="/painel/produtos"><i class="bi bi-box-seam"></i> Produtos e serviços</a>
   </section>
   {% if erro == 'duplicado' %}<div class="rec-aviso erro" role="alert">Já existe um item do estoque com esse nome. Use nomes diferentes para cada recurso.</div>
@@ -34,49 +34,19 @@
   {% elif erro == 'tamanho' %}<div class="rec-aviso erro" role="alert">O nome deve ter no máximo 140 caracteres.</div>
   {% elif erro == 'quantidade' %}<div class="rec-aviso erro" role="alert">A quantidade deve ser um número inteiro igual ou maior que zero.</div>
   {% elif erro == 'formulario' %}<div class="rec-aviso erro" role="alert">Os dados enviados estão incompletos. Atualize a página e tente novamente.</div>{% endif %}
-  {% if erro == 'sem-principal' %}<div class="rec-aviso erro" role="alert">Existem produtos publicados sem equipamento principal vinculado. Configure primeiro os produtos listados abaixo.</div>{% endif %}
   {% if salvo %}<div class="rec-aviso ok" role="status"><i class="bi bi-check-circle"></i> Estoque salvo com sucesso.</div>{% endif %}
-  <section class="rec-box" style="margin-bottom:16px">
-    <h2>Proteção dos equipamentos principais</h2>
-    <p class="texto-discreto">A disponibilidade dos recursos vinculados já é compartilhada. Depois de vincular o equipamento principal a todos os produtos publicados, ative também a proteção para impedir publicação sem principal.</p>
-    {% if sem_principal %}<p><strong>Produtos ainda sem principal:</strong> {% for produto in sem_principal %}<a href="/painel/produto/{{ produto.id }}#operacao">{{ produto.nome }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
-    <form method="post" action="/painel/recursos/validacao-principal" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <input type="hidden" name="exigir" value="{{ 0 if exigir_principal else 1 }}">
-      <strong>Validação de principal: {{ 'Ativada' if exigir_principal else 'Desativada' }}</strong>
-      <button type="submit" {% if sem_principal and not exigir_principal %}disabled title="Configure todos os produtos primeiro"{% endif %}>{{ 'Desativar proteção' if exigir_principal else 'Ativar proteção' }}</button>
-    </form>
-  </section>
   <section class="rec-box">
     <form method="post" action="/painel/itens-estoque/salvar" id="formRecursos">
-      <h3>Equipamentos principais</h3><p class="texto-discreto">Ex.: iPhone, Heineken, Portátil, JBL. Cadastre uma vez cada recurso físico compartilhado.</p>
+      <h3>Estoque dos itens e opcionais</h3><p class="texto-discreto">Produtos principais e combos são configurados em Produtos e Serviços. Aqui permanecem os itens físicos adicionais já cadastrados, sem criar novos equipamentos principais duplicados.</p>
       <div class="rec-grade">
-        {% for item in itens_estoque if item.tipo == 'principal' %}
+        {% for item in itens_estoque %}
         <div class="rec-card{% if not item.ativo %} inativo{% endif %}">
           <input type="hidden" name="item_id" value="{{ item.id }}">
-          <div class="rec-campos">
-            <div><label for="nomeRecurso{{ item.id }}">Nome do item</label><input id="nomeRecurso{{ item.id }}" name="nome_recurso" maxlength="140" value="{{ item.nome }}" required autocomplete="off"></div>
-            <div><label for="qtdRecurso{{ item.id }}">Quantidade</label><input id="qtdRecurso{{ item.id }}" name="quantidade_estoque" type="number" min="0" step="1" value="{{ item.quantidade_estoque or 0 }}" required></div>
-          </div>
-          <label>Tipo</label><select name="tipo_recurso"><option value="principal" selected>Equipamento principal</option><option value="acessorio">Acessório / outro</option></select>
-          <small class="texto-discreto">Estoque total desse recurso. Desativar não altera quantidade nem histórico.</small>
-          <div class="rec-toggle">
-            <span class="texto-discreto">{{ 'Ativo' if item.ativo else 'Desativado' }}</span>
-            <button type="submit" form="toggleRecurso{{ item.id }}" class="botao btn-krj-ghost" onclick="return confirm('{{ 'Desativar' if item.ativo else 'Reativar' }} este recurso? Os vínculos já existentes serão preservados.')">{{ 'Desativar' if item.ativo else 'Ativar' }}</button>
-          </div>
-        </div>
-        {% else %}<p class="texto-discreto">Cadastre o primeiro equipamento principal no formulário abaixo.</p>{% endfor %}
-      </div>
-      <h3 style="margin-top:24px">Acessórios e outros recursos</h3>
-      <div class="rec-grade">
-        {% for item in itens_estoque if item.tipo != 'principal' %}
-        <div class="rec-card{% if not item.ativo %} inativo{% endif %}">
-          <input type="hidden" name="item_id" value="{{ item.id }}">
-          <div class="rec-campos"><div><label for="nomeRecurso{{ item.id }}">Nome do item</label><input id="nomeRecurso{{ item.id }}" name="nome_recurso" maxlength="140" value="{{ item.nome }}" required autocomplete="off"></div>
+          <div class="rec-campos"><div><label for="nomeRecurso{{ item.id }}">Nome</label><input id="nomeRecurso{{ item.id }}" name="nome_recurso" maxlength="140" value="{{ item.nome }}" required autocomplete="off"></div>
           <div><label for="qtdRecurso{{ item.id }}">Quantidade</label><input id="qtdRecurso{{ item.id }}" name="quantidade_estoque" type="number" min="0" step="1" value="{{ item.quantidade_estoque or 0 }}" required></div></div>
-          <label>Tipo</label><select name="tipo_recurso"><option value="principal">Equipamento principal</option><option value="acessorio" selected>Acessório / outro</option></select>
           <div class="rec-toggle"><span>{{ 'Ativo' if item.ativo else 'Desativado' }}</span><button type="submit" form="toggleRecurso{{ item.id }}" class="botao btn-krj-ghost">{{ 'Desativar' if item.ativo else 'Ativar' }}</button></div>
         </div>
-        {% endfor %}
+        {% else %}<p class="texto-discreto">Nenhum item adicional cadastrado.</p>{% endfor %}
       </div>
       {% if itens_estoque %}<div class="rec-acoes"><span class="rec-status" id="statusRecursos">Altere os nomes ou quantidades e salve tudo de uma vez.</span><button type="submit"><i class="bi bi-save"></i> Salvar alterações</button></div>{% endif %}
     </form>
@@ -89,7 +59,7 @@
         <div class="linha">
           <div><label for="novoNomeRecurso">Nome</label><input id="novoNomeRecurso" name="nome" maxlength="140" required placeholder="Ex.: Microfone sem fio"></div>
           <div><label for="novoQtdRecurso">Quantidade</label><input id="novoQtdRecurso" name="quantidade_estoque" type="number" min="0" step="1" value="0"></div>
-          <div><label for="novoTipoRecurso">Tipo</label><select id="novoTipoRecurso" name="tipo"><option value="principal">Equipamento principal</option><option value="acessorio">Acessório / outro</option></select></div>
+          <input type="hidden" name="tipo" value="acessorio">
         </div>
         <button type="submit">Adicionar item</button>
       </form>
