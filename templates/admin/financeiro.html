@@ -64,7 +64,7 @@
       </div>
       <div class="indicador-card indicador-banco-selecionado">
         <span class="indicador-icone"><i class="bi bi-credit-card-2-front" aria-hidden="true"></i></span>
-        <div><small>{{ conta.nome if conta else 'Banco selecionado' }}</small><b>R$ {{ saldo_banco|moeda_br }}</b><em>Saldo do banco selecionado para conferência</em></div>
+        <div><small>{{ conta.nome if conta else 'Banco selecionado' }} — saldo até hoje</small><b>R$ {{ saldo_banco|moeda_br }}</b><em>Movimentos efetivos importados + movimentos anteriores a {{ hoje.strftime('%d/%m/%Y') }}</em></div>
       </div>
       <div class="indicador-card indicador-banco indicador-banco-total">
         <span class="indicador-icone"><i class="bi bi-bank" aria-hidden="true"></i></span>
@@ -101,6 +101,19 @@
   <div class="financeiro-alerta categorias-salvas-alerta"><i class="bi bi-check-circle" aria-hidden="true"></i> Categorias salvas: <b>{{ request.query_params.get('categorias_salvas', '0') }}</b>{% if request.query_params.get('categorias_bloqueadas') %} · <b>{{ request.query_params.get('categorias_bloqueadas') }}</b> não alterada(s) por possuírem vínculo{% endif %}.</div>
   {% endif %}
 
+  {% if resumo_banco_antecipado.quantidade %}
+  <div class="financeiro-alerta" role="status">
+    <i class="bi bi-check-circle" aria-hidden="true"></i>
+    <b>Extrato já considerado no saldo:</b>
+    {{ resumo_banco_antecipado.quantidade }} movimento(s) importado(s)
+    com data contábil de {{ resumo_banco_antecipado.primeira_data.strftime('%d/%m/%Y') }}
+    {% if resumo_banco_antecipado.ultima_data != resumo_banco_antecipado.primeira_data %}até {{ resumo_banco_antecipado.ultima_data.strftime('%d/%m/%Y') }}{% endif %}
+    estão incluídos no saldo atual porque constam no extrato efetivo.
+    Entradas R$ {{ resumo_banco_antecipado.entradas|moeda_br }};
+    saídas R$ {{ resumo_banco_antecipado.saidas|moeda_br }}.
+    A data original do banco foi mantida para conciliação. Pagamentos agendados não devem ser importados como extrato efetivo.
+  </div>
+  {% endif %}
   <div class="financeiro-acoes-faixa">
     <button type="button" class="botao-pequeno btn-abrir-manual"
             onclick="document.getElementById('dlg-lancamento-manual').showModal()">
@@ -334,8 +347,13 @@
         <thead><tr><th>Data</th><th>Histórico</th><th>Valor</th><th>Tipo</th><th>Vínculo</th><th>Ações</th></tr></thead>
         <tbody>
         {% for l in banco %}
-          <tr class="{{ 'linha-vinculada' if l.pagamento or l.organiza_lancamento_id or vinculos_por_banco.get(l.id) or vinculos_titulo_por_banco.get(l.id) or vinculos_organiza_por_banco.get(l.id) else '' }}">
-            <td>{{ l.data.strftime('%d/%m') }}</td>
+          <tr class="{{ 'linha-vinculada' if l.pagamento or l.organiza_lancamento_id or vinculos_por_banco.get(l.id) or vinculos_titulo_por_banco.get(l.id) or vinculos_organiza_por_banco.get(l.id) else '' }}"{% if l.data > hoje %} title="Data contábil do banco posterior à data atual"{% endif %}>
+            <td>{{ l.data.strftime('%d/%m') }}{% if l.data > hoje %}
+              {% if l.origem_importacao and l.data <= limite_data_bancaria and l.criado_em and l.criado_em < limite_importacao_utc %}
+              <small title="Movimento importado já incluído no saldo; data contábil posterior" style="display:block;font-size:0.72em;white-space:nowrap;">Extrato efetivo</small>
+              {% else %}
+              <small title="Data futura: não contabilizada no saldo disponível" style="display:block;font-size:0.72em;white-space:nowrap;">Data futura</small>
+              {% endif %}{% endif %}</td>
             <td class="hist-cell">{{ l.historico }}{% if l.documento %}<small>Doc: {{ l.documento }}</small>{% endif %}</td>
             <td class="{{ 'positivo' if l.valor >= 0 else 'negativo' }}">R$ {{ l.valor|moeda_br }}</td>
             <td>

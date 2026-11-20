@@ -2,6 +2,7 @@ import os
 import logging
 from models import LancamentoOrganiza
 from datetime import datetime, date, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 from pathlib import Path
 from io import BytesIO, StringIO
@@ -7955,6 +7956,8 @@ def _criar_pre_reserva_vitrine(
         + ("[VITRINE_AUTORIZACAO_PARCEIROS_ORIGEM=carrinho]\n" if autorizou_parceiros else "")
         # Marcadores internos ficam fora do campo de observacoes visiveis ao cliente.
     )
+    if frete.get("frete_estimado_cep"):
+        obs += "ATENÇÃO: frete calculado pela referência do CEP; confirmar o número antes da entrega.\n"
     inicio_pedido = pedido.get("hora_inicio")
     if isinstance(inicio_pedido, str):
         try:
@@ -8079,6 +8082,8 @@ def _snapshot_pedido_vitrine(pedido: dict) -> dict:
             "logradouro": str(frete.get("logradouro") or ""), "bairro": str(frete.get("bairro") or ""),
             "cidade": str(frete.get("cidade") or ""), "estado": str(frete.get("estado") or ""),
             "endereco_formatado": str(frete.get("endereco_formatado") or ""),
+            "frete_estimado_cep": bool(frete.get("frete_estimado_cep")),
+            "aviso_endereco": str(frete.get("aviso_endereco") or ""),
         },
         "itens": itens,
     }
@@ -8856,7 +8861,7 @@ def _coordenadas_cep_referencia(cep: str, dados_cep: dict | None = None):
 
 
 
-def _rotas_parciais_conferidas_por_cep(resposta: dict, cep: str) -> list[float]:
+def _rotas_parciais_conferidas_por_cep(resposta: dict, cep: str, *, exigir_parcial: bool = True) -> list[float]:
     """Autoriza rota parcial só após checar o destino viário contra CEP externo confirmado.
 
     O endereço e o CEP foram previamente validados com ViaCEP. Além disso, a
@@ -8871,7 +8876,7 @@ def _rotas_parciais_conferidas_por_cep(resposta: dict, cep: str) -> list[float]:
     if isinstance(tipos, str):
         tipos = [tipos]
     tipos_permitidos = {"street_address", "premise", "subpremise", "route", "intersection", "postal_code"}
-    if not geo.get("placeId") or not geo.get("partialMatch") or not tipos_permitidos.intersection(tipos):
+    if not geo.get("placeId") or (exigir_parcial and not geo.get("partialMatch")) or not tipos_permitidos.intersection(tipos):
         return []
     lat_ref, lon_ref, provedor = _coordenadas_cep_referencia(cep)
     if lat_ref is None or lon_ref is None:
@@ -8906,8 +8911,10 @@ def _rotas_parciais_conferidas_por_cep(resposta: dict, cep: str) -> list[float]:
     return distancias
 
 
-def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, segunda_consulta=None, cep_destino_validado: str = "") -> float | None:
-    """Consulta rotas REAIS do Google para automóvel; sem fallback de menor precisão.
+def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, segunda_consulta=None,
+                              cep_destino_validado: str = "", confirmar_destino_cep: bool = False,
+                              resultado_meta: dict | None = None) -> float | None:
+    """Consulta rotas REAIS do Google para automóvel; sem distância em linha reta.
 
     A menor distância entre as alternativas trafegáveis serve de referência para
     a tarifa por km. Não enviar a chave ao navegador, URL ou aos logs.
@@ -8944,7 +8951,12 @@ def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, seg
         # fonte postal independente. O ponto da loja nunca pode ser parcial.
         origem_ok = bool(origem_geo.get("placeId")) and not origem_geo.get("partialMatch")
         destino_ok = bool(destino_geo.get("placeId"))
-        if origem_ok and destino_ok and destino_geo.get("partialMatch"):
+        if origem_ok and destino_ok and confirmar_destino_cep:
+            # O Google pode reconhecer só o CEP quando o número não existe.
+            # Exige proximidade de referência postal independente, inclusive
+            # quando a API não marca a resposta como correspondência parcial.
+            distancias = _rotas_parciais_conferidas_por_cep(retorno, cep_destino_validado, exigir_parcial=False)
+        elif origem_ok and destino_ok and destino_geo.get("partialMatch"):
             distancias = _rotas_parciais_conferidas_por_cep(retorno, cep_destino_validado)
         elif origem_ok and destino_ok:
             distancias = [float(r["distanceMeters"]) / 1000.0 for r in retorno.get("routes", [])
@@ -8958,8 +8970,17 @@ def _calcular_rota_google_km(origem_endereco: str, destino_endereco: str, *, seg
                     geo_logger.warning("[FRETE] %s: identificador=%s parcial=%s", lado,
                                        bool(ponto.get("placeId")), bool(ponto.get("partialMatch")))
             if segunda_consulta and segunda_consulta != (origem_endereco, destino_endereco):
-                return _calcular_rota_google_km(*segunda_consulta, cep_destino_validado=cep_destino_validado)
+                return _calcular_rota_google_km(*segunda_consulta, cep_destino_validado=cep_destino_validado,
+                                               confirmar_destino_cep=confirmar_destino_cep, resultado_meta=resultado_meta)
             return None
+        if resultado_meta is not None:
+            tipos_destino = destino_geo.get("type") or []
+            if isinstance(tipos_destino, str):
+                tipos_destino = [tipos_destino]
+            tipos_endereco_exato = {"street_address", "premise", "subpremise"}
+            resultado_meta["numero_nao_confirmado"] = bool(confirmar_destino_cep or destino_geo.get("partialMatch")
+                or (tipos_destino and not tipos_endereco_exato.intersection(tipos_destino)))
+            resultado_meta["cep_utilizado"] = bool(confirmar_destino_cep)
         return min(distancias)
     except HTTPError as exc:
         # Registrar somente código/status lógico; nunca chave de API ou endereço.
@@ -9044,9 +9065,21 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
         cidade_uf = ", ".join([dados_destino["cidade"], dados_destino["estado"], "Brasil"])
         rua = dados_destino.get("logradouro")
         alternativa = (origem_endereco + ", Brasil", f"{rua}, {numero}, {cidade_uf}") if rua else None
-        distancia_ida = _calcular_rota_google_km(origem_google, destino_endereco, segunda_consulta=alternativa, cep_destino_validado=cep)
+        detalhes_rota = {}
+        distancia_ida = _calcular_rota_google_km(origem_google, destino_endereco, segunda_consulta=alternativa,
+                                                 cep_destino_validado=cep, resultado_meta=detalhes_rota)
         if distancia_ida is None or not math.isfinite(distancia_ida) or distancia_ida < 0.2:
-            return sob_consulta("Não foi possível confirmar a rota no Google Maps. O frete precisa de aprovação manual.")
+            # O número pode não existir na base do Google, mas o CEP, sim.
+            # Consultar SOMENTE a rota por ruas até o CEP validado; aceitar
+            # apenas destino viário próximo da referência postal independente.
+            destino_cep = f"CEP {cep[:5]}-{cep[5:]}, {dados_destino['cidade']}, {dados_destino['estado']}, Brasil"
+            detalhes_rota.clear()
+            distancia_ida = _calcular_rota_google_km(origem_google, destino_cep, cep_destino_validado=cep,
+                                                     confirmar_destino_cep=True, resultado_meta=detalhes_rota)
+            if distancia_ida is not None:
+                geo_logger.info("[FRETE] fallback por CEP validado empresa_id=%s cep_destino=%s", empresa.id, cep)
+        if distancia_ida is None or not math.isfinite(distancia_ida) or distancia_ida < 0.2:
+            return sob_consulta("Não foi possível confirmar nem a rota por CEP no Google Maps. O frete precisa de aprovação manual.")
         # Corrigir o endereço cadastrado em vez de aceitar trajetos claramente
         # incoerentes. Não existe limite para destinos de outras cidades.
         if (str(dados_destino.get("cidade") or "").strip().casefold() == str(_dados_cep_brasil(origem_cep).get("cidade") or "").strip().casefold()
@@ -9059,7 +9092,11 @@ def _calcular_frete_vitrine(empresa: Empresa, cep_destino: str, numero_destino: 
             "ok": True, "tipo": "km", "cep": cep, "numero": numero, "valor": valor,
             "distancia_ida_km": round(distancia_ida, 1), "quantidade_km": quantidade_km,
             "valor_km": round(valor_km, 2), "distancia_km": round(distancia_ida, 1),
-            "fonte": "google_routes", **extra_endereco,
+            "fonte": "google_routes_cep" if detalhes_rota.get("cep_utilizado") else "google_routes",
+            "frete_estimado_cep": bool(detalhes_rota.get("numero_nao_confirmado")),
+            "aviso_endereco": ("Frete calculado por referência do CEP. Número não confirmado pelo Google; "
+                               "a locadora deve conferir antes da entrega.") if detalhes_rota.get("numero_nao_confirmado") else "",
+            **extra_endereco,
         }
     return {
         "ok": True, "tipo": "consultar", "cep": cep, "numero": numero, "valor": 0.0,
@@ -9419,6 +9456,8 @@ def _pedido_vitrine_sessao(request: Request, db: Session, empresa: Empresa) -> d
             "cidade": str(frete_bruto.get("cidade") or ""),
             "estado": str(frete_bruto.get("estado") or ""),
             "endereco_formatado": str(frete_bruto.get("endereco_formatado") or ""),
+            "frete_estimado_cep": bool(frete_bruto.get("frete_estimado_cep")),
+            "aviso_endereco": str(frete_bruto.get("aviso_endereco") or ""),
         },
         # No pré-contrato, `total` é a base sem horas extras; o JS soma as horas escolhidas
         # para permitir que o cliente revise a retirada sem duplicar o valor.
@@ -10767,6 +10806,8 @@ def _resumo_periodo_compartilhado(db, empresa, preco, cep, numero, cupom, estado
             raise ValueError(frete.get("erro") or "Confira o endereço ou deixe o frete para depois.")
         estado.update(cep=campos["cep"], numero=campos["numero"])
         linhas.append("Entrega em: " + frete["endereco_formatado"])
+        if frete.get("aviso_endereco"):
+            linhas.append(str(frete["aviso_endereco"]))
         if frete.get("distancia_ida_km") is not None:
             linhas.append(f"Loja → cliente: {frete['distancia_ida_km']} km")
         if not frete.get("consultar"):
@@ -10920,8 +10961,10 @@ def atender_oportunidade_vitrine(
     solicitacao.valor_horas_adicionais = horas_snap
     solicitacao.valor_frete = frete_valor_snap
     solicitacao.valor = _total_pedido_frete_unico(subtotal_snap, desconto_snap, horas_snap, frete_valor_snap)
-    # Marcadores técnicos serviam ao fluxo antigo; não devem poluir o contrato.
-    solicitacao.observacoes = ""
+    # Marcadores técnicos serviam ao fluxo antigo. Preservar o alerta
+    # operacional do frete aproximado, se o número não foi confirmado.
+    solicitacao.observacoes = ("ATENÇÃO: frete calculado pela referência do CEP; "
+                              "confirmar o número antes da entrega.") if frete_snap.get("frete_estimado_cep") else ""
     oportunidade.status = "convertida"
     oportunidade.solicitacao = solicitacao
     oportunidade.convertido_em = agora_utc()
@@ -15731,6 +15774,66 @@ def garantir_contas_financeiras(db: Session, empresa_id: int):
     return []
 
 
+def hoje_financeiro_brasil() -> date:
+    """Data de referência operacional no fuso da empresa (RJ/Brasil)."""
+    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+
+def proximo_dia_util_bancario(referencia: date) -> date:
+    """Próximo dia útil da semana; não confunde extrato com data de pagamento agendado.
+
+    A data contábil do arquivo continua intacta. O fallback atende, por exemplo,
+    ao extrato de 20/11/2026 que registra movimentos efetivos em 23/11/2026.
+    """
+    candidato = referencia + timedelta(days=1)
+    while candidato.weekday() >= 5:
+        candidato += timedelta(days=1)
+    return candidato
+
+
+def limite_importacao_banco_utc(ate_data: date) -> datetime:
+    """Início do dia seguinte no Brasil, expresso em UTC ingênuo do banco.
+
+    Evita excluir importações após 21h de Brasília (virada do dia em UTC).
+    """
+    inicio_amanha_local = datetime.combine(ate_data + timedelta(days=1), time.min,
+                                           tzinfo=ZoneInfo("America/Sao_Paulo"))
+    return inicio_amanha_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def filtro_banco_efetivado(ate_data: date):
+    """Inclui importações do extrato efetivo com data do próximo dia útil.
+
+    A importação do Banco Principal é de movimentos do extrato, não de
+    pagamentos agendados. Para evitar antecipações arbitrárias, a tolerância é
+    limitada ao próximo dia útil e a importações feitas até a data de corte.
+    """
+    limite = proximo_dia_util_bancario(ate_data)
+    return or_(
+        LancamentoBanco.data <= ate_data,
+        and_(
+            LancamentoBanco.origem_importacao.isnot(None),
+            LancamentoBanco.data > ate_data,
+            LancamentoBanco.data <= limite,
+            LancamentoBanco.criado_em < limite_importacao_banco_utc(ate_data),
+        ),
+    )
+
+
+def resumo_banco_data_contabil_adiantada(registros, hoje: date) -> dict:
+    """Informa os itens de extrato incluídos no saldo antes da data contábil."""
+    limite = proximo_dia_util_bancario(hoje)
+    antecipados = [(dia, float(valor or 0)) for dia, valor in registros if dia and hoje < dia <= limite]
+    return {
+        'quantidade': len(antecipados),
+        'entradas': round(sum(v for _, v in antecipados if v > 0), 2),
+        'saidas': round(sum(-v for _, v in antecipados if v < 0), 2),
+        'liquido': round(sum(v for _, v in antecipados), 2),
+        'primeira_data': min((dia for dia, _ in antecipados), default=None),
+        'ultima_data': max((dia for dia, _ in antecipados), default=None),
+    }
+
+
 def parse_valor_banco(valor) -> float:
     if valor is None:
         return 0.0
@@ -16483,7 +16586,7 @@ def financeiro(
     )
     importacao_habilitada = bool(conta and conta_principal and conta.id == conta_principal.id)
 
-    hoje = date.today()
+    hoje = hoje_financeiro_brasil()
 
     # Existe um único mês/ano mestre: o seletor dos cards superiores.
     # Ao trocar esse mês, o período detalhado abaixo nasce automaticamente do
@@ -16756,7 +16859,7 @@ def financeiro(
     contratos_receber = q_contratos_receber.order_by(Solicitacao.data_evento.asc(), Solicitacao.id.asc()).all()
     total_contratos_receber = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_receber)
 
-    hoje = date.today()
+    hoje = hoje_financeiro_brasil()
     contratos_vencidos = [c for c in contratos_receber if c.data_evento and c.data_evento < hoje]
     contratos_em_dia = [c for c in contratos_receber if not c.data_evento or c.data_evento >= hoje]
     total_contratos_vencidos = sum(max((c.valor or 0) - (c.valor_pago or 0), 0) for c in contratos_vencidos)
@@ -16864,7 +16967,7 @@ def financeiro(
         ).filter(
             LancamentoBanco.empresa_id == empresa.id,
             LancamentoBanco.data >= inicio_ano,
-            LancamentoBanco.data <= corte_banco,
+            filtro_banco_efetivado(corte_banco),
         ).group_by(LancamentoBanco.conta_id).all()
     }
     totais_manuais_por_conta = {
@@ -16890,6 +16993,26 @@ def financeiro(
 
     saldo_banco = saldo_real_conta(conta)
     saldo_todos = sum(saldo_real_conta(c) for c in contas if c.ativa)
+
+    # Quando o extrato do Banco Principal já trouxe movimentos realizados,
+    # a data contábil do próximo dia útil NÃO impede seu reflexo no saldo.
+    # Permanecem fora movimentos manuais futuros e datas posteriores ao próximo
+    # dia útil (que poderiam ser agendamentos).
+    limite_data_bancaria = proximo_dia_util_bancario(hoje)
+    contabilizados_antecipadamente_q = db.query(
+        LancamentoBanco.data, LancamentoBanco.valor,
+    ).filter(
+        LancamentoBanco.empresa_id == empresa.id,
+        LancamentoBanco.origem_importacao.isnot(None),
+        LancamentoBanco.data > hoje,
+        LancamentoBanco.data <= limite_data_bancaria,
+        LancamentoBanco.criado_em < limite_importacao_banco_utc(hoje),
+    )
+    if conta:
+        contabilizados_antecipadamente_q = contabilizados_antecipadamente_q.filter(
+            LancamentoBanco.conta_id == conta.id)
+    resumo_banco_antecipado = resumo_banco_data_contabil_adiantada(
+        contabilizados_antecipadamente_q.all(), hoje)
 
     # Relatório mensal por semana calculado em memória sobre a única consulta mensal.
     relatorio_semanal = []
@@ -17301,6 +17424,9 @@ def financeiro(
         "pagamentos_sistema_mes": pagamentos_sistema_mes, "total_contratos_pagos_mes": total_contratos_pagos_mes,
         "entradas": entradas, "saidas": saidas, "saldo_real": saldo_real, "total_receber": total_receber, "total_pagar": total_pagar,
         "saldo_previsto": saldo_previsto, "saldo_banco": saldo_banco, "saldo_todos": saldo_todos,
+        "resumo_banco_antecipado": resumo_banco_antecipado,
+        "limite_data_bancaria": limite_data_bancaria,
+        "limite_importacao_utc": limite_importacao_banco_utc(hoje),
         "total_receber_posicao": total_receber_posicao, "total_pagar_posicao": total_pagar_posicao,
         "saldo_projetado_posicao": saldo_projetado_posicao,
         "relatorio_semanal": relatorio_semanal, "relatorio_total": relatorio_total,
@@ -17607,7 +17733,7 @@ async def relatorio_financeiro_salvar_categorias(
 
 
 def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[date] = None):
-    hoje = date.today()
+    hoje = hoje_financeiro_brasil()
     ate_data = ate_data or hoje
     corte_banco = min(ate_data, hoje)
     inicio_ano = corte_banco.replace(month=1, day=1)
@@ -17620,7 +17746,7 @@ def _posicao_financeira_atual(db: Session, empresa_id: int, ate_data: Optional[d
             LancamentoBanco.empresa_id == empresa_id,
             LancamentoBanco.conta_id.in_(ids_contas),
             LancamentoBanco.data >= inicio_ano,
-            LancamentoBanco.data <= corte_banco,
+            filtro_banco_efetivado(corte_banco),
         ).scalar() or 0)
         saldo_banco += float(db.query(func.coalesce(func.sum(LancamentoManualFinanceiro.valor), 0)).filter(
             LancamentoManualFinanceiro.empresa_id == empresa_id,
@@ -21300,6 +21426,8 @@ def vitrine_publica_reservar(
             "cidade": str(frete.get("cidade") or ""),
             "estado": str(frete.get("estado") or ""),
             "endereco_formatado": str(frete.get("endereco_formatado") or ""),
+            "frete_estimado_cep": bool(frete.get("frete_estimado_cep")),
+            "aviso_endereco": str(frete.get("aviso_endereco") or ""),
         },
     }
 
