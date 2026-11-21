@@ -21,6 +21,7 @@
   <form method="post" action="{% if produto %}/painel/produto/{{ produto.id }}{% else %}/painel/produtos{% endif %}" enctype="multipart/form-data" id="formProduto">
     {% if produto %}<input type="hidden" name="produto_id" value="{{ produto.id }}">{% endif %}
     <input type="hidden" name="volume_logistico" value="1"><input type="hidden" name="carga_pontos" value="1">
+    <div id="erroSalvarProduto" role="alert" aria-live="assertive" hidden style="padding:13px 16px;border:1px solid #fda29b;background:#fff4f2;color:#912018;border-radius:12px;margin-bottom:14px;font-weight:700"></div>
 
     <section class="produto-bloco" id="principal">
       <div class="produto-bloco-cab"><span class="produto-num">1</span><div><h2>Informações principais</h2><p>O que identifica o item. A posição na vitrine é organizada visualmente na lista de produtos.</p></div></div>
@@ -239,7 +240,10 @@
     if(tipo()!=='combo')return;
     const selecionados=[...(linhas?.querySelectorAll('.combo-principal-select')||[])].map(s=>s.value);
     if(!selecionados.length || selecionados.some(x=>!x) || new Set(selecionados).size!==selecionados.length){
-      e.preventDefault();e.stopImmediatePropagation();alert('Escolha pelo menos um produto principal, sem repetir nenhum.');
+      e.preventDefault();e.stopImmediatePropagation();
+      const detalhes=box?.closest('details');if(detalhes)detalhes.open=true;
+      window.exibirErroCadastroProduto?.('Escolha pelo menos um produto principal, sem repetir nenhum.');
+      box?.scrollIntoView({block:'center',behavior:'smooth'});
     }
   },true);
   atualizar();
@@ -247,6 +251,59 @@
 
 function alternarRecursoProduto(check){const linha=check.closest('.recurso-linha');const hidden=linha.querySelector('.recurso-utiliza');const qtd=linha.querySelector('.recurso-quantidade');hidden.value=check.checked?'1':'0';if(check.checked&&(!qtd.value||Number(qtd.value)<1))qtd.value='1'}
 document.querySelectorAll('.produto-passos a').forEach(a=>a.addEventListener('click',()=>{const el=document.querySelector(a.getAttribute('href'));if(el&&el.tagName==='DETAILS')el.open=true}));
-const formProduto=document.getElementById('formProduto'),botaoSalvar=document.getElementById('salvarProduto'),statusSalvar=document.getElementById('statusSalvarProduto');formProduto?.addEventListener('submit',()=>{if(botaoSalvar){botaoSalvar.disabled=true;botaoSalvar.innerHTML='<span class="spinner-border spinner-border-sm"></span> Salvando...'}if(statusSalvar)statusSalvar.textContent='Salvando alterações...'});
+// Salvar sem perder o formulário caso o servidor devolva 422/500. O POST
+// continua sendo o mesmo; somente o tratamento de erro muda.
+(function(){
+  const form=document.getElementById('formProduto');
+  const botao=document.getElementById('salvarProduto');
+  const status=document.getElementById('statusSalvarProduto');
+  const erro=document.getElementById('erroSalvarProduto');
+  let salvando=false;
+  const rotuloOriginal=botao?.innerHTML;
+  function mostrarErro(mensagem){
+    if(erro){erro.textContent=mensagem;erro.hidden=false;erro.scrollIntoView({block:'center',behavior:'smooth'})}
+    if(status)status.textContent='Não foi possível salvar. Corrija o problema e tente novamente.';
+  }
+  window.exibirErroCadastroProduto=mostrarErro;
+  form?.addEventListener('invalid',evento=>{
+    const detalhes=evento.target.closest('details');if(detalhes)detalhes.open=true;
+    if(status)status.textContent='Verifique o campo obrigatório antes de salvar.';
+  },true);
+  form?.addEventListener('submit',async evento=>{
+    if(evento.defaultPrevented||salvando)return;
+    evento.preventDefault();
+    if(erro)erro.hidden=true;
+    salvando=true;
+    if(botao){botao.disabled=true;botao.innerHTML='<span class="spinner-border spinner-border-sm"></span> Salvando...'}
+    if(status)status.textContent='Salvando alterações...';
+    try{
+      const dados=new FormData(form);
+      const acionador=evento.submitter;
+      if(acionador?.name)dados.set(acionador.name,acionador.value||'1');
+      const resposta=await fetch(form.action,{method:'POST',body:dados,credentials:'same-origin',headers:{'Accept':'application/json'}});
+      if(resposta.ok){window.location.assign(resposta.url);return}
+      let descricao='';
+      try{
+        const contentType=resposta.headers.get('content-type')||'';
+        if(contentType.includes('json')){
+          const respostaJson=await resposta.json();
+          const detalhe=respostaJson?.detail;
+          descricao=typeof detalhe==='string'?detalhe:Array.isArray(detalhe)?detalhe.map(item=>item.msg||'Campo inválido').join('; '):'';
+          descricao=descricao||respostaJson?.erro||'';
+          if(respostaJson?.codigo)descricao+=' (código '+respostaJson.codigo+')';
+        }
+      }catch(_erro){/* mantém o status HTTP se o servidor respondeu sem JSON */}
+      if(!descricao){
+        descricao=resposta.status>=500?'Erro interno do Conect ao salvar. Verifique os logs do Render.':'Não foi possível salvar os dados do cadastro.';
+      }
+      mostrarErro(descricao+' (HTTP '+resposta.status+')');
+    }catch(_erro){
+      mostrarErro('Falha de conexão ao salvar. Confira a internet e tente novamente.');
+    }finally{
+      salvando=false;
+      if(botao){botao.disabled=false;botao.innerHTML=rotuloOriginal}
+    }
+  });
+})();
 </script>
 {% endblock %}

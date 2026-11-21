@@ -111,7 +111,7 @@ def test_combo_consume_apenas_seus_recursos_mais_multiplos_principais():
         db.close();engine.dispose()
 
 
-def test_bloqueio_data_em_qualquer_principal_bloqueia_combo():
+def test_bloqueio_manual_do_principal_nao_bloqueia_combo():
     from models import BloqueioProduto
     engine,db,emp,cli=preparar()
     try:
@@ -124,7 +124,7 @@ def test_bloqueio_data_em_qualquer_principal_bloqueia_combo():
         dia=date.today()+timedelta(days=3)
         db.add(BloqueioProduto(empresa_id=emp.id, produto_id=b.id, data_inicio=dia, data_fim=dia, ativo=True))
         db.flush()
-        assert disponibilidade(db,emp,dia)['Portátil com Fliperama']==0
+        assert disponibilidade(db,emp,dia)=={'Portátil':2,'Fliperama':0,'Portátil com Fliperama':2}
     finally:
         db.close();engine.dispose()
 

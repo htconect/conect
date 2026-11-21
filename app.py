@@ -4132,6 +4132,7 @@ def _garantir_colunas_v113_criticas() -> None:
         # CRÍTICA de startup, não da manutenção geral (desativada no Render).
         # Sem isso qualquer SELECT de Empresa/Produto pode gerar erro 500.
         "ALTER TABLE produtos_servicos ADD COLUMN IF NOT EXISTS eh_combo BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE produtos_servicos ADD COLUMN IF NOT EXISTS tipo_cadastro VARCHAR(20) NOT NULL DEFAULT 'principal'",
         "ALTER TABLE produtos_servicos ADD COLUMN IF NOT EXISTS produto_principal_id INTEGER",
         "ALTER TABLE itens_produto_servico_estoque ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) NOT NULL DEFAULT 'acessorio'",
         "ALTER TABLE empresas ADD COLUMN IF NOT EXISTS duracao_padrao_minutos INTEGER DEFAULT 240",
@@ -4166,6 +4167,8 @@ def _garantir_colunas_v113_criticas() -> None:
             with engine.begin() as conn:
                 for comando in comandos_pg:
                     conn.execute(text(comando))
+                # O registro de combo já existente continua sendo combo no novo campo.
+                conn.execute(text("UPDATE produtos_servicos SET tipo_cadastro = 'combo' WHERE eh_combo = true AND tipo_cadastro <> 'combo'"))
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS bloqueios_data (
                         id SERIAL PRIMARY KEY,
@@ -6388,7 +6391,7 @@ def _produtos_principais_e_raizes(db: Session, empresa_id: int) -> tuple[dict[in
     produtos = {int(p.id): p for p in db.query(ProdutoServico).filter_by(empresa_id=empresa_id).all()}
     componentes: dict[int, dict[int, int]] = {}
     for pid, produto in produtos.items():
-        if not produto.eh_combo:
+        if not produto.eh_combo and getattr(produto, 'tipo_cadastro', 'principal') != 'opcional':
             componentes[pid] = {pid: 1} if produto.ativo else {}
         else:
             componentes[pid] = {}
@@ -6427,7 +6430,13 @@ def _estoque_compartilhado_produto(
 ) -> tuple[int, int, int]:
     """(limite teorico da composicao, unidades comprometidas equivalentes, disponivel)."""
     requisitos = componentes.get(int(produto.id), {})
-    if not requisitos or not produto.ativo:
+    if not produto.ativo:
+        return 0, 0, 0
+    # Opcional avulso não conta como máquina. Seus recursos obrigatórios
+    # definem todo o estoque em _limite_recursos_produto.
+    if getattr(produto, 'tipo_cadastro', 'principal') == 'opcional' and not produto.eh_combo:
+        return 100000, 0, 100000
+    if not requisitos:
         return 0, 0, 0
     comprometidos = _comprometido_principais(alugado_por_produto, componentes)
     limites, livres = [], []
@@ -6525,12 +6534,12 @@ def _requisitos_solicitacao_efetivos(
         pid = getattr(linha, "produto_id", None)
         if pid:
             produto = db.get(ProdutoServico, int(pid))
-            if produto and produto.eh_combo:
+            if produto and (produto.eh_combo or getattr(produto, 'tipo_cadastro', 'principal') == 'opcional'):
                 for rid, qtd in mapa_produtos.get(int(pid), {}).items():
                     minimo_combo[rid] = minimo_combo.get(rid, 0) + max(1, int(linha.quantidade or 1)) * qtd
     if not any(linha.produto_id for linha in (item.itens or [])) and item.produto_id:
         produto = db.get(ProdutoServico, int(item.produto_id))
-        if produto and produto.eh_combo:
+        if produto and (produto.eh_combo or getattr(produto, 'tipo_cadastro', 'principal') == 'opcional'):
             minimo_combo = dict(mapa_produtos.get(int(item.produto_id), {}))
     for item_estoque_id in list(padrao.keys()):
         if item_estoque_id in ajustes:
@@ -6586,7 +6595,8 @@ def _comprometimento_recursos_data(
     # Mesmo após ajuste manual, recursos obrigatórios do combo são inegociáveis.
     produtos_combo = {
         int(p.id) for p in db.query(ProdutoServico.id).filter(
-            ProdutoServico.empresa_id == empresa_id, ProdutoServico.eh_combo == True,
+            ProdutoServico.empresa_id == empresa_id,
+            or_(ProdutoServico.eh_combo == True, ProdutoServico.tipo_cadastro == 'opcional'),
         ).all()
     }
     totais: dict[int, int] = {}
@@ -6655,11 +6665,14 @@ def _validar_estoque_antes_de_confirmar(db: Session, empresa: Empresa, item: Sol
             raise HTTPException(409, "Produto da reserva está inativo ou não foi encontrado no estoque da empresa.")
         vinculos = mapa.get(pid, {})
         if not raizes.get(pid):
-            raise HTTPException(409, f"Configure os produtos principais do combo {produto.nome}.")
+            if getattr(produto, 'tipo_cadastro', 'principal') != 'opcional':
+                raise HTTPException(409, f"Configure os produtos principais do combo {produto.nome}.")
+            if not _empresa_modulo_ativo(empresa, "recursos") or not vinculos:
+                raise HTTPException(409, f"Configure o recurso físico do opcional avulso {produto.nome}.")
         for rid, qtd in vinculos.items():
             requerido = int(qtd) * qtd_produto
             consumo[rid] = consumo.get(rid, 0) + requerido
-            if bool(getattr(produto, "eh_combo", False)):
+            if bool(getattr(produto, 'eh_combo', False)) or getattr(produto, 'tipo_cadastro', 'principal') == 'opcional':
                 obrigatorios_combo[rid] = obrigatorios_combo.get(rid, 0) + requerido
     for opc in db.query(SolicitacaoOpcional).filter_by(empresa_id=empresa.id, solicitacao_id=item.id).all():
         if opc.item_estoque_id and int(opc.quantidade or 0) > 0:
@@ -6681,7 +6694,9 @@ def _validar_estoque_antes_de_confirmar(db: Session, empresa: Empresa, item: Sol
         dia = item.data_evento + timedelta(days=deslocamento)
         bloqueios = _bloqueios_produtos_na_data(db, empresa.id, dia)
         for pid in produtos_quantidades:
-            if pid in bloqueios or any(raiz in bloqueios for raiz in raizes.get(pid, {})):
+            # Bloqueio manual é comercial e individual: nunca se propaga
+            # para combos que utilizem este produto como componente físico.
+            if pid in bloqueios:
                 raise HTTPException(409, f"Produto indisponível por bloqueio de data em {dia:%d/%m/%Y}.")
         alugados = _alugado_por_produto_data(db, empresa.id, dia, excluir_solicitacao_id=item.id)
         for raiz_id, quantidade in consumo_principais.items():
@@ -6922,7 +6937,7 @@ def _analises_estoque_lote(db: Session, solicitacoes) -> dict[int, dict]:
                     quantidades[rid] = quantidades.get(rid, 0) + qtd
 
         # Requisitos padrão e efetivos por contrato, calculados em memória.
-        combos_ids = {pid for pid in produto_ids if principais_db.get(pid) and principais_db[pid].eh_combo}
+        combos_ids = {pid for pid in produto_ids if principais_db.get(pid) and (principais_db[pid].eh_combo or getattr(principais_db[pid], 'tipo_cadastro', 'principal') == 'opcional')}
         padrao_por_solicitacao: dict[int, dict[int, int]] = {}
         efetivo_por_solicitacao: dict[int, dict[int, int]] = {}
         for sid in ids_relevantes:
@@ -7115,6 +7130,8 @@ def _limite_recursos_produto(
 ) -> tuple[int, list[dict]]:
     limite = max(0, int(limite_fisico or 0))
     detalhes = []
+    if getattr(produto, 'tipo_cadastro', 'principal') == 'opcional' and not recursos_produto:
+        return 0, detalhes
     # Vínculos dos principais são validados no cálculo de limite_fisico.
     for item_estoque_id, qtd_por_unidade in recursos_produto.items():
         recurso = itens_estoque.get(item_estoque_id)
@@ -7138,6 +7155,23 @@ def _limite_recursos_produto(
             "limitante": capacidade < limite_fisico,
         })
     return max(0, limite), detalhes
+
+
+def _resumo_estoque_opcional_avulso(produto, recursos_vinculados, itens_estoque, disponiveis):
+    """Totais para telas: nenhum estoque fictício de 100 mil unidades."""
+    if getattr(produto, 'tipo_cadastro', 'principal') != 'opcional':
+        return None
+    if not recursos_vinculados:
+        return 0, 0, 0
+    capacidades = []
+    for rid, quantidade in recursos_vinculados.items():
+        recurso = itens_estoque.get(rid)
+        if recurso is None or not recurso.ativo:
+            return 0, 0, 0
+        capacidades.append(max(0, int(recurso.quantidade_estoque or 0)) // max(1, int(quantidade)))
+    total = min(capacidades) if capacidades else 0
+    livres = min(total, max(0, int(disponiveis or 0)))
+    return total, max(0, total - livres), livres
 
 
 def _salvar_vinculos_recursos_produto(
@@ -9442,10 +9476,9 @@ def _erro_bloqueio_produto(db: Session, empresa_id: int, produto: ProdutoServico
         return None
     bloqueios = _bloqueios_produtos_na_data(db, empresa_id, data_consulta)
     produto_id = int(produto.id)
-    _produtos, componentes = _produtos_principais_e_raizes(db, empresa_id)
-    bloqueio = bloqueios.get(produto_id) or next(
-        (bloqueios[pid] for pid in componentes.get(produto_id, {}) if pid in bloqueios), None
-    )
+    # Bloqueio de produto é uma regra comercial restrita ao cadastro escolhido.
+    # A composição e o estoque físico compartilhado são verificados à parte.
+    bloqueio = bloqueios.get(produto_id)
     if bloqueio:
         detalhe = f" ({bloqueio.descricao})" if bloqueio.descricao else ""
         return f"{produto.nome} está bloqueado para aluguel em {data_consulta:%d/%m/%Y}{detalhe}."
@@ -9561,9 +9594,8 @@ def _itens_vitrine_publica(db: Session, empresa: Empresa, data_consulta: date,
                 
             )
         else:
-            disponiveis = disponivel_fisico
-        componentes_produto = raizes_produtos.get(int(produto.id), {})
-        if bloqueio_data or int(produto.id) in bloqueios_produto or any(pid in bloqueios_produto for pid in componentes_produto):
+            disponiveis = 0 if getattr(produto, 'tipo_cadastro', 'principal') == 'opcional' else disponivel_fisico
+        if bloqueio_data or int(produto.id) in bloqueios_produto:
             disponiveis = 0
 
         if apenas_disponibilidade:
@@ -10967,7 +10999,7 @@ def painel_vitrine(request: Request, db: Session = Depends(get_db), empresa: Emp
     _garantir_categorias_vitrine_existentes(db, empresa)
     categorias = _categorias_vitrine_empresa(db, empresa.id, somente_ativas=False)
     ordem_cat = {c.nome.casefold(): int(c.ordem or 0) for c in categorias}
-    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id, eh_combo=False).all()
+    produtos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(empresa_id=empresa.id).all()
     produtos.sort(key=lambda p: (ordem_cat.get(str(p.vitrine_categoria or '').casefold(), 999999), int(p.vitrine_ordem or 0), str(p.nome or '').casefold()))
     oportunidades_db = (
         db.query(VitrineOportunidade)
@@ -11864,6 +11896,7 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
             ProdutoServico.empresa_id == empresa.id,
             ProdutoServico.ativo == True,
             ProdutoServico.eh_combo == False,
+            ProdutoServico.tipo_cadastro == 'principal',
             *([ProdutoServico.id != produto.id] if produto else []),
         ).order_by(ProdutoServico.nome).all(),
         "recursos_produto": _recursos_produto_edicao(db, empresa.id, produto.id) if (usa_recursos and produto) else {},
@@ -11871,6 +11904,9 @@ def _contexto_form_produto(request: Request, db: Session, empresa: Empresa, prod
         "precos_evento": _mapa_precos_evento_produto(db, empresa.id, produto.id) if produto else {},
         "opcionais_catalogo": (_opcionais_catalogo_empresa(db, empresa.id, somente_ativos=True) if usa_opcionais else []),
         "opcionais_excluidos": _ids_opcionais_excluidos(db, empresa.id, produto.id) if produto else set(),
+        "contratos_produto_existente": db.query(ReservaItem.id).filter_by(
+            empresa_id=empresa.id, produto_id=produto.id
+        ).count() if produto else 0,
         "salvo": request.query_params.get("salvo", ""),
     }
 
@@ -12074,30 +12110,20 @@ def produto_editar(produto_id: int, request: Request, db: Session = Depends(get_
     return templates.TemplateResponse("admin/produto_form.html", _contexto_form_produto(request, db, empresa, produto))
 
 
-@app.get("/painel/combos", response_class=HTMLResponse)
-def combos_painel(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    combos = db.query(ProdutoServico).options(selectinload(ProdutoServico.fotos)).filter_by(
-        empresa_id=empresa.id, eh_combo=True,
-    ).order_by(ProdutoServico.nome).all()
-    _produtos, componentes = _produtos_principais_e_raizes(db, empresa.id)
-    detalhes = {int(combo.id): [f"{q}x {_produtos[pid].nome}" for pid, q in componentes.get(int(combo.id), {}).items()]
-                for combo in combos}
-    return templates.TemplateResponse("admin/combos.html", {
-        "request": request, "empresa": empresa, "combos": combos, "detalhes": detalhes,
-    })
+@app.get("/painel/combos")
+def combos_painel():
+    # URL antiga compatível: catálogo único (categoria da vitrine separada).
+    return RedirectResponse("/painel/produtos", status_code=303)
 
 
-@app.get("/painel/combo/novo", response_class=HTMLResponse)
-def combo_novo(request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    return templates.TemplateResponse("admin/produto_form.html", _contexto_form_produto(request, db, empresa, None))
+@app.get("/painel/combo/novo")
+def combo_novo():
+    return RedirectResponse("/painel/produto/novo", status_code=303)
 
 
-@app.get("/painel/combo/{combo_id}", response_class=HTMLResponse)
-def combo_editar(combo_id: int, request: Request, db: Session = Depends(get_db), empresa: Empresa = Depends(empresa_logada)):
-    combo = db.get(ProdutoServico, combo_id)
-    if not combo or combo.empresa_id != empresa.id or not combo.eh_combo:
-        raise HTTPException(404)
-    return templates.TemplateResponse("admin/produto_form.html", _contexto_form_produto(request, db, empresa, combo))
+@app.get("/painel/combo/{combo_id}")
+def combo_editar(combo_id: int):
+    return RedirectResponse(f"/painel/produto/{combo_id}", status_code=303)
 
 
 @app.get("/painel/recursos", response_class=HTMLResponse)
@@ -12266,6 +12292,7 @@ def salvar_produto_url(
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
         eh_combo: bool = Form(False),
+        tipo_cadastro: str = Form(""),
         produto_principal_id: str = Form(""),  # legado
         combo_principal_id: list[str] = Form(default=[]),
         combo_principal_quantidade: list[str] = Form(default=[]),
@@ -12285,7 +12312,7 @@ def salvar_produto_url(
         aplicar_evento_todos=aplicar_evento_todos, utiliza_opcionais=utiliza_opcionais, opcional_catalogo_id=opcional_catalogo_id, opcional_utiliza=opcional_utiliza,
         fotos_ajustadas_json=fotos_ajustadas_json, foto_arquivos=foto_arquivos, foto_originais=foto_originais,
         recurso_item_id=recurso_item_id, recurso_utiliza=recurso_utiliza, recurso_quantidade=recurso_quantidade,
-        eh_combo=eh_combo, produto_principal_id=produto_principal_id,
+        eh_combo=eh_combo, tipo_cadastro=tipo_cadastro, produto_principal_id=produto_principal_id,
         combo_principal_id=combo_principal_id, combo_principal_quantidade=combo_principal_quantidade,
         db=db, empresa=empresa,
     )
@@ -12318,6 +12345,7 @@ def salvar_produto(
         recurso_utiliza: list[str] = Form(default=[]),
         recurso_quantidade: list[str] = Form(default=[]),
         eh_combo: bool = Form(False),
+        tipo_cadastro: str = Form(""),
         produto_principal_id: str = Form(""),  # legado
         combo_principal_id: list[str] = Form(default=[]),
         combo_principal_quantidade: list[str] = Form(default=[]),
@@ -12325,6 +12353,24 @@ def salvar_produto(
 ):
     garantir_itens_estoque_padrao(db, empresa.id)
     _garantir_tipos_evento_padrao(db, empresa)
+    tipo_cadastro = str(tipo_cadastro or ('combo' if eh_combo else 'principal')).strip().lower()
+    if tipo_cadastro not in {'principal', 'combo', 'opcional'}:
+        raise HTTPException(422, 'Tipo de cadastro inválido.')
+    eh_combo = tipo_cadastro == 'combo'
+    if tipo_cadastro == 'opcional':
+        if not _empresa_modulo_ativo(empresa, 'recursos'):
+            raise HTTPException(422, 'Ative o módulo de recursos para alugar um opcional avulso.')
+        ids_obrigatorios = [str(rid) for rid, flag in zip(recurso_item_id, recurso_utiliza) if str(flag) == '1']
+        if not ids_obrigatorios:
+            raise HTTPException(422, 'Escolha pelo menos um recurso existente para o opcional avulso.')
+        recursos_selecionados = db.query(ItemProdutoServicoEstoque).filter(
+            ItemProdutoServicoEstoque.empresa_id == empresa.id,
+            ItemProdutoServicoEstoque.ativo == True,
+            ItemProdutoServicoEstoque.tipo != 'principal',
+            ItemProdutoServicoEstoque.id.in_([int(rid) for rid in ids_obrigatorios if rid.isdigit()]),
+        ).count()
+        if recursos_selecionados != len(ids_obrigatorios):
+            raise HTTPException(422, 'Selecione recursos físicos ativos e existentes para o opcional avulso.')
     produto_id_int = int(produto_id) if produto_id else None
     produto = db.get(ProdutoServico, produto_id_int) if produto_id_int else None
     if produto and produto.empresa_id != empresa.id:
@@ -12339,7 +12385,7 @@ def salvar_produto(
         if principal_id in novos_componentes or principal_id == produto_id_int:
             raise HTTPException(422, "O mesmo principal não pode aparecer duas vezes no combo.")
         principal = db.get(ProdutoServico, principal_id)
-        if not principal or principal.empresa_id != empresa.id or not principal.ativo or principal.eh_combo:
+        if not principal or principal.empresa_id != empresa.id or not principal.ativo or principal.eh_combo or principal.tipo_cadastro != 'principal':
             raise HTTPException(422, "Os principais precisam ser produtos ativos da própria empresa (não combos).")
         bruto_quantidade = combo_principal_quantidade[idx] if idx < len(combo_principal_quantidade) else "1"
         try:
@@ -12354,6 +12400,8 @@ def salvar_produto(
     if not eh_combo and novos_componentes:
         raise HTTPException(422, "Produtos principais não podem ter composição de combo.")
     if eh_combo and produto_id_int:
+        # Um principal usado por outros combos não pode virar combo, para evitar
+        # vínculos em cascata e indisponibilidade silenciosa.
         filhos = db.query(ComboProdutoPrincipal.id).filter_by(
             empresa_id=empresa.id, produto_principal_id=produto_id_int,
         ).first()
@@ -12377,9 +12425,15 @@ def salvar_produto(
     contrato_id_int = int(contrato_id) if contrato_id and str(contrato_id).isdigit() else None
     contrato = db.get(Contrato, contrato_id_int) if contrato_id_int else None
     produto.contrato_id = contrato.id if contrato and contrato.empresa_id == empresa.id else None
-    # Quantidade do combo NÃO é cadastrada; vem sempre do produto principal.
-    produto.quantidade_disponivel = 0 if eh_combo else max(0, int(quantidade_disponivel or 0))
+    # Estoque de combo não é independente. Ao converter produto existente, manter
+    # a quantidade anteriormente cadastrada como metadado reversível (NÃO é usada
+    # no cálculo de disponibilidade de combos). Preserva os dados do registro.
+    if tipo_cadastro == 'principal':
+        produto.quantidade_disponivel = max(0, int(quantidade_disponivel or 0))
+    elif not produto_existente:
+        produto.quantidade_disponivel = 0
     produto.eh_combo = bool(eh_combo)
+    produto.tipo_cadastro = tipo_cadastro
     # Vínculo legado permanece apenas no banco; fonte de verdade é a nova tabela.
     produto.produto_principal_id = None
     produto.valor_base = texto_para_float(valor_base)
@@ -12486,7 +12540,7 @@ def salvar_produto(
         )
     db.commit()
     db.refresh(produto)
-    return RedirectResponse(f"/painel/combo/{produto.id}?salvo=1" if produto.eh_combo else f"/painel/produto/{produto.id}?salvo=1", status_code=303)
+    return RedirectResponse(f"/painel/produto/{produto.id}?salvo=1", status_code=303)
 
 
 @app.get("/painel/produto/{produto_id}/copiar")
@@ -12498,6 +12552,7 @@ def copiar_produto(produto_id: int, db: Session = Depends(get_db), empresa: Empr
         empresa_id=empresa.id, contrato_id=origem.contrato_id, nome=f"{origem.nome} - cópia",
         descricao=origem.descricao, quantidade_disponivel=origem.quantidade_disponivel,
         eh_combo=bool(getattr(origem, "eh_combo", False)),
+        tipo_cadastro=getattr(origem, 'tipo_cadastro', 'principal'),
         produto_principal_id=(int(origem.produto_principal_id) if origem.produto_principal_id else None),
         valor_base=origem.valor_base, duracao_minutos=origem.duracao_minutos,
         prazo_retirada_dias=origem.prazo_retirada_dias, carga_pontos=origem.carga_pontos or 1,
@@ -20001,10 +20056,12 @@ def disponibilidade(request: Request, data: str = "", produto_id: int = 0, db: S
             disponivel_fisico,
             
         )
-        componentes_produto = raizes_produtos.get(int(produto.id), {})
-        bloqueio_produto = bloqueios_produto_dia.get(int(produto.id)) or next(
-            (bloqueios_produto_dia[pid] for pid in componentes_produto if pid in bloqueios_produto_dia), None
+        resultado_opcional = _resumo_estoque_opcional_avulso(
+            produto, mapa_recursos.get(produto.id, {}), itens_estoque, disponiveis
         )
+        if resultado_opcional is not None:
+            total, alugados, disponivel_fisico = resultado_opcional
+        bloqueio_produto = bloqueios_produto_dia.get(int(produto.id))
         if bloqueio_produto:
             disponiveis = 0
         conflito_produto = alugados > total
@@ -20084,11 +20141,15 @@ def api_estoque_produto(
             produto, mapa.get(produto.id, {}), itens_estoque, comprometido, disponivel_fisico,
         )
     else:
-        disponiveis, recursos = disponivel_fisico, []
-    bloqueios_data = _bloqueios_produtos_na_data(db, empresa.id, data_consulta)
-    bloqueio_produto = bloqueios_data.get(int(produto.id)) or next(
-        (bloqueios_data[pid] for pid in raizes_produtos.get(int(produto.id), {}) if pid in bloqueios_data), None
+        disponiveis, recursos = (0 if getattr(produto, 'tipo_cadastro', 'principal') == 'opcional' else disponivel_fisico), []
+    resultado_opcional = _resumo_estoque_opcional_avulso(
+        produto, mapa.get(produto.id, {}) if _empresa_modulo_ativo(empresa, "recursos") else {},
+        itens_estoque if _empresa_modulo_ativo(empresa, "recursos") else {}, disponiveis
     )
+    if resultado_opcional is not None:
+        total, alugados, disponivel_fisico = resultado_opcional
+    bloqueios_data = _bloqueios_produtos_na_data(db, empresa.id, data_consulta)
+    bloqueio_produto = bloqueios_data.get(int(produto.id))
     if bloqueio_produto:
         disponiveis = 0
     return JSONResponse({
@@ -20689,7 +20750,13 @@ def agenda_consumo_estoque(
         if controla_recursos:
             disponivel, limitadores = _limite_recursos_produto(produto, mapa.get(pid, {}), recursos_por_id, comprometido, livres, )
         else:
-            disponivel, limitadores = livres, []
+            disponivel, limitadores = (0 if getattr(produto, 'tipo_cadastro', 'principal') == 'opcional' else livres), []
+        resultado_opcional = _resumo_estoque_opcional_avulso(
+            produto, mapa.get(pid, {}) if controla_recursos else {},
+            recursos_por_id if controla_recursos else {}, disponivel
+        )
+        if resultado_opcional is not None:
+            total, reservado, livres = resultado_opcional
         produtos.append({
             "nome": produto.nome, "total": total, "reservado": reservado,
             "livre": disponivel, "fisico_livre": livres,

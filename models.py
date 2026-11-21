@@ -377,6 +377,8 @@ class ProdutoServico(Base):
     horas_fixas = Column(Integer, nullable=True)
     quantidade_disponivel = Column(Integer, default=1)
     eh_combo = Column(Boolean, nullable=False, default=False)
+    # principal: estoque próprio; combo: produtos vinculados; opcional: recurso existente.
+    tipo_cadastro = Column(String(20), nullable=False, default="principal", server_default="principal")
     # Combo consome um ProdutoServico principal existente; não possui estoque próprio.
     produto_principal_id = Column(Integer, ForeignKey("produtos_servicos.id", ondelete="SET NULL"), nullable=True, index=True)
     valor_base = Column(Float, default=0)
