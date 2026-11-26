@@ -4164,9 +4164,21 @@ def _garantir_colunas_v113_criticas() -> None:
     ]
     try:
         if engine.dialect.name == "postgresql":
+            # Evita adquirir AccessExclusiveLock em colunas já existentes.
+            # Cada ALTER necessário tem sua própria transação, sem acumular locks.
+            for comando in comandos_pg:
+                partes = comando.split()
+                tabela, coluna = partes[2], partes[8]
+                with engine.begin() as conn:
+                    conn.execute(text("SET LOCAL lock_timeout = '2s'"))
+                    if coluna not in {c["name"] for c in inspect(conn).get_columns(tabela)}:
+                        conn.execute(text(comando))
             with engine.begin() as conn:
-                for comando in comandos_pg:
-                    conn.execute(text(comando))
+                conn.execute(text("SET LOCAL lock_timeout = '2s'"))
+                conn.execute(text("SELECT pg_advisory_xact_lock(812229)"))
+                conn.execute(text("CREATE TABLE IF NOT EXISTS app_migrations (chave VARCHAR(160) PRIMARY KEY, aplicado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
+                if conn.execute(text("SELECT 1 FROM app_migrations WHERE chave = '20261126_schema_critico_v228'")).scalar():
+                    return
                 # O registro de combo já existente continua sendo combo no novo campo.
                 conn.execute(text("UPDATE produtos_servicos SET tipo_cadastro = 'combo' WHERE eh_combo = true AND tipo_cadastro <> 'combo'"))
                 conn.execute(text("""
@@ -4309,6 +4321,7 @@ def _garantir_colunas_v113_criticas() -> None:
                          WHERE id IN (SELECT DISTINCT empresa_id FROM opcionais_empresa)
                             OR id IN (SELECT DISTINCT empresa_id FROM produtos_servicos WHERE utiliza_opcionais = true)
                     """))
+                conn.execute(text("INSERT INTO app_migrations (chave) VALUES ('20261126_schema_critico_v228') ON CONFLICT DO NOTHING"))
             return
         # Desenvolvimento/SQLite: reutiliza a rotina compatível já existente.
         garantir_colunas_novas()
@@ -4549,9 +4562,17 @@ def _iniciar_migracao_lokafest_v118_em_background() -> None:
 def startup():
     # Tabela própria, sem alterar bloqueios gerais nem contratos existentes.
     # A manutenção ampla continua opcional; esta tabela é necessária para o recurso.
-    BloqueioProduto.__table__.create(bind=engine, checkfirst=True)
-    # Migração estrutural mínima: somente colunas novas desta versão.
-    _garantir_colunas_v113_criticas()
+    for tentativa in range(5):
+        try:
+            BloqueioProduto.__table__.create(bind=engine, checkfirst=True)
+            _garantir_colunas_v113_criticas()
+            break
+        except Exception as exc:
+            codigo = getattr(getattr(exc, "orig", None), "pgcode", None)
+            if codigo not in {"40P01", "55P03", "40001"} or tentativa == 4:
+                raise
+            logger.warning("Migração de startup em conflito (%s); nova tentativa %s/5", codigo, tentativa + 2)
+            time_module.sleep(0.5 * (tentativa + 1))
     _iniciar_migracao_duracoes_v116_em_background()
     # LokaFest é apenas atalho manual; não alterar configuração automaticamente.
 
