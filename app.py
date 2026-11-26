@@ -21645,34 +21645,51 @@ async def vitrine_gerar_link_compartilhamento(slug: str, request: Request, db: S
         return JSONResponse({"ok": False, "erro": str(exc) or "Não foi possível compartilhar."}, status_code=400)
 
 
+def _ceps_busca_google(retorno):
+    resultados, vistos = [], set()
+    for rec in retorno.get("results", []):
+        partes = {tipo: c for c in rec.get("address_components", []) for tipo in c.get("types", [])}
+        def parte(tipo, curto=False):
+            return partes.get(tipo, {}).get("short_name" if curto else "long_name", "")
+        if parte("administrative_area_level_1", True) != "RJ" or parte("country", True) != "BR":
+            continue
+        cep = re.sub(r"\D", "", parte("postal_code"))
+        rua = parte("route")
+        if len(cep) != 8 or not rua or cep in vistos:
+            continue
+        vistos.add(cep)
+        resultados.append({"cep": cep, "logradouro": rua,
+                           "bairro": parte("sublocality_level_1") or parte("neighborhood") or parte("sublocality"),
+                           "cidade": parte("administrative_area_level_2") or parte("locality"),
+                           "uf": "RJ", "numero": parte("street_number")})
+    return resultados
+
+
+@app.get("/e/{slug}/vitrine/buscar-cep-rj")
 @app.get("/e/{slug}/vitrine/buscar-cep")
-def vitrine_buscar_cep_endereco(slug: str, request: Request, uf: str = "", cidade: str = "", rua: str = "", db: Session = Depends(get_db)):
+def vitrine_buscar_cep_endereco(slug: str, request: Request, rua: str = "", numero: str = "", db: Session = Depends(get_db)):
     empresa = db.query(Empresa).filter_by(slug=slug, ativa=True).first()
     if not empresa or not getattr(empresa, "vitrine_ativa", True):
         raise HTTPException(404)
-    uf = re.sub(r"[^A-Za-z]", "", uf).upper()
-    cidade, rua = cidade.strip(), rua.strip()
-    rua = re.sub(r",\s*\d+[a-zA-Z]?\s*$", "", rua).strip()
-    if (uf not in {"AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"} or len(cidade) < 3 or len(rua) < 3
-            or len(cidade) > 90 or len(rua) > 110):
-        return JSONResponse({"ok": False, "erro": "Informe UF, cidade e pelo menos 3 letras da rua."}, status_code=400)
-    url = f"https://viacep.com.br/ws/{quote(uf)}/{quote(cidade, safe='')}/{quote(rua, safe='')}/json/"
+    rua, numero = rua.strip(), numero.strip()
+    if not 3 <= len(rua) <= 110 or not 1 <= len(numero) <= 30:
+        return JSONResponse({"ok": False, "erro": "Informe a rua e o número."}, status_code=400)
+    chave = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    if not chave:
+        return JSONResponse({"ok": False, "erro": "Busca por endereço indisponível. Você ainda pode informar o CEP diretamente."}, status_code=503)
+    params = urlencode({"address": f"{rua}, {numero}", "components": "administrative_area:RJ|country:BR",
+                        "language": "pt-BR", "region": "br", "key": chave})
     try:
-        pedido = UrlRequest(url, headers={"User-Agent": "Connect-Humiat/1.0", "Accept": "application/json"})
-        with urlopen(pedido, timeout=6) as resp:
+        pedido = UrlRequest("https://maps.googleapis.com/maps/api/geocode/json?" + params,
+                            headers={"Accept": "application/json"})
+        with urlopen(pedido, timeout=5) as resp:
             retorno = json.loads(resp.read(256000).decode("utf-8"))
-        resultados = []
-        for rec in retorno if isinstance(retorno, list) else []:
-            cep = re.sub(r"\D", "", str(rec.get("cep") or ""))
-            if len(cep) == 8 and str(rec.get("uf") or "").upper() == uf:
-                resultados.append({"cep": cep, "logradouro": str(rec.get("logradouro") or ""),
-                                   "bairro": str(rec.get("bairro") or ""), "cidade": str(rec.get("localidade") or ""),
-                                   "uf": uf})
-            if len(resultados) >= 30:
-                break
-        return {"ok": True, "resultados": resultados}
+        if retorno.get("status") not in {"OK", "ZERO_RESULTS"}:
+            logger.warning("Busca CEP por endereço: status Google=%s", retorno.get("status"))
+            raise ValueError("Busca indisponível")
+        return {"ok": True, "resultados": _ceps_busca_google(retorno)}
     except Exception:
-        return JSONResponse({"ok": False, "erro": "Não foi possível consultar endereços agora. Tente novamente."}, status_code=503)
+        return JSONResponse({"ok": False, "erro": "Não foi possível buscar o endereço agora. Tente novamente ou informe o CEP diretamente."}, status_code=503)
 
 
 @app.post("/e/{slug}/vitrine/calcular-deslocamento")
