@@ -162,6 +162,8 @@ class BasicRateLimitMiddleware:
             limite = 10
         elif method == "GET" and path.startswith("/e/") and path.endswith("/api/clientes/por-telefone"):
             limite = 30
+        elif method == "GET" and re.fullmatch(r"/e/[^/]+/vitrine/buscar-cep(?:-rj)?", path):
+            limite = 30
         elif method == "POST" and re.fullmatch(r"/e/[^/]+/contrato/\d+/recuperar", path):
             # Limita a recuperação de TODOS os contratos legados por IP, não por número.
             limite = 8
@@ -170,6 +172,8 @@ class BasicRateLimitMiddleware:
         if limite:
             agora = time_module.monotonic()
             prefixo = "/contratos-legados" if re.fullmatch(r"/e/[^/]+/contrato/\d+/recuperar", path) else path.rsplit('/', 1)[0]
+            if method == "GET" and re.fullmatch(r"/e/[^/]+/vitrine/buscar-cep(?:-rj)?", path):
+                prefixo += ":busca-cep"
             chave = f"{_client_ip_scope(scope)}:{prefixo}"
             with _RATE_LIMIT_LOCK:
                 historico = [t for t in _RATE_LIMIT_BUCKETS.get(chave, []) if agora - t < janela]
@@ -21682,8 +21686,116 @@ def _ceps_busca_google(retorno):
         resultados.append({"cep": cep, "logradouro": rua,
                            "bairro": parte("sublocality_level_1") or parte("neighborhood") or parte("sublocality"),
                            "cidade": parte("administrative_area_level_2") or parte("locality"),
-                           "uf": "RJ", "numero": parte("street_number")})
+                           "uf": "RJ", "numero": parte("street_number"),
+                           "numero_confirmado": not rec.get("partial_match") and bool(parte("street_number"))})
     return resultados
+
+
+def _cep_busca_normalizar_rua(rua):
+    rua = re.sub(r"\s+", " ", rua).strip()
+    rua = re.sub(r"^av\.?\s+", "Avenida ", rua, flags=re.I)
+    rua = re.sub(r"^r\.?\s+", "Rua ", rua, flags=re.I)
+    rua = re.sub(r"^estr\.?\s+", "Estrada ", rua, flags=re.I)
+    rua = re.sub(r"^trav\.?\s+", "Travessa ", rua, flags=re.I)
+    return rua
+
+
+def _cep_busca_normalizar_texto(valor):
+    return "".join(c for c in unicodedata.normalize("NFKD", str(valor or "").lower()) if not unicodedata.combining(c))
+
+
+def _cep_busca_prioridade_faixa(complemento, numero):
+    """Ordena sem excluir: a faixa postal não prova que o imóvel existe."""
+    if not re.fullmatch(r"\d+", numero):
+        return 1
+    n = int(numero)
+    texto = _cep_busca_normalizar_texto(complemento)
+    if ("lado par" in texto and n % 2) or ("lado impar" in texto and not n % 2):
+        return 2
+    faixa = re.search(r"(?:de|do)\s+(\d[\d.]*)\s+(?:a|ao|ate)\s+(\d[\d.]*)", texto)
+    ate = re.search(r"ate\s+(\d[\d.]*)", texto)
+    desde = re.search(r"(?:de|do|a partir de)\s+(\d[\d.]*)\s+(?:ao fim|em diante)", texto)
+    num = lambda t: int(t.replace(".", ""))
+    if faixa:
+        return 0 if num(faixa[1]) <= n <= num(faixa[2]) else 2
+    if ate:
+        return 0 if n <= num(ate[1]) else 2
+    if desde:
+        return 0 if n >= num(desde[1]) else 2
+    return 1
+
+
+def _ceps_busca_viacep(rua, cidade, numero):
+    # ViaCEP exige município. Não disparar consultas para todos os municípios.
+    caminho = f"https://viacep.com.br/ws/RJ/{quote(cidade, safe='')}/{quote(rua, safe='')}/json/"
+    pedido = UrlRequest(caminho, headers={"Accept": "application/json", "User-Agent": "Connect-Humiat/1.0"})
+    with urlopen(pedido, timeout=3.5) as resp:
+        retorno = json.loads(resp.read(256000).decode("utf-8"))
+    if not isinstance(retorno, list):
+        raise ValueError("Resposta postal inválida")
+    resultados, vistos = [], set()
+    for rec in retorno:
+        if not isinstance(rec, dict) or rec.get("uf") != "RJ":
+            continue
+        cep = re.sub(r"\D", "", str(rec.get("cep") or ""))
+        logradouro = str(rec.get("logradouro") or "").strip()
+        if len(cep) != 8 or not logradouro or cep in vistos:
+            continue
+        vistos.add(cep)
+        resultados.append({"cep": cep, "logradouro": logradouro,
+                           "bairro": str(rec.get("bairro") or ""), "cidade": str(rec.get("localidade") or ""),
+                           "uf": "RJ", "numero": "", "numero_confirmado": False,
+                           "faixa": str(rec.get("complemento") or "")})
+    resultados.sort(key=lambda r: _cep_busca_prioridade_faixa(r["faixa"], numero))
+    return resultados
+
+
+def _buscar_ceps_rj(rua, numero):
+    partes = [p.strip() for p in rua.split(",") if p.strip()]
+    rua_base = _cep_busca_normalizar_rua(partes[0]) if partes else ""
+    cidade = partes[-1] if len(partes) > 1 else "Rio de Janeiro"
+    if _cep_busca_normalizar_texto(cidade) in {"rj", "brasil"}:
+        cidade = partes[-2] if len(partes) > 2 else "Rio de Janeiro"
+    endereco = ", ".join([rua_base, numero] + partes[1:] + ["RJ", "Brasil"])
+    chave = (os.getenv("GOOGLE_GEOCODING_API_KEY", "").strip() or os.getenv("GOOGLE_MAPS_API_KEY", "").strip())
+    google_resultados = []
+    status_google = "SEM_CHAVE"
+    if chave:
+        params = urlencode({"address": endereco, "components": "country:BR|administrative_area:RJ",
+                            "language": "pt-BR", "region": "br", "key": chave})
+        try:
+            pedido = UrlRequest("https://maps.googleapis.com/maps/api/geocode/json?" + params,
+                                headers={"Accept": "application/json"})
+            with urlopen(pedido, timeout=3.5) as resp:
+                retorno = json.loads(resp.read(256000).decode("utf-8"))
+            status = retorno.get("status")
+            status_google = status if status in {"OK", "ZERO_RESULTS", "REQUEST_DENIED", "OVER_QUERY_LIMIT", "OVER_DAILY_LIMIT", "INVALID_REQUEST", "UNKNOWN_ERROR"} else "RESPOSTA_INVALIDA"
+            if status_google == "OK":
+                google_resultados = _ceps_busca_google(retorno)
+                exatos = [r for r in google_resultados if r.get("numero_confirmado") and r.get("numero") == numero]
+                if exatos:
+                    return {"ok": True, "resultados": exatos + [r for r in google_resultados if r not in exatos], "fonte": "google"}
+        except Exception as exc:
+            # Nunca registrar URL, query string ou chave da API.
+            status_google = type(exc).__name__
+    logger.warning("Busca CEP RJ: Google=%s; tentando fonte postal", status_google)
+    try:
+        # Se o Google identificou a cidade, use-a na busca postal complementar.
+        cidade_postal = (google_resultados[0].get("cidade") or cidade) if google_resultados and len(partes) == 1 else cidade
+        if len(rua_base) < 3 or len(cidade_postal) < 3:
+            postais = []
+        else:
+            postais = _ceps_busca_viacep(rua_base, cidade_postal, numero)
+        vistos = {r["cep"] for r in postais}
+        resultados = postais + [r for r in google_resultados if r["cep"] not in vistos]
+        aviso = ("Busca postal em " + cidade_postal + ". Confira a faixa de números. "
+                 "Para outro município, acrescente a cidade no mesmo campo, após uma vírgula.")
+        return {"ok": True, "resultados": resultados, "fonte": "viacep", "aviso": aviso}
+    except Exception as exc:
+        logger.warning("Busca CEP RJ: ViaCEP=%s", type(exc).__name__)
+        if google_resultados:
+            return {"ok": True, "resultados": google_resultados, "fonte": "google", "aviso": "Número não confirmado. Confira o CEP antes de continuar."}
+        return {"ok": False, "erro": "Busca de endereço temporariamente indisponível. Informe o CEP diretamente ou tente novamente.", "codigo": "BUSCA_RJ_INDISPONIVEL"}
 
 
 @app.get("/e/{slug}/vitrine/buscar-cep-rj")
@@ -21695,22 +21807,8 @@ def vitrine_buscar_cep_endereco(slug: str, request: Request, rua: str = "", nume
     rua, numero = rua.strip(), numero.strip()
     if not 3 <= len(rua) <= 110 or not 1 <= len(numero) <= 30:
         return JSONResponse({"ok": False, "erro": "Informe a rua e o número."}, status_code=400)
-    chave = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
-    if not chave:
-        return JSONResponse({"ok": False, "erro": "Busca por endereço indisponível. Você ainda pode informar o CEP diretamente."}, status_code=503)
-    params = urlencode({"address": f"{rua}, {numero}", "components": "administrative_area:RJ|country:BR",
-                        "language": "pt-BR", "region": "br", "key": chave})
-    try:
-        pedido = UrlRequest("https://maps.googleapis.com/maps/api/geocode/json?" + params,
-                            headers={"Accept": "application/json"})
-        with urlopen(pedido, timeout=5) as resp:
-            retorno = json.loads(resp.read(256000).decode("utf-8"))
-        if retorno.get("status") not in {"OK", "ZERO_RESULTS"}:
-            logger.warning("Busca CEP por endereço: status Google=%s", retorno.get("status"))
-            raise ValueError("Busca indisponível")
-        return {"ok": True, "resultados": _ceps_busca_google(retorno)}
-    except Exception:
-        return JSONResponse({"ok": False, "erro": "Não foi possível buscar o endereço agora. Tente novamente ou informe o CEP diretamente."}, status_code=503)
+    resultado = _buscar_ceps_rj(rua, numero)
+    return JSONResponse(resultado, status_code=200 if resultado.get("ok") else 503)
 
 
 @app.post("/e/{slug}/vitrine/calcular-deslocamento")
