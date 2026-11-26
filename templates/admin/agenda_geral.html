@@ -20,7 +20,10 @@
 
   <div class="agenda-nav-mes">
     <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_anterior }}" aria-label="Mês anterior">‹</a>
-    <strong>{{ mes_titulo }}</strong>
+    <div style="text-align:center;min-width:0">
+      <strong>{{ mes_titulo }}</strong>
+      <div style="font-size:.9rem;font-weight:750;color:var(--cor-primaria,#155bb5);margin-top:5px" title="Contratos com início neste mês, sem duplicar locações de vários dias">{{ total_alugueis_mes }} {{ 'aluguel' if total_alugueis_mes == 1 else 'aluguéis' }} no mês</div>
+    </div>
     <a href="/painel/agenda?modo={{ modo }}&mes={{ mes_proximo }}" aria-label="Próximo mês">›</a>
   </div>
 

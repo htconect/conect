@@ -20398,9 +20398,10 @@ def _agenda_desde(inicio):
     ))
 
 
-def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_mes: date) -> dict:
+def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_mes: date) -> tuple[dict, int]:
     """Resumo leve para o calendário mensal de Contratos e Operação."""
     resumo = {}
+    total_alugueis_mes = 0
     solicitacoes = db.query(Solicitacao).filter(
         Solicitacao.empresa_id == empresa.id,
         _agenda_desde(inicio_mes),
@@ -20414,6 +20415,8 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
         chave = item.data_evento.isoformat()
         dia = resumo.setdefault(chave, {"contratos": 0, "contratos_pendentes": 0, "operacoes": 0, "entregas_pendentes": 0, "retiradas_pendentes": 0})
         if (item.status or "") not in status_cancelados:
+            if inicio_mes <= item.data_evento <= fim_mes:
+                total_alugueis_mes += 1
             dia["contratos"] += 1
             for data_uso, numero, total in _dias_locacao_agenda(item, inicio_mes, fim_mes):
                 uso = resumo.setdefault(data_uso.isoformat(), {"contratos": 0, "contratos_pendentes": 0,
@@ -20448,7 +20451,7 @@ def _agenda_resumo_mensal(db: Session, empresa: Empresa, inicio_mes: date, fim_m
                 dia["retiradas_pendentes"] += 1
             else:
                 dia["entregas_pendentes"] += 1
-    return resumo
+    return resumo, total_alugueis_mes
 
 
 def _resumo_quantidades_operacao(estoque_total, na_rua, saidas_dia, a_preparar):
@@ -20799,7 +20802,7 @@ def agenda(
         fim_mes = referencia.replace(day=ultimo)
         anterior = (referencia - timedelta(days=1)).replace(day=1)
         proximo = (fim_mes + timedelta(days=1)).replace(day=1)
-        resumo_mes = _agenda_resumo_mensal(db, empresa, referencia, fim_mes)
+        resumo_mes, total_alugueis_mes = _agenda_resumo_mensal(db, empresa, referencia, fim_mes)
         bloqueios_mes = db.query(BloqueioData).filter(
             BloqueioData.empresa_id == empresa.id, BloqueioData.ativo == True,
             BloqueioData.data_inicio <= fim_mes, BloqueioData.data_fim >= referencia,
@@ -20818,7 +20821,7 @@ def agenda(
             "referencia": referencia, "fim_mes": fim_mes, "celulas": celulas,
             "mes_titulo": f"{nomes_meses[referencia.month-1]} {referencia.year}",
             "mes_anterior": anterior.strftime("%Y-%m"), "mes_proximo": proximo.strftime("%Y-%m"),
-            "resumo_mes": resumo_mes, "pode_operacao": pode_operacao, "bloqueios_mes": bloqueios_mes,
+            "resumo_mes": resumo_mes, "total_alugueis_mes": total_alugueis_mes, "pode_operacao": pode_operacao, "bloqueios_mes": bloqueios_mes,
             "google_disponivel": bool(
                 getattr(empresa, "google_calendar_ativo", False)
                 and _google_calendar_conectado(empresa)
